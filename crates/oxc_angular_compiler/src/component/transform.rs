@@ -3795,6 +3795,12 @@ pub fn transform_angular_file(
                         class_name, template_url
                     )));
                 }
+                // A `template:` value that isn't statically resolvable
+                // (`extract_string_value` returned `None`) reaches neither
+                // branch: the component is emitted with no ɵcmp and no
+                // diagnostic. Upstream errors instead ("Unresolved identifier
+                // found for @Component.template field" in local mode /
+                // "template must be a string") — pre-existing gap.
             } else {
                 // Not a @Component - check if it's a @Directive
                 // We need to compile @Directive classes properly to generate ɵdir/ɵfac
@@ -4719,6 +4725,86 @@ fn compile_component_partial<'a>(
     }
 }
 
+/// Where a template's text lives, so a parse error in it can be reported with a position.
+enum TemplateOrigin<'s> {
+    /// The text is `source[offset..]`, and `source` is the text the diagnostics are
+    /// rendered against.
+    InSource { path: &'s str, source: &'s str, offset: u32 },
+    /// The text is a separate file, named as the component wrote its `templateUrl`.
+    External { url: &'s str },
+    /// The text cannot be located in a file.
+    Unknown,
+}
+
+impl<'s> TemplateOrigin<'s> {
+    /// The origin of a component's template: its `templateUrl` file, or its inline
+    /// template when that appears verbatim in the source. An inline template written
+    /// with escapes or built from several strings has no exact position.
+    fn of_component(
+        metadata: &'s ComponentMetadata<'_>,
+        template: &str,
+        path: &'s str,
+        source: &'s str,
+        resolved_resources: Option<&ResolvedResources>,
+    ) -> Self {
+        // With `templateUrl` set and resolved resources present, the resolved
+        // template is the external file even when the inline `template` happens
+        // to hold identical text (`resolve_template` prefers the URL, matching
+        // upstream `parseTemplateDeclaration`'s isInline:false). With no
+        // resources, `resolve_template` skipped the URL and `template` is
+        // whatever inline text existed — fall through to the InSource checks.
+        if let Some(url) = &metadata.template_url
+            && resolved_resources.is_some()
+        {
+            return Self::External { url: url.as_str() };
+        }
+        if metadata.template.as_ref().is_none_or(|inline| inline.as_str() != template) {
+            return Self::Unknown;
+        }
+        match metadata.template_span {
+            Some(span) if source.get(span.start as usize..span.end as usize) == Some(template) => {
+                Self::InSource { path, source, offset: span.start }
+            }
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// The 1-based line and column of a byte offset in `text`, counting columns in characters.
+fn line_and_column(text: &str, offset: u32) -> (usize, usize) {
+    let before = &text[..(offset as usize).min(text.len())];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    (before.matches('\n').count() + 1, before[line_start..].chars().count() + 1)
+}
+
+/// Converts an HTML parse error to a diagnostic that says where it is: as a label when
+/// the template is part of the rendered source, and always as `file:line:column` (or a
+/// line and column within the template) in the help text.
+fn html_parse_error_diagnostic(
+    error: &crate::util::ParseError,
+    origin: &TemplateOrigin<'_>,
+) -> OxcDiagnostic {
+    let diagnostic = OxcDiagnostic::error(error.msg.clone());
+    let (start, end) = (error.span.start.offset, error.span.end.offset);
+    let template = &*error.span.start.file.content;
+    match origin {
+        TemplateOrigin::InSource { path, source, offset } => {
+            let (line, column) = line_and_column(source, offset + start);
+            diagnostic
+                .with_label(Span::new(offset + start, offset + end.max(start)))
+                .with_help(format!("{path}:{line}:{column}"))
+        }
+        TemplateOrigin::External { url } => {
+            let (line, column) = line_and_column(template, start);
+            diagnostic.with_help(format!("{url}:{line}:{column}"))
+        }
+        TemplateOrigin::Unknown => {
+            let (line, column) = line_and_column(template, start);
+            diagnostic.with_help(format!("line {line}, column {column} of the template"))
+        }
+    }
+}
+
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -4737,7 +4823,10 @@ fn compile_component_full<'a>(
 
     // Partial-mode early branch: skip the entire template pipeline.
     // Partial declarations carry the template as a verbatim string and
-    // let the linker re-parse at consumer build time.
+    // let the linker re-parse at consumer build time. Known gap: this also
+    // means template parse errors (incl. `IncompleteBlockOpen`) go unreported
+    // for library builds — upstream ngtsc still parses the template in
+    // declaration mode and surfaces those diagnostics.
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
         return Ok(compile_component_partial(
             allocator,
@@ -4768,8 +4857,10 @@ fn compile_component_full<'a>(
     let html_result = parser.parse();
 
     if !html_result.errors.is_empty() {
+        let template_origin =
+            TemplateOrigin::of_component(metadata, template, file_path, source, resolved_resources);
         for error in &html_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            diagnostics.push(html_parse_error_diagnostic(error, &template_origin));
         }
         return Err(diagnostics);
     }
@@ -5148,7 +5239,13 @@ fn compile_component_full<'a>(
         host_binding_next_pool_index.unwrap_or_else(|| job.pool.next_name_index());
 
     // Collect any diagnostics from the compilation job
-    // (Done after using job to avoid borrow issues)
+    // (Done after using job to avoid borrow issues).
+    // Non-error job diagnostics are collected here but discarded:
+    // `FullCompilationResult` has no diagnostics field, and downstream napi
+    // maps every `TransformResult.diagnostics` entry into `errors` while
+    // hardcoding `warnings: vec![]` — so a warning-severity diagnostic would
+    // surface as an error and the Vite plugin's `result.warnings` arm stays
+    // unreachable. Splitting warnings through is beyond this PR's scope.
     diagnostics.extend(job.diagnostics);
 
     Ok(FullCompilationResult {
@@ -5266,8 +5363,13 @@ pub fn compile_component_template<'a>(
     let html_result = parser.parse();
 
     if !html_result.errors.is_empty() {
+        // `file_path` names the component's file while error offsets point into
+        // the template text — a source label would land in the wrong buffer, so
+        // positions stay template-relative (same as `compile_template_for_hmr`
+        // and `compile_template_for_linker`).
+        let template_origin = TemplateOrigin::Unknown;
         for error in &html_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            diagnostics.push(html_parse_error_diagnostic(error, &template_origin));
         }
         return Err(diagnostics);
     }
@@ -5365,8 +5467,10 @@ pub fn compile_template_to_js_with_options<'a>(
     let html_result = parser.parse();
 
     if !html_result.errors.is_empty() {
+        let template_origin =
+            TemplateOrigin::InSource { path: file_path, source: template, offset: 0 };
         for error in &html_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            diagnostics.push(html_parse_error_diagnostic(error, &template_origin));
         }
         return Err(diagnostics);
     }
@@ -5543,8 +5647,13 @@ pub fn compile_template_for_hmr<'a>(
     let html_result = parser.parse();
 
     if !html_result.errors.is_empty() {
+        // `file_path` names the component's file here, while the template text
+        // usually came from a `templateUrl` read — so the template has no
+        // locatable origin (same as `compile_component_template` /
+        // `compile_template_for_linker`) and positions stay template-relative.
+        let template_origin = TemplateOrigin::Unknown;
         for error in &html_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            diagnostics.push(html_parse_error_diagnostic(error, &template_origin));
         }
         return Err(diagnostics);
     }
@@ -6279,8 +6388,9 @@ pub fn compile_template_for_linker<'a>(
     let html_result = parser.parse();
 
     if !html_result.errors.is_empty() {
+        let template_origin = TemplateOrigin::Unknown;
         for error in &html_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            diagnostics.push(html_parse_error_diagnostic(error, &template_origin));
         }
         return Err(diagnostics);
     }

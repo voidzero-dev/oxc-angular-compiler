@@ -240,3 +240,41 @@ export class AppComponent {}`,
     expect(await transform(source)).toContain('ɵɵdefineComponent')
   })
 })
+
+describe('@oxc-angular/vite error reporting', () => {
+  // Rollup shows only the message passed to `this.error`, so the location the
+  // compiler puts in the help text has to be part of it.
+  it('includes the location of a template parse error', async () => {
+    const plugin = getAngularPlugin()
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    const source = `import { Component } from '@angular/core';
+@Component({
+  selector: 'app-root',
+  template: \`
+    <p>before</p>
+    @if (on() {
+  \`,
+})
+export class AppComponent {
+  on() { return true; }
+}`
+
+    const reported: string[] = []
+    await plugin.transform.handler.call(
+      {
+        error(message: string) {
+          reported.push(message)
+        },
+        warn() {},
+      } as any,
+      source,
+      'app.component.ts',
+    )
+
+    expect(reported).toEqual([
+      'Incomplete block "if". If you meant to write the @ character, you should use the "&#64;" HTML entity instead.\napp.component.ts:6:5',
+    ])
+  })
+})

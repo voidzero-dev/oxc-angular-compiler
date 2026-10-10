@@ -154,6 +154,17 @@ const TEMPLATE_REGEX = /\.html?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
 /**
+ * The text to report for a compiler diagnostic. Rollup shows only this string, so the
+ * help text is appended to it: for a template parse error that is where the error is
+ * (`file:line:column`).
+ */
+function describeDiagnostic(diagnostic: { message: string; helpMessage?: string | null }): string {
+  return diagnostic.helpMessage
+    ? `${diagnostic.message}\n${diagnostic.helpMessage}`
+    : diagnostic.message
+}
+
+/**
  * True when `mod` is the module graph node for `normalizedFile` itself, and
  * not a postfixed variant of it.
  *
@@ -850,7 +861,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // `angular:invalidate` full-reload path in the catch below.
                 const hmrErrors = result.errors.filter((e) => e.severity === 'Error')
                 if (hmrErrors.length > 0) {
-                  throw new Error(hmrErrors.map((e) => e.message).join('\n'))
+                  // Keep the help text (`file:line:column` for template parse
+                  // errors) so the invalidation message says where it is.
+                  throw new Error(hmrErrors.map(describeDiagnostic).join('\n'))
                 }
 
                 // Only consume the pending slot once we have real content to
@@ -1065,10 +1078,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Report errors and warnings
           for (const error of result.errors) {
-            this.error(error.message)
+            this.error(describeDiagnostic(error))
           }
           for (const warning of result.warnings) {
-            this.warn(warning.message)
+            this.warn(describeDiagnostic(warning))
           }
 
           // Library builds: stash the Ivy `.d.ts` member declarations for this

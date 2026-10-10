@@ -768,6 +768,485 @@ mod errors {
 }
 
 // ============================================================================
+// Incomplete Block Tests
+// ============================================================================
+
+/// A block whose parameters never close, or that has no `{`, is an error, and is kept
+/// in the tree as an empty block (Angular's `_consumeIncompleteBlock`).
+///
+/// The expected errors (message, start offset, end offset) and trees are the output of
+/// `@angular/compiler` 22.2.1's `HtmlParser` for the same input.
+mod incomplete_blocks {
+    use super::*;
+
+    fn incomplete(name: &str) -> String {
+        format!(
+            "Incomplete block \"{name}\". If you meant to write the @ character, you should use the \"&#64;\" HTML entity instead."
+        )
+    }
+
+    fn outline(nodes: &[HtmlNode<'_>], depth: usize, out: &mut Vec<String>) {
+        let indent = "  ".repeat(depth);
+        for node in nodes {
+            match node {
+                HtmlNode::Text(text) => out.push(format!(
+                    "{indent}Text {:?} [{},{}]",
+                    text.value.as_str(),
+                    text.span.start,
+                    text.span.end
+                )),
+                HtmlNode::Element(element) => {
+                    out.push(format!(
+                        "{indent}Element {:?} [{},{}]",
+                        element.name.as_str(),
+                        element.span.start,
+                        element.span.end
+                    ));
+                    outline(&element.children, depth + 1, out);
+                }
+                HtmlNode::Block(block) => {
+                    let params: Vec<_> = block
+                        .parameters
+                        .iter()
+                        .map(|p| format!("{:?}", p.expression.as_str()))
+                        .collect();
+                    let params = params.join(",");
+                    out.push(format!(
+                        "{indent}Block {:?} params=[{params}] [{},{}]",
+                        block.name.as_str(),
+                        block.span.start,
+                        block.span.end
+                    ));
+                    outline(&block.children, depth + 1, out);
+                }
+                other => out.push(format!("{indent}{other:?}")),
+            }
+        }
+    }
+
+    #[track_caller]
+    fn check(html: &str, expected_errors: &[(String, u32, u32)], expected_tree: &[&str]) {
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_expansion_forms(&allocator, html, "TestComp").parse();
+
+        let errors: Vec<_> = result
+            .errors
+            .iter()
+            .map(|e| (e.msg.clone(), e.span.start.offset, e.span.end.offset))
+            .collect();
+        assert_eq!(errors, expected_errors, "errors for {html:?}");
+
+        let mut tree = Vec::new();
+        outline(&result.nodes, 0, &mut tree);
+        assert_eq!(tree, expected_tree, "tree for {html:?}");
+    }
+
+    // Ported from Angular's html_parser_spec.ts
+
+    #[test]
+    fn should_parse_an_incomplete_block_with_no_parameters() {
+        // TS: it('should parse an incomplete block with no parameters', ...)
+        check(
+            "This is the @if() block",
+            &[(incomplete("if"), 12, 18)],
+            &[
+                "Text \"This is the \" [0,12]",
+                "Block \"if\" params=[] [12,18]",
+                "Text \"block\" [18,23]",
+            ],
+        );
+    }
+
+    #[test]
+    fn should_parse_an_incomplete_block_with_no_body() {
+        // TS: it('should parse an incomplete block with no body', ...)
+        check(
+            "This is the @if({alias: \"foo\"}) block with params",
+            &[(incomplete("if"), 12, 32)],
+            &[
+                "Text \"This is the \" [0,12]",
+                "Block \"if\" params=[\"{alias: \\\"foo\\\"}\"] [12,32]",
+                "Text \"block with params\" [32,49]",
+            ],
+        );
+    }
+
+    #[test]
+    fn should_report_a_final_case_without_a_body() {
+        // TS: it('should report a final @case without a body', ...)
+        check(
+            "@switch (expr) {@case (1)}",
+            &[(incomplete("case"), 16, 25)],
+            &[
+                "Block \"switch\" params=[\"expr\"] [0,26]",
+                "  Block \"case\" params=[\"1\"] [16,25]",
+            ],
+        );
+    }
+
+    // Parameter list that never closes
+
+    #[test]
+    fn if_with_unclosed_parameters() {
+        check(
+            "@if (cond {",
+            &[(incomplete("if"), 0, 11)],
+            &["Block \"if\" params=[\"cond {\"] [0,11]"],
+        );
+    }
+
+    #[test]
+    fn for_with_unclosed_parameters() {
+        check(
+            "@for (item of items; track item {",
+            &[(incomplete("for"), 0, 33)],
+            &["Block \"for\" params=[\"item of items\",\"track item {\"] [0,33]"],
+        );
+    }
+
+    #[test]
+    fn switch_with_unclosed_parameters() {
+        check(
+            "@switch (value {",
+            &[(incomplete("switch"), 0, 16)],
+            &["Block \"switch\" params=[\"value {\"] [0,16]"],
+        );
+    }
+
+    #[test]
+    fn defer_with_unclosed_parameters() {
+        check(
+            "@defer (on idle {",
+            &[(incomplete("defer"), 0, 17)],
+            &["Block \"defer\" params=[\"on idle {\"] [0,17]"],
+        );
+    }
+
+    #[test]
+    fn else_if_with_unclosed_parameters_after_a_well_formed_if() {
+        check(
+            "@if (a) {x} @else if (cond {",
+            &[(incomplete("else if"), 12, 28)],
+            &[
+                "Block \"if\" params=[\"a\"] [0,11]",
+                "  Text \"x\" [9,10]",
+                "Text \" \" [11,12]",
+                "Block \"else if\" params=[\"cond {\"] [12,28]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_swallow_the_rest_of_the_template() {
+        // The reported template: everything after the `(` becomes the parameter.
+        check(
+            "<text>before</text>\n@if (on() {\n  <text>inside</text>\n}\n<text>after</text>",
+            &[(incomplete("if"), 20, 74)],
+            &[
+                "Element \"text\" [0,19]",
+                "  Text \"before\" [6,12]",
+                "Text \"\\n\" [19,20]",
+                "Block \"if\" params=[\"on() {\\n  <text>inside</text>\\n}\\n<text>after</text>\"] [20,74]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_end_at_an_unbalanced_closing_paren() {
+        check(
+            "@if (cond {a} <p>(b)</p> ) <i>c</i>",
+            &[(incomplete("if"), 0, 27)],
+            &[
+                // Angular keeps the parameter's trailing space; this lexer trims parameters.
+                "Block \"if\" params=[\"cond {a} <p>(b)</p>\"] [0,27]",
+                "Element \"i\" [27,35]",
+                "  Text \"c\" [30,31]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_with_a_paren_inside_a_string() {
+        check(
+            "@if (a === ')' {x}",
+            &[(incomplete("if"), 0, 18)],
+            &["Block \"if\" params=[\"a === ')' {x}\"] [0,18]"],
+        );
+    }
+
+    // Quoted parameter delimiters
+
+    #[test]
+    fn a_backtick_quoted_paren_keeps_a_block_well_formed() {
+        // `chars.isQuote` includes the backtick, so a `)` inside a template
+        // literal doesn't close the parameter list.
+        check(
+            "@if (a === `)`) {x}",
+            &[],
+            &["Block \"if\" params=[\"a === `)`\"] [0,19]", "  Text \"x\" [17,18]"],
+        );
+    }
+
+    #[test]
+    fn a_backtick_quoted_semicolon_does_not_split_parameters() {
+        check(
+            "@if (`;`;b) {x}",
+            &[],
+            &["Block \"if\" params=[\"`;`\",\"b\"] [0,15]", "  Text \"x\" [13,14]"],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_with_a_paren_inside_a_template_literal() {
+        check(
+            "@if (a === `)` {x}",
+            &[(incomplete("if"), 0, 18)],
+            &["Block \"if\" params=[\"a === `)` {x}\"] [0,18]"],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_as_the_last_thing_in_the_template() {
+        check(
+            "<p>a</p>@if (cond {",
+            &[(incomplete("if"), 8, 19)],
+            &[
+                "Element \"p\" [0,8]",
+                "  Text \"a\" [3,4]",
+                "Block \"if\" params=[\"cond {\"] [8,19]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_on_a_later_line() {
+        check(
+            "<p>a</p>\n  @if (cond {\n",
+            &[(incomplete("if"), 11, 23)],
+            &[
+                "Element \"p\" [0,8]",
+                "  Text \"a\" [3,4]",
+                "Text \"\\n  \" [8,11]",
+                // Angular keeps the parameter's trailing newline; this lexer trims parameters.
+                "Block \"if\" params=[\"cond {\"] [11,23]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_nested_in_a_block() {
+        // The outer block never sees its `}`, so it is reported as unclosed too.
+        check(
+            "@if (a) {<p>x</p>@if (cond {y}}",
+            // Angular words the second error `Unclosed block "if"` and spans it [0,9]. That
+            // error predates this test and is left as this parser reports it.
+            &[(incomplete("if"), 17, 31), ("Unclosed block \"@if\"".to_string(), 0, 0)],
+            &[
+                "Block \"if\" params=[\"a\"] [0,9]",
+                "  Element \"p\" [9,17]",
+                "    Text \"x\" [12,13]",
+                "  Block \"if\" params=[\"cond {y}}\"] [17,31]",
+            ],
+        );
+    }
+
+    #[test]
+    fn unclosed_parameters_nested_in_an_element() {
+        check(
+            "<div><span>a</span>@if (cond {y}</div>",
+            &[(incomplete("if"), 19, 38)],
+            &[
+                "Element \"div\" [0,5]",
+                "  Element \"span\" [5,19]",
+                "    Text \"a\" [11,12]",
+                "  Block \"if\" params=[\"cond {y}</div>\"] [19,38]",
+            ],
+        );
+    }
+
+    // No body
+
+    #[test]
+    fn parameters_with_no_brace() {
+        check(
+            "@if (cond) hello",
+            &[(incomplete("if"), 0, 11)],
+            &["Block \"if\" params=[\"cond\"] [0,11]", "Text \"hello\" [11,16]"],
+        );
+    }
+
+    #[test]
+    fn parameters_with_no_brace_before_an_element() {
+        check(
+            "@if (cond) <p>hello</p>",
+            &[(incomplete("if"), 0, 11)],
+            &[
+                "Block \"if\" params=[\"cond\"] [0,11]",
+                "Element \"p\" [11,23]",
+                "  Text \"hello\" [14,19]",
+            ],
+        );
+    }
+
+    #[test]
+    fn parameters_with_no_brace_at_the_end() {
+        check(
+            "@if (cond)",
+            &[(incomplete("if"), 0, 10)],
+            &["Block \"if\" params=[\"cond\"] [0,10]"],
+        );
+    }
+
+    #[test]
+    fn bare_if() {
+        check("@if", &[(incomplete("if"), 0, 3)], &["Block \"if\" params=[] [0,3]"]);
+    }
+
+    #[test]
+    fn bare_if_followed_by_text() {
+        // Text up to the end of the line is read as part of the block name.
+        check(
+            "@if hello",
+            &[(incomplete("if hello"), 0, 9)],
+            &["Block \"if hello\" params=[] [0,9]"],
+        );
+    }
+
+    #[test]
+    fn bare_if_nested_in_an_element() {
+        check(
+            "<div>@if</div><p>x</p>",
+            &[(incomplete("if"), 5, 8)],
+            &[
+                "Element \"div\" [0,14]",
+                "  Block \"if\" params=[] [5,8]",
+                "Element \"p\" [14,22]",
+                "  Text \"x\" [17,18]",
+            ],
+        );
+    }
+
+    #[test]
+    fn no_brace_nested_in_an_element() {
+        check(
+            "<div>@if (cond) x</div><p>y</p>",
+            &[(incomplete("if"), 5, 16)],
+            &[
+                "Element \"div\" [0,23]",
+                "  Block \"if\" params=[\"cond\"] [5,16]",
+                "  Text \"x\" [16,17]",
+                "Element \"p\" [23,31]",
+                "  Text \"y\" [26,27]",
+            ],
+        );
+    }
+
+    #[test]
+    fn bare_else_after_a_well_formed_if() {
+        check(
+            "@if (a) {x} @else",
+            &[(incomplete("else"), 12, 17)],
+            &[
+                "Block \"if\" params=[\"a\"] [0,11]",
+                "  Text \"x\" [9,10]",
+                "Text \" \" [11,12]",
+                "Block \"else\" params=[] [12,17]",
+            ],
+        );
+    }
+
+    #[test]
+    fn two_incomplete_blocks() {
+        check(
+            "@if (a) x @for (b) y",
+            &[(incomplete("if"), 0, 8), (incomplete("for"), 10, 19)],
+            &[
+                "Block \"if\" params=[\"a\"] [0,8]",
+                "Text \"x \" [8,10]",
+                "Block \"for\" params=[\"b\"] [10,19]",
+                "Text \"y\" [19,20]",
+            ],
+        );
+    }
+
+    #[test]
+    fn incomplete_block_before_a_well_formed_one() {
+        check(
+            "@if (a) x @if (b) {y}",
+            &[(incomplete("if"), 0, 8)],
+            &[
+                "Block \"if\" params=[\"a\"] [0,8]",
+                "Text \"x \" [8,10]",
+                "Block \"if\" params=[\"b\"] [10,21]",
+                "  Text \"y\" [19,20]",
+            ],
+        );
+    }
+
+    // Not affected
+
+    #[test]
+    fn at_sign_in_text_is_not_a_block() {
+        check(
+            "<p>user@example.com</p>",
+            &[],
+            &["Element \"p\" [0,23]", "  Text \"user@example.com\" [3,19]"],
+        );
+    }
+
+    #[test]
+    fn lone_at_sign_is_not_a_block() {
+        check("a @ b", &[], &["Text \"a @ b\" [0,5]"]);
+    }
+
+    #[test]
+    fn trailing_at_sign_is_not_a_block() {
+        check("a@", &[], &["Text \"a@\" [0,2]"]);
+    }
+
+    #[test]
+    fn at_sign_before_a_digit_is_not_a_block() {
+        check("@1", &[], &["Text \"@1\" [0,2]"]);
+    }
+
+    #[test]
+    fn well_formed_blocks_are_unchanged() {
+        check(
+            "@if (a) {x} @else if (b) {y} @else {z} @for (i of is; track i) {w} @empty {e} @switch (v) { @case (1) {o} @default {d} } @defer (on idle) {q}",
+            &[],
+            &[
+                "Block \"if\" params=[\"a\"] [0,11]",
+                "  Text \"x\" [9,10]",
+                "Text \" \" [11,12]",
+                "Block \"else if\" params=[\"b\"] [12,28]",
+                "  Text \"y\" [26,27]",
+                "Text \" \" [28,29]",
+                "Block \"else\" params=[] [29,38]",
+                "  Text \"z\" [36,37]",
+                "Text \" \" [38,39]",
+                "Block \"for\" params=[\"i of is\",\"track i\"] [39,66]",
+                "  Text \"w\" [64,65]",
+                "Text \" \" [66,67]",
+                "Block \"empty\" params=[] [67,77]",
+                "  Text \"e\" [75,76]",
+                "Text \" \" [77,78]",
+                "Block \"switch\" params=[\"v\"] [78,120]",
+                "  Text \" \" [91,92]",
+                "  Block \"case\" params=[\"1\"] [92,105]",
+                "    Text \"o\" [103,104]",
+                "  Text \" \" [105,106]",
+                "  Block \"default\" params=[] [106,118]",
+                "    Text \"d\" [116,117]",
+                "  Text \" \" [118,119]",
+                "Text \" \" [120,121]",
+                "Block \"defer\" params=[\"on idle\"] [121,141]",
+                "  Text \"q\" [139,140]",
+            ],
+        );
+    }
+}
+
+// ============================================================================
 // @let Declaration Tests
 // ============================================================================
 
@@ -1857,6 +2336,48 @@ mod expansion_forms {
         );
         // Note: The result may be empty because Humanizer doesn't visit Expansion nodes
         // but the parser should not panic
+    }
+
+    /// Angular parses each case body with a full `_TreeBuilder`, so block
+    /// tokens are real there: a bare `@if` inside a case is an incomplete
+    /// block and is reported, like anywhere else.
+    #[test]
+    fn should_report_an_incomplete_block_inside_an_expansion_case() {
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_expansion_forms(
+            &allocator,
+            "{x, plural, =a {@if} =b {y}}",
+            "TestComp",
+        )
+        .parse();
+        assert_eq!(
+            result.errors.iter().map(|e| e.msg.as_str()).collect::<Vec<_>>(),
+            ["Incomplete block \"if\". If you meant to write the @ character, \
+              you should use the \"&#64;\" HTML entity instead."]
+        );
+    }
+
+    /// Well-formed blocks inside a case get real nodes; a block left open at
+    /// the case's `}` is unclosed, same as at EOF.
+    #[test]
+    fn should_parse_blocks_inside_an_expansion_case() {
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_expansion_forms(
+            &allocator,
+            "{x, plural, =a {@if (cond) {y}} =b {z}}",
+            "TestComp",
+        )
+        .parse();
+        // The case's `}` lands inside the block, so the block is unclosed and
+        // the expansion's own `}` is consumed as the case terminator.
+        assert_eq!(
+            result.errors.iter().map(|e| e.msg.as_str()).collect::<Vec<_>>(),
+            [
+                "Unexpected character \"EOF\" (Do you have an unescaped \"{\" in your template? \
+                 Use \"{{ '{' }}\") to escape it.)",
+                "Unclosed block \"@if\"",
+            ]
+        );
     }
 }
 

@@ -509,6 +509,9 @@ pub struct HtmlTokenError {
     pub msg: String,
     /// The position (line, column) where the error occurred.
     pub position: (u32, u32),
+    /// The byte offset where the error occurred. `position` is a `(line, column)`
+    /// pair, which the parser must not read as a source span.
+    pub offset: u32,
 }
 
 /// HTML template lexer.
@@ -698,6 +701,7 @@ impl<'a> HtmlLexer<'a> {
             self.errors.push(HtmlTokenError {
                 msg: "Unexpected character \"EOF\" (Do you have an unescaped \"{\" in your template? Use \"{{ '{' }}\") to escape it.)".to_string(),
                 position: (self.line, self.column),
+                offset: self.index,
             });
         }
 
@@ -725,7 +729,11 @@ impl<'a> HtmlLexer<'a> {
                         // Convert offset to line:column using token start
                         let error_pos = token.start + offset as u32;
                         let (line, col) = offset_to_position(self.input, error_pos);
-                        errors_to_add.push(HtmlTokenError { msg, position: (line, col) });
+                        errors_to_add.push(HtmlTokenError {
+                            msg,
+                            position: (line, col),
+                            offset: error_pos,
+                        });
                     }
                     if has_null {
                         null_encountered = true;
@@ -946,8 +954,11 @@ impl<'a> HtmlLexer<'a> {
 
     /// Reports an error at the current position.
     fn error(&mut self, msg: &str) {
-        self.errors
-            .push(HtmlTokenError { msg: msg.to_string(), position: (self.line, self.column) });
+        self.errors.push(HtmlTokenError {
+            msg: msg.to_string(),
+            position: (self.line, self.column),
+            offset: self.index,
+        });
     }
 
     /// Checks if the current position is the start of a supported block.
@@ -961,7 +972,11 @@ impl<'a> HtmlLexer<'a> {
             let check_str = format!("@{block_name}");
             if self.starts_with(&check_str) {
                 // Make sure the block name is not followed by an identifier char
-                // (e.g., "@iffy" should not match "@if")
+                // (e.g., "@iffy" should not match "@if"). Deliberate divergence
+                // from upstream `_isBlockStart`, which is a pure `_peekStr`
+                // prefix match: there `@ifx`/`@else5` lex as
+                // IncompleteBlockOpen ("Incomplete block \"ifx\"") instead of
+                // staying plain text.
                 let next_char_index = self.index as usize + check_str.len();
                 if next_char_index >= self.input.len() {
                     return true; // At end of input, it's a match
@@ -1109,7 +1124,13 @@ impl<'a> HtmlLexer<'a> {
             }
         }
 
-        // Normalize whitespace: collapse multiple spaces/tabs into single space
+        // Normalize whitespace: collapse multiple spaces/tabs into single space.
+        // Upstream `_getBlockName` only `.trim()`s, so a name like `else  if`
+        // keeps its double space in the "Incomplete block" message, `else\nif`
+        // fails its `/^else[^\S\r\n]+if/` else-if pattern (no newline allowed),
+        // and `default  never` fails the strict `=== 'default never'` check
+        // that accepts `@default never;`. Here they normalize to
+        // `else if`/`default never` and are accepted.
         let raw = self.input[name_start as usize..self.index as usize].trim();
         let mut result = String::with_capacity(raw.len());
         let mut prev_was_whitespace = false;
@@ -1403,7 +1424,10 @@ impl<'a> HtmlLexer<'a> {
             let mut paren_depth = 0;
 
             // Consume the parameter until the next semicolon or closing paren.
-            // Note that we skip over semicolons inside of strings.
+            // Note that we skip over semicolons inside of strings and inside
+            // nested parens — upstream's `_consumeBlockParameters` tracks
+            // `openParens` only for `)` and splits on any `;` outside quotes,
+            // so `@for (i of f(a; b))` is one parameter here, two upstream.
             while self.index < self.length {
                 let ch = self.peek();
 
@@ -1425,8 +1449,10 @@ impl<'a> HtmlLexer<'a> {
                     continue;
                 }
 
-                // Not in quote - check for quote start
-                if ch == '"' || ch == '\'' {
+                // Not in quote - check for quote start. `chars.isQuote` includes
+                // the backtick, so `)`/`;` inside a template literal don't end
+                // the parameter.
+                if ch == '"' || ch == '\'' || ch == '`' {
                     in_quote = Some(ch);
                     self.advance();
                     continue;
@@ -1452,6 +1478,7 @@ impl<'a> HtmlLexer<'a> {
                 self.errors.push(HtmlTokenError {
                     msg: "Unexpected character \"EOF\"".to_string(),
                     position: (self.line, self.column),
+                    offset: self.index,
                 });
             }
 
@@ -2140,6 +2167,7 @@ impl<'a> HtmlLexer<'a> {
                 self.errors.push(HtmlTokenError {
                     msg: "Unexpected character \"EOF\"".to_string(),
                     position: (self.line, self.column),
+                    offset: self.index,
                 });
             } else {
                 self.advance();
@@ -2162,6 +2190,7 @@ impl<'a> HtmlLexer<'a> {
             self.errors.push(HtmlTokenError {
                 msg: "Unexpected character \"EOF\"".to_string(),
                 position: (self.line, self.column),
+                offset: self.index,
             });
             return;
         }
@@ -2174,6 +2203,7 @@ impl<'a> HtmlLexer<'a> {
             self.errors.push(HtmlTokenError {
                 msg: "Unexpected character \"EOF\"".to_string(),
                 position: (self.line, self.column),
+                offset: self.index,
             });
         } else {
             self.advance();
@@ -2538,6 +2568,7 @@ impl<'a> HtmlLexer<'a> {
                 self.errors.push(HtmlTokenError {
                     msg: "Unexpected character \"EOF\"".to_string(),
                     position: (self.line, self.column),
+                    offset: self.index,
                 });
             }
         } else {
@@ -3242,6 +3273,7 @@ impl<'a> HtmlLexer<'a> {
                 self.errors.push(HtmlTokenError {
                     msg: "Unexpected character \"EOF\"".to_string(),
                     position: (self.line, self.column),
+                    offset: self.index,
                 });
             } else {
                 self.advance();
@@ -3252,6 +3284,7 @@ impl<'a> HtmlLexer<'a> {
                         "Unable to parse entity \"{entity_str}\" - {entity_type} character reference entities must end with \";\""
                     ),
                     position: (self.line, self.column),
+                    offset: self.index,
                 });
             }
             // Revert and treat as text
@@ -3298,6 +3331,7 @@ impl<'a> HtmlLexer<'a> {
                     "Unknown entity \"{name}\" - use the \"&#<decimal>;\" or  \"&#x<hex>;\" syntax"
                 ),
                 position: (start_line, start_col),
+                offset: start,
             });
             // Revert and treat as text
             self.index = start;

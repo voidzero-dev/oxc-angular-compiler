@@ -47,6 +47,9 @@ pub fn is_else_if_pattern(s: &str) -> bool {
         return false;
     }
     let after_else = &s[4..];
+    // `trim_start` skips newlines too, so `else\nif` matches here where the
+    // upstream regex rejects it — `get_block_name` already collapsed the
+    // newline to a space, so callers never see it (documented divergence).
     let trimmed = after_else.trim_start();
     // Must have whitespace between "else" and "if"
     trimmed.len() < after_else.len() && trimmed.starts_with("if")

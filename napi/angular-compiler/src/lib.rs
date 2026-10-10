@@ -1230,7 +1230,10 @@ impl Task for TransformAngularFileTask {
             rust_resources.as_ref(),
         );
 
-        // Convert diagnostics to errors (for simplicity, all diagnostics become errors)
+        // Convert diagnostics to errors (for simplicity, all diagnostics become
+        // errors — a warning-severity diagnostic would be promoted, and
+        // `warnings` stays empty, so the vite plugin's `result.warnings` arm is
+        // unreachable today)
         let errors = OxcError::from_diagnostics(&self.filename, &self.source, result.diagnostics);
 
         Ok(TransformResult {

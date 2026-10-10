@@ -235,6 +235,10 @@ pub struct ComponentMetadata<'a> {
     /// Inline template string.
     pub template: Option<Ident<'a>>,
 
+    /// Where the inline template's text sits in the source file, when it is written as
+    /// a single string or template literal. Used to point template errors at the file.
+    pub template_span: Option<Span>,
+
     /// URL to an external template file.
     pub template_url: Option<Ident<'a>>,
 
@@ -663,6 +667,7 @@ impl<'a> ComponentMetadata<'a> {
             class_span,
             selector: None,
             template: None,
+            template_span: None,
             template_url: None,
             styles: Vec::new_in(&allocator),
             styles_resolved: true,

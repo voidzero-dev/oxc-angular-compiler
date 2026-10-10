@@ -150,10 +150,16 @@ impl<'a> HtmlParser<'a> {
         let result = lexer.tokenize();
         let source_file = Arc::new(ParseSourceFile::new(source.to_string(), url.to_string()));
 
-        // Convert lexer errors to ParseErrors
+        // Convert lexer errors to ParseErrors. `lex_err.position` is a
+        // (line, column) pair; the span needs the byte offset.
         let mut errors = std::vec::Vec::new();
         for lex_err in result.errors {
-            let loc = ParseLocation::new(source_file.clone(), lex_err.position.0, 0, 0);
+            let loc = ParseLocation::new(
+                source_file.clone(),
+                lex_err.offset,
+                lex_err.position.0,
+                lex_err.position.1,
+            );
             let span = ParseSourceSpan::new(loc.clone(), loc);
             errors.push(ParseError::new(span, lex_err.msg));
         }
@@ -186,8 +192,11 @@ impl<'a> HtmlParser<'a> {
         }
 
         // Close all remaining containers at EOF (error recovery)
-        // This ensures we still produce AST nodes even for unclosed elements
-        // Process from top of stack (innermost) to bottom (outermost)
+        // This ensures we still produce AST nodes even for unclosed elements.
+        // Popping drains innermost→outermost, so multiple "Unclosed block"
+        // errors come out in that order; upstream iterates `_containerStack`
+        // front-to-back and reports outermost first. (Its message and span also
+        // differ: `Unclosed block "if"` over the whole block, no `@`.)
         while let Some(container) = self.container_stack.pop() {
             match container {
                 ContainerIndex::Block(idx) => {
@@ -539,7 +548,11 @@ impl<'a> HtmlParser<'a> {
                 }
             }
             HtmlTokenType::BlockOpenStart => {
-                self.consume_block_open();
+                let block = self.read_block_open();
+                self.push_block_container(block);
+            }
+            HtmlTokenType::IncompleteBlockOpen => {
+                self.consume_incomplete_block();
             }
             HtmlTokenType::BlockClose => {
                 self.consume_block_close();
@@ -566,7 +579,11 @@ impl<'a> HtmlParser<'a> {
                 }
             }
             _ => {
-                // Skip unknown tokens
+                // Skip unknown tokens. Known gap: `IncompleteComponentOpen`
+                // (selectorless mode) reaches this arm and is dropped silently;
+                // upstream routes it through `_consumeComponentStartTag` and
+                // reports `Opening tag "<name>" not terminated.` Pre-existing,
+                // outside this PR's scope.
                 self.advance();
             }
         }
@@ -1333,6 +1350,8 @@ impl<'a> HtmlParser<'a> {
         let name = token.value().to_string();
 
         let name_string = if name.is_empty() { String::new() } else { format!(" \"{name}\"") };
+        // Upstream reports on the token's full sourceSpan; `make_error` gives a
+        // zero-width span at `start` (pre-existing).
         let err = self.make_error(
             start,
             format!(
@@ -1471,33 +1490,14 @@ impl<'a> HtmlParser<'a> {
         let saved_elements = std::mem::take(&mut self.elements);
         let saved_blocks = std::mem::take(&mut self.blocks);
 
-        // Parse content until ExpansionCaseExpEnd
+        // Parse content until ExpansionCaseExpEnd. Angular runs a full
+        // `_TreeBuilder` over the case body, so blocks, @let declarations and
+        // comments get real nodes — and an `IncompleteBlockOpen` produces its
+        // "Incomplete block" diagnostic instead of being skipped silently.
         while let Some(tok) = self.peek() {
             match tok.token_type {
-                HtmlTokenType::ExpansionCaseExpEnd => break,
-                HtmlTokenType::ExpansionFormEnd => break,
-                HtmlTokenType::Text
-                | HtmlTokenType::EncodedEntity
-                | HtmlTokenType::Interpolation => {
-                    if let Some(node) = self.consume_text() {
-                        self.add_to_parent(node);
-                    }
-                }
-                HtmlTokenType::TagOpenStart | HtmlTokenType::ComponentOpenStart => {
-                    self.consume_element_start();
-                }
-                HtmlTokenType::TagClose | HtmlTokenType::ComponentClose => {
-                    self.consume_element_end();
-                }
-                HtmlTokenType::ExpansionFormStart => {
-                    // Nested expansion
-                    if let Some(node) = self.parse_expansion() {
-                        self.add_to_parent(node);
-                    }
-                }
-                _ => {
-                    self.advance();
-                }
+                HtmlTokenType::ExpansionCaseExpEnd | HtmlTokenType::ExpansionFormEnd => break,
+                _ => self.parse_and_add_node(),
             }
         }
 
@@ -1525,6 +1525,14 @@ impl<'a> HtmlParser<'a> {
                     self.add_to_parent(HtmlNode::Element(Box::new_in(element, &self.allocator)));
                 }
                 ContainerIndex::Block(idx) => {
+                    // A block left open at the case's `}` is unclosed, same as
+                    // at EOF in the main loop.
+                    let block = &self.blocks[idx];
+                    let err = self.make_error(
+                        block.span.start,
+                        format!("Unclosed block \"@{}\"", block.name),
+                    );
+                    self.errors.push(err);
                     let block = std::mem::replace(
                         &mut self.blocks[idx],
                         HtmlBlock {
@@ -1581,10 +1589,9 @@ impl<'a> HtmlParser<'a> {
     }
 
     /// Consumes a block open (@if, @for, etc.) and pushes it onto the container stack.
-    fn consume_block_open(&mut self) {
-        let Some(token) = self.advance() else {
-            return; // No token to consume
-        };
+    fn read_block_open(&mut self) -> HtmlBlock<'a> {
+        // Callers dispatch on a peeked token, so there is always one to consume.
+        let token = self.advance().expect("block open token");
         let name = token.value().to_string();
         let start = token.start;
         let name_end = token.end;
@@ -1637,12 +1644,15 @@ impl<'a> HtmlParser<'a> {
             }
         }
 
+        // Upstream ends the block span at `_peek.sourceSpan.fullStart`; we use
+        // `start`. Inert today: `leading_trivia_chars` is never enabled, so
+        // `fullStart == start`.
         let end = self.peek().map(|t| t.start).unwrap_or(start);
         let span = self.make_span(start, end);
         let name_span = self.make_span(start, name_end);
         let start_span = self.make_span(start, end);
 
-        let block = HtmlBlock {
+        HtmlBlock {
             block_type,
             name: Ident::from_in(name, &self.allocator),
             parameters,
@@ -1651,10 +1661,24 @@ impl<'a> HtmlParser<'a> {
             name_span,
             start_span,
             end_span: None,
-        };
+        }
+    }
 
-        // Push block onto container stack - children will be added as we parse
-        self.push_block_container(block);
+    /// Consumes a block whose header was never completed: its parameters are unclosed
+    /// or it has no `{`. The block is kept, empty, and reported.
+    ///
+    /// Ported from Angular's `_consumeIncompleteBlock`.
+    fn consume_incomplete_block(&mut self) {
+        let block = self.read_block_open();
+        let message = format!(
+            "Incomplete block \"{}\". If you meant to write the @ character, \
+             you should use the \"&#64;\" HTML entity instead.",
+            block.name
+        );
+        let start = ParseLocation::new(Arc::clone(&self.source_file), block.span.start, 0, 0);
+        let end = ParseLocation::new(Arc::clone(&self.source_file), block.span.end, 0, 0);
+        self.errors.push(ParseError::new(ParseSourceSpan::new(start, end), message));
+        self.add_to_parent(HtmlNode::Block(Box::new_in(block, &self.allocator)));
     }
 
     /// Parses a directive token sequence: DirectiveName → DirectiveOpen? → attrs → DirectiveClose?
