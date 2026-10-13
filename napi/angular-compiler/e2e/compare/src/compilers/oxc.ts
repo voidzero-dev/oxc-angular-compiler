@@ -19,10 +19,15 @@ import type { CompilerOutput, ProjectCompilationResult } from '../types.js'
 // is on, so version-gated emit (e.g. modern vs legacy safe-navigation `?.`,
 // gated at major >= 22) matches. Without this, OXC falls back to its
 // conservative legacy default and diverges from a newer Angular.
-const OXC_ANGULAR_VERSION = {
+// ANGULAR_VERSION.full may carry a prerelease suffix ("22.3.0-next.0"); the
+// major/minor/patch fields never include it, so pass the tag through
+// separately for gates that cut over mid-`next` cycle.
+const prereleaseTag = ANGULAR_VERSION.full.split('-')[1]
+const OXC_ANGULAR_VERSION: NonNullable<TransformOptions['angularVersion']> = {
   major: Number.parseInt(ANGULAR_VERSION.major, 10) || 0,
   minor: Number.parseInt(ANGULAR_VERSION.minor, 10) || 0,
   patch: Number.parseInt(ANGULAR_VERSION.patch, 10) || 0,
+  ...(prereleaseTag ? { prerelease: prereleaseTag } : {}),
 }
 
 // Re-export ResolvedResources type for use in runner

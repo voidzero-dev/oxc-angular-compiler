@@ -17,6 +17,12 @@ export interface AngularVersion {
   minor: number
   /** Patch version number (e.g., 0 for Angular 19.0.0). */
   patch: number
+  /**
+   * Prerelease tag without the leading dash (e.g., `"next.0"` or `"rc.1"`
+   * for Angular `22.3.0-next.0`). Omit for stable releases; unknown tags
+   * sort below `next`/`rc` prereleases of the same version.
+   */
+  prerelease?: string
 }
 
 /** Result of class metadata compilation. */
@@ -850,6 +856,9 @@ export interface TransformOptions {
    *
    * When set, used to determine defaults like:
    * - `standalone`: defaults to `false` for v18 and earlier, `true` for v19+
+   *
+   * For prerelease builds, also set `prerelease` on the version (e.g.
+   * `{ major: 22, minor: 3, patch: 0, prerelease: "next.0" }`).
    *
    * When not set, assumes latest Angular version (v19+ behavior).
    */

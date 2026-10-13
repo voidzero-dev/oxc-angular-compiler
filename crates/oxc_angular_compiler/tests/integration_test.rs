@@ -3880,8 +3880,13 @@ fn test_svg_namespace_in_block_tag_is_gated_on_22_2_2() {
     const TEMPLATE: &str =
         r#"@if (on) {<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" /></svg>}"#;
 
-    // Old behavior: verbatim namespaced tag.
-    for version in [AngularVersion::new(21, 2, 15), AngularVersion::new(22, 2, 1)] {
+    // Old behavior: verbatim namespaced tag. `22.3.0-next.0` postdates 22.2.2
+    // in triple order but was cut upstream before the fix landed on `main`.
+    for version in [
+        AngularVersion::new(21, 2, 15),
+        AngularVersion::new(22, 2, 1),
+        AngularVersion::parse("22.3.0-next.0").unwrap(),
+    ] {
         let js = compile_template_to_js_with_version(TEMPLATE, "TestComponent", Some(version));
         assert!(
             js.contains(r#"":svg:svg""#),
@@ -3891,8 +3896,12 @@ fn test_svg_namespace_in_block_tag_is_gated_on_22_2_2() {
 
     // New behavior: the namespace prefix is stripped. `None` means latest, so it
     // takes the 22.2.2+ path too.
-    for version in [None, Some(AngularVersion::new(22, 2, 2)), Some(AngularVersion::new(22, 3, 0))]
-    {
+    for version in [
+        None,
+        Some(AngularVersion::new(22, 2, 2)),
+        Some(AngularVersion::new(22, 3, 0)),
+        AngularVersion::parse("22.3.0-next.1"),
+    ] {
         let js = compile_template_to_js_with_version(TEMPLATE, "TestComponent", version);
         assert!(
             js.contains("ɵɵconditionalCreate(") && js.contains(r#""svg""#) && !js.contains(":svg:"),

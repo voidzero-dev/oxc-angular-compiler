@@ -1152,6 +1152,8 @@ mod tests {
             Some(crate::AngularVersion::new(22, 2, 2)),
             Some(crate::AngularVersion::new(22, 3, 0)),
             Some(crate::AngularVersion::new(23, 0, 0)),
+            crate::AngularVersion::parse("22.3.0-next.1"),
+            crate::AngularVersion::parse("22.3.0-rc.0"),
         ] {
             assert_eq!(
                 get_security_context_for("img", "src", version),
@@ -1174,14 +1176,16 @@ mod tests {
                 "{version:?}"
             );
         }
-        // 22.0.0 through 22.2.1 — and the 21.x/20.x/19.x lines, which the fix
-        // never reached — still classify `img|src` as a URL sink.
+        // 22.0.0 through 22.2.1 — 22.3.0-next.0, which predates the fix
+        // upstream — and the 21.x/20.x/19.x lines, which the fix never reached —
+        // still classify `img|src` as a URL sink.
         for version in [
             crate::AngularVersion::new(22, 0, 0),
             crate::AngularVersion::new(22, 2, 1),
             crate::AngularVersion::new(21, 2, 15),
             crate::AngularVersion::new(20, 3, 22),
             crate::AngularVersion::new(19, 2, 23),
+            crate::AngularVersion::parse("22.3.0-next.0").unwrap(),
         ] {
             let version = Some(version);
             assert_eq!(

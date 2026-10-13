@@ -32,7 +32,7 @@ pub use dependency::{
 pub use import_elision::ImportElisionAnalyzer;
 pub use metadata::{
     AngularVersion, ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode,
-    HostDirectiveMetadata, HostMetadata, LifecycleMetadata, TemplateDependency,
+    HostDirectiveMetadata, HostMetadata, LifecycleMetadata, Prerelease, TemplateDependency,
     TemplateDependencyKind, ViewEncapsulation,
 };
 pub use namespace_registry::NamespaceRegistry;

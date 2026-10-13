@@ -46,8 +46,8 @@ fn has_change_detection(region: &str, value: u32) -> bool {
         || region.contains(&format!("changeDetection: {value}"))
 }
 
-const V22: Option<AngularVersion> = Some(AngularVersion { major: 22, minor: 0, patch: 0 });
-const V21: Option<AngularVersion> = Some(AngularVersion { major: 21, minor: 0, patch: 0 });
+const V22: Option<AngularVersion> = Some(AngularVersion::new(22, 0, 0));
+const V21: Option<AngularVersion> = Some(AngularVersion::new(21, 0, 0));
 
 // --- v22+ (and unknown version, which assumes latest) -----------------------
 

@@ -21,7 +21,8 @@ use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
     AngularVersion as RustAngularVersion, ChangeDetectionStrategy as RustChangeDetectionStrategy,
     HmrTemplateFields, HmrUpdateModuleOptions, HostMetadataInput as RustHostMetadataInput,
-    TransformOptions as RustTransformOptions, ViewEncapsulation as RustViewEncapsulation,
+    Prerelease as RustPrerelease, TransformOptions as RustTransformOptions,
+    ViewEncapsulation as RustViewEncapsulation,
     build_ctor_params_metadata_in as core_build_ctor_params_metadata,
     build_decorator_metadata_array as core_build_decorator_metadata_array,
     build_prop_decorators_metadata_in as core_build_prop_decorators_metadata,
@@ -41,11 +42,19 @@ pub struct AngularVersion {
     pub minor: u32,
     /// Patch version number (e.g., 0 for Angular 19.0.0).
     pub patch: u32,
+    /// Prerelease tag without the leading dash (e.g., `"next.0"` or `"rc.1"`
+    /// for Angular `22.3.0-next.0`). Omit for stable releases; unknown tags
+    /// sort below `next`/`rc` prereleases of the same version.
+    pub prerelease: Option<String>,
 }
 
 impl From<AngularVersion> for RustAngularVersion {
     fn from(v: AngularVersion) -> Self {
-        RustAngularVersion::new(v.major, v.minor, v.patch)
+        let version = RustAngularVersion::new(v.major, v.minor, v.patch);
+        match v.prerelease {
+            Some(tag) => version.with_prerelease(RustPrerelease::parse(&tag)),
+            None => version,
+        }
     }
 }
 
@@ -134,6 +143,9 @@ pub struct TransformOptions {
     ///
     /// When set, used to determine defaults like:
     /// - `standalone`: defaults to `false` for v18 and earlier, `true` for v19+
+    ///
+    /// For prerelease builds, also set `prerelease` on the version (e.g.
+    /// `{ major: 22, minor: 3, patch: 0, prerelease: "next.0" }`).
     ///
     /// When not set, assumes latest Angular version (v19+ behavior).
     pub angular_version: Option<AngularVersion>,

@@ -10,6 +10,39 @@ use super::dependency::R3DependencyMetadata;
 use crate::directive::R3InputMetadata;
 use crate::output::ast::OutputExpression;
 
+/// Angular prerelease tag (`-next.N` / `-rc.N` in the published version).
+///
+/// Ordering follows Angular's release cadence: `next.N` builds come off
+/// `main` weekly, `rc.N` builds are cut from the release branch later, so
+/// `Next` < `Rc` < release. Unrecognized tags map to [`Prerelease::Other`],
+/// which sorts below both so an unknown suffix is treated as earlier than
+/// any published prerelease of the same `major.minor.patch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Prerelease {
+    /// Any prerelease tag that is not `next.N` or `rc.N`.
+    Other,
+    /// A `next.N` (main-branch snapshot) prerelease.
+    Next(u32),
+    /// An `rc.N` (release candidate) prerelease.
+    Rc(u32),
+}
+
+impl Prerelease {
+    /// Parse a prerelease tag like `next.0` or `rc.1`.
+    ///
+    /// Unknown tags are kept as [`Prerelease::Other`] rather than dropped so
+    /// they still sort below the release of the same triple.
+    pub fn parse(tag: &str) -> Self {
+        let (channel, ordinal) = tag.split_once('.').unwrap_or((tag, "0"));
+        let ordinal: u32 = ordinal.parse().unwrap_or(0);
+        match channel {
+            "next" => Self::Next(ordinal),
+            "rc" => Self::Rc(ordinal),
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Angular version information for feature detection.
 ///
 /// Used to determine version-conditional behavior like the default value
@@ -22,12 +55,21 @@ pub struct AngularVersion {
     pub minor: u32,
     /// Patch version number (e.g., 0 for Angular 19.0.0).
     pub patch: u32,
+    /// Prerelease tag (e.g., `Next(0)` for `22.3.0-next.0`), if any.
+    pub prerelease: Option<Prerelease>,
 }
 
 impl AngularVersion {
-    /// Create a new AngularVersion.
-    pub fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+    /// Create a new AngularVersion for a stable release.
+    pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
+        Self { major, minor, patch, prerelease: None }
+    }
+
+    /// Set the prerelease tag (e.g., `Prerelease::Next(0)` for `-next.0`).
+    #[must_use]
+    pub fn with_prerelease(mut self, prerelease: Prerelease) -> Self {
+        self.prerelease = Some(prerelease);
+        self
     }
 
     /// Check if this version supports implicit standalone default (v19.0.0+).
@@ -160,53 +202,77 @@ impl AngularVersion {
     }
 
     /// Check if this version is `major.minor.patch` or newer.
+    ///
+    /// Compares the release triple only: a prerelease of `22.3.0` counts as
+    /// `>= 22.2.2` even though it predates the `22.3.0` stable. Callers gating
+    /// on a fix that landed mid-`next` cycle must exclude prerelease ordinals
+    /// explicitly (see [`AngularVersion::is_22_3_0_next_0`]).
     pub fn is_at_least(&self, major: u32, minor: u32, patch: u32) -> bool {
         (self.major, self.minor, self.patch) >= (major, minor, patch)
     }
 
+    /// True only for `22.3.0-next.0`, the single published `next` build that
+    /// postdates `22.2.2` in triple order but predates the fixes it contains.
+    fn is_22_3_0_next_0(&self) -> bool {
+        self.major == 22
+            && self.minor == 3
+            && self.patch == 0
+            && self.prerelease == Some(Prerelease::Next(0))
+    }
+
     /// Check if this version drops `img|src` and `video|src` from the URL
-    /// security context (v22.2.2+ / v22.3.0-next.1+; prereleases compare by
-    /// triple only, so 22.3.0-next.0 already counts).
+    /// security context (v22.2.2+ / v22.3.0-next.1+).
     ///
     /// `angular/angular@439ff1bdf4` ("refactor(compiler): remove img/video src
     /// attribute from the URL security context") landed only on the v22 line,
     /// so a bound `src` on `<img>`/`<video>` no longer receives
     /// `ɵɵsanitizeUrl`. The 19.x/20.x/21.x security backports kept the keys.
+    /// `22.3.0-next.0` is excluded explicitly: it sorts after `22.2.2` by
+    /// triple but was cut before the fix landed on `main` (first in
+    /// `v22.3.0-next.1`).
     pub fn drops_img_video_src_url_context(&self) -> bool {
-        self.is_at_least(22, 2, 2)
+        self.is_at_least(22, 2, 2) && !self.is_22_3_0_next_0()
     }
 
     /// Check if this version strips the `:svg:`/`:math:` namespace prefix from
     /// the single-root tag passed to `ɵɵconditionalCreate` /
     /// `ɵɵconditionalBranchCreate` / `ɵɵrepeaterCreate` (v22.2.2+ /
-    /// v22.3.0-next.1+; prereleases compare by triple only, so 22.3.0-next.0
-    /// already counts).
+    /// v22.3.0-next.1+).
     ///
     /// `angular/angular@0244a1cb3` ("fix(compiler): match namespaced root nodes
     /// of control flow blocks against ng-content tag selectors") was never
-    /// backported to the 21.x/20.x/19.x lines.
+    /// backported to the 21.x/20.x/19.x lines. `22.3.0-next.0` is excluded
+    /// explicitly: it sorts after `22.2.2` by triple but was cut before the
+    /// fix landed on `main` (first in `v22.3.0-next.1`).
     pub fn strips_namespaced_block_tag(&self) -> bool {
-        self.is_at_least(22, 2, 2)
+        self.is_at_least(22, 2, 2) && !self.is_22_3_0_next_0()
     }
 
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
-    /// Returns `None` if the version string is invalid.
+    /// The `-next.N` / `-rc.N` prerelease tag is retained; any other suffix
+    /// parses to [`Prerelease::Other`]. Returns `None` if the version string
+    /// is invalid.
     pub fn parse(version_str: &str) -> Option<Self> {
         // Handle placeholder version (means latest/head)
         if version_str == "0.0.0-PLACEHOLDER" {
             return Some(Self::new(u32::MAX, 0, 0)); // Treat as latest
         }
 
-        // Strip any prerelease suffix: "19.0.0-rc.1" -> "19.0.0"
-        let base_version = version_str.split('-').next()?;
+        // "19.0.0-rc.1" -> base "19.0.0", prerelease tag "rc.1"
+        let (base_version, prerelease) = match version_str.split_once('-') {
+            Some((base, tag)) => (base, Some(Prerelease::parse(tag))),
+            None => (version_str, None),
+        };
 
         let mut parts = base_version.split('.');
         let major = parts.next()?.parse().ok()?;
         let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
-        Some(Self::new(major, minor, patch))
+        let mut version = Self::new(major, minor, patch);
+        version.prerelease = prerelease;
+        Some(version)
     }
 }
 
@@ -750,5 +816,64 @@ impl<'a> ComponentMetadata<'a> {
     /// Format: `{file_path}@{class_name}`
     pub fn component_id(&self, file_path: &str) -> String {
         format!("{}@{}", file_path, self.class_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_keeps_prerelease_tag() {
+        assert_eq!(
+            AngularVersion::parse("22.3.0-next.0"),
+            Some(AngularVersion::new(22, 3, 0).with_prerelease(Prerelease::Next(0)))
+        );
+        assert_eq!(
+            AngularVersion::parse("19.0.0-rc.1"),
+            Some(AngularVersion::new(19, 0, 0).with_prerelease(Prerelease::Rc(1)))
+        );
+        // Unknown tags stay a prerelease (below the release) rather than being
+        // dropped.
+        assert_eq!(
+            AngularVersion::parse("19.0.0-beta.2"),
+            Some(AngularVersion::new(19, 0, 0).with_prerelease(Prerelease::Other))
+        );
+        assert_eq!(AngularVersion::parse("22.2.2"), Some(AngularVersion::new(22, 2, 2)));
+        // Placeholder means latest/head: no prerelease, so every gate takes the
+        // newest path.
+        assert_eq!(
+            AngularVersion::parse("0.0.0-PLACEHOLDER"),
+            Some(AngularVersion::new(u32::MAX, 0, 0))
+        );
+    }
+
+    /// Both 22.2.2 gates share the same cutoff, so they are exercised
+    /// together: `>= 22.2.2` stable and `22.3.0-next.1+`, but not
+    /// `22.3.0-next.0`, which was cut before the fixes landed on `main`.
+    #[test]
+    fn prerelease_gates_exclude_only_22_3_0_next_0() {
+        let parse = |s| AngularVersion::parse(s).unwrap();
+
+        for version in [
+            parse("22.2.2"),
+            parse("22.3.0-next.1"),
+            parse("22.3.0-rc.0"),
+            parse("22.3.0"),
+            parse("23.0.0"),
+            AngularVersion::new(u32::MAX, 0, 0),
+        ] {
+            assert!(version.drops_img_video_src_url_context(), "{version:?}");
+            assert!(version.strips_namespaced_block_tag(), "{version:?}");
+        }
+
+        for version in [
+            parse("22.2.1"),
+            parse("22.3.0-next.0"),
+            AngularVersion::new(22, 2, 0).with_prerelease(Prerelease::Next(5)),
+        ] {
+            assert!(!version.drops_img_video_src_url_context(), "{version:?}");
+            assert!(!version.strips_namespaced_block_tag(), "{version:?}");
+        }
     }
 }
