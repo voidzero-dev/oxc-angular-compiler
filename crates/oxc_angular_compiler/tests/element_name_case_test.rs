@@ -6,12 +6,12 @@
 //! and that ingest discards, so `<View><text>hi</text></View>` compiled to an empty
 //! template with no error.
 //!
-//! The expected output is ngtsc 22.2.1's for the same template, in this emitter's
-//! spelling.
+//! The expected output is ngtsc 22.2.2's for the same template (the default is
+//! the latest release line), in this emitter's spelling.
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    TransformOptions,
+    AngularVersion, TransformOptions,
     output::emitter::JsEmitter,
     parser::html::HtmlParser,
     pipeline::{emit::compile_template, ingest::ingest_component},
@@ -22,6 +22,11 @@ use oxc_str::Ident;
 
 /// The whitespace-free definition of the component compiled from `template`.
 fn definition(template: &str) -> String {
+    definition_for(template, None)
+}
+
+/// `definition` pinned to an Angular version (`None` is the latest line).
+fn definition_for(template: &str, angular_version: Option<AngularVersion>) -> String {
     let source = format!(
         "import {{ Component }} from '@angular/core';\n\
          @Component({{ selector: 'x', template: `{template}` }})\n\
@@ -32,7 +37,7 @@ fn definition(template: &str) -> String {
         &allocator,
         "/x/a.ts",
         &source,
-        Some(&TransformOptions::default()),
+        Some(&TransformOptions { angular_version, ..TransformOptions::default() }),
         None,
     );
     assert!(result.diagnostics.is_empty(), "`{template}`: {:?}", result.diagnostics);
@@ -147,13 +152,20 @@ fn html_elements_written_in_capitals() {
             r#"i0.ɵɵelementStart(5,"P");i0.ɵɵtext(6,"p");i0.ɵɵelementEnd();i0.ɵɵelementStart(7,"P");"#,
         ],
     );
-    assert_compiles_to(
-        r#"<INPUT [value]="t"><BR><Img [src]="t">after"#,
-        &[
-            "decls:4,vars:2,",
-            r#"i0.ɵɵelement(0,"INPUT",0)(1,"BR")(2,"Img",1);i0.ɵɵtext(3,"after");"#,
-            r#"i0.ɵɵproperty("src",ctx.t,i0.ɵɵsanitizeUrl);"#,
-        ],
+    let img_src = definition(r#"<INPUT [value]="t"><BR><Img [src]="t">after"#);
+    assert!(
+        img_src.contains(r#"i0.ɵɵelement(0,"INPUT",0)(1,"BR")(2,"Img",1);i0.ɵɵtext(3,"after");"#),
+        "{img_src}"
+    );
+    // 22.2.2 (`angular/angular@439ff1bdf4`) removed `img|src` from the URL
+    // security context, so bound `src` no longer receives `ɵɵsanitizeUrl`.
+    assert!(img_src.contains(r#"i0.ɵɵproperty("src",ctx.t)"#), "{img_src}");
+    assert!(!img_src.contains("sanitizeUrl"), "{img_src}");
+    // Versions through 22.2.1 still sanitize it.
+    let img_src_22_2_1 = definition_for(r#"<Img [src]="t">"#, Some(AngularVersion::new(22, 2, 1)));
+    assert!(
+        img_src_22_2_1.contains(r#"i0.ɵɵproperty("src",ctx.t,i0.ɵɵsanitizeUrl)"#),
+        "{img_src_22_2_1}"
     );
     assert_compiles_to(
         r#"<A [href]="t">a</A><IFRAME [src]="t"></IFRAME>"#,

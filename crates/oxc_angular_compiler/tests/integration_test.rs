@@ -3846,28 +3846,59 @@ export class TestComponent {
 // SVG Namespace Tests
 // ============================================================================
 
-/// Test that SVG elements inside @switch/@case inside @for have the correct namespace prefix.
+/// Test that SVG elements inside @switch/@case inside @for pass the namespaced root tag.
 ///
-/// This is a regression test for a bug where conditionalCreate was emitting "svg" instead
-/// of ":svg:svg" for the tag parameter when the SVG element was inside a @switch/@case
-/// that was nested inside a @for loop.
+/// This is a regression test for the tag parameter emitted by conditionalCreate when
+/// the SVG element is inside a @switch/@case nested inside a @for loop.
 ///
-/// Expected: `conditionalCreate(0, ..., 2, 0, ":svg:svg", 0)`
-/// Bug:      `conditionalCreate(0, ..., 2, 0, "svg", 0)`
+/// Angular 22.2.2 (`angular/angular@0244a1cb3`, fixed angular#71162) strips the
+/// `:svg:` namespace prefix so the tag matches ng-content tag selectors:
+/// `conditionalCreate(0, ..., 2, 0, "svg", 0)`. Versions through 22.2.1 emitted the
+/// verbatim `:svg:svg`.
 #[test]
 fn test_svg_namespace_in_switch_case_inside_for() {
     // Test with minimal whitespace - SVG is the ONLY child of @case block
-    // When SVG is the single root element, the tag should include namespace prefix ":svg:svg"
+    // When SVG is the single root element, the tag is the stripped local name "svg"
     let js = compile_template_to_js(
         r#"@for (item of items; track item.id) {@switch (item.type) {@case ('circle') {<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" /></svg>}@case ('rect') {<svg viewBox="0 0 100 100"><rect width="80" height="80" /></svg>}}}"#,
         "TestComponent",
     );
 
-    // Verify that conditionalCreate uses ":svg:svg" not just "svg"
+    // Verify that the block tag args carry the stripped local name: "svg" still
+    // renders for the elements while no create call keeps the ":svg:" prefix.
     assert!(
-        js.contains(r#"":svg:svg""#),
-        "conditionalCreate should use ':svg:svg' namespace prefix for SVG elements. Output:\n{js}"
+        js.contains(r#""svg""#) && !js.contains(":svg:"),
+        "conditionalCreate should use the stripped 'svg' tag for SVG elements. Output:\n{js}"
     );
+}
+
+/// The `:svg:` namespace prefix on block-create tag arguments is only stripped for
+/// Angular 22.2.2+; older versions (and the never-backported 21.x/20.x/19.x lines)
+/// emit the verbatim `:svg:svg` tag.
+#[test]
+fn test_svg_namespace_in_block_tag_is_gated_on_22_2_2() {
+    const TEMPLATE: &str =
+        r#"@if (on) {<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" /></svg>}"#;
+
+    // Old behavior: verbatim namespaced tag.
+    for version in [AngularVersion::new(21, 2, 15), AngularVersion::new(22, 2, 1)] {
+        let js = compile_template_to_js_with_version(TEMPLATE, "TestComponent", Some(version));
+        assert!(
+            js.contains(r#"":svg:svg""#),
+            "{version:?} should pass ':svg:svg' verbatim. Output:\n{js}"
+        );
+    }
+
+    // New behavior: the namespace prefix is stripped. `None` means latest, so it
+    // takes the 22.2.2+ path too.
+    for version in [None, Some(AngularVersion::new(22, 2, 2)), Some(AngularVersion::new(22, 3, 0))]
+    {
+        let js = compile_template_to_js_with_version(TEMPLATE, "TestComponent", version);
+        assert!(
+            js.contains("ɵɵconditionalCreate(") && js.contains(r#""svg""#) && !js.contains(":svg:"),
+            "{version:?} should pass the stripped 'svg' tag. Output:\n{js}"
+        );
+    }
 }
 
 /// Test SVG namespace using the NAPI path (with whitespace removal).
@@ -3905,10 +3936,10 @@ fn test_svg_namespace_in_switch_case_inside_for_napi_path() {
 
     match result {
         Ok(output) => {
-            // Verify that conditionalCreate uses ":svg:svg" not just "svg"
+            // Verify that the block tag args use "svg", without the ":svg:" prefix
             assert!(
-                output.code.contains(r#"":svg:svg""#),
-                "NAPI path: conditionalCreate should use ':svg:svg' namespace prefix. Output:\n{}",
+                output.code.contains(r#""svg""#) && !output.code.contains(":svg:"),
+                "NAPI path: conditionalCreate should use the stripped 'svg' tag. Output:\n{}",
                 output.code
             );
         }
@@ -3953,10 +3984,10 @@ fn test_svg_namespace_in_switch_case_inside_for_domonly_mode() {
 
     match result {
         Ok(output) => {
-            // Verify that conditionalCreate uses ":svg:svg" not just "svg"
+            // Verify that the block tag args use "svg", without the ":svg:" prefix
             assert!(
-                output.code.contains(r#"":svg:svg""#),
-                "DomOnly mode: conditionalCreate should use ':svg:svg' namespace prefix. Output:\n{}",
+                output.code.contains(r#""svg""#) && !output.code.contains(":svg:"),
+                "DomOnly mode: conditionalCreate should use the stripped 'svg' tag. Output:\n{}",
                 output.code
             );
         }
@@ -4001,10 +4032,10 @@ export class SvgInSwitchCaseComponent {}
 
     let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
-    // Verify that conditionalCreate uses ":svg:svg" not just "svg"
+    // Verify that the block tag args use "svg", without the ":svg:" prefix
     assert!(
-        result.code.contains(r#"":svg:svg""#),
-        "transform_angular_file: conditionalCreate should use ':svg:svg' namespace prefix. Output:\n{}",
+        result.code.contains(r#""svg""#) && !result.code.contains(":svg:"),
+        "transform_angular_file: conditionalCreate should use the stripped 'svg' tag. Output:\n{}",
         result.code
     );
 }

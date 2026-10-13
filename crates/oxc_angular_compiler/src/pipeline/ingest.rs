@@ -2452,9 +2452,9 @@ fn ingest_if_block<'a>(
         let tag_name =
             ingest_control_flow_insertion_point(job, view_xref, branch_view_xref, &branch.children);
 
-        // Tag name is passed directly for content projection (including namespace prefix).
-        // This matches TypeScript's ingestIfBlock which passes tagName directly from
-        // ingestControlFlowInsertionPoint without stripping the namespace.
+        // Tag name is passed directly for content projection;
+        // ingest_control_flow_insertion_point strips the namespace on 22.2.2+
+        // (angular/angular@0244a1cb3).
         let tag = tag_name.clone();
 
         // fn_name_suffix is hardcoded to "Conditional" without namespace prefix
@@ -3036,9 +3036,9 @@ fn ingest_switch_block<'a>(
         let tag_name =
             ingest_control_flow_insertion_point(job, view_xref, group_view_xref, &group.children);
 
-        // Tag name is passed directly for content projection (including namespace prefix).
-        // This matches TypeScript's ingestSwitchBlock which passes tagName directly from
-        // ingestControlFlowInsertionPoint without stripping the namespace.
+        // Tag name is passed directly for content projection;
+        // ingest_control_flow_insertion_point strips the namespace on 22.2.2+
+        // (angular/angular@0244a1cb3).
         let tag = tag_name.clone();
 
         // fn_name_suffix is hardcoded to "Case" without namespace prefix
@@ -4681,6 +4681,24 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
 
     // Get the tag name
     let tag_name = root.tag_name();
+
+    if job.angular_version.map_or(true, |v| v.strips_namespaced_block_tag()) {
+        // 22.2.2+ matches the root tag against ng-content tag selectors, so the
+        // namespace prefix is stripped upstream (`rawTagName ?
+        // splitNsName(rawTagName)[1] : null`); `ng-template` is checked on the
+        // stripped name. See `angular/angular@0244a1cb3`.
+        if tag_name.as_str().is_empty() {
+            return None;
+        }
+        let (namespace, stripped) = split_ns_name(tag_name.as_str());
+        if stripped == NG_TEMPLATE_TAG_NAME {
+            return None;
+        }
+        if namespace.is_some() {
+            return Some(Ident::from(allocator.alloc_str(stripped)));
+        }
+        return Some(tag_name);
+    }
 
     // Don't pass along `ng-template` tag name since it enables directive matching.
     if tag_name.as_str() == NG_TEMPLATE_TAG_NAME { None } else { Some(tag_name) }

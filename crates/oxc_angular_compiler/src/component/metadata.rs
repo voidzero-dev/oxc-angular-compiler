@@ -159,6 +159,36 @@ impl AngularVersion {
         false
     }
 
+    /// Check if this version is `major.minor.patch` or newer.
+    pub fn is_at_least(&self, major: u32, minor: u32, patch: u32) -> bool {
+        (self.major, self.minor, self.patch) >= (major, minor, patch)
+    }
+
+    /// Check if this version drops `img|src` and `video|src` from the URL
+    /// security context (v22.2.2+ / v22.3.0-next.1+; prereleases compare by
+    /// triple only, so 22.3.0-next.0 already counts).
+    ///
+    /// `angular/angular@439ff1bdf4` ("refactor(compiler): remove img/video src
+    /// attribute from the URL security context") landed only on the v22 line,
+    /// so a bound `src` on `<img>`/`<video>` no longer receives
+    /// `ɵɵsanitizeUrl`. The 19.x/20.x/21.x security backports kept the keys.
+    pub fn drops_img_video_src_url_context(&self) -> bool {
+        self.is_at_least(22, 2, 2)
+    }
+
+    /// Check if this version strips the `:svg:`/`:math:` namespace prefix from
+    /// the single-root tag passed to `ɵɵconditionalCreate` /
+    /// `ɵɵconditionalBranchCreate` / `ɵɵrepeaterCreate` (v22.2.2+ /
+    /// v22.3.0-next.1+; prereleases compare by triple only, so 22.3.0-next.0
+    /// already counts).
+    ///
+    /// `angular/angular@0244a1cb3` ("fix(compiler): match namespaced root nodes
+    /// of control flow blocks against ng-content tag selectors") was never
+    /// backported to the 21.x/20.x/19.x lines.
+    pub fn strips_namespaced_block_tag(&self) -> bool {
+        self.is_at_least(22, 2, 2)
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// Returns `None` if the version string is invalid.

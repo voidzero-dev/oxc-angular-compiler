@@ -42,9 +42,13 @@ enum SchemaKind {
     V21_2_7,
     /// 21.2.14 only. Namespaced keys but no `:svg:a|href` yet.
     V21_2_14,
-    /// 19.2.23+, 20.3.22+, 21.2.15+, 22+. Namespaced keys with `:svg:a|href`.
-    /// `script|src` and `script|href` are gone.
+    /// 19.2.23+, 20.3.22+, 21.2.15+, 22.0.0–22.2.1. Namespaced keys with
+    /// `:svg:a|href`. `script|src` and `script|href` are gone.
     V22,
+    /// 22.2.2+ / 22.3.0-next.1+. `angular/angular@439ff1bdf4` removed `img|src`
+    /// and `video|src` from the URL context; the fix was never backported to
+    /// the older maintained lines, so `V22` still carries them.
+    V22_2_2,
 }
 
 struct SecurityProfile {
@@ -76,10 +80,15 @@ struct SecurityProfile {
 
 fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     let Some(version) = version else {
-        return v22_profile();
+        return v22_profile(SchemaKind::V22_2_2);
     };
     if version.major >= 22 {
-        return v22_profile();
+        let kind = if version.drops_img_video_src_url_context() {
+            SchemaKind::V22_2_2
+        } else {
+            SchemaKind::V22
+        };
+        return v22_profile(kind);
     }
 
     let (kind, iframe_src_i18n) = match version.major {
@@ -115,7 +124,7 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
         _ => (SchemaKind::Legacy, false),
     };
 
-    let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22);
+    let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22 | SchemaKind::V22_2_2);
     // `:svg:style` stripping existed only in 19.2.23, 20.3.22 and 21.2.14.
     let strip_svg_style = matches!(kind, SchemaKind::V21_2_14)
         || (version.major == 20 && version.minor == 3 && version.patch == 22)
@@ -126,7 +135,7 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
         // `normalizeTagName` in `securityContext` landed with the schema
         // backports that carried `:svg:a|href` (19.2.23 / 20.3.22 / 21.2.15);
         // 21.2.14 has namespaced keys but no normalizer.
-        normalizes_tag_names: matches!(kind, SchemaKind::V22),
+        normalizes_tag_names: matches!(kind, SchemaKind::V22 | SchemaKind::V22_2_2),
         strip_svg_script: namespaced,
         strip_svg_style,
         iframe_src_i18n,
@@ -134,9 +143,9 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     }
 }
 
-fn v22_profile() -> SecurityProfile {
+fn v22_profile(kind: SchemaKind) -> SecurityProfile {
     SecurityProfile {
-        kind: SchemaKind::V22,
+        kind,
         namespaced: true,
         normalizes_tag_names: true,
         strip_svg_script: true,
@@ -188,7 +197,12 @@ pub fn is_iframe_security_sensitive_attr(attr_name: &str) -> bool {
     )
 }
 
-fn build_v22_schema(with_svg_a: bool) -> FxHashMap<String, SecurityContext> {
+fn build_v22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
+    let with_svg_a = kind != SchemaKind::V21_2_14;
+    // `img|src` and `video|src` left the URL context in 22.2.2
+    // (`angular/angular@439ff1bdf4`); that change was never backported to
+    // the 21.x/20.x/19.x lines.
+    let with_img_video_src = kind != SchemaKind::V22_2_2;
     let mut schema = FxHashMap::default();
 
     register(
@@ -209,11 +223,16 @@ fn build_v22_schema(with_svg_a: bool) -> FxHashMap<String, SecurityContext> {
             ("area", &["href"]),
             ("a", &["href", "xlink:href"]),
             ("form", &["action"]),
-            // Kept for compatibility with upstream; safe in practice.
-            ("img", &["src"]),
-            ("video", &["src"]),
         ],
     );
+    if with_img_video_src {
+        register(
+            &mut schema,
+            SecurityContext::Url,
+            None,
+            &[("img", &["src"]), ("video", &["src"])],
+        );
+    }
 
     register_uniform(
         &mut schema,
@@ -287,9 +306,11 @@ fn build_v22_schema(with_svg_a: bool) -> FxHashMap<String, SecurityContext> {
 }
 
 static V22_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
-    LazyLock::new(|| build_v22_schema(true));
+    LazyLock::new(|| build_v22_schema(SchemaKind::V22));
+static V22_2_2_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_v22_schema(SchemaKind::V22_2_2));
 static V21_2_14_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
-    LazyLock::new(|| build_v22_schema(false));
+    LazyLock::new(|| build_v22_schema(SchemaKind::V21_2_14));
 static V21_27_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_pren22_schema(SchemaKind::V21_2_7));
 static V21_1_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
@@ -313,6 +334,7 @@ fn schema_for(kind: SchemaKind) -> &'static FxHashMap<String, SecurityContext> {
         SchemaKind::V21_2_7 => &V21_27_SCHEMA,
         SchemaKind::V21_2_14 => &V21_2_14_SCHEMA,
         SchemaKind::V22 => &V22_SCHEMA,
+        SchemaKind::V22_2_2 => &V22_2_2_SCHEMA,
     }
 }
 /// Pre-v22 schemas look up bare `tag|attr` keys (`normalizeTagName` did not keep
@@ -1114,11 +1136,65 @@ mod tests {
     fn test_url_context() {
         assert_eq!(get_security_context("a", "href"), SecurityContext::Url);
         assert_eq!(get_security_context("form", "action"), SecurityContext::Url);
-        assert_eq!(get_security_context("img", "src"), SecurityContext::Url);
         assert_eq!(get_security_context(":svg:a", "href"), SecurityContext::Url);
         assert_eq!(get_security_context(":math:mi", "href"), SecurityContext::Url);
         // Bare MathML local names are not the schema key.
         assert_eq!(get_security_context("mi", "href"), SecurityContext::None);
+    }
+
+    #[test]
+    fn v22_2_2_drops_img_and_video_src_from_the_url_context() {
+        // Latest (`None`) and 22.2.2+/22.3.x: `img|src` and `video|src` are no
+        // URL sinks, so bound `src` gets no `ɵɵsanitizeUrl`. `iframe|src` keeps
+        // the ResourceUrl context.
+        for version in [
+            None,
+            Some(crate::AngularVersion::new(22, 2, 2)),
+            Some(crate::AngularVersion::new(22, 3, 0)),
+            Some(crate::AngularVersion::new(23, 0, 0)),
+        ] {
+            assert_eq!(
+                get_security_context_for("img", "src", version),
+                SecurityContext::None,
+                "{version:?}"
+            );
+            assert_eq!(
+                get_security_context_for("video", "src", version),
+                SecurityContext::None,
+                "{version:?}"
+            );
+            assert_eq!(
+                host_binding_security_context_for("img", "src", version),
+                SecurityContext::None,
+                "{version:?}"
+            );
+            assert_eq!(
+                element_security_context_for("img", "src", version),
+                SecurityContext::None,
+                "{version:?}"
+            );
+        }
+        // 22.0.0 through 22.2.1 — and the 21.x/20.x/19.x lines, which the fix
+        // never reached — still classify `img|src` as a URL sink.
+        for version in [
+            crate::AngularVersion::new(22, 0, 0),
+            crate::AngularVersion::new(22, 2, 1),
+            crate::AngularVersion::new(21, 2, 15),
+            crate::AngularVersion::new(20, 3, 22),
+            crate::AngularVersion::new(19, 2, 23),
+        ] {
+            let version = Some(version);
+            assert_eq!(
+                get_security_context_for("img", "src", version),
+                SecurityContext::Url,
+                "{version:?}"
+            );
+            assert_eq!(
+                get_security_context_for("video", "src", version),
+                SecurityContext::Url,
+                "{version:?}"
+            );
+        }
     }
 
     #[test]
@@ -1170,10 +1246,9 @@ mod tests {
 
     #[test]
     fn test_unknown_element_url_or_resource_url() {
-        assert_eq!(
-            calc_security_context_for_unknown_element("src"),
-            SecurityContext::UrlOrResourceUrl
-        );
+        // 22.2.2 dropped the last `*|src` URL contributor (`img`/`video`), so
+        // `src` only hits `embed`/`frame`/`iframe` ResourceUrl keys.
+        assert_eq!(calc_security_context_for_unknown_element("src"), SecurityContext::ResourceUrl);
         assert_eq!(
             calc_security_context_for_unknown_element("href"),
             SecurityContext::UrlOrResourceUrl
@@ -1205,8 +1280,17 @@ mod tests {
             SecurityContext::AttributeNoBinding
         );
         assert_eq!(host_binding_security_context("a", "href"), SecurityContext::Url);
-        assert_eq!(host_binding_security_context("img", "src"), SecurityContext::Url);
         assert_eq!(host_binding_security_context("iframe", "src"), SecurityContext::ResourceUrl);
+        // 22.2.2 removed `img|src` from the URL context; 22.2.1 kept it.
+        assert_eq!(host_binding_security_context("img", "src"), SecurityContext::None);
+        assert_eq!(
+            host_binding_security_context_for(
+                "img",
+                "src",
+                Some(crate::AngularVersion::new(22, 2, 1))
+            ),
+            SecurityContext::Url
+        );
     }
 
     #[test]
@@ -1223,9 +1307,10 @@ mod tests {
         // `*` never produces an element name upstream, so `*` / `*[x]` behave
         // like an attribute-only selector and scan every known element.
         for selector in ["*", "*[x]", "[x]"] {
+            // 22.2.2 removed the `src` URL keys, leaving only ResourceUrl.
             assert_eq!(
                 host_binding_security_context(selector, "src"),
-                SecurityContext::UrlOrResourceUrl,
+                SecurityContext::ResourceUrl,
                 "{selector}"
             );
             assert_eq!(
