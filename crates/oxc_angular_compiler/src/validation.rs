@@ -115,15 +115,19 @@ fn namespace_import_of<'a>(
 /// in `ns.f.required`) only when `ns` resolves to a namespace import of the
 /// module. Any other binding — a parameter, a local, an unrelated import —
 /// means the call isn't one of the API's.
-fn is_api_reference(callee: &Expression<'_>, api: InitializerApi, semantic: &Semantic<'_>) -> bool {
+fn is_api_reference<'a>(
+    callee: &Expression<'a>,
+    api: InitializerApi,
+    semantic: &Semantic<'a>,
+) -> bool {
     // `f` — its binding must be the import.
-    let named = |expr: &Expression<'_>| {
+    let named = |expr: &Expression<'a>| {
         let Expression::Identifier(id) = expr else { return false };
         direct_import_of(id, semantic)
             .is_some_and(|(module, name)| module == api.1 && name == api.0)
     };
     // `ns.f` — `ns` must be a namespace import of the module.
-    let namespaced = |expr: &Expression<'_>| {
+    let namespaced = |expr: &Expression<'a>| {
         let Expression::StaticMemberExpression(member) = expr else { return false };
         let Expression::Identifier(ns) = &member.object else { return false };
         member.property.name == api.0 && namespace_import_of(ns, semantic) == Some(api.1)
