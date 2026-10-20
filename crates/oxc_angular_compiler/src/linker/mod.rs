@@ -460,12 +460,30 @@ fn get_metadata_object<'a>(call: &'a CallExpression<'a>) -> Option<&'a ObjectExp
 /// Handles both regular string literals (`"..."`) and template literals with no expressions (`` `...` ``).
 fn as_static_string<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.as_str()),
+        Expression::StringLiteral(lit) => lit.value.as_str(),
         Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
-            tl.quasis.first()?.value.cooked.as_deref()
+            tl.quasis.first()?.value.cooked?.as_str()
         }
         _ => None,
     }
+}
+
+/// A static string (see [`as_static_string`]) as a JS string literal: its
+/// value quoted and escaped, or, for a value with a lone surrogate
+/// (`'\uD800'`), which has no `&str`, the literal as written.
+fn static_string_literal<'a>(expr: &'a Expression<'a>, source: &str) -> Option<String> {
+    if let Some(value) = as_static_string(expr) {
+        return Some(crate::output::emitter::escape_string(value, false));
+    }
+    let has_lone_surrogate = match expr {
+        Expression::StringLiteral(lit) => lit.value.has_lone_surrogate(),
+        Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+            tl.quasis.first().and_then(|q| q.value.cooked).is_some_and(|c| c.has_lone_surrogate())
+        }
+        _ => false,
+    };
+    has_lone_surrogate
+        .then(|| source[expr.span().start as usize..expr.span().end as usize].to_string())
 }
 
 /// Extract a string property value from an object expression.
@@ -882,8 +900,15 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
         for prop in &attr_obj.properties {
             if let ObjectPropertyKind::ObjectProperty(p) = prop {
                 let key = match &p.key {
-                    PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-                    PropertyKey::StringLiteral(s) => s.value.to_string(),
+                    PropertyKey::StaticIdentifier(ident) => {
+                        crate::output::emitter::escape_string(&ident.name, false)
+                    }
+                    // A lone surrogate (`'\uD800'`) has no `&str`: keep the key
+                    // as written.
+                    PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                        Some(key) => crate::output::emitter::escape_string(key, false),
+                        None => source[s.span.start as usize..s.span.end as usize].to_string(),
+                    },
                     _ => continue,
                 };
                 // Static strings (including template literals a bundler may have
@@ -895,7 +920,7 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
                     },
                     |s| crate::output::emitter::escape_string(s, false),
                 );
-                attrs.push(crate::output::emitter::escape_string(&key, false));
+                attrs.push(key);
                 attrs.push(value);
             }
         }
@@ -1377,9 +1402,20 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
     for prop in &inputs_obj.properties {
         let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
 
-        let key = match &p.key {
-            PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-            PropertyKey::StringLiteral(s) => s.value.to_string(),
+        // The key for the output object, and the key as a string literal (the
+        // public and declared name when the object form leaves them out).
+        let (quoted_key, key_literal) = match &p.key {
+            PropertyKey::StaticIdentifier(ident) => {
+                (quote_key(&ident.name), crate::output::emitter::escape_string(&ident.name, false))
+            }
+            PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                Some(key) => (quote_key(key), crate::output::emitter::escape_string(key, false)),
+                // A lone surrogate (`'\uD800'`) has no `&str`: use the key as written.
+                None => {
+                    let key = source[s.span.start as usize..s.span.end as usize].to_string();
+                    (key.clone(), key)
+                }
+            },
             _ => {
                 // Fallback: use source text
                 let span = p.span();
@@ -1388,15 +1424,10 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             }
         };
 
-        let quoted_key = quote_key(&key);
-
         // Simple string: propertyName: "publicName" → keep as is. The value may
         // arrive as a template literal when a bundler rewrote the string.
-        if let Some(public_name) = as_static_string(&p.value) {
-            entries.push(format!(
-                "{quoted_key}: {}",
-                crate::output::emitter::escape_string(public_name, false)
-            ));
+        if let Some(public_name) = static_string_literal(&p.value, source) {
+            entries.push(format!("{quoted_key}: {public_name}"));
             continue;
         }
 
@@ -1409,7 +1440,7 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
                     .elements
                     .first()
                     .and_then(ArrayExpressionElement::as_expression)
-                    .and_then(as_static_string)
+                    .and_then(|first| static_string_literal(first, source))
                     .is_some();
 
                 if !first_is_string {
@@ -1433,14 +1464,20 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             }
             // Object: Angular 16+ format with classPropertyName, publicName, isRequired, etc.
             Expression::ObjectExpression(obj) => {
-                let public_name = crate::output::emitter::escape_string(
-                    get_string_property(obj, "publicName").unwrap_or(&key),
-                    false,
-                );
-                let declared_name = crate::output::emitter::escape_string(
-                    get_string_property(obj, "classPropertyName").unwrap_or(&key),
-                    false,
-                );
+                // `get_string_property`, as a string literal.
+                let name_literal = |name: &str| {
+                    obj.properties.iter().find_map(|prop| match prop {
+                        ObjectPropertyKind::ObjectProperty(prop)
+                            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) =>
+                        {
+                            static_string_literal(&prop.value, source)
+                        }
+                        _ => None,
+                    })
+                };
+                let public_name = name_literal("publicName").unwrap_or_else(|| key_literal.clone());
+                let declared_name =
+                    name_literal("classPropertyName").unwrap_or_else(|| key_literal.clone());
                 let is_signal = get_bool_property(obj, "isSignal").unwrap_or(false);
                 let is_required = get_bool_property(obj, "isRequired").unwrap_or(false);
                 // Angular emits `transformFunction: null` for signal inputs without
@@ -1617,7 +1654,10 @@ fn extract_host_metadata_input(
             let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
             let key = match &p.key {
                 PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-                PropertyKey::StringLiteral(s) => s.value.to_string(),
+                PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                    Some(key) => key.to_string(),
+                    None => continue,
+                },
                 _ => continue,
             };
             let Some(value) = as_static_string(&p.value) else { continue };
@@ -1630,7 +1670,10 @@ fn extract_host_metadata_input(
             let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
             let key = match &p.key {
                 PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-                PropertyKey::StringLiteral(s) => s.value.to_string(),
+                PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                    Some(key) => key.to_string(),
+                    None => continue,
+                },
                 _ => continue,
             };
             let Some(value) = as_static_string(&p.value) else { continue };

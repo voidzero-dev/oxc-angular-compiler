@@ -34,7 +34,7 @@ const APIS: [InitializerApi; 8] = [
 fn should_check(program: &Program<'_>) -> bool {
     program.body.iter().any(|stmt| {
         let Statement::ImportDeclaration(import) = stmt else { return false };
-        let module = import.source.value.as_str();
+        let Some(module) = import.source.value.as_str() else { return false };
         if module != "@angular/core" && module != "@angular/core/rxjs-interop" {
             return false;
         }
@@ -58,7 +58,7 @@ fn importing_module<'a>(declaration: &AstNode<'a>, semantic: &Semantic<'a>) -> O
     let AstKind::ImportDeclaration(import) = semantic.nodes().parent_kind(declaration.id()) else {
         return None;
     };
-    Some(import.source.value.as_str())
+    import.source.value.as_str()
 }
 
 /// The declaration `id`'s reference resolves to when it's the symbol's only

@@ -871,6 +871,9 @@ impl Inner {
                     return;
                 }
 
+                // A source with a lone surrogate (`'\uD800'`) can't be
+                // resolved: keep the specifier's own info, unchased.
+                let source = decl.source.value.as_str();
                 for spec in &decl.specifiers {
                     let exported_name = spec.exported.name().to_string();
                     let local_name = spec.local.name().to_string();
@@ -878,7 +881,7 @@ impl Inner {
                         exported_name,
                         ExportInfo {
                             is_type_only: spec.export_kind.is_type(),
-                            re_export_source: Some((decl.source.value.to_string(), local_name)),
+                            re_export_source: source.map(|source| (source.to_string(), local_name)),
                             value_local: None,
                         },
                     );
@@ -901,7 +904,9 @@ impl Inner {
                 );
             }
             Statement::ExportAllDeclaration(decl) => {
-                let source_module = decl.source.value.to_string();
+                // A source with a lone surrogate (`'\uD800'`) can't be resolved.
+                let Some(source_module) = decl.source.value.as_str() else { return };
+                let source_module = source_module.to_string();
                 if let Some(exported) = &decl.exported {
                     // export * as X from './other'
                     exports.insert(

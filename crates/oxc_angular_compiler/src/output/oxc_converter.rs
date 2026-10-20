@@ -17,7 +17,7 @@ use oxc_ast::ast::{
     PropertyKind, UnaryOperator as OxcUnaryOperator,
 };
 use oxc_span::Span;
-use oxc_str::Ident;
+use oxc_str::{Ident, JSStr};
 
 use super::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, CommaExpr,
@@ -27,6 +27,7 @@ use super::ast::{
     SpreadElementExpr, TemplateLiteralElement, TemplateLiteralExpr, TypeofExpr, UnaryOperator,
     UnaryOperatorExpr, VoidExpr,
 };
+use crate::directive::quote_string_literal;
 
 // ============================================================================
 // Main Conversion Function
@@ -68,13 +69,24 @@ pub fn convert_oxc_expression<'a>(
             &allocator,
         ))),
 
-        Expression::StringLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
-            LiteralExpr {
-                value: LiteralValue::String(lit.value.clone().into()),
-                source_span: None,
-            },
-            &allocator,
-        ))),
+        Expression::StringLiteral(lit) => match lit.value.as_str() {
+            Some(value) => Some(OutputExpression::Literal(Box::new_in(
+                LiteralExpr { value: LiteralValue::String(value.into()), source_span: None },
+                &allocator,
+            ))),
+            // A lone surrogate (`'\uD800'`) has no `&str`: keep the literal as
+            // written, or (no source text) print its exact UTF-16 escapes.
+            None => {
+                let source = match lit.raw {
+                    Some(raw) => raw.into(),
+                    None => Ident::from(allocator.alloc_str(&quote_string_literal(lit))),
+                };
+                Some(OutputExpression::RawSource(Box::new_in(
+                    RawSourceExpr { source, source_span: None },
+                    &allocator,
+                )))
+            }
+        },
 
         // Identifiers
         Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
@@ -307,13 +319,12 @@ fn convert_object_expression<'a>(
 ) -> Option<OutputExpression<'a>> {
     // A `LiteralMap` entry is a plain `key: value` pair, so methods (`a() {}`),
     // accessors (`get a() {}`), computed keys (`[a]: 1`) and other key kinds
-    // cannot be represented. Keep such objects as written rather than emitting
-    // an altered object.
-    if obj
-        .properties
-        .iter()
-        .any(|prop| matches!(prop, ObjectPropertyKind::ObjectProperty(p) if !is_plain_property(p)))
-    {
+    // cannot be represented, nor can a key with a lone surrogate (`'\uD800'`).
+    // Keep such objects as written rather than emitting an altered object.
+    if obj.properties.iter().any(|prop| {
+        matches!(prop, ObjectPropertyKind::ObjectProperty(p) if !is_plain_property(p)
+            || matches!(&p.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate()))
+    }) {
         return make_raw_source(allocator, source_text, obj.span);
     }
     convert_plain_properties(allocator, obj, source_text)
@@ -350,7 +361,12 @@ pub fn convert_plain_properties<'a>(
                 }
                 let (key, quoted) = match &p.key {
                     PropertyKey::StaticIdentifier(id) => (id.name.clone().into(), false),
-                    PropertyKey::StringLiteral(lit) => (lit.value.clone().into(), true),
+                    // A key with a lone surrogate (`'\uD800'`) has no `&str`
+                    // form and the emitter re-quotes keys, so leave it out.
+                    PropertyKey::StringLiteral(lit) => match lit.value.as_str() {
+                        Some(key) => (Ident::from(key), true),
+                        None => continue,
+                    },
                     PropertyKey::NumericLiteral(lit) => {
                         (Ident::from(allocator.alloc_str(&lit.value.to_string())), true)
                     }
@@ -623,11 +639,9 @@ fn convert_template_literal<'a>(
     // Convert quasis to template literal elements
     let mut elements = OxcVec::with_capacity_in(tpl.quasis.len(), &allocator);
     for quasi in &tpl.quasis {
-        let text = quasi
-            .value
-            .cooked
-            .as_ref()
-            .map_or_else(|| quasi.value.raw.clone(), |cooked| cooked.clone());
+        // A cooked value with a lone surrogate (`\uD800`) has no `&str`: use
+        // `raw`, as for an invalid escape. The emitter prints `raw_text` anyway.
+        let text = quasi.value.cooked.and_then(JSStr::as_arena_str).unwrap_or(quasi.value.raw);
         let raw_text = quasi.value.raw.clone();
 
         elements.push(TemplateLiteralElement {
@@ -1224,5 +1238,45 @@ mod tests {
         let raw = raw.source.as_str();
         assert!(!raw.contains(": string"), "Should strip type annotations. Got: {raw}");
         assert!(raw.contains("attach(x)") && raw.contains("[key]: 1"), "Got: {raw}");
+    }
+
+    /// A string with a lone surrogate has no `&str`: the literal, and an
+    /// object keyed by one, are kept as written.
+    #[test]
+    fn test_lone_surrogate_strings_are_kept_as_written() {
+        let allocator = Allocator::default();
+        let source = r"['\uD800', { '\uDC00': 1 }, 'ok']";
+        let expr = parse_expression(&allocator, source);
+        let Some(OutputExpression::LiteralArray(array)) =
+            convert_oxc_expression(&allocator, &expr, Some(source))
+        else {
+            panic!("Expected LiteralArray expression");
+        };
+        let entries: std::vec::Vec<_> = array
+            .entries
+            .iter()
+            .map(|entry| match entry {
+                OutputExpression::RawSource(raw) => format!("raw {}", raw.source),
+                OutputExpression::Literal(lit) => format!("literal {:?}", lit.value),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(entries, [r"raw '\uD800'", r"raw { '\uDC00': 1 }", r#"literal String("ok")"#]);
+    }
+
+    /// A synthesized literal (no source text) with a lone surrogate prints
+    /// its exact UTF-16 escapes.
+    #[test]
+    fn test_lone_surrogate_string_without_raw_is_escaped() {
+        let allocator = Allocator::default();
+        let mut expr = parse_expression(&allocator, r"'a\uD800\u00e9'");
+        let Expression::StringLiteral(lit) = &mut expr else { panic!("Expected StringLiteral") };
+        lit.raw = None;
+        let Some(OutputExpression::RawSource(raw)) =
+            convert_oxc_expression(&allocator, &expr, None)
+        else {
+            panic!("Expected RawSource expression");
+        };
+        assert_eq!(raw.source.as_str(), r#""a\uD800\u00E9""#);
     }
 }

@@ -17644,3 +17644,120 @@ fn test_unnameable_members_emit_nothing() {
         );
     }
 }
+
+#[test]
+fn test_component_with_lone_surrogate_key_still_compiles() {
+    // A `@Component` key with a lone surrogate (`'\uD800'`) has no `&str`
+    // form and names no option: it is ignored like any unknown key, rather
+    // than dropping the whole component.
+    let result = expect_result(
+        "import { Component } from '@angular/core';\n\
+         @Component({ selector: 'app-c', '\\uD800': 1, template: '<p>hi</p>' })\n\
+         export class C {}",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(result.code.contains("ɵɵdefineComponent"), "{}", result.code);
+    assert!(result.code.contains("selectors:[[\"app-c\"]]"), "{}", result.code);
+    // The metadata keeps the decorator's object as written.
+    assert!(result.code.contains(r"args:[{ selector: 'app-c', '\uD800': 1,"), "{}", result.code);
+}
+
+#[test]
+fn test_lone_surrogate_query_selector_kept_exact() {
+    // A string query predicate with a lone surrogate (`'\uD800'`) has no
+    // `&str` form: it still becomes a selector list (split on commas, each
+    // part trimmed), with exact escapes, not a lossy rendering or a bare
+    // string token.
+    let result = expect_result(
+        "import { Component, ViewChild, viewChild } from '@angular/core';\n\
+         @Component({ selector: 'app-c', template: '' })\n\
+         export class C {\n\
+           @ViewChild('\\uD800') a: any;\n\
+           b = viewChild(' x ,\\uDC00 ');\n\
+         }",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"i0.ɵɵviewQuerySignal(ctx.b,["x","\uDC00"],5);"#),
+        "{}",
+        result.code
+    );
+    assert!(result.code.contains(r#"i0.ɵɵviewQuery(["\uD800"],5);"#), "{}", result.code);
+}
+
+#[test]
+fn test_lone_surrogate_input_alias_is_diagnostic() {
+    // An `alias` with a lone surrogate (`'\uD800'`) has no `&str` form. It is
+    // present but unreadable, not absent: report it like the positional
+    // `@Input('\uD800')` instead of compiling the class property name.
+    let input_error = "@Input decorator argument must resolve to a string or an object \
+                       literal Value could not be determined statically.";
+    let inputs_error = "@Directive.inputs array can only contain strings or object literals \
+                        Value could not be determined statically.";
+    for (decorator, member, expected) in [
+        ("", r"@Input('\uD800') value: any;", input_error),
+        ("", r"@Input({ alias: '\uD800', required: true }) value: any;", input_error),
+        ("", r"@Input({ alias: `\uD800` }) value: any;", input_error),
+        ("", "@Input({ alias: C }) value: any;", input_error),
+        ("", "@Input(OPTS) value: any;", input_error),
+        (r", inputs: [{ name: 'value', alias: '\uD800' }]", "value: any;", inputs_error),
+    ] {
+        let source = format!(
+            "import {{ Directive, Input }} from '@angular/core';\n\
+             const C = '\\uD800';\n\
+             const OPTS = {{ alias: '\\uD800' }};\n\
+             @Directive({{ selector: '[d]'{decorator} }})\n\
+             export class D {{\n  {member}\n}}"
+        );
+        assert_eq!(expect_diagnostics(&source), [expected], "`{decorator}` `{member}`");
+    }
+    // A truly dynamic alias still reads as no alias, like ngtsc.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n  @Input({ alias: y }) value: any;\n}",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn test_lone_surrogate_host_listener_argument_is_diagnostic() {
+    // A `@HostListener` argument with a lone surrogate (`'\uD800'`) can't be
+    // read. It is reported, and the call never shifts the later arguments
+    // into its place.
+    let result = expect_result(
+        "import { Directive, HostListener } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n\
+           @HostListener('click', ['$event.a', '\\uD800', '$event.c'])\n\
+           onClick(a: any, b: any, c: any) {}\n\
+         }",
+    );
+    let messages: Vec<String> = result.diagnostics.iter().map(|d| format!("{d}")).collect();
+    assert_eq!(
+        messages,
+        ["Failed to resolve @HostListener.args at position 1 to a string Value could not be \
+             determined statically."]
+    );
+    assert!(!result.code.contains("ctx.onClick($event.a,$event.c)"), "{}", result.code);
+    assert!(result.code.contains("ctx.onClick()"), "{}", result.code);
+
+    for (member, expected) in [
+        (
+            r"@HostBinding('\uD800') b = 1;",
+            "@HostBinding's argument must be a string Value could not be determined statically.",
+        ),
+        (
+            r"@HostListener('\uD800') onX() {}",
+            "@HostListener's event name argument must be a string Value could not be \
+             determined statically.",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, HostBinding, HostListener }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n  {member}\n}}"
+        );
+        assert_eq!(expect_diagnostics(&source), [expected], "`{member}`");
+    }
+}

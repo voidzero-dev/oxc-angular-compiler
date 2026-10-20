@@ -415,3 +415,34 @@ fn synthesized_decorator_precedes_explicit_member_decorators() {
         "synthesized model() decorators should precede the explicit @HostBinding. Got:\n{model_out}"
     );
 }
+
+#[test]
+fn lone_surrogate_alias_is_rejected_like_aot() {
+    // An alias with a lone surrogate (`'\uD800'`) has no `&str` form: JIT
+    // rejects it with the AOT path's error rather than lowering a lossy alias.
+    for (field, imports) in [
+        (r"  readonly value = input(0, { alias: '\uD800' });", "input"),
+        (r"  readonly ready = output<void>({ alias: '\uDC00' });", "output"),
+        (r"  readonly m = model.required<number>({ alias: '\uDBFF' });", "model"),
+    ] {
+        let source = component(field, imports);
+        for jit in [true, false] {
+            let allocator = Allocator::default();
+            let options = ComponentTransformOptions { jit, ..Default::default() };
+            let result = transform_angular_file(
+                &allocator,
+                "test.component.ts",
+                &source,
+                Some(&options),
+                None,
+            );
+            let messages: Vec<String> = result.diagnostics.iter().map(|d| format!("{d}")).collect();
+            assert_eq!(
+                messages,
+                ["Alias needs to be a string that is statically analyzable."],
+                "jit: {jit}, `{field}`\n{}",
+                result.code
+            );
+        }
+    }
+}

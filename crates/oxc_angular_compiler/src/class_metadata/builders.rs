@@ -1386,10 +1386,13 @@ fn get_decorator_name<'a>(decorator: &Decorator<'a>) -> Option<&'a str> {
 }
 
 /// Get property key name as an Atom.
+///
+/// A string key holding a lone surrogate has no `&str` form, so it returns
+/// `None` (and [`convert_plain_properties`] skips such entries too).
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.into()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         _ => None,
     }
 }
@@ -1400,13 +1403,15 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
 /// string-literal key (`'x-y'`, `'x'`) is always quoted in the emitted object
 /// literal; a bare identifier is not. A no-substitution template literal
 /// counts too; private (`#x`), computed and numeric keys have no usable name
-/// and return `None`.
+/// and return `None`, as does a string key holding a lone surrogate (it has
+/// no `&str` form, so the member is left out).
 fn member_key_name<'a>(key: &PropertyKey<'a>) -> Option<(Ident<'a>, bool)> {
+    let quoted = |value: oxc_str::JSStr<'a>| value.as_str().map(|name| (Ident::from(name), true));
     match key {
         PropertyKey::StaticIdentifier(id) => Some((id.name.into(), false)),
-        PropertyKey::StringLiteral(lit) => Some((lit.value.into(), true)),
+        PropertyKey::StringLiteral(lit) => quoted(lit.value),
         PropertyKey::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(|v| (v.into(), true)))
+            tpl.quasis.first().and_then(|q| q.value.cooked.and_then(quoted))
         }
         _ => None,
     }

@@ -12,6 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
+use oxc_ast::StaticPropertyName;
 use oxc_ast::ast::{
     Argument, ArrayExpression, ArrayExpressionElement, ArrowFunctionBody, ArrowFunctionExpression,
     BinaryExpression, BindingPattern, BlockStatement, CallExpression, CatchClause, ChainElement,
@@ -32,6 +33,7 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
+use oxc_str::JSStr;
 use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use oxc_syntax::scope::ScopeFlags;
 
@@ -199,7 +201,7 @@ impl<'a> AliasTarget<'a> {
         }
         Some(match reference {
             TSModuleReference::ExternalModuleReference(m) => {
-                AliasTarget::Module(m.expression.value.as_str())
+                AliasTarget::Module(m.expression.value.as_str()?)
             }
             TSModuleReference::IdentifierReference(id) => {
                 AliasTarget::Entity(std::vec![id.name.as_str()])
@@ -314,14 +316,17 @@ impl<'a> FileScope<'a> {
         for stmt in &program.body {
             match stmt {
                 Statement::ImportDeclaration(import) => {
-                    let module = import.source.value.as_str();
+                    let Some(module) = import.source.value.as_str() else { continue };
                     for spec in import.specifiers.iter().flatten() {
                         let (local, imported) = match spec {
                             ImportDeclarationSpecifier::ImportSpecifier(s) => {
                                 let imported = match &s.imported {
                                     ModuleExportName::IdentifierName(n) => n.name.as_str(),
                                     ModuleExportName::IdentifierReference(n) => n.name.as_str(),
-                                    ModuleExportName::StringLiteral(n) => n.value.as_str(),
+                                    ModuleExportName::StringLiteral(n) => match n.value.as_str() {
+                                        Some(name) => name,
+                                        None => continue,
+                                    },
                                 };
                                 (s.local.name.as_str(), Some(imported))
                             }
@@ -1637,11 +1642,45 @@ pub(crate) struct Evaluator<'s, 'a> {
     /// reference dynamic (ngtsc overflows its stack on those).
     variables: RefCell<HashMap<Slot<'a>, Option<(Value<'a>, u32)>>>,
     fuel: Cell<u32>,
+    /// Set once a string with a lone surrogate (`'\uD800'`) is read: it has
+    /// no `&str` form and evaluates as dynamic.
+    lone_surrogate: Cell<bool>,
 }
 
 impl<'s, 'a> Evaluator<'s, 'a> {
     pub(crate) fn new(consts: &'s super::StringConsts<'a>) -> Self {
-        Self { consts, variables: RefCell::default(), fuel: Cell::new(FUEL) }
+        Self {
+            consts,
+            variables: RefCell::default(),
+            fuel: Cell::new(FUEL),
+            lone_surrogate: Cell::new(false),
+        }
+    }
+
+    /// Whether evaluating `expr` reads a string with a lone surrogate
+    /// (`'\uD800'`), directly or through a `const`. Such a string evaluates
+    /// as dynamic; a reader that takes a dynamic value as absent (an input's
+    /// `alias`) reports it instead, so a string the source gives is never
+    /// silently replaced.
+    pub(crate) fn reads_lone_surrogate(
+        consts: &'s super::StringConsts<'a>,
+        expr: &'a Expression<'a>,
+    ) -> bool {
+        // A fresh evaluator, whose cache can't hold the `const` already.
+        let evaluator = Evaluator::new(consts);
+        evaluator.evaluate(expr);
+        evaluator.lone_surrogate.get()
+    }
+
+    /// A string value, or dynamic for one with a lone surrogate.
+    fn string(&self, value: JSStr<'_>) -> Value<'a> {
+        match value.as_str() {
+            Some(value) => Value::String(value.to_string()),
+            None => {
+                self.lone_surrogate.set(true);
+                Value::Dynamic
+            }
+        }
     }
 
     pub(crate) fn evaluate(&self, expr: &'a Expression<'a>) -> Value<'a> {
@@ -1786,7 +1825,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             Expression::NullLiteral(_) => Value::Null,
             Expression::BooleanLiteral(b) => Value::Bool(b.value),
             Expression::NumericLiteral(n) => Value::Number(n.value),
-            Expression::StringLiteral(s) => Value::String(s.value.to_string()),
+            Expression::StringLiteral(s) => self.string(s.value),
             Expression::TemplateLiteral(tpl) => self.template(tpl, depth, frame),
             Expression::Identifier(id) => self.identifier(id.name.as_str(), depth, frame),
             Expression::ParenthesizedExpression(e) => self.eval(&e.expression, depth, frame),
@@ -1821,7 +1860,11 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     fn template(&self, tpl: &'a TemplateLiteral<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
         let mut out = String::new();
         for (i, quasi) in tpl.quasis.iter().enumerate() {
-            let Some(cooked) = &quasi.value.cooked else { return Value::Dynamic };
+            let Some(cooked) = quasi.value.cooked else { return Value::Dynamic };
+            let Some(cooked) = cooked.as_str() else {
+                self.lone_surrogate.set(true);
+                return Value::Dynamic;
+            };
             out.push_str(cooked);
             if let Some(e) = tpl.expressions.get(i) {
                 match literal(self.eval(e, depth, frame)) {
@@ -2091,7 +2134,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
         match key {
             PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-            PropertyKey::StringLiteral(s) => Some(s.value.to_string()),
+            PropertyKey::StringLiteral(s) => s.value.as_str().map(str::to_string),
             PropertyKey::NumericLiteral(n) => Some(format_number_like_js(n.value)),
             _ => None,
         }
@@ -2347,11 +2390,9 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     ) -> Value<'a> {
         let name_of = |member: &'a TSEnumMemberName<'a>| match member {
             TSEnumMemberName::Identifier(id) => Some(id.name.as_str()),
-            TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
-                Some(s.value.as_str())
-            }
+            TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => s.value.as_str(),
             TSEnumMemberName::ComputedTemplateString(t) => {
-                t.quasis.first().and_then(|q| q.value.cooked.as_ref()).map(oxc_str::Str::as_str)
+                t.quasis.first().and_then(|q| q.value.cooked?.as_str())
             }
         };
         // Inside the initializers, a member's name refers to the member.
@@ -2396,12 +2437,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             TSType::TSLiteralType(lit) => match &lit.literal {
                 TSLiteral::BooleanLiteral(b) => Value::Bool(b.value),
                 TSLiteral::NumericLiteral(n) => Value::Number(n.value),
-                TSLiteral::StringLiteral(s) => Value::String(s.value.to_string()),
+                TSLiteral::StringLiteral(s) => self.string(s.value),
                 TSLiteral::TemplateLiteral(t) if t.expressions.is_empty() => t
                     .quasis
                     .first()
-                    .and_then(|q| q.value.cooked.as_ref())
-                    .map_or(Value::Dynamic, |c| Value::String(c.to_string())),
+                    .and_then(|q| q.value.cooked)
+                    .map_or(Value::Dynamic, |c| self.string(c)),
                 TSLiteral::UnaryExpression(u) => {
                     match self.eval(&u.argument, depth, &Frame::at(block)) {
                         Value::Dynamic => Value::Dynamic,
@@ -2784,7 +2825,7 @@ pub(crate) fn transform_error<'a>(
                     && el
                         .property_key()
                         .and_then(PropertyKey::static_name)
-                        .is_some_and(|n| n == conflicting)
+                        .is_some_and(|n| n == conflicting.as_str())
             })
             .then(|| {
                 (
@@ -3610,7 +3651,9 @@ pub fn input_transform_types<'a>(
             ClassElement::MethodDefinition(m) => (&m.key, &m.decorators),
             _ => continue,
         };
-        let Some(name) = key.static_name() else { continue };
+        let Some(name) = key.static_name().and_then(StaticPropertyName::into_cow_str) else {
+            continue;
+        };
         if let Some(options) =
             super::property_decorators::input_decorator_options(decorators, consts)
             && let Some(transform) = evaluator.evaluate(options).prop("transform")

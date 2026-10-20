@@ -296,7 +296,7 @@ pub(crate) fn member_name(element: &ClassElement<'_>) -> Option<String> {
     }
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.to_string()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(str::to_string),
         PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
         _ => None,
     }
@@ -391,13 +391,43 @@ pub(crate) fn literal_alias_error<'a>(
     Ok(None)
 }
 
+/// The predicate for a string selector with a lone surrogate (`'\uD800'`),
+/// which has no `&str`: the selector list the emitter builds from a string
+/// (split on commas, each part trimmed), each part with its exact UTF-16
+/// escapes.
+fn lone_surrogate_selectors<'a>(
+    allocator: &'a Allocator,
+    lit: &oxc_ast::ast::StringLiteral<'_>,
+) -> QueryPredicate<'a> {
+    use crate::output::ast::{LiteralArrayExpr, RawSourceExpr};
+
+    let units: std::vec::Vec<u16> = lit.value.encode_utf16().collect();
+    let is_space = |unit: &u16| char::from_u32(u32::from(*unit)).is_some_and(char::is_whitespace);
+    let mut entries = Vec::new_in(&allocator);
+    for part in units.split(|&unit| unit == u16::from(b',')) {
+        let start = part.iter().position(|unit| !is_space(unit)).unwrap_or(part.len());
+        let end = part.iter().rposition(|unit| !is_space(unit)).map_or(start, |i| i + 1);
+        if start < end {
+            let source = allocator.alloc_str(&super::quote_units(part[start..end].iter().copied()));
+            entries.push(OutputExpression::RawSource(oxc_allocator::Box::new_in(
+                RawSourceExpr { source: Ident::from(&*source), source_span: None },
+                &allocator,
+            )));
+        }
+    }
+    QueryPredicate::Type(OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+        LiteralArrayExpr { entries, source_span: None },
+        &allocator,
+    )))
+}
+
 /// Get the property key name as an Atom.
 ///
 /// Handles both identifier keys and string literal keys.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         _ => None,
     }
 }
@@ -407,9 +437,9 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
 /// Handles string literals and simple template literals (no expressions).
 fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
+        Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
+            tpl.quasis.first().and_then(|q| q.value.cooked?.as_str()).map(Ident::from)
         }
         _ => None,
     }
@@ -557,7 +587,7 @@ fn parse_literal_input_config<'a>(
     match first_arg {
         // @Input('alias')
         Argument::StringLiteral(lit) => {
-            InputConfig { alias: Some(lit.value.clone().into()), ..Default::default() }
+            InputConfig { alias: lit.value.as_str().map(Ident::from), ..Default::default() }
         }
 
         // @Input({ alias: 'name', required: true, transform: fn })
@@ -936,7 +966,7 @@ fn parse_output_config<'a>(
             _ => None,
         },
         None => match argument {
-            Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
+            Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
             _ => None,
         },
     };
@@ -1163,11 +1193,18 @@ fn parse_query_config<'a>(
     config.is_forward_ref = unwrapped.is_some();
     let node = unwrapped.unwrap_or(first_arg);
     config.predicate = match node {
-        Expression::StringLiteral(lit) => {
-            let mut list = Vec::new_in(&allocator);
-            list.push(lit.value.clone().into());
-            Some(QueryPredicate::Selectors(list))
-        }
+        Expression::StringLiteral(lit) => match lit.value.as_str() {
+            Some(selector) => {
+                let mut list = Vec::new_in(&allocator);
+                list.push(Ident::from(selector));
+                Some(QueryPredicate::Selectors(list))
+            }
+            None => {
+                // Like a selector, a string isn't wrapped in `forwardRef`.
+                config.is_forward_ref = false;
+                Some(lone_surrogate_selectors(allocator, lit))
+            }
+        },
         _ => convert_oxc_expression(allocator, node, source_text)
             .or_else(|| make_raw_source(allocator, source_text, node.span()))
             .map(QueryPredicate::Type),
@@ -1281,11 +1318,14 @@ fn try_parse_signal_query<'a>(
     let mut is_forward_ref = false;
     let predicate = match predicate_arg {
         // String selector: viewChild('myRef')
-        Argument::StringLiteral(lit) => {
-            let mut selectors = oxc_allocator::Vec::new_in(&allocator);
-            selectors.push(lit.value.clone().into());
-            QueryPredicate::Selectors(selectors)
-        }
+        Argument::StringLiteral(lit) => match lit.value.as_str() {
+            Some(selector) => {
+                let mut selectors = oxc_allocator::Vec::new_in(&allocator);
+                selectors.push(Ident::from(selector));
+                QueryPredicate::Selectors(selectors)
+            }
+            None => lone_surrogate_selectors(allocator, lit),
+        },
         // Type predicate: viewChild(TemplateRef) or viewChild(forwardRef(() => MyClass))
         _ => {
             // ngtsc emits a non-string locator as written (`WrappedNodeExpr`);
@@ -1819,7 +1859,7 @@ fn extract_host_binding_name<'a>(decorator: &'a Decorator<'a>) -> Option<Ident<'
     let first_arg = call.arguments.first()?;
 
     match first_arg {
-        Argument::StringLiteral(lit) => Some(lit.value.clone().into()),
+        Argument::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         _ => {
             let expr = first_arg.to_expression();
             extract_string_value(expr)
@@ -1902,6 +1942,83 @@ pub(crate) fn extract_host_listeners_in<'a>(
     listeners
 }
 
+/// ngtsc's error for a `@HostBinding` / `@HostListener` argument that is a
+/// string with a lone surrogate (`'\uD800'`). It has no `&str`, so oxc can't
+/// read it; rather than fall back (to the member name, no listener, no
+/// arguments) it reports what ngtsc reports for an argument it can't read.
+/// Upstream's other argument checks aren't ported. Like `extractHostBindings`,
+/// the `@HostBinding`s come before the `@HostListener`s.
+pub(crate) fn lone_surrogate_host_error<'a>(
+    class: &'a Class<'a>,
+    consts: &super::StringConsts<'a>,
+) -> Option<(String, Span)> {
+    // The members `extract_host_bindings_in` / `extract_host_listeners_in`
+    // compile, with their decorator's call.
+    let members = |name: &'static str| {
+        class.body.body.iter().filter_map(move |element| {
+            let (decorators, key, is_static) = match element {
+                ClassElement::PropertyDefinition(prop) => {
+                    (&prop.decorators, &prop.key, prop.r#static)
+                }
+                ClassElement::MethodDefinition(method) => {
+                    (&method.decorators, &method.key, method.r#static)
+                }
+                ClassElement::AccessorProperty(prop) => {
+                    (&prop.decorators, &prop.key, prop.r#static)
+                }
+                _ => return None,
+            };
+            if is_static || get_property_key_name(key).is_none() {
+                return None;
+            }
+            let decorator = find_decorator_by_name(decorators, name, Some(consts))?;
+            let Expression::CallExpression(call) = &decorator.expression else { return None };
+            Some((decorator, call))
+        })
+    };
+    let suffix = Value::Dynamic.wrong_type_suffix();
+    let is_lone = |arg: &Argument<'_>| arg.as_expression().is_some_and(is_lone_surrogate_literal);
+    for (decorator, call) in members("HostBinding") {
+        if call.arguments.first().is_some_and(is_lone) {
+            return Some((
+                format!("@HostBinding's argument must be a string{suffix}"),
+                decorator.span,
+            ));
+        }
+    }
+    for (_, call) in members("HostListener") {
+        let Some(event_name) = call.arguments.first() else { continue };
+        if is_lone(event_name) {
+            let message = format!("@HostListener's event name argument must be a string{suffix}");
+            return Some((message, event_name.span()));
+        }
+        if let Some(Argument::ArrayExpression(args)) = call.arguments.get(1)
+            && let Some(position) = args
+                .elements
+                .iter()
+                .position(|elem| elem.as_expression().is_some_and(is_lone_surrogate_literal))
+        {
+            let message = format!(
+                "Failed to resolve @HostListener.args at position {position} to a string{suffix}"
+            );
+            return Some((message, args.span));
+        }
+    }
+    None
+}
+
+/// A string literal, or a template literal without substitutions, holding a
+/// lone surrogate (`'\uD800'`).
+fn is_lone_surrogate_literal(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::StringLiteral(lit) => lit.value.has_lone_surrogate(),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().and_then(|q| q.value.cooked).is_some_and(|c| c.has_lone_surrogate())
+        }
+        _ => false,
+    }
+}
+
 /// Parse the configuration from a @HostListener decorator.
 ///
 /// Returns the event name and list of argument expressions.
@@ -1917,20 +2034,30 @@ fn parse_host_listener_config<'a>(
 
     // First argument: event name
     let event_name = call.arguments.first().and_then(|arg| match arg {
-        Argument::StringLiteral(lit) => Some(lit.value.clone().into()),
+        Argument::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         _ => {
             let expr = arg.to_expression();
             extract_string_value(expr)
         }
     });
 
-    // Second argument: array of argument strings
+    // Second argument: array of argument strings. One with a lone surrogate
+    // (`'\uD800'`) can't be read; leaving out only that one would shift the
+    // later ones, so the whole list is left out, as for a second argument
+    // that isn't an array literal ([`lone_surrogate_host_error`] reports it).
     if let Some(second_arg) = call.arguments.get(1) {
-        if let Argument::ArrayExpression(arr) = second_arg {
+        if let Argument::ArrayExpression(arr) = second_arg
+            && !arr
+                .elements
+                .iter()
+                .any(|elem| elem.as_expression().is_some_and(is_lone_surrogate_literal))
+        {
             for elem in &arr.elements {
                 match elem {
                     ArrayExpressionElement::StringLiteral(lit) => {
-                        args.push(lit.value.clone().into());
+                        if let Some(arg) = lit.value.as_str() {
+                            args.push(arg.into());
+                        }
                     }
                     ArrayExpressionElement::Elision(_) => {}
                     _ => {
@@ -2009,7 +2136,10 @@ fn reflect_object_literal<'a>(
         }
         let name = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => s.value.to_string(),
+            PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                Some(name) => name.to_string(),
+                None => continue,
+            },
             PropertyKey::NumericLiteral(n) => n.value.to_string(),
             _ => continue,
         };
@@ -2322,7 +2452,7 @@ fn decorator_query<'a>(
         return Err((format!("@{name} must have arguments"), span));
     };
     let unwrapped = try_unwrap_forward_ref(first, Some(consts));
-    let is_forward_ref = unwrapped.is_some();
+    let mut is_forward_ref = unwrapped.is_some();
     let node = unwrapped.unwrap_or(first);
     let at_node = |message: String| (message, node.span());
     let predicate = match evaluator.evaluate(node) {
@@ -2330,12 +2460,21 @@ fn decorator_query<'a>(
         // evaluated is wrapped in a `WrappedNodeExpr` and emitted as written,
         // so the source text is the fallback for nodes the output AST can't
         // represent (`class Foo {}`, an import, ...).
-        Value::Reference { .. } | Value::Dynamic | Value::Function(_) => {
-            let expr = convert_oxc_expression(allocator, node, source_text)
-                .or_else(|| make_raw_source(allocator, source_text, node.span()))
-                .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
-            QueryPredicate::Type(expr)
-        }
+        Value::Reference { .. } | Value::Dynamic | Value::Function(_) => match node {
+            // A string with a lone surrogate (`'\uD800'`) has no `&str`, so
+            // the evaluator can't read it, but it is still a selector. Like
+            // one, it isn't wrapped in `forwardRef`.
+            Expression::StringLiteral(lit) if lit.value.has_lone_surrogate() => {
+                is_forward_ref = false;
+                lone_surrogate_selectors(allocator, lit)
+            }
+            _ => {
+                let expr = convert_oxc_expression(allocator, node, source_text)
+                    .or_else(|| make_raw_source(allocator, source_text, node.span()))
+                    .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
+                QueryPredicate::Type(expr)
+            }
+        },
         Value::String(s) => {
             let mut selectors = Vec::new_in(&allocator);
             selectors.push(Ident::from(allocator.alloc_str(&s)));

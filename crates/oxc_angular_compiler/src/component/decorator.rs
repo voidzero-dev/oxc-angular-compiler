@@ -86,6 +86,12 @@ pub fn extract_component_metadata<'a>(
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
             && is_metadata_property(prop)
         {
+            // A string key with a lone surrogate (`'\uD800'`) has no `&str`
+            // form and names no option, so it is ignored like any unknown key.
+            if matches!(&prop.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
+            {
+                continue;
+            }
             let key_name = get_property_key_name(&prop.key, consts)?;
 
             match key_name.as_str() {
@@ -410,7 +416,7 @@ fn get_property_key_name<'a>(
 ) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         // Computed identifier reference: `[FOO]: bar` — resolve against same-file consts.
         PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
@@ -782,7 +788,7 @@ fn parse_mapping_element<'a>(
     match element {
         // Simple string: "color" - same public and internal name
         ArrayExpressionElement::StringLiteral(lit) => {
-            let value = lit.value.as_str();
+            let value = lit.value.as_str()?;
 
             // Check for mapping format: "internalName: publicName"
             if let Some(colon_pos) = value.find(':') {
@@ -794,7 +800,7 @@ fn parse_mapping_element<'a>(
                 ))
             } else {
                 // Same name for both
-                Some((lit.value.clone().into(), lit.value.clone().into()))
+                Some((Ident::from(value), Ident::from(value)))
             }
         }
 
@@ -804,13 +810,13 @@ fn parse_mapping_element<'a>(
             if elements.len() >= 2 {
                 let internal = match elements.first() {
                     Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        Some(lit.value.clone().into())
+                        lit.value.as_str().map(Ident::from)
                     }
                     _ => None,
                 };
                 let public = match elements.get(1) {
                     Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        Some(lit.value.clone().into())
+                        lit.value.as_str().map(Ident::from)
                     }
                     _ => None,
                 };
@@ -968,8 +974,10 @@ fn extract_param_dependency<'a>(
                 "Attribute" => {
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
-                        if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone().into());
+                        if let Some(Argument::StringLiteral(s)) = call.arguments.first()
+                            && let Some(name) = s.value.as_str()
+                        {
+                            attribute_name = Some(name.into());
                         }
                     }
                 }

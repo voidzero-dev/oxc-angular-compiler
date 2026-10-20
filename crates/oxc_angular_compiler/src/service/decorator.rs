@@ -151,7 +151,7 @@ fn is_service_decorator(decorator: &Decorator<'_>) -> bool {
 fn get_property_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(s) => Some(s.value.clone().into()),
+        PropertyKey::StringLiteral(s) => s.value.as_str().map(Ident::from),
         _ => None,
     }
 }

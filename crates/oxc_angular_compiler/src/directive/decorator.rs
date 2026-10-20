@@ -388,8 +388,10 @@ fn extract_param_dependency<'a>(
                 "Attribute" => {
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
-                        if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone().into());
+                        if let Some(Argument::StringLiteral(s)) = call.arguments.first()
+                            && let Some(name) = s.value.as_str()
+                        {
+                            attribute_name = Some(name.into());
                         }
                     }
                 }
@@ -643,9 +645,9 @@ pub fn collect_string_consts<'a>(
 /// Returns `None` for anything that isn't a plain string at compile time.
 fn literal_string_from_expression<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
+        Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
+            tpl.quasis.first().and_then(|q| q.value.cooked?.as_str()).map(Ident::from)
         }
         _ => None,
     }
@@ -661,14 +663,14 @@ pub(crate) fn resolve_template_literal<'a>(
     consts: &StringConsts<'a>,
 ) -> Option<Ident<'a>> {
     if tpl.expressions.is_empty() {
-        return tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into));
+        return tpl.quasis.first().and_then(|q| q.value.cooked?.as_str()).map(Ident::from);
     }
     let mut buf = String::new();
     // A TemplateLiteral has `quasis.len() == expressions.len() + 1`: the
     // interleaving is quasi[0], expr[0], quasi[1], expr[1], …, quasi[n].
     for (i, quasi) in tpl.quasis.iter().enumerate() {
-        let cooked = quasi.value.cooked.as_ref()?;
-        buf.push_str(cooked.as_str());
+        let cooked = quasi.value.cooked?.as_str()?;
+        buf.push_str(cooked);
         if let Some(expr) = tpl.expressions.get(i) {
             let resolved = extract_string_value(allocator, expr, consts)?;
             buf.push_str(resolved.as_str());
@@ -687,7 +689,7 @@ fn get_property_key_name<'a>(
 ) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         // Computed identifier reference: `[FOO]: bar` — resolve against same-file consts.
         PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
@@ -772,6 +774,14 @@ pub(super) fn value_error(
 /// [`value_error`] for `value` in `@Directive.{field}`.
 fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) -> String {
     value_error(&format!("@Directive.{field}"), message, value)
+}
+
+/// Whether an object property's value is dynamic because it reads a string
+/// with a lone surrogate (`'\uD800'`), as opposed to being absent or truly
+/// dynamic.
+fn reads_lone_surrogate<'a>(prop: &super::evaluator::Prop<'a>, consts: &StringConsts<'a>) -> bool {
+    prop.value.is_dynamic()
+        && prop.expr.is_some_and(|expr| Evaluator::reads_lone_surrogate(consts, expr))
 }
 
 /// oxc's error for a transform written inside a function that the metadata
@@ -996,6 +1006,13 @@ fn parse_input_object<'a>(
         if let Some(value) = item.prop(key).map(|p| &p.value).filter(|v| v.is_import()) {
             return Some((io_error("inputs", String::new, value), span));
         }
+    }
+    // Nor an alias with a lone surrogate (`'\uD800'`), which evaluates as
+    // dynamic: an unreadable string item gets this error too.
+    if item.prop("alias").is_some_and(|alias| reads_lone_surrogate(alias, consts)) {
+        let message =
+            || "@Directive.inputs array can only contain strings or object literals".into();
+        return Some((io_error("inputs", message, &Value::Dynamic), span));
     }
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
@@ -1465,8 +1482,11 @@ pub fn decorator_io_errors<'a>(
     // @HostListener argument checks in the same step (arity, "argument must
     // be a string") aren't ported — `extract_host_binding_name` falls back
     // to the member name and `parse_host_listener_config` drops a non-string
-    // argument instead of reporting it.
+    // argument instead of reporting it — except for a string with a lone
+    // surrogate, which oxc can't read.
     let host = || host_metadata_error(allocator, config, decorator_name, consts).map(at);
+    let host_members =
+        || super::property_decorators::lone_surrogate_host_error(class, consts).map(at);
 
     io.as_ref()
         .and_then(|io| io.input_error.clone())
@@ -1478,6 +1498,7 @@ pub fn decorator_io_errors<'a>(
         .or_else(queries)
         .or_else(selector)
         .or_else(host)
+        .or_else(host_members)
         .map(|(message, span, related)| {
             let diagnostic = OxcDiagnostic::error(message).with_label(span);
             match related {
@@ -1700,6 +1721,16 @@ fn input_decorator_error<'a>(
         let message = format!(
             "{subject} decorator argument must resolve to a string or an object literal{}",
             options.wrong_type_suffix()
+        );
+        return Some((message, decorator.span));
+    }
+    // An `alias` with a lone surrogate (`'\uD800'`) evaluates as dynamic,
+    // which would read as no alias: report it like `@Input('\uD800')` rather
+    // than compile the class property name.
+    if options.prop("alias").is_some_and(|alias| reads_lone_surrogate(alias, consts)) {
+        let message = format!(
+            "{subject} decorator argument must resolve to a string or an object literal{}",
+            Value::Dynamic.wrong_type_suffix()
         );
         return Some((message, decorator.span));
     }
@@ -2279,7 +2310,7 @@ fn parse_mapping_element<'a>(
     match element {
         // Simple string: "color" - same public and internal name
         ArrayExpressionElement::StringLiteral(lit) => {
-            let value = lit.value.as_str();
+            let value = lit.value.as_str()?;
 
             // Check for mapping format: "internalName: publicName"
             if let Some(colon_pos) = value.find(':') {
@@ -2291,7 +2322,7 @@ fn parse_mapping_element<'a>(
                 ))
             } else {
                 // Same name for both
-                Some((lit.value.clone().into(), lit.value.clone().into()))
+                Some((Ident::from(value), Ident::from(value)))
             }
         }
 
@@ -2301,13 +2332,13 @@ fn parse_mapping_element<'a>(
             if elements.len() >= 2 {
                 let internal = match elements.first() {
                     Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        Some(lit.value.clone().into())
+                        lit.value.as_str().map(Ident::from)
                     }
                     _ => None,
                 };
                 let public = match elements.get(1) {
                     Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        Some(lit.value.clone().into())
+                        lit.value.as_str().map(Ident::from)
                     }
                     _ => None,
                 };

@@ -2089,28 +2089,12 @@ pub(crate) fn quote(s: &str) -> String {
 }
 
 /// [`quote`] for a string literal from the source, whose value can hold lone
-/// surrogates (`'\uD800'`): the parser encodes each as `\u{FFFD}` and its
-/// code unit in hex (and a `\u{FFFD}` as `\u{FFFD}fffd`).
-fn quote_literal(literal: &StringLiteral<'_>) -> String {
-    if !literal.lone_surrogates {
-        return quote(&literal.value);
-    }
-    let mut units = Vec::new();
-    let mut chars = literal.value.chars();
-    while let Some(c) = chars.next() {
-        if c == '\u{FFFD}' {
-            let hex: String = chars.by_ref().take(4).collect();
-            if let Ok(unit) = u16::from_str_radix(&hex, 16) {
-                units.push(unit);
-                continue;
-            }
-        }
-        units.extend(c.encode_utf16(&mut [0; 2]).iter());
-    }
-    quote_units(units)
+/// surrogates (`'\uD800'`).
+pub(crate) fn quote_literal(literal: &StringLiteral<'_>) -> String {
+    quote_units(literal.value.encode_utf16())
 }
 
-fn quote_units(units: impl IntoIterator<Item = u16>) -> String {
+pub(crate) fn quote_units(units: impl IntoIterator<Item = u16>) -> String {
     let units: Vec<u16> = units.into_iter().collect();
     let mut out = String::with_capacity(units.len() + 2);
     out.push('"');

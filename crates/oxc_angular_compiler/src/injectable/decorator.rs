@@ -332,7 +332,7 @@ fn is_injectable_decorator(decorator: &Decorator<'_>) -> bool {
 fn get_property_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(s) => Some(s.value.clone().into()),
+        PropertyKey::StringLiteral(s) => s.value.as_str().map(Ident::from),
         _ => None,
     }
 }
@@ -363,9 +363,9 @@ fn parse_provided_in_value<'a>(
 ) -> Option<ProvidedInValue<'a>> {
     match expr {
         Expression::StringLiteral(s) => match s.value.as_str() {
-            "root" => Some(ProvidedInValue::Root),
-            "platform" => Some(ProvidedInValue::Platform),
-            "any" => Some(ProvidedInValue::Any),
+            Some("root") => Some(ProvidedInValue::Root),
+            Some("platform") => Some(ProvidedInValue::Platform),
+            Some("any") => Some(ProvidedInValue::Any),
             _ => None,
         },
         Expression::NullLiteral(_) => Some(ProvidedInValue::None),
@@ -625,8 +625,10 @@ fn extract_param_dependency<'a>(
                 "Attribute" => {
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
-                        if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone().into());
+                        if let Some(Argument::StringLiteral(s)) = call.arguments.first()
+                            && let Some(name) = s.value.as_str()
+                        {
+                            attribute_name = Some(name.into());
                         }
                     }
                 }

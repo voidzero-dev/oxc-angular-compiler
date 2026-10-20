@@ -43,7 +43,7 @@ use std::path::Path;
 
 use oxc_ast::ast::{
     BindingIdentifier, ClassElement, Expression, ImportDeclarationSpecifier, MethodDefinitionKind,
-    Program, Statement, TSType,
+    Program, Statement, StringLiteral, TSType,
 };
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
 use oxc_str::Ident;
@@ -103,6 +103,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
             // Skip type-only imports entirely (import type { X })
             // These are already handled by TypeScript stripping
             if import_decl.import_kind.is_type() {
+                continue;
+            }
+
+            // A source with a lone surrogate (`'\uD800'`) can't be named in a
+            // generated import (`build_import_map` leaves it out), so generated
+            // code references its bindings as written: keep them all.
+            if import_decl.source.value.has_lone_surrogate() {
                 continue;
             }
 
@@ -906,7 +913,10 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 continue;
             }
 
-            let source = import_decl.source.value.as_str();
+            // A source with a lone surrogate (`'\uD800'`) can't be resolved.
+            let Some(source) = import_decl.source.value.as_str() else {
+                continue;
+            };
             let Some(specifiers) = &import_decl.specifiers else {
                 continue;
             };
@@ -1049,7 +1059,6 @@ pub fn import_elision_edits<'a>(
             }
 
             // Build the new import statement
-            let source_str = import_decl.source.value.as_str();
             let mut new_import = String::from("import ");
 
             if let Some(default_name) = default_import {
@@ -1069,9 +1078,9 @@ pub fn import_elision_edits<'a>(
                 }
             }
 
-            new_import.push_str(" from \"");
-            new_import.push_str(source_str);
-            new_import.push_str("\";");
+            new_import.push_str(" from ");
+            push_module_specifier(&mut new_import, &import_decl.source, source);
+            new_import.push(';');
 
             // Replace the entire import declaration
             let start = import_decl.span.start as usize;
@@ -1100,14 +1109,14 @@ pub fn import_elision_edits<'a>(
                 export_decl.span.end,
                 export_decl.export_kind.is_type(),
                 &export_decl.specifiers,
-                None::<&str>,
+                None,
             ),
             Statement::ExportFromDeclaration(export_decl) => (
                 export_decl.span.start,
                 export_decl.span.end,
                 export_decl.export_kind.is_type(),
                 &export_decl.specifiers,
-                Some(export_decl.source.value.as_str()),
+                Some(&export_decl.source),
             ),
             _ => continue,
         };
@@ -1160,9 +1169,8 @@ pub fn import_elision_edits<'a>(
             new_export.push_str(" }");
 
             if let Some(source_mod) = source_module {
-                new_export.push_str(" from \"");
-                new_export.push_str(source_mod);
-                new_export.push('"');
+                new_export.push_str(" from ");
+                push_module_specifier(&mut new_export, source_mod, source);
             }
             new_export.push(';');
 
@@ -1175,6 +1183,20 @@ pub fn import_elision_edits<'a>(
     }
 
     edits
+}
+
+/// Write a rebuilt declaration's module specifier: its value in double quotes,
+/// or, for a value with a lone surrogate (`'\uD800'`), which has no `&str`,
+/// the literal as written.
+fn push_module_specifier(out: &mut String, specifier: &StringLiteral<'_>, source: &str) {
+    match specifier.value.as_str() {
+        Some(value) => {
+            out.push('"');
+            out.push_str(value);
+            out.push('"');
+        }
+        None => out.push_str(specifier.span.source_text(source)),
+    }
 }
 
 #[cfg(test)]
@@ -2525,6 +2547,25 @@ class TestComponent {
             filtered.contains("export { helper }"),
             "Value export should not be affected.\nFiltered:\n{}",
             filtered
+        );
+    }
+
+    /// A module specifier with a lone surrogate has no `&str` form: an import
+    /// from it keeps all its bindings (generated code can't import them
+    /// again), and a rebuilt re-export keeps the specifier as written.
+    #[test]
+    fn test_lone_surrogate_module_specifier_is_kept_as_written() {
+        let source = r#"import { Used, OnlyType } from '\uD800';
+export { type T, V } from '\uDC00';
+let x: OnlyType = Used;
+"#;
+        let filtered = filter_source(source);
+        assert_eq!(
+            filtered,
+            r#"import { Used, OnlyType } from '\uD800';
+export { V } from '\uDC00';
+let x: OnlyType = Used;
+"#
         );
     }
 }

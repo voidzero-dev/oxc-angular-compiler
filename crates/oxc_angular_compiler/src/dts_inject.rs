@@ -103,8 +103,12 @@ fn namespace_imports_of(program: &Program<'_>) -> FxHashMap<String, String> {
         let Statement::ImportDeclaration(decl) = stmt else { continue };
         let Some(specifiers) = &decl.specifiers else { continue };
         for spec in specifiers {
-            if let ImportDeclarationSpecifier::ImportNamespaceSpecifier(ns) = spec {
-                aliases.insert(ns.local.name.to_string(), decl.source.value.to_string());
+            // A source with a lone surrogate (`'\uD800'`) never matches a
+            // generated one (`build_import_map` leaves it unmapped).
+            if let ImportDeclarationSpecifier::ImportNamespaceSpecifier(ns) = spec
+                && let Some(source) = decl.source.value.as_str()
+            {
+                aliases.insert(ns.local.name.to_string(), source.to_string());
             }
         }
     }
@@ -223,7 +227,7 @@ fn property_key_name(key: &PropertyKey<'_>) -> Option<String> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
         _ => match key.as_expression() {
-            Some(Expression::StringLiteral(lit)) => Some(lit.value.to_string()),
+            Some(Expression::StringLiteral(lit)) => lit.value.as_str().map(str::to_string),
             Some(Expression::NumericLiteral(lit)) => Some(lit.value.to_string()),
             _ => None,
         },

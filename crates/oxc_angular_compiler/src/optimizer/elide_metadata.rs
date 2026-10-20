@@ -184,7 +184,7 @@ impl ElideMetadataTransformer {
             // Computed member: i0["ɵsetClassMetadata"](...)
             Expression::ComputedMemberExpression(member) => {
                 if let Expression::StringLiteral(lit) = &member.expression {
-                    Some(lit.value.as_str())
+                    lit.value.as_str()
                 } else {
                     None
                 }

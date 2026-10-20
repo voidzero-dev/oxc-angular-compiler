@@ -4,6 +4,7 @@
 //! and options parsing from AST expressions.
 
 use oxc_ast::ast::{Argument, CallExpression, Expression};
+use oxc_str::JSStr;
 
 use crate::test_case::{HtmlLexerOptions, HtmlParserOptions, LexerRange, ParseOptions};
 
@@ -13,11 +14,11 @@ impl SpecExtractor {
     /// Extract a string from a string literal expression
     pub(super) fn extract_string(&self, expr: &Expression<'_>) -> Option<String> {
         match expr {
-            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            Expression::StringLiteral(lit) => lit.value.as_str().map(str::to_string),
             Expression::TemplateLiteral(lit) if lit.expressions.is_empty() => {
                 // Template literal with no expressions - use cooked value (with escapes processed)
                 if lit.quasis.len() == 1 {
-                    lit.quasis[0].value.cooked.as_ref().map(std::string::ToString::to_string)
+                    lit.quasis[0].value.cooked.and_then(JSStr::as_str).map(str::to_string)
                 } else {
                     None
                 }
@@ -44,17 +45,17 @@ impl SpecExtractor {
     /// Resolve a string value directly from an expression
     pub(super) fn resolve_string_from_expression(&self, expr: &Expression<'_>) -> Option<String> {
         match expr {
-            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            Expression::StringLiteral(lit) => lit.value.as_str().map(str::to_string),
             Expression::TemplateLiteral(lit) if lit.expressions.is_empty() => {
                 // Template literal with no expressions - use cooked value
                 if lit.quasis.len() == 1 {
-                    lit.quasis[0].value.cooked.as_ref().map(std::string::ToString::to_string)
+                    lit.quasis[0].value.cooked.and_then(JSStr::as_str).map(str::to_string)
                 } else {
                     // Multiple quasis but no expressions means we can concatenate them
                     let parts: Vec<&str> = lit
                         .quasis
                         .iter()
-                        .filter_map(|q| q.value.cooked.as_ref().map(oxc_str::Str::as_str))
+                        .filter_map(|q| q.value.cooked.and_then(JSStr::as_str))
                         .collect();
                     Some(parts.join(""))
                 }
@@ -135,7 +136,7 @@ impl SpecExtractor {
     pub(super) fn extract_json_value(&self, expr: &Expression<'_>) -> Option<serde_json::Value> {
         match expr {
             Expression::StringLiteral(lit) => {
-                Some(serde_json::Value::String(lit.value.to_string()))
+                lit.value.as_str().map(|s| serde_json::Value::String(s.to_string()))
             }
             Expression::NumericLiteral(lit) => {
                 serde_json::Number::from_f64(lit.value.into()).map(serde_json::Value::Number)
@@ -183,7 +184,7 @@ impl SpecExtractor {
                     lit.quasis[0]
                         .value
                         .cooked
-                        .as_ref()
+                        .and_then(JSStr::as_str)
                         .map(|s| serde_json::Value::String(s.to_string()))
                 } else {
                     None

@@ -41,7 +41,9 @@ pub use decorator::{
 };
 pub(crate) use decorator::{merge_by_class_property, parse_decorator_io};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
-pub(crate) use dts_type::quote as ts_string_literal;
+pub(crate) use dts_type::{
+    quote as ts_string_literal, quote_literal as quote_string_literal, quote_units,
+};
 pub use evaluator::input_transform_types;
 #[cfg(feature = "cross_file_elision")]
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};

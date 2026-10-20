@@ -337,7 +337,7 @@ fn is_ng_module_call(callee: &Expression<'_>) -> bool {
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
+        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         _ => None,
     }
 }
@@ -345,9 +345,9 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
 /// Extract a string value from an expression.
 fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
+        Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
+            tpl.quasis.first().and_then(|q| q.value.cooked?.as_str()).map(Ident::from)
         }
         _ => None,
     }
@@ -502,8 +502,10 @@ fn extract_param_dependency<'a>(
                 "Attribute" => {
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
-                        if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone().into());
+                        if let Some(Argument::StringLiteral(s)) = call.arguments.first()
+                            && let Some(name) = s.value.as_str()
+                        {
+                            attribute_name = Some(name.into());
                         }
                     }
                 }

@@ -540,7 +540,11 @@ pub fn build_import_map<'a>(
             continue;
         };
 
-        let default_source_module = import_decl.source.value.clone();
+        // A source with a lone surrogate (`'\uD800'`) can't be named in a
+        // generated import: unless `resolved_imports` names another path, its
+        // bindings stay unmapped and are referenced as written (import elision
+        // keeps them, see `ImportElisionAnalyzer::analyze`).
+        let default_source_module = import_decl.source.value.as_str().map(Ident::from);
 
         // `import type { ... }` makes all specifiers type-only
         let decl_is_type_only = import_decl.import_kind == ImportOrExportKind::Type;
@@ -566,10 +570,13 @@ pub fn build_import_map<'a>(
                         decl_is_type_only || spec.import_kind == ImportOrExportKind::Type;
 
                     // Check if we have a resolved path for this identifier
-                    let source_module = resolved_imports
+                    let Some(source_module) = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone().into());
+                        .or(default_source_module)
+                    else {
+                        continue;
+                    };
 
                     // `import { Foo as Bar }` → export name `Foo` for `i1.Foo` / @defer.
                     // Path rewrite via `resolved_imports` does not change the export
@@ -597,10 +604,13 @@ pub fn build_import_map<'a>(
                     let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
-                    let source_module = resolved_imports
+                    let Some(source_module) = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone().into());
+                        .or(default_source_module)
+                    else {
+                        continue;
+                    };
 
                     import_map.insert(
                         local_name,
@@ -622,10 +632,13 @@ pub fn build_import_map<'a>(
                     let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
-                    let source_module = resolved_imports
+                    let Some(source_module) = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone().into());
+                        .or(default_source_module)
+                    else {
+                        continue;
+                    };
 
                     import_map.insert(
                         local_name,
@@ -1143,7 +1156,7 @@ fn decorator_forces_jit(decorator: &oxc_ast::ast::Decorator<'_>) -> bool {
         }
         let is_jit = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.as_str() == "jit",
-            PropertyKey::StringLiteral(s) => s.value.as_str() == "jit",
+            PropertyKey::StringLiteral(s) => s.value == "jit",
             _ => false,
         };
         if is_jit {
@@ -1274,6 +1287,7 @@ fn extract_all_jit_member_decorators(
     class: &oxc_ast::ast::Class<'_>,
     string_consts: &crate::directive::StringConsts<'_>,
     core_namespace: &str,
+    diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> (std::vec::Vec<JitMemberDecorator>, std::vec::Vec<JitNonAngularMemberDecorator>) {
     use oxc_ast::ast::{ClassElement, MethodDefinitionKind, PropertyKey};
 
@@ -1281,12 +1295,17 @@ fn extract_all_jit_member_decorators(
     let mut non_angular_members: std::vec::Vec<JitNonAngularMemberDecorator> = std::vec::Vec::new();
 
     for element in &class.body.body {
+        // A string key with a lone surrogate (`'\uD800'`) has no `&str` form;
+        // like a computed or numeric key, it is skipped.
         let (member_name, quoted_key, is_static, is_property, decorators, initializer) =
             match element {
                 ClassElement::PropertyDefinition(prop) => {
                     let (name, quoted) = match &prop.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                            Some(name) => (name.to_string(), true),
+                            None => continue,
+                        },
                         _ => continue,
                     };
                     (name, quoted, prop.r#static, true, &prop.decorators, prop.value.as_ref())
@@ -1297,7 +1316,10 @@ fn extract_all_jit_member_decorators(
                     }
                     let (name, quoted) = match &method.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                            Some(name) => (name.to_string(), true),
+                            None => continue,
+                        },
                         _ => continue,
                     };
                     (name, quoted, method.r#static, false, &method.decorators, None)
@@ -1305,7 +1327,10 @@ fn extract_all_jit_member_decorators(
                 ClassElement::AccessorProperty(accessor) => {
                     let (name, quoted) = match &accessor.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                            Some(name) => (name.to_string(), true),
+                            None => continue,
+                        },
                         _ => continue,
                     };
                     (name, quoted, accessor.r#static, false, &accessor.decorators, None)
@@ -1376,6 +1401,7 @@ fn extract_all_jit_member_decorators(
                 &explicit_field_decorators,
                 string_consts,
                 core_namespace,
+                diagnostics,
             );
             // Upstream inserts the synthesized decorator ahead of the member's
             // existing decorators (`[newDecorator, ...member.node.modifiers]`),
@@ -1638,12 +1664,23 @@ fn synthesize_signal_api_decorators(
     existing: &rustc_hash::FxHashSet<String>,
     string_consts: &crate::directive::StringConsts<'_>,
     core_namespace: &str,
+    diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> std::vec::Vec<JitParamDecorator> {
     let unwrapped = unwrap_jit_initializer(initializer);
     let Expression::CallExpression(call) = unwrapped else { return std::vec::Vec::new() };
     let Some(kind) = classify_initializer_api(&call.callee, string_consts) else {
         return std::vec::Vec::new();
     };
+    // The `alias` option, or the field name; `None` (after reporting the
+    // error) when the alias can't be read.
+    let mut alias_or_field_name =
+        |options_index: usize| match extract_string_option(call, options_index, "alias") {
+            Ok(alias) => Some(alias.unwrap_or_else(|| field_name.to_string())),
+            Err(error) => {
+                diagnostics.push(error);
+                None
+            }
+        };
 
     match kind {
         InitializerApiKind::Input | InitializerApiKind::InputRequired => {
@@ -1653,8 +1690,9 @@ fn synthesize_signal_api_decorators(
             let required = matches!(kind, InitializerApiKind::InputRequired);
             // input(initial, options?) → options is args[1]; input.required(options?) → args[0].
             let options_index = if required { 0 } else { 1 };
-            let alias = extract_string_option(call, options_index, "alias")
-                .unwrap_or_else(|| field_name.to_string());
+            let Some(alias) = alias_or_field_name(options_index) else {
+                return std::vec::Vec::new();
+            };
             let args = format!(
                 "{{ isSignal: true, alias: \"{alias}\", required: {required}, transform: undefined }}",
                 alias = escape_js_string(&alias),
@@ -1672,8 +1710,9 @@ fn synthesize_signal_api_decorators(
             // output(options?) → args[0]; outputFromObservable(source, options?) → args[1].
             let options_index =
                 if matches!(kind, InitializerApiKind::OutputFromObservable) { 1 } else { 0 };
-            let alias = extract_string_option(call, options_index, "alias")
-                .unwrap_or_else(|| field_name.to_string());
+            let Some(alias) = alias_or_field_name(options_index) else {
+                return std::vec::Vec::new();
+            };
             let args = format!("\"{}\"", escape_js_string(&alias));
             std::vec::Vec::from([JitParamDecorator {
                 name: format!("{core_namespace}.Output"),
@@ -1688,8 +1727,9 @@ fn synthesize_signal_api_decorators(
             let required = matches!(kind, InitializerApiKind::ModelRequired);
             // Same arg layout as input.
             let options_index = if required { 0 } else { 1 };
-            let alias = extract_string_option(call, options_index, "alias")
-                .unwrap_or_else(|| field_name.to_string());
+            let Some(alias) = alias_or_field_name(options_index) else {
+                return std::vec::Vec::new();
+            };
             let input_args = format!(
                 "{{ isSignal: true, alias: \"{alias}\", required: {required}, transform: undefined }}",
                 alias = escape_js_string(&alias),
@@ -1768,29 +1808,38 @@ fn jit_classes_need_angular_core_namespace(
 }
 
 /// Pull a string option (e.g. `alias`) from the object literal at `args[options_index]`.
-/// Returns `None` if the argument isn't an object literal or the option is missing/non-string.
+/// Returns `Ok(None)` if the argument isn't an object literal or the option is missing/non-string.
+///
+/// A string with a lone surrogate (`'\uD800'`) has no `&str` form: it is an
+/// error, as the AOT path's `literal_alias_error` reports it.
 fn extract_string_option(
     call: &oxc_ast::ast::CallExpression<'_>,
     options_index: usize,
     option_name: &str,
-) -> Option<String> {
-    let arg = call.arguments.get(options_index)?;
-    let Argument::ObjectExpression(obj) = arg else { return None };
+) -> Result<Option<String>, OxcDiagnostic> {
+    let Some(arg) = call.arguments.get(options_index) else { return Ok(None) };
+    let Argument::ObjectExpression(obj) = arg else { return Ok(None) };
     for prop in &obj.properties {
         let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
         let key_matches = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.as_str() == option_name,
-            PropertyKey::StringLiteral(s) => s.value.as_str() == option_name,
+            PropertyKey::StringLiteral(s) => s.value == option_name,
             _ => false,
         };
         if !key_matches {
             continue;
         }
         if let Expression::StringLiteral(s) = &prop.value {
-            return Some(s.value.to_string());
+            return match s.value.as_str() {
+                Some(value) => Ok(Some(value.to_string())),
+                None => Err(OxcDiagnostic::error(
+                    "Alias needs to be a string that is statically analyzable.",
+                )
+                .with_label(s.span)),
+            };
         }
     }
-    None
+    Ok(None)
 }
 
 /// Minimal JS-string escape for values embedded in synthesized propDecorator text.
@@ -1964,7 +2013,7 @@ fn build_jit_decorator_text<'a>(
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             let key_name = match &prop.key {
                 PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-                PropertyKey::StringLiteral(s) => Some(s.value.as_str()),
+                PropertyKey::StringLiteral(s) => s.value.as_str(),
                 _ => None,
             };
 
@@ -2493,6 +2542,7 @@ fn collect_jit_class_info<'a>(
     resource_imports: &mut std::vec::Vec<(String, String)>,
     string_consts: &crate::directive::StringConsts<'a>,
     core_namespace: &str,
+    diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> JitClassInfo {
     let mut all_class_decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
     let mut all_class_decorator_texts: std::vec::Vec<String> = std::vec::Vec::new();
@@ -2527,8 +2577,13 @@ fn collect_jit_class_info<'a>(
         extract_jit_ctor_params(source, class, string_consts);
 
     // Extract Angular and non-Angular member decorators
-    let (member_decorators, non_angular_member_decorators) =
-        extract_all_jit_member_decorators(source, class, string_consts, core_namespace);
+    let (member_decorators, non_angular_member_decorators) = extract_all_jit_member_decorators(
+        source,
+        class,
+        string_consts,
+        core_namespace,
+        diagnostics,
+    );
 
     JitClassInfo {
         class_name,
@@ -2840,6 +2895,7 @@ fn transform_angular_file_jit(
             &mut resource_imports,
             &string_consts,
             core_namespace.as_str(),
+            &mut result.diagnostics,
         ));
 
         result.component_count +=
@@ -3110,7 +3166,10 @@ pub fn transform_angular_file(
                 continue;
             };
 
-            let source = import_decl.source.value.as_str();
+            // A source with a lone surrogate (`'\uD800'`) can't be resolved.
+            let Some(source) = import_decl.source.value.as_str() else {
+                continue;
+            };
             let Some(specifiers) = &import_decl.specifiers else {
                 continue;
             };
@@ -3268,6 +3327,7 @@ pub fn transform_angular_file(
                     &mut jit_resource_imports,
                     &string_consts,
                     core_namespace.as_str(),
+                    &mut result.diagnostics,
                 );
 
                 // A co-located @Injectable still compiles: upstream's

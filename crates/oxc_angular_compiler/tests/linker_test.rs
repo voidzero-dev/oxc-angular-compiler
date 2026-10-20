@@ -385,3 +385,26 @@ fn test_link_angular_version_keeps_legacy_safe_navigation() {
         assert!(!code.contains("ctx.item?.label"), "{version:?}:\n{code}");
     }
 }
+
+/// Keys and values with a lone surrogate (`'\uD800'`) have no `&str`: the
+/// linker keeps them as written instead of a lossy rendering.
+#[test]
+fn test_link_lone_surrogate_keys_kept_as_written() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+export class MyDir {}
+MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "17.0.0", type: MyDir, selector: "[myDir]", inputs: { '\uD800': "pub", ok: '\uDC00', '\uD801': ["pub", "priv"], '\uD802': { classPropertyName: '\uD802', publicName: "p", isSignal: true }, '\uD803': { isRequired: true, isSignal: true }, named: { classPropertyName: "named", publicName: '\uDC01', isSignal: false } }, host: { attributes: { '\uD800': "v", title: '\uDBFF' } } });"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(
+        result.code.contains(
+            r#"inputs: { '\uD800': "pub", ok: '\uDC00', '\uD801': [0, "pub", "priv"], '\uD802': [1, "p", '\uD802'], '\uD803': [1, '\uD803', '\uD803'], named: [0, '\uDC01', "named"] }"#
+        ),
+        "inputs not kept as written:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains(r#"hostAttrs: ['\uD800', "v", "title", '\uDBFF']"#),
+        "hostAttrs not kept as written:\n{}",
+        result.code
+    );
+}
