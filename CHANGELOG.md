@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.42 - 2026-10-20
+
+- Linked with the application's `angularVersion`, so `img`/`video` `[src]` keeps `ɵɵsanitizeUrl` on runtimes before 22.2.2.
+- Resolved template locals inside `$safeNavigationMigration` in listeners and arrow functions.
+- Tied closure lifetimes to `Semantic` in validation.
+- Updated Oxc to 0.155, keeping string values with lone surrogates exact or treating them as unreadable.
+- Updated oxlint and other npm dependencies.
+
 ## 0.0.41 - 2026-10-14
 
 - Matched Angular 22.2.2 emit: dropped `img|src`/`video|src` from URL sanitization and stripped the namespace on control-flow insertion-point tag names.
