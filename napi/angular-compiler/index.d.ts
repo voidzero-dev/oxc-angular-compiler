@@ -50,6 +50,49 @@ export declare function compileClassMetadata(
 ): Promise<ClassMetadataNapiCompileResult>
 
 /**
+ * Compile the HMR update module of one component, with the options of the
+ * full transform (async).
+ *
+ * Takes the `source`, `filename`, `options` and `resolvedResources` that
+ * `transformAngularFile` takes, and compiles the update from one parse of
+ * the source: the class's metadata is read like the transform reads it
+ * (imported values included with `resolveImportedValues`), and the template
+ * is compiled with the same options (`preserveWhitespaces`, i18n message
+ * ids, `angularVersion`, `filename` for i18n names and error locations,
+ * template stylesheet links). The module's `template`, `consts`, `decls`,
+ * `vars`, `ngContentSelectors` and `styles` are those of the transform's
+ * ɵcmp, except that constants are numbered from `_c0` and a `@defer` block
+ * of a class with `deferredImports` gets no dependency function.
+ *
+ * Resources the class needs but `resolvedResources` lacks come back in
+ * `missingTemplateUrl` / `missingStyleUrls`: read them and call again.
+ */
+export declare function compileComponentHmrUpdate(
+  source: string,
+  filename: string,
+  className: string,
+  options?: TransformOptions | undefined | null,
+  resolvedResources?: ResolvedResources | undefined | null,
+  hmrOptions?: ComponentHmrUpdateOptions | undefined | null,
+): Promise<ComponentHmrUpdateResult>
+
+/**
+ * Sync version of `compileComponentHmrUpdate`.
+ *
+ * # Errors
+ *
+ * Never: compile errors are reported in the result's `errors`.
+ */
+export declare function compileComponentHmrUpdateSync(
+  source: string,
+  filename: string,
+  className: string,
+  options?: TransformOptions | undefined | null,
+  resolvedResources?: ResolvedResources | undefined | null,
+  hmrOptions?: ComponentHmrUpdateOptions | undefined | null,
+): ComponentHmrUpdateResult
+
+/**
  * Compile a factory function from the provided metadata (async).
  *
  * This generates a factory function that creates instances of the class
@@ -72,6 +115,8 @@ export declare function compileFactory(
  * Compile for HMR (async).
  *
  * This is the async version of `compileForHmrSync`.
+ *
+ * @deprecated Use `compileComponentHmrUpdate`; see `compileForHmrSync`.
  */
 export declare function compileForHmr(
   template: string,
@@ -101,6 +146,12 @@ export declare function compileForHmr(
  * # Returns
  *
  * A tuple of (hmr_module_code, component_id) or errors.
+ *
+ * @deprecated Compiles the template alone, with only the options passed
+ * here: no file path for i18n message names or error locations, and the
+ * caller has to find the template, styles and `preserveWhitespaces` itself.
+ * Use `compileComponentHmrUpdate`, which compiles the update from the
+ * component's source with the transform's options.
  */
 export declare function compileForHmrSync(
   template: string,
@@ -163,6 +214,66 @@ export interface ComponentHmrFingerprint {
   fingerprint: string
   /** The named classes whose `@Component({...})` was read, in source order. */
   components: Array<string>
+}
+
+/** What `compileComponentHmrUpdate` needs besides the source and options. */
+export interface ComponentHmrUpdateOptions {
+  /**
+   * `TransformResult.hmrFingerprint` of the source the running component
+   * was compiled from. When this source has another fingerprint (another
+   * plugin rewrote the module, say), styles that come out empty are not
+   * trusted to clear the live ones.
+   */
+  sourceFingerprint?: string
+  /**
+   * The class names that fingerprint was taken for: the components the
+   * transform compiled in the file. Defaults to `className` alone.
+   */
+  compiledClassNames?: Array<string>
+}
+
+/** An HMR update for one component. */
+export interface ComponentHmrUpdateResult {
+  /**
+   * The update module, or an empty string when there is nothing to send:
+   * the class is not a compiled `@Component`, its template is empty, its
+   * `templateUrl` is missing from the resources (see `missingTemplateUrl`),
+   * or compiling failed (see `errors`).
+   */
+  hmrModule: string
+  /** The component ID (path@ClassName). */
+  componentId: string
+  /** The template function the module installs, as emitted in the ɵcmp. */
+  templateJs: string
+  /**
+   * The styles the module installs, as emitted in the ɵcmp, or `null` when
+   * they are not known and the module keeps the live ones.
+   */
+  styles?: Array<string>
+  /** The class's `templateUrl`, as written. */
+  templateUrl?: string
+  /** The class's `styleUrl` / `styleUrls` entries, as written. */
+  styleUrls: Array<string>
+  /** The `href` of each stylesheet `<link>` in the template, as written. */
+  templateStyleUrls: Array<string>
+  /**
+   * The `templateUrl` when it was not in the resources. Nothing was
+   * compiled; read it and call again.
+   */
+  missingTemplateUrl?: string
+  /**
+   * `styleUrls` and template `<link>` hrefs that were not in the
+   * resources. Read the ones that can be read and call again.
+   */
+  missingStyleUrls: Array<string>
+  /**
+   * The HMR fingerprint of the source for `compiledClassNames` (as
+   * `componentHmrFingerprint` computes it), or `null` when it did not
+   * parse.
+   */
+  fingerprint?: string
+  /** Parse and compile errors (and other diagnostics). */
+  errors: Array<OxcError>
 }
 
 /** Host metadata extracted from a `@Component` decorator. */

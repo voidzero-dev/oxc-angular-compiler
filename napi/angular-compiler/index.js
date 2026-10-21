@@ -907,6 +907,8 @@ if (!nativeBinding) {
 
 const {
   compileClassMetadata,
+  compileComponentHmrUpdate,
+  compileComponentHmrUpdateSync,
   compileFactory,
   compileForHmr,
   compileForHmrSync,
@@ -930,6 +932,8 @@ const {
   Severity,
 } = nativeBinding
 export { compileClassMetadata }
+export { compileComponentHmrUpdate }
+export { compileComponentHmrUpdateSync }
 export { compileFactory }
 export { compileForHmr }
 export { compileForHmrSync }
