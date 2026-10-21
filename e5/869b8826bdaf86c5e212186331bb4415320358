@@ -1,0 +1,45 @@
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_f0a3b7ba04f61b::t_c01ea4c5fa060e 17668-17670,17680-17697,17706-17713
+crates/oxc_angular_compiler/tests/jit_signal_initializer_test.rs
+  s_f0a3b7ba04f61b::t_18db2965060f35 420-442,455-458
+crates/oxc_angular_compiler/src/class_metadata/builders.rs
+  s_f0a3b7ba04f61b::t_1ddeee3e69d0c3 28,597,683,697-698,1408-1414
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_f0a3b7ba04f61b::t_558fc489e9052f 21,1298-1299,1305-1307,1318-1320,1328-1330,1669-1673,1683,1701,1716,1795-1796,1801-1803,1815,1818,1822-1823,1825-1836,2567-2568,2720
+crates/oxc_angular_compiler/src/directive/decorator.rs
+  s_f0a3b7ba04f61b::t_eb55b1896dbccf 28,1201,1214,1352,1369,1515-1522,1526
+crates/oxc_angular_compiler/src/directive/dts_type.rs
+  s_f0a3b7ba04f61b::t_5c6b7f9fd423f6 2088
+crates/oxc_angular_compiler/src/directive/evaluator.rs
+  s_f0a3b7ba04f61b::t_28bc1025b8ddaa 40,1649,1652-1653,1655,1836,2796,3622-3624,3629
+crates/oxc_angular_compiler/src/directive/mod.rs
+  s_f0a3b7ba04f61b::t_4fd50a3847e61d 44
+crates/oxc_angular_compiler/src/directive/property_decorators.rs
+  s_f0a3b7ba04f61b::t_8a0f96a590899c 28,300-302,363,387,422-434,594,653,673-676,687,708,726,762,772,857,1026,1188-1192,1306-1310,2437,2445-2450
+crates/oxc_angular_compiler/src/dts.rs
+  s_f0a3b7ba04f61b::t_171ab79477c5e5 26,641-648,833-848
+crates/oxc_angular_compiler/src/output/emitter.rs
+  s_f0a3b7ba04f61b::t_215d7a3b2b193f 26,669-679,1288-1296
+crates/oxc_angular_compiler/src/util/lone_surrogate.rs
+  s_f0a3b7ba04f61b::t_5187802ea126ae 1-128
+crates/oxc_angular_compiler/src/util/mod.rs
+  s_f0a3b7ba04f61b::t_8bc60d769c32d6 5
+crates/oxc_angular_compiler/tests/lone_surrogate_names_test.rs
+  s_f0a3b7ba04f61b::t_29da087a0e3912 1-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e5869b8826bdaf86c5e212186331bb4415320358",
+  "prompts": {},
+  "sessions": {
+    "s_f0a3b7ba04f61b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4059902c-843c-4b9a-8a80-fcbd6b0ac040",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
