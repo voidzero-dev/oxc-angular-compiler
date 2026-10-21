@@ -526,6 +526,17 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   }
 
   /**
+   * What `resolveResources` returns for a file with no external template or
+   * stylesheet.
+   */
+  function emptyResources(): { resources: ResolvedResources; dependencies: string[] } {
+    return {
+      resources: { templates: {}, styles: {} } as unknown as ResolvedResources,
+      dependencies: [],
+    }
+  }
+
+  /**
    * Main Angular plugin for file transformation.
    */
   function angularPlugin(): Plugin {
@@ -959,8 +970,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // Apply file replacements
           const actualId = pluginOptions.fileReplacements?.[id] ?? id
 
-          // Resolve external resources
-          const { resources, dependencies } = await resolveResources(code, actualId)
+          // Resolve external resources. JIT output never reads them: the Rust
+          // JIT transform turns `templateUrl`/`styleUrl(s)` into
+          // `angular:jit:*` imports that `jitPlugin` loads, and it registers
+          // no components for HMR, so nothing downstream uses the reads or
+          // the bookkeeping below.
+          //
+          // Outside JIT, `extractComponentUrls` is a second full parse of the
+          // file. A file that never spells `templateUrl` or `styleUrl` almost
+          // never has one, so it is compiled with no resources first; the
+          // retry after the transform covers the rare file that does.
+          const mayHaveResourceUrls =
+            !pluginOptions.jit && (code.includes('templateUrl') || code.includes('styleUrl'))
+          let { resources, dependencies } = mayHaveResourceUrls
+            ? await resolveResources(code, actualId)
+            : emptyResources()
 
           // Disable HMR for SSR transforms. SSR bundles must not contain HMR
           // initialization code that dynamically imports @ng/component virtual
@@ -986,7 +1010,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             tsconfigPath: pluginOptions.tsconfig,
           }
 
-          const result = await transformAngularFile(code, actualId, transformOptions, resources)
+          let result = await transformAngularFile(code, actualId, transformOptions, resources)
+
+          // The compiler reads a key the way the parser does, so a component
+          // can still name a resource without the plain text: an escaped key
+          // (`style\u0055rls`) or a computed key folded from a same-file
+          // constant. It then reports the URL as COMPONENT_RESOURCE_NOT_FOUND,
+          // since resources were passed but held none. Any error on the fast
+          // path therefore reruns the file through the full resolution, which
+          // makes the fast path give exactly the old result: with no URL in
+          // the file, `resolveResources` would have passed these same empty
+          // resources.
+          if (!pluginOptions.jit && !mayHaveResourceUrls && result.errors.length > 0) {
+            ;({ resources, dependencies } = await resolveResources(code, actualId))
+            result = await transformAngularFile(code, actualId, transformOptions, resources)
+          }
 
           // Resource deps (templates/styles) plus files the compiler read to
           // resolve imported decorator-metadata values (`result.dependencies`).
