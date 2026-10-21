@@ -28,7 +28,7 @@ use crate::ast::r3::{
 };
 use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
-use crate::parser::expression::{BindingParser, find_comment_start};
+use crate::parser::expression::{BindingParser, blank_interpolation_error, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
     element_security_context_for, is_known_element, is_trusted_types_sink_at,
@@ -1509,17 +1509,9 @@ impl<'a> HtmlToR3Transform<'a> {
             let span =
                 Span::new(placeholder.source_span.start.offset, placeholder.source_span.end.offset);
             let text = self.allocator.alloc_str(&placeholder.text);
-            let value = if self.has_interpolation(text) {
-                self.parse_interpolation(text, span).map(|value| {
-                    R3IcuPlaceholder::BoundText(R3BoundText {
-                        value,
-                        source_span: span,
-                        i18n: None,
-                    })
-                })
-            } else {
-                None
-            };
+            let value = self.parse_interpolation(text, span).map(|value| {
+                R3IcuPlaceholder::BoundText(R3BoundText { value, source_span: span, i18n: None })
+            });
             let value = value.unwrap_or_else(|| {
                 R3IcuPlaceholder::Text(R3Text { value: Ident::from(text), source_span: span })
             });
@@ -1698,8 +1690,9 @@ impl<'a> HtmlToR3Transform<'a> {
         let value_str = text.value.as_str();
         let has_ngsp = value_str.contains(NGSP_UNICODE);
 
-        // Check if text contains interpolation (only when not in ngNonBindable context)
-        if self.non_bindable_depth == 0 && self.has_interpolation(value_str) {
+        // Like Angular's `_visitTextWithInterpolation`, always run the interpolation parser
+        // (outside ngNonBindable) and keep the text static when it finds no interpolation.
+        if self.non_bindable_depth == 0 {
             // Check if there are HTML entities that could affect span calculations.
             // If so, use the tokens which have correct source spans.
             let has_entities = text
@@ -1707,43 +1700,42 @@ impl<'a> HtmlToR3Transform<'a> {
                 .iter()
                 .any(|t| matches!(t.token_type, InterpolatedTokenType::EncodedEntity));
 
-            // Create i18n metadata for bound text when inside an i18n block.
-            // This creates a Container with Text and Placeholder nodes that match
-            // the structure expected by the ingest phase.
-            // Ported from Angular's r3_template_transform.ts I18nMetaVisitor.visitText
-            let i18n_meta = if self.i18n_depth > 0 {
-                let processed_text = if has_ngsp {
-                    value_str.replace(NGSP_UNICODE, " ")
-                } else {
-                    value_str.to_string()
-                };
-                Some(self.create_i18n_meta_for_text_with_interpolation(&processed_text, text.span))
-            } else {
-                None
-            };
-
-            if has_entities {
+            let expr = if has_entities {
                 // Use tokens to parse interpolations with correct source spans
-                if let Some(expr) = self.parse_interpolation_from_tokens(text) {
-                    let bound_text =
-                        R3BoundText { value: expr, source_span: text.span, i18n: i18n_meta };
-                    return Some(R3Node::BoundText(Box::new_in(bound_text, &self.allocator)));
-                }
+                self.parse_interpolation_from_tokens(text)
             } else {
                 // No entities - use the simple path with decoded text
                 let interpolation_text = if has_ngsp {
                     let replaced = value_str.replace(NGSP_UNICODE, " ");
                     self.allocator.alloc_str(&replaced)
                 } else {
-                    self.allocator.alloc_str(value_str)
+                    value_str
                 };
+                self.parse_interpolation(interpolation_text, text.span)
+            };
 
-                // Create bound text with interpolation expression
-                if let Some(expr) = self.parse_interpolation(interpolation_text, text.span) {
-                    let bound_text =
-                        R3BoundText { value: expr, source_span: text.span, i18n: i18n_meta };
-                    return Some(R3Node::BoundText(Box::new_in(bound_text, &self.allocator)));
-                }
+            if let Some(expr) = expr {
+                // Create i18n metadata for bound text when inside an i18n block.
+                // This creates a Container with Text and Placeholder nodes that match
+                // the structure expected by the ingest phase.
+                // Ported from Angular's r3_template_transform.ts I18nMetaVisitor.visitText
+                let i18n_meta =
+                    if self.i18n_depth > 0 {
+                        let processed_text = if has_ngsp {
+                            value_str.replace(NGSP_UNICODE, " ")
+                        } else {
+                            value_str.to_string()
+                        };
+                        Some(self.create_i18n_meta_for_text_with_interpolation(
+                            &processed_text,
+                            text.span,
+                        ))
+                    } else {
+                        None
+                    };
+                let bound_text =
+                    R3BoundText { value: expr, source_span: text.span, i18n: i18n_meta };
+                return Some(R3Node::BoundText(Box::new_in(bound_text, &self.allocator)));
             }
         }
 
@@ -3435,17 +3427,20 @@ impl<'a> HtmlToR3Transform<'a> {
             // NOTE: animate.* without brackets is a TextAttribute, NOT a BoundAttribute.
             // Only [animate.xxx] or (animate.xxx) are special bindings.
 
-            // Check for interpolation in attribute value - convert to BoundAttribute
+            // An attribute value with interpolation becomes a BoundAttribute (Angular's
+            // `parsePropertyInterpolation`); without one it stays a text attribute.
             // Note: name is already normalized at the start of the loop
-            if self.has_interpolation(attr.value.as_str()) {
+            if let Some(expr) = self.parse_attribute_interpolation(attr) {
                 // Look up i18n metadata for this attribute (e.g., i18n-title for title="{{ name }}")
                 let i18n = i18n_attrs_meta.remove(name);
-                if let Some(bound_attr) =
-                    self.create_interpolated_bound_attribute(element_name, name, attr, i18n)
-                {
-                    inputs.push(bound_attr);
-                    continue;
-                }
+                inputs.push(self.create_interpolated_bound_attribute(
+                    element_name,
+                    name,
+                    attr,
+                    expr,
+                    i18n,
+                ));
+                continue;
             }
 
             // Static attribute - look up i18n metadata
@@ -4577,18 +4572,6 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// Checks if text contains interpolation.
-    /// Ensures that `{{` appears before `}}` in the string.
-    fn has_interpolation(&self, text: &str) -> bool {
-        if let Some(open_pos) = text.find("{{")
-            && let Some(close_pos) = text.find("}}")
-        {
-            // Ensure the opening delimiter comes before the closing delimiter
-            return open_pos < close_pos;
-        }
-        false
-    }
-
     /// Creates i18n metadata (Container with Text and Placeholder nodes) for text with interpolation.
     /// This is used when bound text appears inside an i18n block.
     ///
@@ -4687,6 +4670,8 @@ impl<'a> HtmlToR3Transform<'a> {
         use crate::ast::expression::Interpolation;
         use crate::parser::html::NGSP_UNICODE;
 
+        let input = text.value.as_str();
+
         let mut strings = Vec::new_in(&self.allocator);
         let mut expressions = Vec::new_in(&self.allocator);
 
@@ -4695,6 +4680,8 @@ impl<'a> HtmlToR3Transform<'a> {
         // and strings.len() == expressions.len() + 1 after processing interpolation.
         // This ensures the final result has strings.len() == expressions.len() + 1.
         let mut current_string = String::new();
+        // Length of the decoded input before `current_string`, for error columns.
+        let mut committed_len = 0;
 
         for token in &text.tokens {
             match token.token_type {
@@ -4712,14 +4699,15 @@ impl<'a> HtmlToR3Transform<'a> {
                 InterpolatedTokenType::Interpolation => {
                     // Interpolation token has parts = [startMarker, expression, endMarker]
                     if token.parts.len() >= 3 {
+                        let start_marker = &token.parts[0];
+                        let expr_content = &token.parts[1];
+                        let end_marker = &token.parts[2];
+                        let column = committed_len + current_string.len();
+
                         // Before adding an expression, commit the current string buffer
                         // (even if empty, we need a string before each expression)
                         strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
                         current_string.clear();
-
-                        let start_marker = &token.parts[0];
-                        let expr_content = &token.parts[1];
-                        let end_marker = &token.parts[2];
 
                         // Calculate the expression span from the token span
                         // Token span covers the whole interpolation: {{expr}}
@@ -4733,6 +4721,15 @@ impl<'a> HtmlToR3Transform<'a> {
                         // expressions. This matches Angular's behavior where entities like
                         // &times; inside string literals in interpolations are decoded.
                         let decoded_expr = decode_entities_in_string(expr_content.as_str());
+                        committed_len =
+                            column + start_marker.len() + decoded_expr.len() + end_marker.len();
+                        // Angular's `splitInterpolation` reports `{{ }}` and still parses it.
+                        if decoded_expr.trim().is_empty() {
+                            self.report_error(
+                                &blank_interpolation_error(column, input),
+                                token.span,
+                            );
+                        }
                         let expr_str = self.allocator.alloc_str(&decoded_expr);
                         let parse_result = self.binding_parser.parse_binding(expr_str, expr_span);
 
@@ -4778,6 +4775,7 @@ impl<'a> HtmlToR3Transform<'a> {
         use crate::parser::html::NGSP_UNICODE;
 
         let tokens = attr.value_tokens.as_ref()?;
+        let input = attr.value.as_str();
 
         let mut strings = Vec::new_in(&self.allocator);
         let mut expressions = Vec::new_in(&self.allocator);
@@ -4787,6 +4785,8 @@ impl<'a> HtmlToR3Transform<'a> {
         // and strings.len() == expressions.len() + 1 after processing interpolation.
         // This ensures the final result has strings.len() == expressions.len() + 1.
         let mut current_string = String::new();
+        // Length of the decoded input before `current_string`, for error columns.
+        let mut committed_len = 0;
 
         for token in tokens {
             match token.token_type {
@@ -4804,14 +4804,15 @@ impl<'a> HtmlToR3Transform<'a> {
                 InterpolatedTokenType::Interpolation => {
                     // Interpolation token has parts = [startMarker, expression, endMarker]
                     if token.parts.len() >= 3 {
+                        let start_marker = &token.parts[0];
+                        let expr_content = &token.parts[1];
+                        let end_marker = &token.parts[2];
+                        let column = committed_len + current_string.len();
+
                         // Before adding an expression, commit the current string buffer
                         // (even if empty, we need a string before each expression)
                         strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
                         current_string.clear();
-
-                        let start_marker = &token.parts[0];
-                        let expr_content = &token.parts[1];
-                        let end_marker = &token.parts[2];
 
                         // Calculate the expression span from the token span
                         let expr_start = token.span.start + start_marker.len() as u32;
@@ -4822,6 +4823,15 @@ impl<'a> HtmlToR3Transform<'a> {
                         // expressions. This matches Angular's behavior where entities like
                         // &times; inside string literals in interpolations are decoded.
                         let decoded_expr = decode_entities_in_string(expr_content.as_str());
+                        committed_len =
+                            column + start_marker.len() + decoded_expr.len() + end_marker.len();
+                        // Angular's `splitInterpolation` reports `{{ }}` and still parses it.
+                        if decoded_expr.trim().is_empty() {
+                            self.report_error(
+                                &blank_interpolation_error(column, input),
+                                token.span,
+                            );
+                        }
                         let expr_str = self.allocator.alloc_str(&decoded_expr);
                         let parse_result = self.binding_parser.parse_binding(expr_str, expr_span);
 
@@ -4856,16 +4866,12 @@ impl<'a> HtmlToR3Transform<'a> {
         Some(AngularExpression::Interpolation(Box::new_in(interpolation, &self.allocator)))
     }
 
-    /// Creates a bound attribute from an attribute with interpolation value.
-    /// Handles special prefixes like `attr.`, `class.`, `style.` similar to Angular's
-    /// `createBoundElementProperty` in binding_parser.ts.
-    fn create_interpolated_bound_attribute(
+    /// Parses the interpolation in an attribute value, or returns `None` when the value has
+    /// none.
+    fn parse_attribute_interpolation(
         &mut self,
-        element_name: &str,
-        name: &str,
         attr: &HtmlAttribute<'a>,
-        i18n: Option<I18nMeta<'a>>,
-    ) -> Option<R3BoundAttribute<'a>> {
+    ) -> Option<AngularExpression<'a>> {
         let value_span = attr.value_span.unwrap_or(attr.span);
 
         // Check if there are HTML entities in the attribute value that could affect span calculations.
@@ -4874,17 +4880,29 @@ impl<'a> HtmlToR3Transform<'a> {
             tokens.iter().any(|t| matches!(t.token_type, InterpolatedTokenType::EncodedEntity))
         });
 
-        let expr = if has_entities {
+        if has_entities {
             // Use tokens to parse interpolations with correct source spans
-            self.parse_interpolation_from_attr_tokens(attr, value_span)?
+            self.parse_interpolation_from_attr_tokens(attr, value_span)
         } else {
             // Use attr.value which has HTML entities already decoded by the HTML parser.
             // This matches Angular's behavior where the ml_parser decodes entities in interpolation
             // expressions for backward compatibility.
             // See: Angular's parser.ts _consumeAttr which decodes entities in ATTR_VALUE_INTERPOLATION.
-            self.parse_interpolation(attr.value.as_str(), value_span)?
-        };
+            self.parse_interpolation(attr.value.as_str(), value_span)
+        }
+    }
 
+    /// Creates a bound attribute from an attribute with interpolation value.
+    /// Handles special prefixes like `attr.`, `class.`, `style.` similar to Angular's
+    /// `createBoundElementProperty` in binding_parser.ts.
+    fn create_interpolated_bound_attribute(
+        &self,
+        element_name: &str,
+        name: &str,
+        attr: &HtmlAttribute<'a>,
+        expr: AngularExpression<'a>,
+        i18n: Option<I18nMeta<'a>>,
+    ) -> R3BoundAttribute<'a> {
         // Determine binding type, final name, and security context based on prefix
         // This matches Angular's binding_parser.ts createBoundElementProperty
         let (binding_type, final_name, unit, security_context) =
@@ -4911,7 +4929,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         let name_atom = Ident::from(self.allocator.alloc_str(final_name));
 
-        Some(R3BoundAttribute {
+        R3BoundAttribute {
             name: name_atom,
             binding_type,
             security_context,
@@ -4921,7 +4939,7 @@ impl<'a> HtmlToR3Transform<'a> {
             key_span: attr.name_span,
             value_span: attr.value_span,
             i18n,
-        })
+        }
     }
 
     /// Creates an empty expression placeholder.
@@ -5670,6 +5688,8 @@ mod security_tests {
 #[cfg(test)]
 mod template_parser_tests {
     use super::*;
+    use crate::parser::html::HtmlParser;
+    use oxc_allocator::Allocator;
 
     fn meta(value: &str) -> (&str, &str, &str) {
         let ParsedI18nMeta { meaning, description, custom_id } = parse_i18n_meta(value);
@@ -5695,5 +5715,79 @@ mod template_parser_tests {
         // of the meaning-and-description part: meaning is all of it, description is empty.
         assert_eq!(meta("d@@id|x"), ("d", "", "id|x"));
         assert_eq!(meta("m|d@@id|x"), ("m", "d", "id|x"));
+    }
+
+    /// Transforms `source` and returns a flat description of its nodes and the errors.
+    fn transform(source: &str) -> (std::vec::Vec<String>, std::vec::Vec<String>) {
+        let allocator = Allocator::default();
+        let parsed = HtmlParser::new(&allocator, source, "test.html").parse();
+        let result =
+            html_ast_to_r3_ast(&allocator, source, &parsed.nodes, TransformOptions::default());
+        fn describe(node: &R3Node<'_>, out: &mut std::vec::Vec<String>) {
+            match node {
+                R3Node::Text(text) => out.push(format!("text:{}", text.value.as_str())),
+                R3Node::BoundText(_) => out.push("bound-text".to_string()),
+                R3Node::Element(element) => {
+                    for attr in &element.attributes {
+                        out.push(format!("attr:{}", attr.name.as_str()));
+                    }
+                    for input in &element.inputs {
+                        out.push(format!("input:{}", input.name.as_str()));
+                    }
+                    for child in &element.children {
+                        describe(child, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut nodes = std::vec::Vec::new();
+        for node in &result.nodes {
+            describe(node, &mut nodes);
+        }
+        let errors = result.errors.iter().map(|err| err.msg.clone()).collect();
+        (nodes, errors)
+    }
+
+    #[test]
+    fn closing_braces_before_an_interpolation_still_bind() {
+        // A bare `}` in text closes a block, so text spells `}}` with entities.
+        let (nodes, errors) = transform(r#"<div title="}} {{a}}" i18n-title></div>"#);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(nodes, ["input:title"]);
+
+        let (nodes, errors) = transform("<p>&#125;&#125; {{a}}</p>");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(nodes, ["bound-text"]);
+
+        let (nodes, errors) = transform("<p i18n>&#125;&#125; {{a}}</p>");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(nodes, ["bound-text"]);
+    }
+
+    #[test]
+    fn text_without_an_interpolation_stays_static() {
+        let (nodes, errors) = transform(
+            r#"<div title="{{ a" i18n-title></div><p title="{{ '}}' ">&#123;&#123; a</p>"#,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(nodes, ["attr:title", "attr:title", "text:{{ a"]);
+    }
+
+    #[test]
+    fn blank_interpolations_are_reported() {
+        for source in ["<p>a {{ }}</p>", r#"<p title="a {{}}"></p>"#, "<p>&amp; {{ }}</p>"] {
+            let (_, errors) = transform(source);
+            assert!(
+                errors.iter().any(|msg| msg
+                    .starts_with("Blank expressions are not allowed in interpolated strings")),
+                "{source}: {errors:?}"
+            );
+        }
+        let (_, errors) = transform("<p>a {{ }}</p>");
+        assert_eq!(
+            errors,
+            ["Blank expressions are not allowed in interpolated strings at column 2 in [a {{ }}]"]
+        );
     }
 }

@@ -23,6 +23,14 @@ use crate::util::ParseError;
 use super::TemplateBindingParseResult;
 use super::lexer::{Lexer, Token};
 
+/// Angular's error for an interpolation with a blank expression (`{{ }}`), raised by
+/// `splitInterpolation`; `column` is the offset of the `{{` in `input`.
+pub fn blank_interpolation_error(column: usize, input: &str) -> String {
+    format!(
+        "Blank expressions are not allowed in interpolated strings at column {column} in [{input}]"
+    )
+}
+
 /// Helper to capitalize the first character of a string.
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
@@ -999,6 +1007,14 @@ impl<'a> Parser<'a> {
                     strings.push(Ident::from_in(text, &self.allocator));
 
                     let expr_text = &self.source[expr_start..expr_start + end_idx];
+                    // Angular's `splitInterpolation` reports `{{ }}` and still parses it
+                    // (to an empty expression).
+                    if expr_text.trim().is_empty() {
+                        self.errors.push(ParseError::new(
+                            Default::default(),
+                            blank_interpolation_error(abs_start, self.source),
+                        ));
+                    }
 
                     // Parse the expression
                     let expr_parser = Parser::with_offset(
