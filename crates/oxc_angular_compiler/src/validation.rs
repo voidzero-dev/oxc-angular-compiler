@@ -267,9 +267,34 @@ pub fn initializer_api_usage_errors<'a>(
     // `with_build_nodes` keeps the node store for the declaration kinds and
     // their `ImportDeclaration` parents; resolution doesn't need it.
     let semantic_ret = SemanticBuilder::new().with_build_nodes(true).build(program);
+    initializer_api_usage_errors_with_semantic(program, consts, &semantic_ret.semantic)
+}
+
+/// Whether [`initializer_api_usage_errors_with_semantic`] reads the semantic
+/// model at all, so a caller building one to share knows if it needs the
+/// node store (`SemanticBuilder::with_build_nodes`).
+pub fn initializer_api_usage_needs_semantic(program: &Program<'_>) -> bool {
+    should_check(program)
+}
+
+/// [`initializer_api_usage_errors`] with a semantic model the caller already
+/// built for `program`. When [`initializer_api_usage_needs_semantic`] holds,
+/// it must have been built `with_build_nodes(true)`.
+pub fn initializer_api_usage_errors_with_semantic<'a>(
+    program: &'a Program<'a>,
+    consts: &StringConsts<'a>,
+    semantic: &Semantic<'a>,
+) -> std::vec::Vec<OxcDiagnostic> {
+    if !should_check(program) {
+        return std::vec::Vec::new();
+    }
+    debug_assert!(
+        !semantic.nodes().is_empty(),
+        "initializer API validation needs a semantic model built with nodes"
+    );
     let mut rule = InitializerApiUsage {
         consts,
-        semantic: &semantic_ret.semantic,
+        semantic,
         ancestors: std::vec::Vec::new(),
         diagnostics: std::vec::Vec::new(),
     };
