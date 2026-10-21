@@ -37,7 +37,7 @@ use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::output::emitter::format_number_like_js;
-use crate::util::lone_surrogate::js_str_to_str;
+use crate::util::lone_surrogate::{encode_utf16, js_str_to_str};
 
 /// Everything declared at the top level of a file that the evaluator can resolve.
 #[derive(Default)]
@@ -3526,7 +3526,7 @@ fn binary<'a>(operator: BinaryOperator, left: &Value<'a>, right: &Value<'a>) -> 
 /// `a < b` (or `a <= b`): strings compare by UTF-16 code units, anything else as numbers.
 fn compare(a: &Value<'_>, b: &Value<'_>, or_equal: bool) -> bool {
     let ordering = match (a, b) {
-        (Value::String(a), Value::String(b)) => Some(a.encode_utf16().cmp(b.encode_utf16())),
+        (Value::String(a), Value::String(b)) => Some(encode_utf16(a).cmp(encode_utf16(b))),
         _ => to_number(a).partial_cmp(&to_number(b)),
     };
     ordering.is_some_and(|o| o.is_lt() || (or_equal && o.is_eq()))
@@ -3537,7 +3537,8 @@ fn strict_equals(a: &Value<'_>, b: &Value<'_>) -> bool {
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => a == b,
-        (Value::String(a), Value::String(b)) => a == b,
+        // By code units: `'\uD800' + '\uDC00'` is `'😀'`.
+        (Value::String(a), Value::String(b)) => encode_utf16(a).eq(encode_utf16(b)),
         _ => false,
     }
 }

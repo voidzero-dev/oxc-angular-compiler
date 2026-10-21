@@ -287,3 +287,19 @@ export class C {
         result.diagnostics
     );
 }
+
+#[test]
+fn evaluated_strings_compare_by_code_unit() {
+    // `'\uD800' < ''` in JS, and the two halves of a pair joined are
+    // the pair itself.
+    let result = compile(
+        r"import { Directive, Input } from '@angular/core';
+const LESS = '\uD800' < '' ? 'lt' : 'ge';
+const SAME = '\uD83D' + '\uDE00' === '😀' ? 'eq' : 'ne';
+@Directive({ selector: '[o]' })
+export class O { @Input(LESS) a: any; @Input(SAME) b: any; }
+",
+        TransformOptions::default(),
+    );
+    assert_has(&compact(&result.code), &[r#"inputs:{a:[0,"lt","a"],b:[0,"eq","b"]}"#]);
+}

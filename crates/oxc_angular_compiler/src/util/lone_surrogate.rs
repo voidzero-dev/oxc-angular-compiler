@@ -7,6 +7,10 @@
 //! U+FDD0, which Unicode reserves for a program's internal use, then the
 //! private-use character `U+10F800 + k`. The string printers turn that pair
 //! back into `\uXXXX`; either character on its own is printed as itself.
+//!
+//! A source string that really holds U+FDD0 followed by a character from
+//! U+10F800 to U+10FFFF reads as a stored lone surrogate too. Both are
+//! reserved code points, so no real name is expected to have that pair.
 
 use std::borrow::Cow;
 
