@@ -1,0 +1,19 @@
+crates/oxc_angular_compiler/src/optimizer/mod.rs
+  s_f61d5886f59e8c::t_b3a32f101783be 350-357,364-370,383-384,391,396-416,418-428,430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "953b53b15d45a33ea032f450fabae04c2c910f3b",
+  "prompts": {},
+  "sessions": {
+    "s_f61d5886f59e8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad56baa2a25992c8d",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
