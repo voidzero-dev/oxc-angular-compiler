@@ -691,6 +691,11 @@ export interface LinkOptions {
    * When not set, assumes the latest Angular version.
    */
   angularVersion?: AngularVersion
+  /**
+   * Generate a source map from the linked code back to the input.
+   * Default: false
+   */
+  sourcemap?: boolean
 }
 
 /** Result of linking Angular partial declarations. */

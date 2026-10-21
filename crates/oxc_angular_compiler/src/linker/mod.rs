@@ -91,6 +91,9 @@ pub struct LinkOptions {
     /// such as the DOM security schema (`img|src` is sanitized before 22.2.2).
     /// `None` assumes the latest Angular version.
     pub angular_version: Option<AngularVersion>,
+
+    /// Generate a source map from the linked code back to `code`.
+    pub sourcemap: bool,
 }
 
 /// Link Angular partial declarations in a JavaScript file.
@@ -131,9 +134,13 @@ pub fn link_with_options(
         return LinkResult { code: code.to_string(), map: None, linked: false };
     }
 
-    let linked_code = crate::optimizer::apply_edits(code, edits);
+    let (linked_code, map) = if options.sourcemap {
+        crate::optimizer::apply_edits_with_sourcemap(code, edits, filename)
+    } else {
+        (crate::optimizer::apply_edits(code, edits), None)
+    };
 
-    LinkResult { code: linked_code, map: None, linked: true }
+    LinkResult { code: linked_code, map, linked: true }
 }
 
 /// Recursively walk the AST to find all ɵɵngDeclare* calls and generate edits.

@@ -155,9 +155,13 @@ pub fn optimize(
     }
 
     // Apply edits
-    let optimized_code = apply_edits(code, edits);
+    let (optimized_code, map) = if options.sourcemap {
+        apply_edits_with_sourcemap(code, edits, filename)
+    } else {
+        (apply_edits(code, edits), None)
+    };
 
-    OptimizeResult { code: optimized_code, map: None }
+    OptimizeResult { code: optimized_code, map }
 }
 
 /// A source code edit operation.

@@ -89,8 +89,9 @@ async function linkCode(
   code: string,
   id: string,
   angularVersion: AngularVersion | undefined,
+  sourcemap: boolean,
 ): Promise<{ code: string; map: string | null; linked: boolean }> {
-  const result = await linkAngularPackage(code, id, { angularVersion })
+  const result = await linkAngularPackage(code, id, { angularVersion, sourcemap })
   return {
     code: result.linked ? result.code : code,
     map: result.map ?? null,
@@ -101,6 +102,8 @@ async function linkCode(
 export interface AngularLinkerPluginOptions {
   /** Angular version of the application, forwarded to the linker. Assumes latest when unset. */
   angularVersion?: AngularVersion
+  /** Return source maps from linked code back to the package file. Default: false */
+  sourcemap?: boolean
 }
 
 /**
@@ -115,7 +118,10 @@ function optimizerPluginName(angularVersion: AngularVersion | undefined): string
   return `angular-linker@${major}.${minor}.${patch}${prerelease != null ? `-${prerelease}` : ''}`
 }
 
-export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptions = {}): Plugin {
+export function angularLinkerPlugin({
+  angularVersion,
+  sourcemap = false,
+}: AngularLinkerPluginOptions = {}): Plugin {
   let optimizeDepsExclude: readonly string[] = []
 
   return {
@@ -162,13 +168,13 @@ export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptio
                       return
                     }
 
-                    const result = await linkCode(code, id, angularVersion)
+                    const result = await linkCode(code, id, angularVersion, sourcemap)
 
                     if (!result.linked) {
                       return
                     }
 
-                    return result.code
+                    return result.map ? { code: result.code, map: result.map } : result.code
                   },
                 },
               },
@@ -201,7 +207,7 @@ export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptio
           return
         }
 
-        const result = await linkCode(code, id, angularVersion)
+        const result = await linkCode(code, id, angularVersion, sourcemap)
 
         if (!result.linked) {
           return

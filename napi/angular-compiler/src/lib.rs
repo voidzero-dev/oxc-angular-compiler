@@ -2951,8 +2951,10 @@ pub fn link_angular_package_sync(
     use oxc_angular_compiler::linker::{LinkOptions as RustLinkOptions, link_with_options};
 
     let allocator = Allocator::default();
+    let options = options.unwrap_or_default();
     let rust_options = RustLinkOptions {
-        angular_version: options.and_then(|o| o.angular_version).map(Into::into),
+        angular_version: options.angular_version.map(Into::into),
+        sourcemap: options.sourcemap.unwrap_or(false),
     };
     let result = link_with_options(&allocator, &code, &filename, &rust_options);
 
@@ -2969,6 +2971,10 @@ pub struct LinkOptions {
     /// Angular's own linker does with the application's `@angular/compiler`.
     /// When not set, assumes the latest Angular version.
     pub angular_version: Option<AngularVersion>,
+
+    /// Generate a source map from the linked code back to the input.
+    /// Default: false
+    pub sourcemap: Option<bool>,
 }
 
 /// Async task for Angular linking.

@@ -288,7 +288,7 @@ Shape.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0
 
 fn link_for_version(code: &str, version: Option<AngularVersion>) -> String {
     let allocator = Allocator::default();
-    let options = LinkOptions { angular_version: version };
+    let options = LinkOptions { angular_version: version, ..LinkOptions::default() };
     let result = link_with_options(&allocator, code, "test.mjs", &options);
     assert!(result.linked);
     result.code
@@ -486,6 +486,46 @@ class D {
             r#"hostAttrs: [2, "background", "url('a;b')", "font-family", "\"Foo;Bar\", serif", "background-color", "blue"]"#
         ),
         "{}",
+        result.code
+    );
+}
+
+/// Zero-based line of the first line starting with `prefix`.
+fn line_starting_with(text: &str, prefix: &str) -> u32 {
+    text.lines().position(|line| line.starts_with(prefix)).unwrap() as u32
+}
+
+/// With `sourcemap`, the linker returns a map from the linked code back to the
+/// input; code after a replaced declaration maps to its original line even when
+/// the replacement spans more lines than the declaration.
+#[test]
+fn test_link_sourcemap() {
+    let code = r#"import * as i0 from "@angular/core";
+class P {
+  static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: P, deps: [], target: i0.ɵɵFactoryTarget.Pipe });
+  static ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: P, isStandalone: true, name: "p" });
+}
+export { P };
+"#;
+    let allocator = Allocator::default();
+    assert!(link(&allocator, code, "p.mjs").map.is_none(), "no map unless requested");
+
+    let options = LinkOptions { sourcemap: true, ..LinkOptions::default() };
+    let result = link_with_options(&allocator, code, "p.mjs", &options);
+    assert!(result.linked);
+    let map = result.map.expect("sourcemap requested");
+    let map = oxc_sourcemap::SourceMap::from_json_string(&map).unwrap();
+    assert_eq!(map.get_sources().collect::<Vec<_>>(), ["p.mjs"]);
+
+    let src_line = line_starting_with(code, "export");
+    let out_line = line_starting_with(&result.code, "export");
+    assert_ne!(src_line, out_line, "the factory should add lines:\n{}", result.code);
+    assert!(
+        map.get_tokens().any(|t| t.get_dst_line() == out_line
+            && t.get_dst_col() == 0
+            && t.get_src_line() == src_line
+            && t.get_src_col() == 0),
+        "`export` line {out_line} should map to source line {src_line}:\n{}",
         result.code
     );
 }

@@ -361,3 +361,51 @@ describe('linker: angularVersion', () => {
     expect(await link({ major: 22, minor: 2, patch: 2 })).toContain('ɵɵproperty("src",ctx.url)')
   })
 })
+
+describe('linker: sourcemap', () => {
+  const id = 'node_modules/@angular/common/fesm2022/_pipes-chunk.mjs'
+
+  it('returns a source map only when requested', () => {
+    expect(linkAngularPackageSync(PIPE_CHUNK, id).map ?? null).toBeNull()
+
+    const result = linkAngularPackageSync(PIPE_CHUNK, id, { sourcemap: true })
+    expect(result.linked).toBe(true)
+    const map = JSON.parse(result.map!)
+    expect(map.sources).toEqual([id])
+    expect(map.mappings).not.toBe('')
+  })
+
+  it('forwards the plugin sourcemap option through the Vite transform hook', async () => {
+    const transform = async (sourcemap?: boolean) =>
+      (angularLinkerPlugin({ sourcemap }) as any).transform.handler.call({}, PIPE_CHUNK, id)
+
+    expect((await transform()).map).toBeNull()
+    expect(JSON.parse((await transform(true)).map).sources).toEqual([id])
+  })
+
+  it('returns the map from the dependency optimizer load hook', async () => {
+    const plugin = angularLinkerPlugin({ sourcemap: true }) as any
+    plugin.configResolved({ optimizeDeps: {} })
+    const [optimizerPlugin] = plugin.config({}, { command: 'serve' }).optimizeDeps.rolldownOptions
+      .plugins
+    const result = await optimizerPlugin.load.handler.call(
+      { fs: { readFile: async () => PIPE_CHUNK } },
+      id,
+    )
+
+    expect(result.code).toContain('definePipe')
+    expect(JSON.parse(result.map).sources).toEqual([id])
+  })
+
+  it('forwards angular() sourceMap to the linker plugin', async () => {
+    const link = async (sourceMap: boolean) => {
+      const plugin = angular({ sourceMap }).find(
+        (candidate) => candidate.name === '@oxc-angular/vite-linker',
+      ) as any
+      return plugin.transform.handler.call({}, PIPE_CHUNK, id)
+    }
+
+    expect((await link(false)).map).toBeNull()
+    expect(JSON.parse((await link(true)).map).sources).toEqual([id])
+  })
+})

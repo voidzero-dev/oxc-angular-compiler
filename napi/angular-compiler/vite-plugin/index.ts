@@ -1546,7 +1546,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     angularPlugin(),
     stylesPlugin(),
     dtsPlugin(),
-    angularLinkerPlugin({ angularVersion: pluginOptions.angularVersion }),
+    angularLinkerPlugin({
+      angularVersion: pluginOptions.angularVersion,
+      sourcemap: pluginOptions.sourceMap,
+    }),
     pluginOptions.jit &&
       jitPlugin({
         inlineStylesExtension: pluginOptions.inlineStylesExtension,
