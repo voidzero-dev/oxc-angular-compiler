@@ -1,0 +1,31 @@
+crates/oxc_angular_compiler/src/component/defer_resolver.rs
+  s_6c0f2e038d3650::t_4e841d85b4ef19 49,51,235-238,274,279-284,291,293-294,299,303-314,319-327,347
+crates/oxc_angular_compiler/src/pipeline/selector.rs
+  s_6c0f2e038d3650::t_3116d6df42a926 93-99,104-110,112,689-704
+crates/oxc_angular_compiler/tests/defer_implicit_imports_test.rs
+  s_7ba319e2963c5c::t_036c12dae411cc 414-571
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d5495342bae998bb02012ce9394ab8a680c9cf47",
+  "prompts": {},
+  "sessions": {
+    "s_6c0f2e038d3650": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8dfb6f22b9a61062",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_7ba319e2963c5c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab49b20a01024c256",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
