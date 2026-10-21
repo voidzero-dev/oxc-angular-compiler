@@ -20,7 +20,7 @@ use std::rc::Rc;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BindingPattern, Class, Declaration, ExportDefaultDeclarationKind, Expression,
-    ObjectPropertyKind, Statement, TSNamespaceDeclarationBody,
+    ObjectPropertyKind, Program, Statement, TSNamespaceDeclarationBody,
 };
 use oxc_parser::Parser;
 use oxc_resolver::{
@@ -48,6 +48,10 @@ pub struct ExportInfo {
     /// hit a file already in `analyzing`, making the result depend on which
     /// file happened to be read first.
     pub(crate) value_local: Option<String>,
+    /// A top-level `export class` or `export function`: the evaluator reads
+    /// it as a reference, which `StaticValue` can't hold, so
+    /// [`Inner::export_value_at`] answers `None` without evaluating it.
+    pub(crate) never_static: bool,
 }
 
 /// Bounds a re-export chain (`export { X } from ...`, `export *`) followed
@@ -650,6 +654,9 @@ impl Inner {
 
         // A local export: evaluate its binding lazily. `local` is `"default"`
         // for `export default <expr>`.
+        if export_info.never_static {
+            return None;
+        }
         self.eval_export(file_path, &export_info.value_local?)
     }
 
@@ -863,6 +870,7 @@ impl Inner {
                     is_type_only: info.is_type_only,
                     re_export_source: Some((resolved, export_name.to_string())),
                     value_local: None,
+                    never_static: false,
                 });
             }
 
@@ -872,6 +880,7 @@ impl Inner {
                     is_type_only: info.is_type_only,
                     re_export_source: Some((resolved, export_name.to_string())),
                     value_local: None,
+                    never_static: false,
                 });
             }
         }
@@ -979,21 +988,62 @@ impl Inner {
         let parser_ret = Parser::new(&allocator, &source, source_type).parse();
 
         let mut exports = FxHashMap::default();
-
-        for stmt in &parser_ret.program.body {
-            self.analyze_statement(stmt, &mut exports);
-        }
+        self.analyze_program(&parser_ret.program, &mut exports);
 
         self.cache.borrow_mut().insert(file_path.to_string(), exports);
         self.analyzing.borrow_mut().remove(file_path);
     }
 
-    /// Analyze a statement for export information.
-    fn analyze_statement(&self, stmt: &Statement, exports: &mut FxHashMap<String, ExportInfo>) {
+    /// Collect `program`'s exports into `exports`.
+    fn analyze_program(&self, program: &Program, exports: &mut FxHashMap<String, ExportInfo>) {
+        for stmt in &program.body {
+            self.analyze_statement(stmt, exports, true);
+        }
+        // A top-level variable or enum shadows a class or function of the
+        // same name for the evaluator (a duplicate declaration TypeScript
+        // rejects): evaluate those exports as before.
+        if !exports.values().any(|info| info.never_static) {
+            return;
+        }
+        for stmt in &program.body {
+            let decl = match stmt {
+                Statement::ExportDeclaration(decl) => &decl.declaration,
+                _ => match stmt.as_declaration() {
+                    Some(decl) => decl,
+                    None => continue,
+                },
+            };
+            let mut shadow = |name: &str| {
+                if let Some(info) = exports.get_mut(name) {
+                    info.never_static = false;
+                }
+            };
+            match decl {
+                Declaration::VariableDeclaration(vars) => {
+                    for var in &vars.declarations {
+                        for id in var.id.get_binding_identifiers() {
+                            shadow(&id.name);
+                        }
+                    }
+                }
+                Declaration::TSEnumDeclaration(e) => shadow(&e.id.name),
+                _ => {}
+            }
+        }
+    }
+
+    /// Analyze a statement for export information. `top_level` is whether
+    /// `stmt` is in the program body rather than a namespace or module block.
+    fn analyze_statement(
+        &self,
+        stmt: &Statement,
+        exports: &mut FxHashMap<String, ExportInfo>,
+        top_level: bool,
+    ) {
         match stmt {
             // export class/function/const/interface/type Foo { ... }
             Statement::ExportDeclaration(decl) => {
-                self.analyze_declaration(&decl.declaration, exports);
+                self.analyze_declaration(&decl.declaration, exports, top_level);
             }
             // Local named export: export { X, Y } / export type { X }
             Statement::ExportNamedDeclaration(decl) => {
@@ -1006,6 +1056,7 @@ impl Inner {
                                 is_type_only: true,
                                 re_export_source: None,
                                 value_local: None,
+                                never_static: false,
                             },
                         );
                     }
@@ -1022,7 +1073,12 @@ impl Inner {
                     let value_local = (!is_type_only).then(|| spec.local.name().to_string());
                     exports.insert(
                         name,
-                        ExportInfo { is_type_only, re_export_source: None, value_local },
+                        ExportInfo {
+                            is_type_only,
+                            re_export_source: None,
+                            value_local,
+                            never_static: false,
+                        },
                     );
                 }
             }
@@ -1040,6 +1096,7 @@ impl Inner {
                                 is_type_only: true,
                                 re_export_source: None,
                                 value_local: None,
+                                never_static: false,
                             },
                         );
                     }
@@ -1058,6 +1115,7 @@ impl Inner {
                             is_type_only: spec.export_kind.is_type(),
                             re_export_source: source.map(|source| (source.to_string(), local_name)),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 }
@@ -1075,6 +1133,7 @@ impl Inner {
                         is_type_only,
                         re_export_source: None,
                         value_local: (!is_type_only).then(|| "default".to_string()),
+                        never_static: false,
                     },
                 );
             }
@@ -1090,6 +1149,7 @@ impl Inner {
                             is_type_only: false, // Namespace re-export - assume value
                             re_export_source: Some((source_module, "*".to_string())),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 } else {
@@ -1102,6 +1162,7 @@ impl Inner {
                             is_type_only: false,
                             re_export_source: Some((source_module, "*".to_string())),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 }
@@ -1110,7 +1171,7 @@ impl Inner {
             Statement::TSExternalModuleDeclaration(module_decl) => {
                 if let Some(block) = &module_decl.body {
                     for inner_stmt in &block.body {
-                        self.analyze_statement(inner_stmt, exports);
+                        self.analyze_statement(inner_stmt, exports, false);
                     }
                 }
             }
@@ -1121,7 +1182,7 @@ impl Inner {
             // declare global { ... }
             Statement::TSGlobalDeclaration(global_decl) => {
                 for inner_stmt in &global_decl.body.body {
-                    self.analyze_statement(inner_stmt, exports);
+                    self.analyze_statement(inner_stmt, exports, false);
                 }
             }
             _ => {}
@@ -1137,7 +1198,7 @@ impl Inner {
         match body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => {
                 for inner_stmt in &block.body {
-                    self.analyze_statement(inner_stmt, exports);
+                    self.analyze_statement(inner_stmt, exports, false);
                 }
             }
             TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
@@ -1146,15 +1207,26 @@ impl Inner {
         }
     }
 
-    /// Analyze a declaration and add export information.
-    fn analyze_declaration(&self, decl: &Declaration, exports: &mut FxHashMap<String, ExportInfo>) {
+    /// Analyze a declaration and add export information. `top_level` is
+    /// whether it's declared in the program body (see
+    /// [`ExportInfo::never_static`]).
+    fn analyze_declaration(
+        &self,
+        decl: &Declaration,
+        exports: &mut FxHashMap<String, ExportInfo>,
+        top_level: bool,
+    ) {
         // A runtime export binds the declared name; its value is evaluated
         // lazily by `eval_export`. Type declarations have no value local.
         let value_info = |name: &str, is_type_only: bool| ExportInfo {
             is_type_only,
             re_export_source: None,
             value_local: (!is_type_only).then(|| name.to_string()),
+            never_static: false,
         };
+        // A class or function evaluates to a reference to itself.
+        let reference_info =
+            |name: &str| ExportInfo { never_static: top_level, ..value_info(name, false) };
         match decl {
             Declaration::TSInterfaceDeclaration(d) => {
                 exports.insert(d.id.name.to_string(), value_info(&d.id.name, true));
@@ -1164,12 +1236,12 @@ impl Inner {
             }
             Declaration::ClassDeclaration(d) => {
                 if let Some(id) = &d.id {
-                    exports.insert(id.name.to_string(), value_info(&id.name, false));
+                    exports.insert(id.name.to_string(), reference_info(&id.name));
                 }
             }
             Declaration::FunctionDeclaration(d) => {
                 if let Some(id) = &d.id {
-                    exports.insert(id.name.to_string(), value_info(&id.name, false));
+                    exports.insert(id.name.to_string(), reference_info(&id.name));
                 }
             }
             Declaration::VariableDeclaration(d) => {
@@ -1943,5 +2015,52 @@ export { doSomething } from './utils';
 
         analyzer.clear_cache();
         assert_eq!(selector(&analyzer).as_deref(), Some("app-b"));
+    }
+
+    #[test]
+    fn test_value_class_and_function_exports_are_opaque() {
+        // Top-level classes and functions resolve to `None` without being
+        // evaluated; the export map still gives their local for selectors.
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "decls.ts",
+            "export class C {}\nexport function f() { return 1; }\nexport const V = 'v';",
+        );
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(resolve(&analyzer, &main_file, "./decls", "C").is_none());
+        assert!(resolve(&analyzer, &main_file, "./decls", "f").is_none());
+        assert!(analyzer.inner.value_memo.borrow().is_empty());
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./decls", "V"),
+            Some(StaticValue::String(s)) if s == "v"
+        ));
+    }
+
+    #[test]
+    fn test_value_namespace_class_export_still_evaluates() {
+        // A namespace member's export entry evaluates the top-level name it
+        // shares (here a `const`): only top-level declarations skip
+        // evaluation, as do ones a top-level variable doesn't shadow.
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "ns.ts",
+            "export const Foo = 'x';\nexport namespace N { export class Foo {} }",
+        );
+        create_test_file(dir.path(), "dup.ts", "const Bar = 'y';\nexport class Bar {}");
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./ns", "Foo"),
+            Some(StaticValue::String(s)) if s == "x"
+        ));
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./dup", "Bar"),
+            Some(StaticValue::String(s)) if s == "y"
+        ));
     }
 }
