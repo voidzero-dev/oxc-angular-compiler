@@ -339,11 +339,13 @@ export declare function extractComponentMetadataSync(
  * Extract templateUrl and styleUrls from all @Component decorators in a file (async).
  *
  * This is the async version of `extractComponentUrlsSync`. Use this when
- * extracting URLs in a non-blocking context.
+ * extracting URLs in a non-blocking context. Pass the `TransformOptions` the
+ * file will be transformed with, so the URLs are read the same way.
  */
 export declare function extractComponentUrls(
   source: string,
   filename: string,
+  options?: TransformOptions | undefined | null,
 ): Promise<ComponentUrls>
 
 /** Extracted component metadata from a `@Component` decorator. */
@@ -572,6 +574,15 @@ export interface HmrCompileResult {
   componentId: string
   /** The compiled template function as JavaScript. */
   templateJs: string
+  /**
+   * The `href` of each stylesheet `<link>` in the template, as written.
+   *
+   * The full transform compiles their contents into the component's styles
+   * (after the decorator's `styleUrls`), so the caller reads them the same
+   * way and compiles again with them in `styles`. `styles` is never
+   * changed here: only the caller can read files.
+   */
+  templateStyleUrls: Array<string>
   /** Compilation errors. */
   errors: Array<OxcError>
 }
@@ -1032,6 +1043,17 @@ export interface TransformResult {
   errors: Array<OxcError>
   /** Compilation warnings. */
   warnings: Array<OxcError>
+  /**
+   * The `href` of each stylesheet `<link>` in a compiled template that was
+   * not in `resolvedResources.styles`, as written.
+   *
+   * ngtsc loads these like `styleUrls`, relative to the component file, but
+   * they are only known once the template is parsed. A build tool can read
+   * them, add them to `resolvedResources.styles` and transform again. Each
+   * one also has a COMPONENT_RESOURCE_NOT_FOUND entry in `errors` (one per
+   * component that links it).
+   */
+  missingLinkUrls: Array<string>
   /**
    * `.d.ts` type declarations for Angular classes.
    *

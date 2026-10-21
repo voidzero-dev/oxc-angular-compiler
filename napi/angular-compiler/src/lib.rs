@@ -398,6 +398,16 @@ pub struct TransformResult {
     /// Compilation warnings.
     pub warnings: Vec<OxcError>,
 
+    /// The `href` of each stylesheet `<link>` in a compiled template that was
+    /// not in `resolvedResources.styles`, as written.
+    ///
+    /// ngtsc loads these like `styleUrls`, relative to the component file, but
+    /// they are only known once the template is parsed. A build tool can read
+    /// them, add them to `resolvedResources.styles` and transform again. Each
+    /// one also has a COMPONENT_RESOURCE_NOT_FOUND entry in `errors` (one per
+    /// component that links it).
+    pub missing_link_urls: Vec<String>,
+
     /// `.d.ts` type declarations for Angular classes.
     ///
     /// Each entry contains the class name and the static member declarations
@@ -706,6 +716,7 @@ pub fn compile_for_hmr_sync(
                 hmr_module,
                 component_id,
                 template_js,
+                template_style_urls: output.style_urls,
                 // Non-fatal pipeline diagnostics (warnings, advice) — the
                 // update module was still generated. Errors come back through
                 // the `Err` arm instead.
@@ -716,6 +727,7 @@ pub fn compile_for_hmr_sync(
             hmr_module: String::new(),
             component_id,
             template_js: String::new(),
+            template_style_urls: Vec::new(),
             errors: OxcError::from_diagnostics(&file_path, &template, diagnostics),
         },
     }
@@ -733,6 +745,14 @@ pub struct HmrCompileResult {
 
     /// The compiled template function as JavaScript.
     pub template_js: String,
+
+    /// The `href` of each stylesheet `<link>` in the template, as written.
+    ///
+    /// The full transform compiles their contents into the component's styles
+    /// (after the decorator's `styleUrls`), so the caller reads them the same
+    /// way and compiles again with them in `styles`. `styles` is never
+    /// changed here: only the caller can read files.
+    pub template_style_urls: Vec<String>,
 
     /// Compilation errors.
     pub errors: Vec<OxcError>,
@@ -894,84 +914,42 @@ pub struct ComponentUrls {
 
 /// Extract templateUrl and styleUrls from all @Component decorators in a file.
 ///
-/// This parses a TypeScript file and extracts URL references from all
-/// @Component decorators found in the file.
+/// This parses a TypeScript file and reads the URL references of every
+/// @Component decorator in it the way `transformAngularFile` reads them.
 ///
 /// # Arguments
 ///
 /// * `source` - The TypeScript source code
 /// * `filename` - The filename (used for source type detection)
+/// * `options` - The options the file will be transformed with. Only the
+///   decorator-evaluation ones matter (`resolveImportedValues`, `baseDir`,
+///   `tsconfigPath`, `resolvedImports`): with them, a URL held in a `const`
+///   imported from another file is found as the transform will look it up.
 ///
 /// # Returns
 ///
 /// A `ComponentUrls` containing all template and style URLs found.
-pub fn extract_component_urls_sync(source: String, filename: String) -> ComponentUrls {
-    use oxc_angular_compiler::{
-        build_import_map, collect_string_consts, extract_component_metadata,
-    };
-    use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
-    use oxc_parser::Parser;
-    use oxc_span::SourceType;
-
+pub fn extract_component_urls_sync(
+    source: String,
+    filename: String,
+    options: Option<TransformOptions>,
+) -> ComponentUrls {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(&filename).unwrap_or_default();
-
-    let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-    let program = &parser_ret.program;
-
-    // Build import map for component metadata extraction
-    let import_map = build_import_map(&allocator, &program.body, None);
-    let string_consts = collect_string_consts(&allocator, program);
-
-    let mut template_urls = Vec::new();
-    let mut style_urls = Vec::new();
-
-    // Walk statements looking for class declarations
-    for stmt in &program.body {
-        let class = match stmt {
-            Statement::ClassDeclaration(class) => Some(class.as_ref()),
-            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
-                _ => None,
-            },
-            Statement::ExportDeclaration(export) => match &export.declaration {
-                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
-                _ => None,
-            },
-            _ => None,
-        };
-
-        if let Some(class) = class {
-            // Extract metadata from @Component decorator
-            // Use implicit_standalone=true (v19+ default) since it doesn't affect URL extraction
-            if let Some(metadata) = extract_component_metadata(
-                &allocator,
-                class,
-                true,
-                &import_map,
-                Some(&source),
-                &string_consts,
-            ) {
-                // Collect template URL
-                if let Some(template_url) = &metadata.template_url {
-                    template_urls.push(template_url.to_string());
-                }
-
-                // Collect style URLs
-                for url in &metadata.style_urls {
-                    style_urls.push(url.to_string());
-                }
-            }
-        }
-    }
-
-    ComponentUrls { template_urls, style_urls }
+    let rust_options: RustTransformOptions = options.unwrap_or_default().into();
+    let urls = oxc_angular_compiler::extract_component_resource_urls(
+        &allocator,
+        &filename,
+        &source,
+        Some(&rust_options),
+    );
+    ComponentUrls { template_urls: urls.template_urls, style_urls: urls.style_urls }
 }
 
 /// Async task for extracting component URLs.
 pub struct ExtractComponentUrlsTask {
     source: String,
     filename: String,
+    options: Option<TransformOptions>,
 }
 
 #[napi]
@@ -980,7 +958,11 @@ impl Task for ExtractComponentUrlsTask {
     type Output = ComponentUrls;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        Ok(extract_component_urls_sync(self.source.clone(), self.filename.clone()))
+        Ok(extract_component_urls_sync(
+            std::mem::take(&mut self.source),
+            std::mem::take(&mut self.filename),
+            self.options.take(),
+        ))
     }
 
     fn resolve(&mut self, _: napi::Env, result: Self::Output) -> napi::Result<Self::JsValue> {
@@ -991,13 +973,15 @@ impl Task for ExtractComponentUrlsTask {
 /// Extract templateUrl and styleUrls from all @Component decorators in a file (async).
 ///
 /// This is the async version of `extractComponentUrlsSync`. Use this when
-/// extracting URLs in a non-blocking context.
+/// extracting URLs in a non-blocking context. Pass the `TransformOptions` the
+/// file will be transformed with, so the URLs are read the same way.
 #[napi]
 pub fn extract_component_urls(
     source: String,
     filename: String,
+    options: Option<TransformOptions>,
 ) -> AsyncTask<ExtractComponentUrlsTask> {
-    AsyncTask::new(ExtractComponentUrlsTask { source, filename })
+    AsyncTask::new(ExtractComponentUrlsTask { source, filename, options })
 }
 
 /// Top-level declarations extracted from a TypeScript file for HMR.
@@ -1265,6 +1249,7 @@ impl Task for TransformAngularFileTask {
             component_decorators: result.component_decorators,
             errors,
             warnings: vec![],
+            missing_link_urls: result.missing_link_urls,
             dts_declarations: result
                 .dts_declarations
                 .into_iter()

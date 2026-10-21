@@ -715,6 +715,77 @@ pub(crate) fn extract_string_value<'a>(
     }
 }
 
+/// A string-valued resource field (`template`, `templateUrl`, a `styleUrl`),
+/// read the way ngtsc does: `evaluator.evaluate(expr)` must give a string.
+///
+/// The forms [`extract_string_value`] folds come first and give the same
+/// result as before. Anything else goes through the partial evaluator, which
+/// reads what ngtsc reads: `'a' + B`, a namespace member, and — when the
+/// consts carry an import value resolver (`resolve_imported_values`) — a
+/// `const` imported from another file. A value that is not a string, or
+/// holds a lone surrogate (which no file name or template text needs), stays
+/// unresolved.
+pub fn evaluate_string_value<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<Ident<'a>> {
+    extract_string_value(allocator, expr, consts).or_else(|| {
+        match Evaluator::new(consts).evaluate(expr) {
+            Value::String(value) => string_ident(allocator, &value),
+            _ => None,
+        }
+    })
+}
+
+/// `styleUrls` (or a `styleUrl`), read like ngtsc's
+/// `extractStyleUrlsFromExpression`: an array literal is read entry by entry,
+/// with each spread (`...SHARED_URLS`) read the same way; any other
+/// expression is evaluated whole and may give one string or an array of them.
+///
+/// Where ngtsc reports an entry that is not a string, the entry is skipped,
+/// as [`extract_string_value`]'s callers always did.
+pub fn evaluate_style_urls<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+    urls: &mut Vec<'a, Ident<'a>>,
+) {
+    if let Expression::ArrayExpression(array) = expr {
+        for element in &array.elements {
+            if let ArrayExpressionElement::SpreadElement(spread) = element {
+                evaluate_style_urls(allocator, &spread.argument, consts, urls);
+            } else if let Some(element) = element.as_expression()
+                && let Some(url) = evaluate_string_value(allocator, element, consts)
+            {
+                urls.push(url);
+            }
+        }
+        return;
+    }
+    if let Some(url) = extract_string_value(allocator, expr, consts) {
+        urls.push(url);
+        return;
+    }
+    match Evaluator::new(consts).evaluate(expr) {
+        Value::String(value) => urls.extend(string_ident(allocator, &value)),
+        Value::Array(entries) => {
+            for entry in entries {
+                if let Value::String(value) = entry {
+                    urls.extend(string_ident(allocator, &value));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// An evaluated string as an arena [`Ident`], or `None` when it holds a lone
+/// surrogate (see [`evaluate_string_value`]).
+fn string_ident<'a>(allocator: &'a Allocator, value: &str) -> Option<Ident<'a>> {
+    (!has_lone_surrogate(value)).then(|| Ident::from(allocator.alloc_str(value)))
+}
+
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {

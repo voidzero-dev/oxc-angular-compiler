@@ -42,11 +42,7 @@ export default defineConfig({
 ### Standalone Transformer
 
 ```typescript
-import {
-  transformAngularFile,
-  compileTemplateSync,
-  extractComponentUrlsSync,
-} from '@oxc-angular/vite'
+import { transformAngularFile, compileTemplateSync, extractComponentUrls } from '@oxc-angular/vite'
 
 // Transform an entire Angular file
 const result = await transformAngularFile(sourceCode, 'app.component.ts', {
@@ -94,11 +90,14 @@ transformAngularFile(
 #### Component Metadata Extraction
 
 ```typescript
-// Extract templateUrl and styleUrls
-extractComponentUrlsSync(
+// Extract templateUrl and styleUrls. Pass the options the file is transformed
+// with (`resolveImportedValues`, `baseDir`, `tsconfigPath`) so the URLs are
+// evaluated the same way, imported constants included.
+extractComponentUrls(
   source: string,
-  filename: string
-): ComponentUrls[]
+  filename: string,
+  options?: TransformOptions
+): Promise<ComponentUrls>
 ```
 
 #### Style Processing

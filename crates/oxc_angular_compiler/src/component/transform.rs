@@ -340,6 +340,18 @@ pub struct TransformResult {
     /// Compilation diagnostics (errors and warnings).
     pub diagnostics: Vec<OxcDiagnostic>,
 
+    /// Stylesheet `<link>`s in compiled templates (`<link rel="stylesheet"
+    /// href="...">`) whose `href` was not in the resolved styles, as written.
+    ///
+    /// ngtsc loads these like `styleUrls`, relative to the component file.
+    /// They are only known once the template is parsed, so a build tool
+    /// learns them here: it can read them, add them to
+    /// [`ResolvedResources::styles`] and transform again. Each entry also has
+    /// a COMPONENT_RESOURCE_NOT_FOUND error in `diagnostics` (one per
+    /// component that links it), and only resources that were passed are
+    /// checked.
+    pub missing_link_urls: Vec<String>,
+
     /// Number of components found in the file.
     pub component_count: usize,
 
@@ -413,6 +425,12 @@ pub struct HmrTemplateCompileOutput {
     /// Styles extracted from `<style>` tags in the template.
     /// These must be included in the HMR update module to avoid constant pool mismatches.
     pub styles: std::vec::Vec<String>,
+
+    /// The `href`s of the template's stylesheet `<link>`s, as written. The
+    /// full transform loads them like `styleUrls` (see
+    /// [`TransformResult::missing_link_urls`]); an HMR caller reads them the
+    /// same way and passes their contents with the component's other styles.
+    pub style_urls: std::vec::Vec<String>,
 
     /// The consts array as JavaScript code.
     /// This must be included in the HMR update module to match the template function's
@@ -3139,15 +3157,7 @@ pub fn transform_angular_file(
     #[cfg(feature = "cross_file_elision")]
     let cross_file_analyzer: Option<CrossFileAnalyzer> =
         if options.cross_file_elision || options.resolve_imported_values {
-            let file_path = std::path::Path::new(path);
-            let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
-            base_dir.map(|base| {
-                CrossFileAnalyzer::new(
-                    base,
-                    options.tsconfig_path.as_deref(),
-                    options.resolve_imported_values,
-                )
-            })
+            new_cross_file_analyzer(path, options)
         } else {
             None
         };
@@ -3207,16 +3217,10 @@ pub fn transform_angular_file(
     // references (e.g. `host: { [ATTR_NAME]: '' }`) the same way the official
     // Angular compiler does. `resolve_imported_values` teaches the evaluator
     // to read imported bindings the way ngtsc's checker does.
-    #[allow(unused_mut)]
-    let mut string_consts = collect_string_consts(allocator, &parser_ret.program);
+    let string_consts = collect_string_consts(allocator, &parser_ret.program);
     #[cfg(feature = "cross_file_elision")]
-    if options.resolve_imported_values
-        && let Some(analyzer) = &cross_file_analyzer
-    {
-        string_consts = string_consts.with_resolver(std::rc::Rc::new(
-            analyzer.value_resolver(std::path::PathBuf::from(path)),
-        ));
-    }
+    let string_consts =
+        with_imported_values(string_consts, cross_file_analyzer.as_ref(), path, options);
 
     // ngtsc's source-file rules (validation/): initializer APIs used outside a
     // class member initializer (UNSUPPORTED_INITIALIZER_API_USAGE).
@@ -3616,6 +3620,9 @@ pub fn transform_angular_file(
                                     class_name, style_url
                                 )));
                             }
+                            result
+                                .missing_link_urls
+                                .extend(compilation_result.missing_link_urls.iter().cloned());
 
                             let component_id = format!("{}@{}", path, class_name);
 
@@ -4780,6 +4787,115 @@ struct FullCompilationResult {
     missing_link_urls: Vec<String>,
 }
 
+/// The analyzer behind both cross-file features (`cross_file_elision`'s
+/// type-only scan and `resolve_imported_values`), resolving modules from
+/// `path`'s directory (or `base_dir`) with `tsconfig_path`'s aliases.
+#[cfg(feature = "cross_file_elision")]
+fn new_cross_file_analyzer(path: &str, options: &TransformOptions) -> Option<CrossFileAnalyzer> {
+    let file_path = std::path::Path::new(path);
+    let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
+    base_dir.map(|base| {
+        CrossFileAnalyzer::new(
+            base,
+            options.tsconfig_path.as_deref(),
+            options.resolve_imported_values,
+        )
+    })
+}
+
+/// `string_consts` with `analyzer`'s import value resolver attached when
+/// `resolve_imported_values` is on, so decorator metadata reads a binding
+/// imported from another file the way ngtsc's checker does.
+#[cfg(feature = "cross_file_elision")]
+fn with_imported_values<'a>(
+    string_consts: crate::directive::StringConsts<'a>,
+    analyzer: Option<&CrossFileAnalyzer>,
+    path: &str,
+    options: &TransformOptions,
+) -> crate::directive::StringConsts<'a> {
+    match analyzer {
+        Some(analyzer) if options.resolve_imported_values => string_consts.with_resolver(
+            std::rc::Rc::new(analyzer.value_resolver(std::path::PathBuf::from(path))),
+        ),
+        _ => string_consts,
+    }
+}
+
+/// The external resources the `@Component` classes of a file name.
+#[derive(Debug, Default)]
+pub struct ComponentResourceUrls {
+    /// Each component's `templateUrl`, as written.
+    pub template_urls: Vec<String>,
+    /// Each component's `styleUrl` / `styleUrls` entries, as written.
+    pub style_urls: Vec<String>,
+}
+
+/// The `templateUrl` and `styleUrl(s)` of every `@Component` class in a file:
+/// the files a build tool reads and passes to [`transform_angular_file`] as
+/// [`ResolvedResources`], keyed by these same strings.
+///
+/// The URLs are read exactly as the transform reads them — the same
+/// [`extract_component_metadata`] over the same consts, with the cross-file
+/// resolver attached under the same `options` (`resolve_imported_values`,
+/// `base_dir`, `tsconfig_path`) — so a URL the transform will look up is never
+/// one this skipped (an imported `const TEMPLATE_URL`, say). Stylesheet
+/// `<link>`s inside a template are only known once the template is parsed;
+/// the transform reports the ones it was not given in
+/// [`TransformResult::missing_link_urls`].
+pub fn extract_component_resource_urls(
+    allocator: &Allocator,
+    path: &str,
+    source: &str,
+    options: Option<&TransformOptions>,
+) -> ComponentResourceUrls {
+    let default_options = TransformOptions::default();
+    let options = options.unwrap_or(&default_options);
+
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, source, source_type).parse();
+    let program = &parser_ret.program;
+
+    let import_map = build_import_map(allocator, &program.body, options.resolved_imports.as_ref());
+    #[cfg(feature = "cross_file_elision")]
+    let analyzer =
+        if options.resolve_imported_values { new_cross_file_analyzer(path, options) } else { None };
+    let string_consts = collect_string_consts(allocator, program);
+    #[cfg(feature = "cross_file_elision")]
+    let string_consts = with_imported_values(string_consts, analyzer.as_ref(), path, options);
+
+    let mut urls = ComponentResourceUrls::default();
+    for stmt in &program.body {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => class.as_ref(),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        // `standalone` does not change which URLs a component names.
+        let Some(metadata) = extract_component_metadata(
+            allocator,
+            class,
+            options.implicit_standalone(),
+            &import_map,
+            Some(source),
+            &string_consts,
+        ) else {
+            continue;
+        };
+        if let Some(template_url) = &metadata.template_url {
+            urls.template_urls.push(template_url.to_string());
+        }
+        urls.style_urls.extend(metadata.style_urls.iter().map(ToString::to_string));
+    }
+    urls
+}
+
 /// Compile a component template and generate ɵcmp/ɵfac definitions.
 ///
 /// The `pool_starting_index` parameter is used to ensure constant names don't conflict
@@ -5037,7 +5153,7 @@ fn compile_component_full<'a>(
     // below, like upstream.
     let mut missing_link_urls = Vec::new();
     let template_style_urls: Vec<String> =
-        r3_result.style_urls.iter().map(|url| url.to_string()).collect();
+        r3_result.style_urls.iter().map(ToString::to_string).collect();
     if let Some(resources) = resolved_resources {
         for style_url in &r3_result.style_urls {
             if let Some(style_contents) = resources.styles.get(style_url.as_str()) {
@@ -5937,6 +6053,8 @@ pub fn compile_template_for_hmr<'a>(
 
     // Extract styles from <style> tags in the template
     let styles: std::vec::Vec<String> = r3_result.styles.iter().map(|s| s.to_string()).collect();
+    let style_urls: std::vec::Vec<String> =
+        r3_result.style_urls.iter().map(ToString::to_string).collect();
 
     // Emit the consts array if present
     // The consts array must be included in HMR updates to ensure the template function's
@@ -6006,6 +6124,7 @@ pub fn compile_template_for_hmr<'a>(
         template_js,
         declarations_js,
         styles,
+        style_urls,
         consts_js,
         decls: job.root.decl_count.unwrap_or(0),
         vars: job.root.vars.unwrap_or(0),

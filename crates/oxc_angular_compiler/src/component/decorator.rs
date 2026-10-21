@@ -113,7 +113,7 @@ pub fn extract_component_metadata<'a>(
                     // for @Component.template field" in local mode,
                     // "template must be a string" otherwise) — pre-existing.
                     metadata.template =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts);
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
                     // The text between the quotes or backticks.
                     metadata.template_span = match &prop.value {
                         Expression::StringLiteral(lit) => Some(lit.span),
@@ -125,8 +125,12 @@ pub fn extract_component_metadata<'a>(
                     .map(|span| Span::new(span.start + 1, span.end - 1));
                 }
                 "templateUrl" => {
+                    // Evaluated like ngtsc's `parseTemplateDeclaration`, so a
+                    // URL imported from another file resolves when the consts
+                    // carry the cross-file resolver. The resource extractor
+                    // (`extract_component_resource_urls`) reads it the same way.
                     metadata.template_url =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts);
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
                 }
                 "styles" => {
                     // ngtsc's `reflectObjectLiteral` drops computed keys and
@@ -157,13 +161,17 @@ pub fn extract_component_metadata<'a>(
                     }
                 }
                 "styleUrls" | "styleUrl" => {
-                    if let Some(urls) = extract_string_array(allocator, &prop.value, consts) {
-                        metadata.style_urls = urls;
-                    } else if let Some(url) =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
-                    {
-                        metadata.style_urls.push(url);
+                    // An array literal replaces the URLs read so far; any
+                    // other value adds to them.
+                    if matches!(prop.value, Expression::ArrayExpression(_)) {
+                        metadata.style_urls.clear();
                     }
+                    crate::directive::evaluate_style_urls(
+                        allocator,
+                        &prop.value,
+                        consts,
+                        &mut metadata.style_urls,
+                    );
                 }
                 "standalone" => {
                     // Only override the implicit value if an explicit boolean is provided
@@ -430,35 +438,6 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
         _ => None,
     }
 }
-/// Extract an array of strings from an expression.
-///
-/// `${...}` interpolations inside individual template-literal elements are
-/// folded against `consts` (e.g. `` styles: [`:host { color: ${COLOR}; }`] ``)
-/// to match Angular's partial evaluator. Identifier elements (`[STYLE_CONST]`)
-/// are likewise resolved.
-fn extract_string_array<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Vec<'a, Ident<'a>>> {
-    let Expression::ArrayExpression(arr) = expr else {
-        return None;
-    };
-
-    let mut result = Vec::new_in(&allocator);
-    for element in &arr.elements {
-        // ArrayExpressionElement variants that can hold a value expression all
-        // carry one — funnel them through `as_expression()` and let the shared
-        // resolver decide which shapes fold.
-        let Some(elem_expr) = element.as_expression() else { continue };
-        if let Some(value) = crate::directive::extract_string_value(allocator, elem_expr, consts) {
-            result.push(value);
-        }
-    }
-
-    Some(result)
-}
-
 /// Extract an array of identifiers (for imports).
 fn extract_identifier_array<'a>(
     allocator: &'a Allocator,

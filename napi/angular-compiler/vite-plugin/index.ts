@@ -155,6 +155,19 @@ const TEMPLATE_REGEX = /\.html?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
 /**
+ * `ResolvedResources` as the plugin builds it: NAPI-RS binds its `HashMap`s
+ * to plain objects at runtime, despite the `Map` type in index.d.ts.
+ */
+interface PlainResources {
+  templates: Record<string, string>
+  styles: Record<string, string[]>
+}
+
+function plainResources(resources: ResolvedResources): PlainResources {
+  return resources as unknown as PlainResources
+}
+
+/**
  * The text to report for a compiler diagnostic. Rollup shows only this string, so the
  * help text is appended to it: for a template parse error that is where the error is
  * (`file:line:column`).
@@ -490,18 +503,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
   /**
    * Resolve external template/style URLs and read their contents.
+   *
+   * `transformOptions` are the ones the file is transformed with, so the URLs
+   * are read as the transform will look them up (a `templateUrl` held in a
+   * `const` imported from another file, say).
    */
   async function resolveResources(
     code: string,
     id: string,
+    transformOptions: TransformOptions,
   ): Promise<{ resources: ResolvedResources; dependencies: string[] }> {
-    const { templateUrls, styleUrls } = await extractComponentUrls(code, id)
+    const { templateUrls, styleUrls } = await extractComponentUrls(code, id, transformOptions)
     const dir = dirname(id)
-    const dependencies: string[] = []
-
-    // NAPI-RS expects plain objects for HashMap, not JavaScript Maps
-    const templates: Record<string, string> = {}
-    const styles: Record<string, string[]> = {}
+    const { resources, dependencies } = emptyResources()
+    const { templates, styles } = plainResources(resources)
 
     // Resolve templates
     for (const templateUrl of templateUrls) {
@@ -530,49 +545,65 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
     // Resolve styles
     for (const styleUrl of styleUrls) {
-      const stylePath = resolve(dir, styleUrl)
-      const normalizedStylePath = normalizePath(stylePath)
-      // Register as a direct style regardless of preprocessing outcome, so the
-      // HMR refresh still runs for styles that initially failed to compile.
-      directStyleUrls.add(normalizedStylePath)
-      dependencies.push(stylePath)
-
-      let content = resourceCache.get(normalizedStylePath)
-      if (!content) {
-        try {
-          content = await readFile(stylePath, 'utf-8')
-          // Preprocess styles (SCSS, Less, etc.)
-          if (resolvedConfig) {
-            try {
-              const processed = await compileStyle(stylePath, content)
-              content = processed.code
-              registerStyleDeps(stylePath, processed.deps)
-            } catch (e) {
-              console.warn(`Failed to preprocess style: ${stylePath}`, e)
-            }
-          }
-          resourceCache.set(normalizedStylePath, content)
-        } catch {
-          console.warn(`Failed to read style: ${stylePath}`)
-          continue
-        }
-      }
-
-      // Watch each transitive dep (it may resolve outside the dev-server
-      // root, e.g. a shared monorepo package), but never register it in
-      // `resourceToComponent`: that map is single-owner per resource, and a
-      // transitive dep would clobber the direct styleUrl/templateUrl mapping
-      // of another component.
-      for (const dep of styleDepsCache.get(normalizedStylePath) ?? []) {
-        if (dep === normalizedStylePath) continue
-        if (watchMode && viteServer) viteServer.watcher?.add?.(dep)
-      }
-
-      styles[styleUrl] = [content]
+      await resolveStyle(dir, styleUrl, styles, dependencies)
     }
 
-    // Note: NAPI-RS HashMap binds to plain objects at runtime, despite Map type in index.d.ts
-    return { resources: { templates, styles } as unknown as ResolvedResources, dependencies }
+    return { resources, dependencies }
+  }
+
+  /**
+   * Read and preprocess one component stylesheet into `styles[styleUrl]`,
+   * resolving `styleUrl` against `dir` (the component file's directory).
+   * Serves decorator `styleUrl(s)` and template stylesheet `<link>`s alike:
+   * both are direct styles of the component, for the cache, the watcher and
+   * HMR. Returns whether the stylesheet could be read.
+   */
+  async function resolveStyle(
+    dir: string,
+    styleUrl: string,
+    styles: Record<string, string[]>,
+    dependencies: string[],
+  ): Promise<boolean> {
+    const stylePath = resolve(dir, styleUrl)
+    const normalizedStylePath = normalizePath(stylePath)
+    // Register as a direct style regardless of preprocessing outcome, so the
+    // HMR refresh still runs for styles that initially failed to compile.
+    directStyleUrls.add(normalizedStylePath)
+    dependencies.push(stylePath)
+
+    let content = resourceCache.get(normalizedStylePath)
+    if (!content) {
+      try {
+        content = await readFile(stylePath, 'utf-8')
+        // Preprocess styles (SCSS, Less, etc.)
+        if (resolvedConfig) {
+          try {
+            const processed = await compileStyle(stylePath, content)
+            content = processed.code
+            registerStyleDeps(stylePath, processed.deps)
+          } catch (e) {
+            console.warn(`Failed to preprocess style: ${stylePath}`, e)
+          }
+        }
+        resourceCache.set(normalizedStylePath, content)
+      } catch {
+        console.warn(`Failed to read style: ${stylePath}`)
+        return false
+      }
+    }
+
+    // Watch each transitive dep (it may resolve outside the dev-server
+    // root, e.g. a shared monorepo package), but never register it in
+    // `resourceToComponent`: that map is single-owner per resource, and a
+    // transitive dep would clobber the direct styleUrl/templateUrl mapping
+    // of another component.
+    for (const dep of styleDepsCache.get(normalizedStylePath) ?? []) {
+      if (dep === normalizedStylePath) continue
+      if (watchMode && viteServer) viteServer.watcher?.add?.(dep)
+    }
+
+    styles[styleUrl] = [content]
+    return true
   }
 
   /**
@@ -580,10 +611,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
    * stylesheet.
    */
   function emptyResources(): { resources: ResolvedResources; dependencies: string[] } {
-    return {
-      resources: { templates: {}, styles: {} } as unknown as ResolvedResources,
-      dependencies: [],
-    }
+    const plain: PlainResources = { templates: {}, styles: {} }
+    return { resources: plain as unknown as ResolvedResources, dependencies: [] }
   }
 
   /**
@@ -829,97 +858,110 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // point.
                 //
                 // Inline `styles` first, then the resolved `styleUrl(s)`
-                // content appended — the order `resolve_styles` produces in
-                // the compiler, which pushes resolved content onto the
-                // decorator's own `styles`. Whitespace-only entries are
-                // dropped to match Angular's `style.trim().length > 0`.
-                const external =
-                  classMetadata.styleUrls.length > 0
-                    ? await readStyles(classMetadata.styleUrls)
-                    : { contents: [] as string[], complete: true }
-                const merged = [...classMetadata.styles, ...external.contents].filter(
-                  (style) => style.trim().length > 0,
-                )
-                // `complete` guards exactly ONE thing: turning an unknown
-                // answer into a definitive `[]` that wipes live CSS. It is
-                // not a reason to throw away content that WAS read. A
-                // stylesheet that failed while a sibling succeeded is a
-                // PARTIAL update — which is what main always delivered,
-                // because the old `readStyles` swallowed failures in a
-                // `catch` and returned whatever it got. Dropping it would
-                // silently lose every edit to the healthy sibling of a
-                // permanently unreadable stylesheet, and the pending slot is
-                // consumed either way, so nothing retries.
-                //
-                // So: a complete read is definitive and may clear; an
-                // incomplete one falls back to main's rule exactly — send
-                // what was read when it is non-empty, and never send `[]`.
-                //
-                // `complete` speaks only about the filesystem. One more
-                // thing has to hold before an empty answer may CLEAR, and it
-                // is about the SOURCE: this endpoint re-parses `resolvedId`
-                // from disk, while the component was compiled from the `code`
-                // Vite handed `transform`. Those differ whenever another
-                // plugin's `load` / pre-`transform` rewrote the module, or
-                // `fileReplacements` pointed `actualId` at a different file.
-                //
-                // On a disk source the compiler never saw, every `styles`
-                // shape the extractor cannot evaluate (an imported constant,
-                // a call to an imported function) resolves to nothing. Read
-                // as definitive that emits `styles: []` and wipes CSS the
-                // running component genuinely has, from a template edit that
-                // never touched the styles at all.
-                //
-                // `componentMetadataCache` already holds the transform-time
-                // source with the `template:` / `styles:` field VALUES
-                // blanked, and blanking only ever empties a DELIMITED range —
-                // so an expression the strip cannot open survives verbatim
-                // and the two stripped forms disagree exactly when the two
-                // sources disagree outside those fields. Matching strips is
-                // the evidence that the styles read here are the styles the
-                // component compiled with.
-                //
-                // This gates the destructive answer ONLY. Content that WAS
-                // read is still served on a mismatch — no worse than main,
-                // which scanned the same disk source.
-                const compiledFromThisSource = () => {
-                  const cachedStripped = componentMetadataCache.get(fileId)
-                  // `componentDecoratorsByFile` is keyed by the transform id
-                  // like the other per-file maps — `resolvedId` would miss on
-                  // Windows and strip nothing, failing the comparison forever.
-                  return (
-                    cachedStripped !== undefined &&
-                    cachedStripped ===
-                      stripComponentMetadata(source, componentDecoratorsByFile.get(fileId))
+                // content appended, then the template's stylesheet `<link>`s
+                // — the order the compiler produces, which pushes resolved
+                // content onto the decorator's own `styles`. Whitespace-only
+                // entries are dropped to match Angular's
+                // `style.trim().length > 0`.
+                const stylesFor = async (urls: string[]): Promise<string[] | null> => {
+                  const external =
+                    urls.length > 0
+                      ? await readStyles(urls)
+                      : { contents: [] as string[], complete: true }
+                  const merged = [...classMetadata.styles, ...external.contents].filter(
+                    (style) => style.trim().length > 0,
                   )
-                }
-                // `stylesResolved` comes first, ahead of "serve what was
-                // read": the extractor here evaluates `styles` without the
-                // `resolveImportedValues` the transform runs with, so a
-                // component whose styles live in another file extracts
-                // `styles: []` — an UNKNOWN answer, not an empty one. Serving
-                // it as definitive would wipe live CSS that the transform
-                // compiled from the import, and serving `merged` when it is
-                // non-empty is no better: it holds only the styleUrls
-                // content, so the imported inline styles are dropped either
-                // way. An unknown `styles` field makes the merged array
-                // itself unrepresentable, so the answer is `null`.
-                const styles: string[] | null =
-                  classMetadata.stylesResolved &&
-                  (merged.length > 0 || (external.complete && compiledFromThisSource()))
+                  // `complete` guards exactly ONE thing: turning an unknown
+                  // answer into a definitive `[]` that wipes live CSS. It is
+                  // not a reason to throw away content that WAS read. A
+                  // stylesheet that failed while a sibling succeeded is a
+                  // PARTIAL update — which is what main always delivered,
+                  // because the old `readStyles` swallowed failures in a
+                  // `catch` and returned whatever it got. Dropping it would
+                  // silently lose every edit to the healthy sibling of a
+                  // permanently unreadable stylesheet, and the pending slot is
+                  // consumed either way, so nothing retries.
+                  //
+                  // So: a complete read is definitive and may clear; an
+                  // incomplete one falls back to main's rule exactly — send
+                  // what was read when it is non-empty, and never send `[]`.
+                  //
+                  // `complete` speaks only about the filesystem. One more
+                  // thing has to hold before an empty answer may CLEAR, and it
+                  // is about the SOURCE: this endpoint re-parses `resolvedId`
+                  // from disk, while the component was compiled from the `code`
+                  // Vite handed `transform`. Those differ whenever another
+                  // plugin's `load` / pre-`transform` rewrote the module, or
+                  // `fileReplacements` pointed `actualId` at a different file.
+                  //
+                  // On a disk source the compiler never saw, every `styles`
+                  // shape the extractor cannot evaluate (an imported constant,
+                  // a call to an imported function) resolves to nothing. Read
+                  // as definitive that emits `styles: []` and wipes CSS the
+                  // running component genuinely has, from a template edit that
+                  // never touched the styles at all.
+                  //
+                  // `componentMetadataCache` already holds the transform-time
+                  // source with the `template:` / `styles:` field VALUES
+                  // blanked, and blanking only ever empties a DELIMITED range —
+                  // so an expression the strip cannot open survives verbatim
+                  // and the two stripped forms disagree exactly when the two
+                  // sources disagree outside those fields. Matching strips is
+                  // the evidence that the styles read here are the styles the
+                  // component compiled with.
+                  //
+                  // This gates the destructive answer ONLY. Content that WAS
+                  // read is still served on a mismatch — no worse than main,
+                  // which scanned the same disk source.
+                  const compiledFromThisSource = () => {
+                    const cachedStripped = componentMetadataCache.get(fileId)
+                    // `componentDecoratorsByFile` is keyed by the transform id
+                    // like the other per-file maps — `resolvedId` would miss on
+                    // Windows and strip nothing, failing the comparison forever.
+                    return (
+                      cachedStripped !== undefined &&
+                      cachedStripped ===
+                        stripComponentMetadata(source, componentDecoratorsByFile.get(fileId))
+                    )
+                  }
+                  // `stylesResolved` comes first, ahead of "serve what was
+                  // read": the extractor here evaluates `styles` without the
+                  // `resolveImportedValues` the transform runs with, so a
+                  // component whose styles live in another file extracts
+                  // `styles: []` — an UNKNOWN answer, not an empty one. Serving
+                  // it as definitive would wipe live CSS that the transform
+                  // compiled from the import, and serving `merged` when it is
+                  // non-empty is no better: it holds only the styleUrls
+                  // content, so the imported inline styles are dropped either
+                  // way. An unknown `styles` field makes the merged array
+                  // itself unrepresentable, so the answer is `null`.
+                  return classMetadata.stylesResolved &&
+                    (merged.length > 0 || (external.complete && compiledFromThisSource()))
                     ? merged
                     : null
+                }
 
                 // Same template options as the full transform, which reads
                 // `preserveWhitespaces` from the decorator: without it the
                 // update module strips whitespace the compiled component
                 // keeps, and text nodes shift after every HMR.
-                const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
-                  angularVersion: pluginOptions.angularVersion,
-                  encapsulation: classMetadata.encapsulation,
-                  preserveWhitespaces: classMetadata.preserveWhitespaces,
-                  minifyComponentStyles: getMinifyComponentStyles(),
-                })
+                const compile = (styles: string[] | null) =>
+                  compileForHmrSync(templateContent, className, resolvedId, styles, {
+                    angularVersion: pluginOptions.angularVersion,
+                    encapsulation: classMetadata.encapsulation,
+                    preserveWhitespaces: classMetadata.preserveWhitespaces,
+                    minifyComponentStyles: getMinifyComponentStyles(),
+                  })
+                let result = compile(await stylesFor(classMetadata.styleUrls))
+                // The template's stylesheet `<link>`s are only known once it
+                // is parsed. The full transform compiles them like
+                // `styleUrls` (relative to the component file), so read them
+                // the same way and compile again with them.
+                if (result.templateStyleUrls.length > 0) {
+                  result = compile(
+                    await stylesFor([...classMetadata.styleUrls, ...result.templateStyleUrls]),
+                  )
+                }
 
                 // A failed compile must not be served as an (empty) update
                 // module — that would call `ɵɵreplaceMetadata` with no
@@ -1035,9 +1077,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // retry after the transform covers the rare file that does.
           const mayHaveResourceUrls =
             !pluginOptions.jit && (code.includes('templateUrl') || code.includes('styleUrl'))
-          let { resources, dependencies } = mayHaveResourceUrls
-            ? await resolveResources(code, actualId)
-            : emptyResources()
 
           // Disable HMR for SSR transforms. SSR bundles must not contain HMR
           // initialization code that dynamically imports @ng/component virtual
@@ -1046,7 +1085,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // bundles (see @angular/build application-code-bundle.js).
           const isSSR = !!options?.ssr
 
-          // Transform with Rust compiler
+          // Transform with Rust compiler. `extractComponentUrls` takes the same
+          // options, so it evaluates the URLs exactly as the transform does.
           const transformOptions: TransformOptions = {
             sourcemap: pluginOptions.sourceMap,
             jit: pluginOptions.jit,
@@ -1056,12 +1096,17 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             emitClassMetadata: pluginOptions.emitClassMetadata,
             compilationMode: pluginOptions.compilationMode,
             // Evaluate decorator metadata imported from other files the way
-            // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`).
-            // Read files land in `result.dependencies`, tracked below.
+            // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`,
+            // `templateUrl: TEMPLATE_URL`). Read files land in
+            // `result.dependencies`, tracked below.
             resolveImportedValues: true,
             baseDir: dirname(actualId),
             tsconfigPath: pluginOptions.tsconfig,
           }
+
+          let { resources, dependencies } = mayHaveResourceUrls
+            ? await resolveResources(code, actualId, transformOptions)
+            : emptyResources()
 
           let result = await transformAngularFile(code, actualId, transformOptions, resources)
 
@@ -1073,10 +1118,40 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // path therefore reruns the file through the full resolution, which
           // makes the fast path give exactly the old result: with no URL in
           // the file, `resolveResources` would have passed these same empty
-          // resources.
-          if (!pluginOptions.jit && !mayHaveResourceUrls && result.errors.length > 0) {
-            ;({ resources, dependencies } = await resolveResources(code, actualId))
+          // resources. Missing template `<link>`s (one error each) are left
+          // to the step below: the URL extraction cannot find them.
+          if (
+            !pluginOptions.jit &&
+            !mayHaveResourceUrls &&
+            result.errors.length > result.missingLinkUrls.length
+          ) {
+            ;({ resources, dependencies } = await resolveResources(
+              code,
+              actualId,
+              transformOptions,
+            ))
             result = await transformAngularFile(code, actualId, transformOptions, resources)
+          }
+
+          // A template's `<link rel="stylesheet" href="...">` is one more
+          // stylesheet of the component: ngtsc loads it like a `styleUrl`,
+          // relative to the component file, and compiles it into `styles`.
+          // Only the transform parses the template, so it reports the hrefs
+          // it was not given; they are read and preprocessed like `styleUrls`
+          // (and are direct styles for HMR), and the file is compiled once
+          // more. Hrefs that still cannot be read stay
+          // COMPONENT_RESOURCE_NOT_FOUND.
+          if (!pluginOptions.jit && result.missingLinkUrls.length > 0) {
+            const { styles } = plainResources(resources)
+            let resolvedAny = false
+            for (const linkUrl of new Set(result.missingLinkUrls)) {
+              if (await resolveStyle(dirname(actualId), linkUrl, styles, dependencies)) {
+                resolvedAny = true
+              }
+            }
+            if (resolvedAny) {
+              result = await transformAngularFile(code, actualId, transformOptions, resources)
+            }
           }
 
           // Resource deps (templates/styles) plus files the compiler read to
