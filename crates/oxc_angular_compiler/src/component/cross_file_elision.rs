@@ -15,7 +15,7 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
@@ -29,7 +29,7 @@ use oxc_resolver::{
 use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::directive::ImportValueResolver;
+use crate::directive::{ImportValueResolver, StringConsts};
 
 /// Result of analyzing a file's exports
 #[derive(Debug, Clone)]
@@ -78,9 +78,10 @@ struct Inner {
     cache: RefCell<FxHashMap<String, FxHashMap<String, ExportInfo>>>,
     /// Files currently being analyzed (for circular import detection)
     analyzing: RefCell<FxHashSet<String>>,
-    /// Source text of analyzed files, kept so `eval_export` can re-parse
-    /// on demand. Only populated when `values_enabled`.
-    sources: RefCell<FxHashMap<String, String>>,
+    /// Files parsed for `eval_export` and `class_selector`, so each is
+    /// parsed once: `analyze_file` keeps its parse when `values_enabled`, and
+    /// other files are parsed on first use.
+    parsed: RefCell<FxHashMap<String, Rc<ParsedFile>>>,
     /// Memoized per-export value evaluations: `(file, local_name)` -> value.
     /// `None` means evaluated-but-opaque.
     value_memo: RefCell<FxHashMap<(String, String), Option<crate::directive::StaticValue>>>,
@@ -95,11 +96,61 @@ struct Inner {
     /// Files read to resolve exported values, so build tools can watch them.
     value_dependencies: RefCell<FxHashSet<String>>,
     /// Whether exported-value resolution (`resolve_imported_values`) is on.
-    /// When false, `analyze_file` doesn't retain source text.
+    /// When false, `analyze_file` doesn't keep the files it parses.
     values_enabled: bool,
-    /// `Rc` handle to this state, for resolvers built while analyzing a file
-    /// (`eval_export` only sees `&self`).
-    this: std::rc::Weak<Inner>,
+    /// Handle to this state, for the resolvers of the files in `parsed`
+    /// (`parse_file` only sees `&self`).
+    this: Weak<Inner>,
+}
+
+/// A file parsed once per analyzer: its program, and the consts the
+/// evaluator reads it through, which resolve its imports with a
+/// [`ParsedFileResolver`].
+struct ParsedFile {
+    // `consts` and `program` borrow `allocator`, which also holds the source
+    // text. They're declared first so they drop first; the allocator is boxed
+    // so it stays put when `ParsedFile` moves.
+    consts: StringConsts<'static>,
+    program: &'static Program<'static>,
+    allocator: Box<Allocator>,
+}
+
+impl ParsedFile {
+    /// Run `f` on the file's allocator, program and consts. `f` works for
+    /// any lifetime, so nothing borrowed from them outlives `self`.
+    fn with<R>(
+        &self,
+        f: impl for<'a> FnOnce(&'a Allocator, &'a Program<'a>, &'a StringConsts<'a>) -> R,
+    ) -> R {
+        // SAFETY: `program` and `consts` only borrow `self.allocator`, which
+        // lives as long as `self`, so they're valid for the borrow of `self`.
+        // `StringConsts` is invariant over its lifetime (its caches are
+        // `RefCell`s), hence the cast; `f` can only store data borrowed for
+        // that same lifetime in them, i.e. from the allocator.
+        let consts = unsafe { &*std::ptr::from_ref(&self.consts).cast::<StringConsts<'_>>() };
+        f(&self.allocator, self.program, consts)
+    }
+}
+
+/// The [`ImportValueResolver`] of a file in [`Inner::parsed`]: a
+/// [`CrossFileResolver`] holding a `Weak` handle, so the cache doesn't keep
+/// the analyzer alive.
+struct ParsedFileResolver {
+    inner: Weak<Inner>,
+    from_file: PathBuf,
+}
+
+impl ImportValueResolver for ParsedFileResolver {
+    fn resolve(&self, module: &str, name: &str) -> Option<crate::directive::StaticValue> {
+        self.inner.upgrade()?.resolve_export_value(module, name, &self.from_file)
+    }
+
+    fn exports(
+        &self,
+        module: &str,
+    ) -> Option<Vec<(String, Option<crate::directive::StaticValue>)>> {
+        self.inner.upgrade()?.export_values_of(module, &self.from_file)
+    }
 }
 
 /// An [`ImportValueResolver`] bound to the file whose imports it resolves:
@@ -123,22 +174,17 @@ impl ImportValueResolver for CrossFileResolver {
     }
 }
 
-/// The selector of the class `local` declares in `source` (the text of
-/// `file_path`; `"default"` for `export default class`) and exports as
-/// `exported`, when it is a standalone `@Component` or `@Directive` whose
-/// `selector` and `standalone` are literals.
-fn standalone_class_selector(
-    file_path: &str,
-    source: &str,
+/// The selector of the class `local` declares in `program` (`"default"` for
+/// `export default class`) and exports as `exported`, when it is a
+/// standalone `@Component` or `@Directive` whose `selector` and `standalone`
+/// are literals. `consts` are the program's.
+fn standalone_class_selector<'a>(
+    program: &'a Program<'a>,
+    consts: &StringConsts<'a>,
     exported: &str,
     local: &str,
     implicit_standalone: bool,
 ) -> Option<String> {
-    let allocator = Allocator::default();
-    let source_type = SourceType::from_path(file_path).unwrap_or_default();
-    let parser_ret = Parser::new(&allocator, source, source_type).parse();
-    let program = &parser_ret.program;
-
     // A plain `class Local` must be exported as `exported` by a local
     // `export { Local as exported }`: the export map also records namespace
     // members, which can share the name of a top-level class the file doesn't
@@ -169,9 +215,8 @@ fn standalone_class_selector(
         _ => None,
     })?;
 
-    let consts = crate::directive::collect_string_consts(&allocator, program);
     let decorator = ["Component", "Directive"].iter().find_map(|name| {
-        crate::directive::find_angular_class_decorator(&class.decorators, name, &consts)
+        crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
     })?;
     let Expression::CallExpression(call) = &decorator.expression else { return None };
     let Some(Expression::ObjectExpression(object)) =
@@ -223,7 +268,7 @@ impl CrossFileAnalyzer {
                 resolver: Resolver::new(options),
                 cache: RefCell::new(FxHashMap::default()),
                 analyzing: RefCell::new(FxHashSet::default()),
-                sources: RefCell::new(FxHashMap::default()),
+                parsed: RefCell::new(FxHashMap::default()),
                 value_memo: RefCell::new(FxHashMap::default()),
                 selector_memo: RefCell::new(FxHashMap::default()),
                 evaluating_values: RefCell::new(FxHashSet::default()),
@@ -499,7 +544,7 @@ impl Inner {
     }
 
     /// [`standalone_class_selector`] memoized per `(file, exported, local)`,
-    /// reading the source `analyze_file` kept instead of the file again.
+    /// reading the file through [`Self::parsed_file`].
     fn class_selector(
         &self,
         file_path: &str,
@@ -512,16 +557,10 @@ impl Inner {
         if let Some(cached) = self.selector_memo.borrow().get(&key) {
             return cached.clone();
         }
-        // `sources` is populated when `values_enabled`; read the file
-        // directly as a fallback, like `eval_export_uncached`.
-        let source = self
-            .sources
-            .borrow()
-            .get(file_path)
-            .cloned()
-            .or_else(|| std::fs::read_to_string(file_path).ok());
-        let selector = source.and_then(|source| {
-            standalone_class_selector(file_path, &source, exported, local, implicit_standalone)
+        let selector = self.parsed_file(file_path).and_then(|file| {
+            file.with(|_, program, consts| {
+                standalone_class_selector(program, consts, exported, local, implicit_standalone)
+            })
         });
         self.selector_memo.borrow_mut().insert(key, selector.clone());
         selector
@@ -679,39 +718,57 @@ impl Inner {
         value
     }
 
-    /// [`Self::eval_export`] without the memo: re-parse the cached source and
-    /// evaluate the named binding.
+    /// [`Self::eval_export`] without the memo: evaluate the named binding in
+    /// the parsed file.
     fn eval_export_uncached(
         &self,
         file_path: &str,
         local: &str,
     ) -> Option<crate::directive::StaticValue> {
-        // `sources` is populated by `analyze_file` when `values_enabled`;
-        // read the file directly as a fallback so behavior doesn't depend on
-        // which path discovered it first.
-        let source = self
-            .sources
-            .borrow()
-            .get(file_path)
-            .cloned()
-            .or_else(|| std::fs::read_to_string(file_path).ok())?;
+        let file = self.parsed_file(file_path)?;
+        file.with(|allocator, program, consts| {
+            let evaluator = crate::directive::Evaluator::new(consts);
+            if local == "default" {
+                return self
+                    .find_default_expr(&program.body)
+                    .and_then(|expr| evaluator.evaluate(expr).as_static());
+            }
+            evaluator.evaluate_name(allocator.alloc_str(local)).as_static()
+        })
+    }
 
-        let allocator = Allocator::default();
-        let source_type = SourceType::from_path(file_path).unwrap_or_default();
-        let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-        let Some(inner) = self.this.upgrade() else { return None };
-        let consts =
-            crate::directive::collect_string_consts(&allocator, &parser_ret.program).with_resolver(
-                Rc::new(CrossFileResolver { inner, from_file: Path::new(file_path).to_path_buf() }),
-            );
-        let evaluator = crate::directive::Evaluator::new(&consts);
-
-        if local == "default" {
-            return self
-                .find_default_expr(&parser_ret.program.body)
-                .and_then(|expr| evaluator.evaluate(expr).as_static());
+    /// `file_path` parsed, from [`Self::parsed`], or read and parsed now when
+    /// `analyze_file` didn't keep it (`values_enabled` off) so behavior
+    /// doesn't depend on which path discovered it first. `None` when the
+    /// file can't be read.
+    fn parsed_file(&self, file_path: &str) -> Option<Rc<ParsedFile>> {
+        if let Some(file) = self.parsed.borrow().get(file_path) {
+            return Some(Rc::clone(file));
         }
-        evaluator.evaluate_name(allocator.alloc_str(local)).as_static()
+        let source = std::fs::read_to_string(file_path).ok()?;
+        let file = Rc::new(self.parse_file(file_path, &source));
+        self.parsed.borrow_mut().insert(file_path.to_string(), Rc::clone(&file));
+        Some(file)
+    }
+
+    /// Parse `source`, the text of `file_path`, with consts whose imports
+    /// resolve from `file_path`.
+    fn parse_file(&self, file_path: &str, source: &str) -> ParsedFile {
+        let allocator = Box::new(Allocator::default());
+        // SAFETY: the boxed allocator outlives the program and consts that
+        // borrow it (see `ParsedFile`), and `ParsedFile::with` only lends
+        // them for the borrow of the `ParsedFile`.
+        let arena: &'static Allocator = unsafe { &*std::ptr::from_ref::<Allocator>(&*allocator) };
+        let source = arena.alloc_str(source);
+        let source_type = SourceType::from_path(file_path).unwrap_or_default();
+        let program = arena.alloc(Parser::new(arena, source, source_type).parse().program);
+        let resolver = ParsedFileResolver {
+            inner: Weak::clone(&self.this),
+            from_file: Path::new(file_path).to_path_buf(),
+        };
+        let consts = crate::directive::collect_string_consts(arena, program)
+            .with_resolver(Rc::new(resolver));
+        ParsedFile { consts, program, allocator }
     }
 
     /// The initializer expression of `export default <expr>`, searching the
@@ -979,16 +1036,19 @@ impl Inner {
             }
         };
 
-        if self.values_enabled {
-            self.sources.borrow_mut().insert(file_path.to_string(), source.clone());
-        }
-
-        let allocator = Allocator::default();
-        let source_type = SourceType::from_path(file_path).unwrap_or_default();
-        let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-
+        // With values on, keep the parsed file for `eval_export` and
+        // `class_selector`, so the file is parsed once per analyzer.
         let mut exports = FxHashMap::default();
-        self.analyze_program(&parser_ret.program, &mut exports);
+        if self.values_enabled {
+            let file = Rc::new(self.parse_file(file_path, &source));
+            file.with(|_, program, _| self.analyze_program(program, &mut exports));
+            self.parsed.borrow_mut().insert(file_path.to_string(), file);
+        } else {
+            let allocator = Allocator::default();
+            let source_type = SourceType::from_path(file_path).unwrap_or_default();
+            let parser_ret = Parser::new(&allocator, &source, source_type).parse();
+            self.analyze_program(&parser_ret.program, &mut exports);
+        }
 
         self.cache.borrow_mut().insert(file_path.to_string(), exports);
         self.analyzing.borrow_mut().remove(file_path);
@@ -1271,7 +1331,7 @@ impl Inner {
     /// Clear the analysis cache.
     pub fn clear_cache(&self) {
         self.cache.borrow_mut().clear();
-        self.sources.borrow_mut().clear();
+        self.parsed.borrow_mut().clear();
         self.value_memo.borrow_mut().clear();
         self.selector_memo.borrow_mut().clear();
     }
@@ -1912,8 +1972,8 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_value_elision_only_analyzer_resolves_on_demand() {
-        // `resolve_export_value` works without `values_enabled`: `sources` is
-        // empty and the file is re-read for evaluation.
+        // `resolve_export_value` works without `values_enabled`: `parsed` is
+        // empty and the file is read again for evaluation.
         let dir = TempDir::new().unwrap();
         create_test_file(dir.path(), "other.ts", "export const V = 'v';");
         let main_file = dir.path().join("main.ts");
@@ -1994,7 +2054,7 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_standalone_directive_selector_is_memoized() {
-        // The selector is read from the source `analyze_file` kept and
+        // The selector is read from the file `analyze_file` parsed and
         // memoized, not re-read from disk on every lookup, until the caches
         // are cleared. The file is still reported as a dependency each time.
         let dir = TempDir::new().unwrap();
@@ -2015,6 +2075,28 @@ export { doSomething } from './utils';
 
         analyzer.clear_cache();
         assert_eq!(selector(&analyzer).as_deref(), Some("app-b"));
+    }
+
+    #[test]
+    fn test_value_file_parsed_once() {
+        // `analyze_file`'s parse serves every later evaluation and selector
+        // lookup in the file: an edit made after it isn't seen.
+        let dir = TempDir::new().unwrap();
+        let meta =
+            create_test_file(dir.path(), "meta.ts", "export const A = 'a';\nexport const B = 'b';");
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./meta", "A"),
+            Some(StaticValue::String(s)) if s == "a"
+        ));
+        fs::write(&meta, "export const A = 'x';\nexport const B = 'y';").unwrap();
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./meta", "B"),
+            Some(StaticValue::String(s)) if s == "b"
+        ));
+        assert_eq!(analyzer.inner.parsed.borrow().len(), 1);
     }
 
     #[test]
