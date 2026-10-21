@@ -1,0 +1,43 @@
+crates/oxc_angular_compiler/src/component/decorator.rs
+  s_eb55aac6b49b26::t_6c53a8793fe750 9,64,150,417-483
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_eb55aac6b49b26::t_7be516ddf03f05 4831-4833,4841-4848,4886-4888,4891,4894-4899
+crates/oxc_angular_compiler/tests/component_resource_urls_test.rs
+  s_b9101fa11cce19::t_38c8d92427ab0a 273-331
+napi/angular-compiler/test/component-resources.test.ts
+  s_511f48475a7f5f::t_9466c62607d7ee 289-328
+napi/angular-compiler/vite-plugin/index.ts
+  s_511f48475a7f5f::t_e82785aae22e74 461-481,985-989
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d308b3e200770c4152f0d4b953480c2a7f71f29b",
+  "prompts": {},
+  "sessions": {
+    "s_511f48475a7f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aea991d22bf108d27",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_b9101fa11cce19": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a90ff5896cede8607",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_eb55aac6b49b26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af65ad23fe97b6480",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
