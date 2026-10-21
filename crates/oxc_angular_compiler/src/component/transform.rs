@@ -6189,45 +6189,29 @@ fn convert_host_metadata_to_input<'a>(
     }
 
     // Convert static attributes: "role" -> OutputExpression::Literal
-    // This matches TypeScript which uses `o.literal(value)` for host attributes
-    let mut attributes: FxHashMap<Ident<'a>, crate::output::ast::OutputExpression<'a>> =
-        FxHashMap::default();
-
-    for (key, value) in host.attributes.iter() {
-        // Create a literal string expression for static attributes
-        let expr = crate::output::ast::OutputExpression::Literal(oxc_allocator::Box::new_in(
+    // This matches TypeScript which uses `o.literal(value)` for host attributes.
+    // They are in the order `merge_host_bindings` put them in.
+    let literal = |value: &Ident<'a>| {
+        crate::output::ast::OutputExpression::Literal(oxc_allocator::Box::new_in(
             crate::output::ast::LiteralExpr {
                 value: crate::output::ast::LiteralValue::String(value.clone()),
                 source_span: None,
             },
             &allocator,
-        ));
-        attributes.insert(key.clone(), expr);
+        ))
+    };
+    let mut attributes = crate::pipeline::ingest::HostAttributes::default();
+    for (key, value) in &host.attributes {
+        attributes.insert(*key, literal(value));
     }
 
-    // Add special attributes (class_attr, style_attr) to the attributes map.
-    // This matches Angular's compiler.ts lines 501-510 which adds these to attributes
-    // before passing to the ingestion phase.
-    if let Some(ref style_attr) = host.style_attr {
-        let expr = crate::output::ast::OutputExpression::Literal(oxc_allocator::Box::new_in(
-            crate::output::ast::LiteralExpr {
-                value: crate::output::ast::LiteralValue::String(style_attr.clone()),
-                source_span: None,
-            },
-            &allocator,
-        ));
-        attributes.insert(Ident::from("style"), expr);
-    }
-
-    if let Some(ref class_attr) = host.class_attr {
-        let expr = crate::output::ast::OutputExpression::Literal(oxc_allocator::Box::new_in(
-            crate::output::ast::LiteralExpr {
-                value: crate::output::ast::LiteralValue::String(class_attr.clone()),
-                source_span: None,
-            },
-            &allocator,
-        ));
-        attributes.insert(Ident::from("class"), expr);
+    // Like Angular's `createHostBindingsFunction`, a non-empty static style,
+    // then class, goes after the other attributes (an empty one is dropped).
+    let special = [("style", &host.style_attr), ("class", &host.class_attr)];
+    for (name, value) in special {
+        if let Some(value) = value.as_ref().filter(|v| !v.is_empty()) {
+            attributes.insert(Ident::from(name), literal(value));
+        }
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }

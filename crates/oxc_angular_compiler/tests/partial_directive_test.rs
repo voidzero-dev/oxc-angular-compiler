@@ -169,6 +169,7 @@ fn host_directive_with_forward_ref_wraps_directive() {
     let hd = R3HostDirectiveMetadata {
         directive: read_var(&allocator, "FwdHostDir"),
         is_forward_reference: true,
+        has_mapping_keys: false,
         inputs: Vec::new_in(&&allocator),
         outputs: Vec::new_in(&&allocator),
     };
@@ -216,6 +217,7 @@ fn host_directive_with_forward_ref_wraps_directive() {
             v.push(R3HostDirectiveMetadata {
                 directive: read_var(&allocator, "FwdHostDir"),
                 is_forward_reference: true,
+                has_mapping_keys: false,
                 inputs: Vec::new_in(&&allocator),
                 outputs: Vec::new_in(&&allocator),
             });

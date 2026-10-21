@@ -20,6 +20,7 @@ use super::metadata::{
     R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata, R3HostMetadata,
     R3InputMetadata,
 };
+use super::property_decorators::try_unwrap_forward_ref;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
@@ -184,10 +185,14 @@ pub fn extract_directive_metadata<'a>(
                         }
                     }
                     "hostDirectives" => {
-                        let host_directives =
-                            extract_host_directives(allocator, &prop.value, consts);
-                        for hd in host_directives {
-                            builder = builder.add_host_directive(hd);
+                        for entry in evaluate_host_directives(allocator, &prop.value, consts) {
+                            builder = builder.add_host_directive(R3HostDirectiveMetadata {
+                                directive: OutputAstBuilder::variable(allocator, entry.name),
+                                is_forward_reference: entry.is_forward_reference,
+                                has_mapping_keys: entry.has_mapping_keys(),
+                                inputs: entry.inputs.unwrap_or_else(|| Vec::new_in(&allocator)),
+                                outputs: entry.outputs.unwrap_or_else(|| Vec::new_in(&allocator)),
+                            });
                         }
                     }
                     _ => {
@@ -198,7 +203,12 @@ pub fn extract_directive_metadata<'a>(
         }
     }
 
-    // Extract @Input/@Output/@HostBinding/@HostListener from class members
+    // Extract @Input/@Output/@HostBinding/@HostListener from class members.
+    // The members merge into the `host:` bindings (ngtsc's
+    // `extractHostBindings`), so those go in first.
+    if let Some(decorator_host) = host_from_decorator {
+        builder = builder.host(decorator_host);
+    }
     builder = builder.extract_from_class_in(allocator, class, source_text, Some(consts));
 
     // Detect if ngOnChanges lifecycle hook is implemented
@@ -221,8 +231,6 @@ pub fn extract_directive_metadata<'a>(
         builder = builder.deps(deps);
     }
 
-    // Now we need to merge host metadata from decorator with host metadata from class members
-    // The builder already has host data from extract_from_class, we need to merge the decorator host
     let mut metadata = builder.build()?;
 
     // `queries:` from the decorator come after the member queries, as in ngtsc.
@@ -245,36 +253,6 @@ pub fn extract_directive_metadata<'a>(
             merge_by_class_property(io.inputs, fields, |i| i.class_property_name.as_str());
         let fields = std::mem::replace(&mut metadata.outputs, Vec::new_in(&allocator));
         metadata.outputs = merge_by_class_property(io.outputs, fields, |o| o.0.as_str());
-    }
-
-    // Merge host metadata from decorator into the existing host metadata
-    //
-    // Divergence from ngtsc (pre-existing merge structure): upstream reads the
-    // `host:` metadata first and lets member @HostBinding/@HostListener
-    // overwrite same-named keys (`bindings.properties[name] = ...`), keeping
-    // one binding per key. Here member entries were collected first and the
-    // `host:` entries are appended, so a key declared in both emits two
-    // bindings and the `host:` value applies last — the winner is reversed.
-    if let Some(decorator_host) = host_from_decorator {
-        // Merge properties
-        for prop in decorator_host.properties {
-            metadata.host.properties.push(prop);
-        }
-        // Merge listeners
-        for listener in decorator_host.listeners {
-            metadata.host.listeners.push(listener);
-        }
-        // Merge attributes
-        for attr in decorator_host.attributes {
-            metadata.host.attributes.push(attr);
-        }
-        // Set class and style attrs if not already set
-        if decorator_host.class_attr.is_some() && metadata.host.class_attr.is_none() {
-            metadata.host.class_attr = decorator_host.class_attr;
-        }
-        if decorator_host.style_attr.is_some() && metadata.host.style_attr.is_none() {
-            metadata.host.style_attr = decorator_host.style_attr;
-        }
     }
 
     Some(metadata)
@@ -2080,260 +2058,152 @@ fn extract_host_metadata<'a>(
     Some(host)
 }
 
-/// Extract host directives from a hostDirectives array expression.
-///
-/// Divergence from ngtsc's `extractHostDirectives`: upstream evaluates the
-/// expression with the partial evaluator (a const or spread array works, a
-/// non-array is an error). Here only a literal `ArrayExpression` is read and
-/// anything else yields no host directives, with no diagnostic.
-///
-/// Handles the following patterns:
-/// - Simple identifier: `hostDirectives: [TooltipDirective]`
-/// - Object with directive: `hostDirectives: [{ directive: ColorDirective }]`
-/// - Object with mappings: `hostDirectives: [{ directive: D, inputs: ['color', 'bgColor'], outputs: ['changed'] }]`
-/// - Forward ref: `hostDirectives: [forwardRef(() => MyDirective)]`
-///
-/// Reference: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts:1873-1985
-fn extract_host_directives<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Vec<'a, R3HostDirectiveMetadata<'a>> {
-    let mut result = Vec::new_in(&allocator);
-
-    let Expression::ArrayExpression(arr) = expr else {
-        return result;
-    };
-
-    for element in &arr.elements {
-        if let Some(meta) = extract_single_host_directive(allocator, element, consts) {
-            result.push(meta);
-        }
-    }
-
-    result
+/// One `hostDirectives` entry, as ngtsc's `extractHostDirectives` reads it.
+pub struct HostDirectiveEntry<'a> {
+    /// The name the directive class is referenced by in this file: its own
+    /// name, or the local name of its import.
+    pub name: Ident<'a>,
+    /// Written as `forwardRef(() => X)` (ngtsc's synthetic reference).
+    pub is_forward_reference: bool,
+    /// The `inputs` mappings as (publicName, internalName) pairs, or `None`
+    /// when the entry has no `inputs` key.
+    pub inputs: Option<Vec<'a, (Ident<'a>, Ident<'a>)>>,
+    /// The `outputs` mappings, like `inputs`.
+    pub outputs: Option<Vec<'a, (Ident<'a>, Ident<'a>)>>,
 }
 
-/// Extract a single host directive from an array element.
-fn extract_single_host_directive<'a>(
+impl HostDirectiveEntry<'_> {
+    /// Whether `inputs` or `outputs` was written, even as an empty array.
+    pub fn has_mapping_keys(&self) -> bool {
+        self.inputs.is_some() || self.outputs.is_some()
+    }
+}
+
+/// Reads a `hostDirectives` array the way ngtsc's `extractHostDirectives`
+/// does: through the partial evaluator, so a constant, a spread, a constant
+/// `directive` or mapping array all work, and with its forward-ref resolver,
+/// so `forwardRef(() => X)` (`@angular/core`'s) resolves to `X`.
+///
+/// Divergences: ngtsc reports a non-array, an entry that isn't a class
+/// reference and a mapping that isn't a string array; here they are skipped.
+/// A `forwardRef` is only seen where it's written in the array literal itself
+/// or as the `directive` of an object entry (also one read from a constant);
+/// a bare `forwardRef` element inside a constant array is skipped.
+/// A `[internalName, publicName]` tuple is accepted as a mapping.
+pub fn evaluate_host_directives<'a>(
     allocator: &'a Allocator,
-    element: &ArrayExpressionElement<'a>,
+    expr: &'a Expression<'a>,
     consts: &StringConsts<'a>,
-) -> Option<R3HostDirectiveMetadata<'a>> {
-    match element {
-        // Simple identifier: TooltipDirective
-        ArrayExpressionElement::Identifier(id) => Some(R3HostDirectiveMetadata {
-            directive: OutputAstBuilder::variable(allocator, id.name.clone().into()),
-            is_forward_reference: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
-        }),
+) -> std::vec::Vec<HostDirectiveEntry<'a>> {
+    let evaluator = Evaluator::new(consts);
 
-        // Object expression: { directive: ColorDirective, inputs: [...], outputs: [...] }
-        ArrayExpressionElement::ObjectExpression(obj) => {
-            let mut directive_expr = None;
-            let mut inputs = Vec::new_in(&allocator);
-            let mut outputs = Vec::new_in(&allocator);
-            let mut is_forward_reference = false;
-
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop
-                    && is_metadata_property(prop)
-                {
-                    let Some(key_name) = get_property_key_name(&prop.key, consts) else {
-                        continue;
-                    };
-
-                    match key_name.as_str() {
-                        "directive" => {
-                            let (expr, is_forward_ref) =
-                                extract_directive_reference(allocator, &prop.value);
-                            directive_expr = expr;
-                            is_forward_reference = is_forward_ref;
+    // Each element's value, with the expression it was written as when that's
+    // in the array literal.
+    let mut elements: std::vec::Vec<(Value<'a>, Option<&'a Expression<'a>>)> = std::vec::Vec::new();
+    match expr.get_inner_expression() {
+        Expression::ArrayExpression(array) => {
+            for element in &array.elements {
+                match element {
+                    ArrayExpressionElement::SpreadElement(spread) => {
+                        if let Value::Array(values) = evaluator.evaluate(&spread.argument) {
+                            elements.extend(values.into_iter().map(|value| (value, None)));
                         }
-                        "inputs" => {
-                            inputs = extract_io_mappings(allocator, &prop.value);
-                        }
-                        "outputs" => {
-                            outputs = extract_io_mappings(allocator, &prop.value);
-                        }
-                        _ => {}
+                    }
+                    ArrayExpressionElement::Elision(_) => elements.push((Value::Undefined, None)),
+                    element => {
+                        let element = element.to_expression();
+                        elements.push((evaluator.evaluate(element), Some(element)));
                     }
                 }
             }
-
-            directive_expr.map(|directive| R3HostDirectiveMetadata {
-                directive,
-                is_forward_reference,
-                inputs,
-                outputs,
-            })
         }
-
-        // ForwardRef call: forwardRef(() => MyDirective)
-        ArrayExpressionElement::CallExpression(call) => {
-            if is_forward_ref_call(&call.callee) {
-                if let Some(name) = extract_forward_ref_directive_name(call.arguments.first()) {
-                    return Some(R3HostDirectiveMetadata {
-                        directive: OutputAstBuilder::variable(allocator, name),
-                        is_forward_reference: true,
-                        inputs: Vec::new_in(&allocator),
-                        outputs: Vec::new_in(&allocator),
-                    });
-                }
+        _ => {
+            if let Value::Array(values) = evaluator.evaluate(expr) {
+                elements.extend(values.into_iter().map(|value| (value, None)));
             }
-            None
         }
-
-        _ => None,
     }
-}
 
-/// Extract a directive reference from an expression.
-///
-/// Returns the directive expression and whether it's a forward reference.
-fn extract_directive_reference<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-) -> (Option<crate::output::ast::OutputExpression<'a>>, bool) {
-    match expr {
-        // Simple identifier: ColorDirective
-        Expression::Identifier(id) => {
-            (Some(OutputAstBuilder::variable(allocator, id.name.clone().into())), false)
+    // The class a directive reference names, and whether it's a forward ref.
+    let directive = |value: &Value<'a>, written: Option<&'a Expression<'a>>| {
+        if let Some(inner) = written.and_then(|e| try_unwrap_forward_ref(e, Some(consts))) {
+            return host_directive_name(allocator, &evaluator.evaluate(inner)).map(|n| (n, true));
         }
-
-        // ForwardRef call: forwardRef(() => ColorDirective)
-        Expression::CallExpression(call) => {
-            if is_forward_ref_call(&call.callee) {
-                if let Some(name) = extract_forward_ref_directive_name(call.arguments.first()) {
-                    return (Some(OutputAstBuilder::variable(allocator, name)), true);
-                }
-            }
-            (None, false)
-        }
-
-        _ => (None, false),
-    }
-}
-
-/// Check if a callee is a forwardRef call.
-fn is_forward_ref_call(callee: &Expression<'_>) -> bool {
-    match callee {
-        Expression::Identifier(id) => id.name == "forwardRef",
-        _ => false,
-    }
-}
-
-/// Extract the directive name from a forwardRef argument.
-///
-/// Handles: `forwardRef(() => MyDirective)`
-fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<Ident<'a>> {
-    let arg = arg?;
-    match arg {
-        Argument::ArrowFunctionExpression(arrow) => {
-            // Expression body: () => MyDirective
-            if let Some(Expression::Identifier(id)) = arrow.get_expression() {
-                return Some(id.name.clone().into());
-            }
-            // Block body with single ExpressionStatement (parity with pre-0.144)
-            if let Some(body) = arrow.get_function_body() {
-                if let Some(oxc_ast::ast::Statement::ExpressionStatement(stmt)) =
-                    body.statements.first()
-                {
-                    if let Expression::Identifier(id) = &stmt.expression {
-                        return Some(id.name.clone().into());
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-/// Extract input/output mappings from an array expression.
-///
-/// Handles two formats:
-/// - Simple string: `["color"]` - same public and internal name
-/// - Mapping string: `["color: bgColor"]` - internal name mapped to public name
-///
-/// Returns Vec of (publicName, internalName) pairs.
-///
-/// Divergence: ngtsc evaluates the array with the partial evaluator, so a
-/// const or a spread works; here only a literal `ArrayExpression` is read.
-fn extract_io_mappings<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
-    let mut result = Vec::new_in(&allocator);
-
-    let Expression::ArrayExpression(arr) = expr else {
-        return result;
+        host_directive_name(allocator, value).map(|name| (name, false))
     };
 
-    for element in &arr.elements {
-        if let Some((public_name, internal_name)) = parse_mapping_element(allocator, element) {
-            result.push((public_name, internal_name));
-        }
-    }
-
-    result
-}
-
-/// Parse a single mapping element from an input/output array.
-///
-/// Handles:
-/// - Simple string: `"color"` -> ("color", "color")
-/// - Mapping string: `"color: bgColor"` -> ("bgColor", "color")
-/// - Tuple array: `["color", "bgColor"]` -> ("bgColor", "color")
-fn parse_mapping_element<'a>(
-    allocator: &'a Allocator,
-    element: &ArrayExpressionElement<'a>,
-) -> Option<(Ident<'a>, Ident<'a>)> {
-    match element {
-        // Simple string: "color" - same public and internal name
-        ArrayExpressionElement::StringLiteral(lit) => {
-            let value = lit.value.as_str()?;
-
-            // Check for mapping format: "internalName: publicName"
-            if let Some(colon_pos) = value.find(':') {
-                let internal_name = value[..colon_pos].trim();
-                let public_name = value[colon_pos + 1..].trim();
-                Some((
-                    Ident::from(allocator.alloc_str(public_name)),
-                    Ident::from(allocator.alloc_str(internal_name)),
-                ))
+    elements
+        .into_iter()
+        .filter_map(|(value, written)| {
+            if let Value::Object(_) = &value {
+                let reference = value.prop("directive")?;
+                let (name, is_forward_reference) = directive(&reference.value, reference.expr)?;
+                let mappings =
+                    |key| value.prop(key).map(|p| host_directive_mappings(allocator, &p.value));
+                Some(HostDirectiveEntry {
+                    name,
+                    is_forward_reference,
+                    inputs: mappings("inputs"),
+                    outputs: mappings("outputs"),
+                })
             } else {
-                // Same name for both
-                Some((Ident::from(value), Ident::from(value)))
+                let (name, is_forward_reference) = directive(&value, written)?;
+                Some(HostDirectiveEntry { name, is_forward_reference, inputs: None, outputs: None })
             }
-        }
+        })
+        .collect()
+}
 
-        // Tuple array: ["internalName", "publicName"]
-        ArrayExpressionElement::ArrayExpression(arr) => {
-            let elements = &arr.elements;
-            if elements.len() >= 2 {
-                let internal = match elements.first() {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        lit.value.as_str().map(Ident::from)
-                    }
-                    _ => None,
-                };
-                let public = match elements.get(1) {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
-                        lit.value.as_str().map(Ident::from)
-                    }
-                    _ => None,
-                };
-                if let (Some(internal_name), Some(public_name)) = (internal, public) {
-                    return Some((public_name, internal_name));
+/// The name a host directive class reference is written by in this file.
+fn host_directive_name<'a>(allocator: &'a Allocator, value: &Value<'a>) -> Option<Ident<'a>> {
+    let name = match value {
+        Value::Reference { name, kind: RefKind::Class(_) | RefKind::Ambient } => name.as_str(),
+        Value::Reference {
+            kind: RefKind::Import { namespace_member: false, local: Some(local) },
+            ..
+        } => local,
+        _ => return None,
+    };
+    Some(Ident::from(allocator.alloc_str(name)))
+}
+
+/// A host directive `inputs` / `outputs` array as (publicName, internalName)
+/// pairs, like ngtsc's `parseMappingStringArray`: `'field'` or
+/// `'field: alias'` (only the first two `:`-separated parts count), collected
+/// into an object keyed by the field, so a field mapped twice keeps its first
+/// position and its last alias, and array-index fields come first.
+fn host_directive_mappings<'a>(
+    allocator: &'a Allocator,
+    value: &Value<'a>,
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
+    let alloc = |s: &str| Ident::from(allocator.alloc_str(s));
+    // (internalName, publicName) while collecting, keyed like the object.
+    let mut by_field: Vec<'a, (Ident<'a>, Ident<'a>)> = Vec::new_in(&allocator);
+    if let Value::Array(values) = value {
+        for value in values {
+            let (field, alias) = match value {
+                Value::String(mapping) => {
+                    let mut parts = mapping.split(':').map(str::trim);
+                    let field = parts.next().unwrap_or_default();
+                    (field, parts.next().unwrap_or(field))
                 }
+                // `[internalName, publicName]`, which ngtsc rejects.
+                Value::Array(pair) => match pair.as_slice() {
+                    [Value::String(field), Value::String(alias), ..] => {
+                        (field.as_str(), alias.as_str())
+                    }
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            match by_field.iter_mut().find(|(f, _)| f.as_str() == field) {
+                Some(entry) => entry.1 = alloc(alias),
+                None => by_field.push((alloc(field), alloc(alias))),
             }
-            None
         }
-
-        _ => None,
     }
+    super::metadata::sort_like_object_keys(&mut by_field, |key| key);
+    Vec::from_iter_in(by_field.into_iter().map(|(field, alias)| (alias, field)), &allocator)
 }
 
 #[cfg(test)]
@@ -2807,7 +2677,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_directives_forward_ref() {
         let code = r#"
-            import {Directive} from '@angular/core';
+            import {Directive, forwardRef} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 hostDirectives: [forwardRef(() => MyDirective)]
@@ -2911,6 +2781,155 @@ mod tests {
             assert_eq!(meta.host.properties.len(), 2);
             // Should have 2 listeners: from decorator and from @HostListener
             assert_eq!(meta.host.listeners.len(), 2);
+            // `host:` entries come first, like ngtsc's `extractHostBindings`.
+            assert_eq!(meta.host.properties[0].0.as_str(), "[class.highlighted]");
+            assert_eq!(meta.host.listeners[0].0.as_str(), "(focus)");
+        });
+    }
+
+    #[test]
+    fn test_member_host_bindings_replace_host_entries_in_place() {
+        // ngtsc assigns members into the `host:` objects: a member replaces the
+        // entry with the same key where it was, so each key is bound once.
+        let code = r#"
+            import {Directive, HostBinding, HostListener} from '@angular/core';
+            @Directive({
+                selector: '[appTest]',
+                host: {
+                    '[title]': 'hostTitle',
+                    '[id]': 'hostId',
+                    '(click)': 'fromHost()',
+                    '(focus)': 'onFocus()'
+                }
+            })
+            class TestDirective {
+                @HostBinding('tabIndex') tabIndex = 0;
+                @HostBinding('title') memberTitle = '';
+                @HostListener('click', ['$event']) fromMember(e) {}
+                @HostListener('click') later() {}
+            }
+        "#;
+        assert_directive_metadata(code, |meta| {
+            let props: std::vec::Vec<_> =
+                meta.host.properties.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            assert_eq!(
+                props,
+                [("[title]", "memberTitle"), ("[id]", "hostId"), ("[tabIndex]", "tabIndex")]
+            );
+            let listeners: std::vec::Vec<_> =
+                meta.host.listeners.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            assert_eq!(listeners, [("(click)", "later()"), ("(focus)", "onFocus()")]);
+        });
+    }
+
+    #[test]
+    fn test_host_integer_keys_come_first() {
+        // Like any JS object key, an array-index key comes first, ascending.
+        let code = r#"
+            import {Directive} from '@angular/core';
+            @Directive({
+                selector: '[appTest]',
+                host: { z: 'a', '10': 'b', '2': 'c', '02': 'd', '[title]': 't', '[3]': 'x' }
+            })
+            class TestDirective {}
+        "#;
+        assert_directive_metadata(code, |meta| {
+            let attrs: std::vec::Vec<_> =
+                meta.host.attributes.iter().map(|(k, _)| k.as_str()).collect();
+            assert_eq!(attrs, ["2", "10", "z", "02"]);
+            let props: std::vec::Vec<_> =
+                meta.host.properties.iter().map(|(k, _)| k.as_str()).collect();
+            assert_eq!(props, ["[3]", "[title]"]);
+        });
+    }
+
+    #[test]
+    fn test_host_directives_through_evaluator() {
+        let code = r#"
+            import {Directive, forwardRef} from '@angular/core';
+            import {Imported as Local} from './imported';
+            class A {}
+            class B {}
+            const SHARED = [A];
+            const INPUTS = ['value: alias', 'other'];
+            const ALIAS = B;
+            @Directive({
+                selector: '[appTest]',
+                hostDirectives: [
+                    ...SHARED,
+                    { directive: ALIAS, inputs: INPUTS },
+                    { directive: A },
+                    { directive: A, outputs: [] },
+                    Local,
+                    forwardRef(() => Later),
+                ]
+            })
+            class TestDirective {}
+            @Directive({ selector: '[later]' }) class Later {}
+        "#;
+        assert_directive_metadata(code, |meta| {
+            let names: std::vec::Vec<_> = meta
+                .host_directives
+                .iter()
+                .map(|hd| match &hd.directive {
+                    OutputExpression::ReadVar(var) => var.name.as_str(),
+                    _ => panic!("expected a variable"),
+                })
+                .collect();
+            assert_eq!(names, ["A", "B", "A", "A", "Local", "Later"]);
+            let mapping_keys: std::vec::Vec<_> =
+                meta.host_directives.iter().map(|hd| hd.has_mapping_keys).collect();
+            assert_eq!(mapping_keys, [false, true, false, true, false, false]);
+            let forward: std::vec::Vec<_> =
+                meta.host_directives.iter().map(|hd| hd.is_forward_reference).collect();
+            assert_eq!(forward, [false, false, false, false, false, true]);
+            let inputs: std::vec::Vec<_> = meta.host_directives[1]
+                .inputs
+                .iter()
+                .map(|(public, internal)| (public.as_str(), internal.as_str()))
+                .collect();
+            assert_eq!(inputs, [("alias", "value"), ("other", "other")]);
+        });
+    }
+
+    #[test]
+    fn test_host_directive_mappings_like_parse_mapping_string_array() {
+        // Keyed by the field: a field mapped twice keeps its first position and
+        // its last alias. Only the first two `:`-separated parts count.
+        let code = r#"
+            import {Directive} from '@angular/core';
+            class Base {}
+            @Directive({
+                selector: '[appTest]',
+                hostDirectives: [{ directive: Base, inputs: ['a: x', 'b', 'a: y', 'c: d: e'] }]
+            })
+            class TestDirective {}
+        "#;
+        assert_directive_metadata(code, |meta| {
+            let inputs: std::vec::Vec<_> = meta.host_directives[0]
+                .inputs
+                .iter()
+                .map(|(public, internal)| (public.as_str(), internal.as_str()))
+                .collect();
+            assert_eq!(inputs, [("y", "a"), ("b", "b"), ("d", "c")]);
+        });
+    }
+
+    #[test]
+    fn test_forward_ref_not_from_core_is_not_unwrapped() {
+        // ngtsc only unwraps `@angular/core`'s forwardRef.
+        let code = r#"
+            import {Directive} from '@angular/core';
+            import {forwardRef} from './my-forward-ref';
+            @Directive({
+                selector: '[appTest]',
+                hostDirectives: [forwardRef(() => Later)]
+            })
+            class TestDirective {}
+            @Directive({ selector: '[later]' }) class Later {}
+        "#;
+        assert_directive_metadata(code, |meta| {
+            assert!(meta.host_directives.is_empty());
         });
     }
 

@@ -452,7 +452,7 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 /// `forwardRef` (a local function, one from another module, `util.forwardRef`)
 /// is kept as written. Without the file's imports (`consts` is `None`), a bare
 /// `forwardRef` is matched by name.
-fn try_unwrap_forward_ref<'a>(
+pub fn try_unwrap_forward_ref<'a>(
     expr: &'a Expression<'a>,
     consts: Option<&super::StringConsts<'_>>,
 ) -> Option<&'a Expression<'a>> {

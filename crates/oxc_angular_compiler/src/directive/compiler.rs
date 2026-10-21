@@ -17,7 +17,6 @@
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_span::Span;
 use oxc_str::Ident;
-use rustc_hash::FxHashMap;
 
 use super::metadata::{
     R3DirectiveMetadata, R3HostDirectiveMetadata, R3HostMetadata, R3InputMetadata,
@@ -30,7 +29,7 @@ use crate::output::ast::{
 };
 use crate::parser::expression::BindingParser;
 use crate::pipeline::emit::{HostBindingCompilationResult, compile_host_bindings};
-use crate::pipeline::ingest::{HostBindingInput, ingest_host_binding_with_version};
+use crate::pipeline::ingest::{HostAttributes, HostBindingInput, ingest_host_binding_with_version};
 use crate::pipeline::selector::{
     parse_selector_to_r3_selector as parse_css_to_r3, r3_selector_to_output_expr,
 };
@@ -309,11 +308,8 @@ fn add_features<'a>(
 
     // HostDirectivesFeature (before InheritDefinitionFeature)
     if !metadata.host_directives.is_empty() {
-        let host_directives_arg = create_host_directives_feature_arg(
-            allocator,
-            core_namespace,
-            &metadata.host_directives,
-        );
+        let host_directives_arg =
+            create_host_directives_feature_arg(allocator, &metadata.host_directives);
         let mut args = Vec::new_in(&allocator);
         args.push(host_directives_arg);
         features.push(create_feature_call(
@@ -727,30 +723,26 @@ fn convert_r3_host_metadata_to_input<'a>(
         });
     }
 
-    // Copy attributes directly - they are already OutputExpressions
-    // Handle special style_attr and class_attr if present
-    let mut attributes: FxHashMap<Ident<'a>, OutputExpression<'a>> = FxHashMap::default();
+    // Copy attributes directly - they are already OutputExpressions, in the
+    // order `merge_host_bindings` put them in.
+    let mut attributes = HostAttributes::default();
 
     for (key, value) in host.attributes.iter() {
         // Use clone_in to deep clone the OutputExpression with the allocator
         attributes.insert(key.clone(), value.clone_in(allocator));
     }
 
-    // Add special attributes if present
-    if let Some(ref style_attr) = host.style_attr {
-        let expr = OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(style_attr.clone()), source_span: None },
-            &allocator,
-        ));
-        attributes.insert(Ident::from("style"), expr);
-    }
-
-    if let Some(ref class_attr) = host.class_attr {
-        let expr = OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(class_attr.clone()), source_span: None },
-            &allocator,
-        ));
-        attributes.insert(Ident::from("class"), expr);
+    // Like `createHostBindingsFunction`, a non-empty static style, then class,
+    // goes after the other attributes (an empty one is dropped).
+    let special = [("style", &host.style_attr), ("class", &host.class_attr)];
+    for (name, value) in special {
+        if let Some(value) = value.as_ref().filter(|v| !v.is_empty()) {
+            let expr = OutputExpression::Literal(Box::new_in(
+                LiteralExpr { value: LiteralValue::String(*value), source_span: None },
+                &allocator,
+            ));
+            attributes.insert(Ident::from(name), expr);
+        }
     }
 
     HostBindingInput {
@@ -906,96 +898,60 @@ fn create_feature_ref<'a>(
     ))
 }
 
-/// Creates the host directives feature argument.
-fn create_host_directives_feature_arg<'a>(
+/// Creates the `ɵɵHostDirectivesFeature` argument.
+///
+/// Shared between the directive and component compilers, mirroring Angular's
+/// `createHostDirectivesFeatureArg` in `view/compiler.ts`:
+/// - an entry without `inputs` and `outputs` is the bare directive;
+///   otherwise it's `{ directive, inputs?, outputs? }`, with an empty mapping
+///   left out;
+/// - when any entry is a forward reference, the whole array is wrapped in
+///   `function () { return [...]; }`.
+pub fn create_host_directives_feature_arg<'a>(
     allocator: &'a Allocator,
-    core_namespace: &'a str,
     host_directives: &[R3HostDirectiveMetadata<'a>],
 ) -> OutputExpression<'a> {
-    let mut items = Vec::new_in(&allocator);
+    let mut items = Vec::with_capacity_in(host_directives.len(), &allocator);
+    let mut has_forward_ref = false;
 
     for hd in host_directives {
-        let mut entries = Vec::new_in(&allocator);
-
-        // directive
-        let directive_expr = if hd.is_forward_reference {
-            // Wrap in forwardRef()
-            let mut args = Vec::new_in(&allocator);
-
-            let fn_params = Vec::new_in(&allocator);
-            let mut fn_body = Vec::new_in(&allocator);
-            fn_body.push(OutputStatement::Return(Box::new_in(
-                crate::output::ast::ReturnStatement {
-                    value: hd.directive.clone_in(allocator),
-                    source_span: None,
-                },
+        let directive = hd.directive.clone_in(allocator);
+        // Non-empty mappings were written too, whatever built the metadata.
+        if hd.has_mapping_keys || !hd.inputs.is_empty() || !hd.outputs.is_empty() {
+            let mut entries = Vec::new_in(&allocator);
+            entries.push(LiteralMapEntry::new(Ident::from("directive"), directive, false));
+            if !hd.inputs.is_empty() {
+                let inputs_array = create_host_directive_mappings_array(allocator, &hd.inputs);
+                entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_array, false));
+            }
+            if !hd.outputs.is_empty() {
+                let outputs_array = create_host_directive_mappings_array(allocator, &hd.outputs);
+                entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_array, false));
+            }
+            items.push(OutputExpression::LiteralMap(Box::new_in(
+                LiteralMapExpr { entries, source_span: None },
                 &allocator,
             )));
-
-            let arrow_fn = OutputExpression::Function(Box::new_in(
-                FunctionExpr {
-                    name: None,
-                    params: fn_params,
-                    statements: fn_body,
-                    source_span: None,
-                },
-                &allocator,
-            ));
-
-            args.push(arrow_fn);
-
-            let forward_ref = OutputExpression::ReadProp(Box::new_in(
-                ReadPropExpr {
-                    receiver: Box::new_in(
-                        OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
-                            &allocator,
-                        )),
-                        &allocator,
-                    ),
-                    name: Ident::from(Identifiers::FORWARD_REF),
-                    optional: false,
-                    source_span: None,
-                },
-                &allocator,
-            ));
-
-            OutputExpression::InvokeFunction(Box::new_in(
-                InvokeFunctionExpr {
-                    fn_expr: Box::new_in(forward_ref, &allocator),
-                    args,
-                    pure: false,
-                    optional: false,
-                    source_span: None,
-                },
-                &allocator,
-            ))
         } else {
-            hd.directive.clone_in(allocator)
-        };
-
-        entries.push(LiteralMapEntry::new(Ident::from("directive"), directive_expr, false));
-
-        // inputs (if any)
-        if !hd.inputs.is_empty() {
-            let inputs_array = create_host_directive_mappings_array(allocator, &hd.inputs);
-            entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_array, false));
+            items.push(directive);
         }
-
-        // outputs (if any)
-        if !hd.outputs.is_empty() {
-            let outputs_array = create_host_directive_mappings_array(allocator, &hd.outputs);
-            entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_array, false));
-        }
-
-        items.push(OutputExpression::LiteralMap(Box::new_in(
-            LiteralMapExpr { entries, source_span: None },
-            &allocator,
-        )));
+        has_forward_ref |= hd.is_forward_reference;
     }
 
-    OutputExpression::LiteralArray(Box::new_in(
+    let array = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: items, source_span: None },
+        &allocator,
+    ));
+    if !has_forward_ref {
+        return array;
+    }
+    let mut statements = Vec::with_capacity_in(1, &allocator);
+    statements.push(OutputStatement::Return(Box::new_in(
+        crate::output::ast::ReturnStatement { value: array, source_span: None },
+        &allocator,
+    )));
+    OutputExpression::Function(Box::new_in(
+        FunctionExpr { name: None, params: Vec::new_in(&allocator), statements, source_span: None },
         &allocator,
     ))
 }
@@ -1004,9 +960,8 @@ fn create_host_directives_feature_arg<'a>(
 ///
 /// Format: `['internalName', 'publicName', 'internalName2', 'publicName2']`
 ///
-/// Shared between directive and component compilers, mirroring Angular's
-/// `createHostDirectivesMappingArray` in `view/compiler.ts`.
-pub(crate) fn create_host_directive_mappings_array<'a>(
+/// Mirrors Angular's `createHostDirectivesMappingArray` in `view/compiler.ts`.
+fn create_host_directive_mappings_array<'a>(
     allocator: &'a Allocator,
     mappings: &[(Ident<'a>, Ident<'a>)],
 ) -> OutputExpression<'a> {
@@ -1534,6 +1489,7 @@ mod tests {
         host_directives.push(R3HostDirectiveMetadata {
             directive: directive_expr,
             is_forward_reference: false,
+            has_mapping_keys: true,
             inputs: host_directive_inputs,
             outputs: Vec::new_in(&&allocator),
         });
@@ -1599,6 +1555,7 @@ mod tests {
         host_directives.push(R3HostDirectiveMetadata {
             directive: directive_expr,
             is_forward_reference: false,
+            has_mapping_keys: true,
             inputs: Vec::new_in(&&allocator),
             outputs: host_directive_outputs,
         });

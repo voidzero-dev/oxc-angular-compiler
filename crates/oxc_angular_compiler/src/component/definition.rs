@@ -25,7 +25,8 @@ use super::metadata::{
 use super::namespace_registry::NamespaceRegistry;
 use super::transform::TransformOptions;
 use crate::directive::{
-    create_host_directive_mappings_array, create_inputs_literal, create_outputs_literal,
+    R3HostDirectiveMetadata, create_host_directives_feature_arg, create_inputs_literal,
+    create_outputs_literal,
 };
 use crate::factory::create_invalid_factory_call;
 use crate::output::ast::{
@@ -1169,7 +1170,8 @@ fn create_directive_reference<'a>(
 
 /// Create the host directives argument array.
 ///
-/// Format depends on whether directives have input/output mappings:
+/// Builds each directive reference (namespaced for imports) and hands them to
+/// the `createHostDirectivesFeatureArg` port the directive compiler uses:
 /// - Simple: [Directive1, Directive2] or [i1.ExternalDir] for imports
 /// - With mappings: [{ directive: Directive1, inputs: ['prop', 'alias'] }]
 /// - Forward ref: function() { return [Directive1] }
@@ -1180,75 +1182,17 @@ fn create_host_directives_arg<'a>(
     host_directives: &[HostDirectiveMetadata<'a>],
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
-    let mut expressions: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(host_directives.len(), &allocator);
-    let mut has_forward_ref = false;
-
-    for directive in host_directives {
-        if directive.is_forward_reference {
-            has_forward_ref = true;
-        }
-
-        // Create the directive reference (potentially namespaced)
-        let directive_ref = create_directive_reference(allocator, directive, namespace_registry);
-
-        if !directive.has_mappings() {
-            // Simple case: just the directive type
-            expressions.push(directive_ref);
-        } else {
-            // Complex case: object with directive, inputs, outputs
-            let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(&allocator);
-
-            // directive: DirectiveClass (or i1.DirectiveClass for imports)
-            entries.push(LiteralMapEntry::new(Ident::from("directive"), directive_ref, false));
-
-            // inputs: ['internalName', 'publicName', ...]
-            if !directive.inputs.is_empty() {
-                let inputs_array =
-                    create_host_directive_mappings_array(allocator, &directive.inputs);
-                entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_array, false));
-            }
-
-            // outputs: ['internalName', 'publicName', ...]
-            if !directive.outputs.is_empty() {
-                let outputs_array =
-                    create_host_directive_mappings_array(allocator, &directive.outputs);
-                entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_array, false));
-            }
-
-            expressions.push(OutputExpression::LiteralMap(Box::new_in(
-                LiteralMapExpr { entries, source_span: None },
-                &allocator,
-            )));
-        }
-    }
-
-    let array_expr = OutputExpression::LiteralArray(Box::new_in(
-        LiteralArrayExpr { entries: expressions, source_span: None },
-        &allocator,
-    ));
-
-    // If there's a forward reference, wrap in: function() { return [directives] }
-    if has_forward_ref {
-        let mut statements: OxcVec<'a, OutputStatement<'a>> =
-            OxcVec::with_capacity_in(1, &allocator);
-        statements.push(OutputStatement::Return(Box::new_in(
-            ReturnStatement { value: array_expr, source_span: None },
-            &allocator,
-        )));
-
-        OutputExpression::Function(Box::new_in(
-            FunctionExpr {
-                name: None,
-                params: OxcVec::new_in(&allocator),
-                statements,
-                source_span: None,
-            },
-            &allocator,
-        ))
-    } else {
-        array_expr
-    }
+    let entries: std::vec::Vec<_> = host_directives
+        .iter()
+        .map(|directive| R3HostDirectiveMetadata {
+            directive: create_directive_reference(allocator, directive, namespace_registry),
+            is_forward_reference: directive.is_forward_reference,
+            has_mapping_keys: directive.has_mapping_keys,
+            inputs: OxcVec::from_iter_in(directive.inputs.iter().copied(), &allocator),
+            outputs: OxcVec::from_iter_in(directive.outputs.iter().copied(), &allocator),
+        })
+        .collect();
+    create_host_directives_feature_arg(allocator, &entries)
 }
 
 /// Generate `ɵɵExternalStylesFeature(['style.css', ...])` expression.

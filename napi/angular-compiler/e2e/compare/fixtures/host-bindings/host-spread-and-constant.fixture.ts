@@ -1,14 +1,11 @@
 /**
  * `host` metadata that is not a plain literal: a spread of an object, or a host
  * that is itself a constant. ngtsc evaluates the expression statically, so each
- * compiles to the same bindings as the entries written out.
- *
- * Fixtures keep to one plain attribute, because the order of several in
- * `hostAttrs` is a separate documented difference (see known-differences.ts).
+ * compiles to the same bindings as the entries written out, in the same order.
  */
 import type { Fixture } from '../types.js'
 
-const ALL = `{ '(click)': 'go()', '[title]': 't', '[class.x]': 'on', '[style.width]': 'w', '[attr.aria-label]': 't', role: 'button', class: 'a b', style: 'color: red' }`
+const ALL = `{ '(click)': 'go()', '[title]': 't', '[class.x]': 'on', '[style.width]': 'w', '[attr.aria-label]': 't', role: 'button', tabindex: '0', 'data-kind': 'x', class: 'a b', style: 'color: red' }`
 
 function host(
   name: string,

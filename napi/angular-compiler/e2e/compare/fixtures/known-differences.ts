@@ -32,7 +32,6 @@ export interface KnownDifference {
   reasons: string[]
 }
 
-const HOST_ATTRS_ORDER = 'hostAttrs are emitted in a different order'
 const CSS_WS = 'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
 const DEBUG_NAME =
   'signal(), input() and the other signal APIs lack the ngDevMode `debugName` argument ngtsc adds to class fields'
@@ -47,7 +46,8 @@ const ALIASED_INJECTABLE =
 
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
-const NG_MODULE_SCOPE_ORDER = 'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
+const NG_MODULE_SCOPE_ORDER =
+  'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
 const DEBUG_INFO_PATH =
   'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
 const DEBUG_INFO_LINE =
@@ -160,10 +160,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     ],
     reasons: [DOM_ONLY],
   },
-  'full-transform/full-transform-host-attribute': {
-    fields: ['HostAttributeComponent.ɵcmp'],
-    reasons: [HOST_ATTRS_ORDER],
-  },
   'full-transform/full-transform-onpush': {
     fields: ['OnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY],
@@ -171,16 +167,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'full-transform/transform-api-onpush': {
     fields: ['OnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY],
-  },
-  'host-bindings/host-attribute': {
-    fields: ['HostAttributeComponent.ɵcmp'],
-    reasons: [HOST_ATTRS_ORDER],
-  },
-  'host-directives/host-directives-empty-mappings': {
-    fields: ['EmptyMappingsComponent.ɵcmp'],
-    reasons: [
-      'HostDirectivesFeature receives the directive class where Angular passes { directive }',
-    ],
   },
   'host-directives/host-directives-with-change-detection': {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],

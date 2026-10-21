@@ -21,11 +21,12 @@ mod metadata;
 mod property_decorators;
 mod query;
 
-pub(crate) use compiler::create_host_directive_mappings_array;
+pub(crate) use compiler::create_host_directives_feature_arg;
 pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
+pub(crate) use decorator::evaluate_host_directives;
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{
     HostKey, angular_decorator_config, evaluate_host_metadata, evaluate_styles,
@@ -45,15 +46,16 @@ pub(crate) use dts_type::{quote as ts_string_literal, quote_literal as quote_str
 pub use evaluator::input_transform_types;
 #[cfg(feature = "cross_file_elision")]
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
+pub(crate) use metadata::{MemberHostBindings, merge_host_bindings};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,
 };
 pub(crate) use property_decorators::{
     angular_class_decorator, angular_member_decorator, angular_param_decorator,
-    decorator_written_name, extract_host_bindings_in, extract_host_listeners_in,
-    is_angular_core_decorator, parse_decorator_queries, try_parse_signal_input,
-    try_parse_signal_model, try_parse_signal_output, unwrap_initializer_api_expr,
+    decorator_written_name, is_angular_core_decorator, parse_decorator_queries,
+    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
+    unwrap_initializer_api_expr,
 };
 pub use property_decorators::{
     extract_class_queries, extract_content_queries, extract_host_bindings, extract_host_listeners,
