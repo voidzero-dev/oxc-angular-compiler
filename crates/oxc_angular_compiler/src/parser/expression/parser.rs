@@ -23,6 +23,14 @@ use crate::util::ParseError;
 use super::TemplateBindingParseResult;
 use super::lexer::{Lexer, Token};
 
+/// Angular's error for an interpolation with a blank expression (`{{ }}`), raised by
+/// `splitInterpolation`; `column` is the offset of the `{{` in `input`.
+pub fn blank_interpolation_error(column: usize, input: &str) -> String {
+    format!(
+        "Blank expressions are not allowed in interpolated strings at column {column} in [{input}]"
+    )
+}
+
 /// Helper to capitalize the first character of a string.
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
@@ -107,11 +115,9 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// Creates a new parser.
     pub fn new(allocator: &'a Allocator, source: &'a str) -> Self {
-        // Strip comments from the source before tokenizing
-        let stripped_source = Self::strip_comments(source);
-        // Allocate the stripped source in the allocator to get 'a lifetime
-        let stripped_ref: &'a str = allocator.alloc_str(&stripped_source);
-        let lexer = Lexer::new(allocator, stripped_ref);
+        // Strip comments from the source before tokenizing. The stripped source is a prefix
+        // of `source`, so it is borrowed rather than copied.
+        let lexer = Lexer::new(allocator, Self::strip_comments(source));
         let tokens = lexer.tokenize();
 
         // Collect error tokens from the lexer
@@ -169,9 +175,11 @@ impl<'a> Parser<'a> {
     ///
     /// Comments are only recognized outside of quoted strings.
     /// This matches Angular's behavior in `_stripComments`.
-    fn strip_comments(input: &str) -> String {
-        let comment_start = Self::find_comment_start(input);
-        if let Some(idx) = comment_start { input[..idx].to_string() } else { input.to_string() }
+    fn strip_comments(input: &str) -> &str {
+        match Self::find_comment_start(input) {
+            Some(idx) => &input[..idx],
+            None => input,
+        }
     }
 
     /// Finds the start index of a `//` comment, respecting quoted strings.
@@ -975,6 +983,11 @@ impl<'a> Parser<'a> {
         start_delimiter: &str,
         end_delimiter: &str,
     ) -> Option<ParseResult<'a>> {
+        // Text without a start delimiter has no interpolation.
+        if !self.source.contains(start_delimiter) {
+            return None;
+        }
+
         // Find interpolation boundaries
         let start_len = start_delimiter.len();
         let end_len = end_delimiter.len();
@@ -999,6 +1012,14 @@ impl<'a> Parser<'a> {
                     strings.push(Ident::from_in(text, &self.allocator));
 
                     let expr_text = &self.source[expr_start..expr_start + end_idx];
+                    // Angular's `splitInterpolation` reports `{{ }}` and still parses it
+                    // (to an empty expression).
+                    if expr_text.trim().is_empty() {
+                        self.errors.push(ParseError::new(
+                            Default::default(),
+                            blank_interpolation_error(abs_start, self.source),
+                        ));
+                    }
 
                     // Parse the expression
                     let expr_parser = Parser::with_offset(
