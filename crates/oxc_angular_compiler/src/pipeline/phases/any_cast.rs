@@ -20,34 +20,23 @@ use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilati
 /// - `$any(value)` → `value`
 /// - `$any(obj.prop)` → `obj.prop`
 pub fn delete_any_casts(job: &mut ComponentCompilationJob<'_>) {
-    let allocator = job.allocator;
+    for view in job.all_views_mut() {
+        // Process create operations
+        for op in view.create.iter_mut() {
+            transform_expressions_in_create_op(
+                op,
+                &|expr, _flags| remove_any_cast(expr),
+                VisitorContextFlag::NONE,
+            );
+        }
 
-    // Process each view
-    let view_xrefs: Vec<_> = job.all_views().map(|v| v.xref).collect();
-
-    for xref in view_xrefs {
-        if let Some(view) = job.view_mut(xref) {
-            // Process create operations
-            for op in view.create.iter_mut() {
-                transform_expressions_in_create_op(
-                    op,
-                    &|expr, _flags| {
-                        remove_any_cast(expr, &allocator);
-                    },
-                    VisitorContextFlag::NONE,
-                );
-            }
-
-            // Process update operations
-            for op in view.update.iter_mut() {
-                transform_expressions_in_update_op(
-                    op,
-                    &|expr, _flags| {
-                        remove_any_cast(expr, &allocator);
-                    },
-                    VisitorContextFlag::NONE,
-                );
-            }
+        // Process update operations
+        for op in view.update.iter_mut() {
+            transform_expressions_in_update_op(
+                op,
+                &|expr, _flags| remove_any_cast(expr),
+                VisitorContextFlag::NONE,
+            );
         }
     }
 }
@@ -64,25 +53,23 @@ pub fn delete_any_casts(job: &mut ComponentCompilationJob<'_>) {
 /// e.fn instanceof ir.LexicalReadExpr &&
 /// e.fn.name === '$any'
 /// ```
-fn remove_any_cast<'a>(expr: &mut IrExpression<'a>, allocator: &'a oxc_allocator::Allocator) {
+fn remove_any_cast(expr: &mut IrExpression<'_>) {
     // Check if this is a ResolvedCall with LexicalRead("$any") as the receiver
     // This is how $any(arg) is represented after convert_ast_to_ir:
     // - $any on implicit receiver becomes LexicalRead("$any")
     // - The call becomes ResolvedCall(receiver: LexicalRead("$any"), args: [...])
-    if let IrExpression::ResolvedCall(call) = expr {
-        if let IrExpression::LexicalRead(lexical_read) = call.receiver.as_ref() {
-            if lexical_read.name.as_str() == "$any" {
-                // This is a $any(arg) call - replace with the argument
-                if call.args.len() == 1 {
-                    // Take the single argument and replace the expression
-                    // We need to clone the argument since we can't move out of a Box
-                    let arg = &call.args[0];
-                    *expr = arg.clone_in(allocator);
-                }
-                // If args.len() != 1, leave as-is (will be caught by type checker)
-            }
-        }
+    let IrExpression::ResolvedCall(call) = expr else { return };
+    let is_any_cast = matches!(
+        call.receiver.as_ref(),
+        IrExpression::LexicalRead(lexical_read) if lexical_read.name.as_str() == "$any"
+    );
+    // If args.len() != 1, leave as-is (will be caught by type checker)
+    if !is_any_cast || call.args.len() != 1 {
+        return;
     }
+    // This is a $any(arg) call - move the argument out and put it in the call's place.
+    let Some(arg) = call.args.pop() else { return };
+    *expr = arg;
     // Note: We only handle ResolvedCall with LexicalRead("$any") as receiver.
     // Standalone LexicalRead("$any") should not be transformed - it's the receiver
     // that the traversal visits before visiting the call. Only the call itself
@@ -93,15 +80,11 @@ fn remove_any_cast<'a>(expr: &mut IrExpression<'a>, allocator: &'a oxc_allocator
 ///
 /// Host version - only processes the root unit (no embedded views).
 pub fn delete_any_casts_for_host(job: &mut HostBindingCompilationJob<'_>) {
-    let allocator = job.allocator;
-
     // Process create operations
     for op in job.root.create.iter_mut() {
         transform_expressions_in_create_op(
             op,
-            &|expr, _flags| {
-                remove_any_cast(expr, &allocator);
-            },
+            &|expr, _flags| remove_any_cast(expr),
             VisitorContextFlag::NONE,
         );
     }
@@ -110,9 +93,7 @@ pub fn delete_any_casts_for_host(job: &mut HostBindingCompilationJob<'_>) {
     for op in job.root.update.iter_mut() {
         transform_expressions_in_update_op(
             op,
-            &|expr, _flags| {
-                remove_any_cast(expr, &allocator);
-            },
+            &|expr, _flags| remove_any_cast(expr),
             VisitorContextFlag::NONE,
         );
     }

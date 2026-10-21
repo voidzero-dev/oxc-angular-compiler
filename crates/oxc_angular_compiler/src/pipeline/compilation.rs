@@ -228,6 +228,11 @@ pub struct ComponentCompilationJob<'a> {
     /// collision-free alias (`i0_1`, ...) when the source file already binds
     /// `i0` or another namespace import to `@angular/core`.
     pub core_namespace: Ident<'a>,
+    /// Whether `generate_arrow_functions` marked any arrow function as hoisted.
+    ///
+    /// No later phase creates hoisted arrow functions, so while this is `false`
+    /// every view's `functions` list is empty and refreshing it can be skipped.
+    pub has_hoisted_arrow_functions: bool,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
 }
@@ -280,6 +285,7 @@ impl<'a> ComponentCompilationJob<'a> {
             angular_version: None,
             legacy_optional_chaining: None,
             core_namespace: Ident::from(crate::r3::CORE_ALIAS),
+            has_hoisted_arrow_functions: false,
             diagnostics: std::vec::Vec::new(),
         }
     }
@@ -691,6 +697,8 @@ pub struct HostBindingCompilationJob<'a> {
     /// Namespace identifier used for `@angular/core` runtime imports.
     /// See [`ComponentCompilationJob::core_namespace`].
     pub core_namespace: Ident<'a>,
+    /// See [`ComponentCompilationJob::has_hoisted_arrow_functions`].
+    pub has_hoisted_arrow_functions: bool,
 }
 
 impl<'a> HostBindingCompilationJob<'a> {
@@ -739,6 +747,7 @@ impl<'a> HostBindingCompilationJob<'a> {
             angular_version: None,
             legacy_optional_chaining: None,
             core_namespace: Ident::from(crate::r3::CORE_ALIAS),
+            has_hoisted_arrow_functions: false,
         }
     }
 

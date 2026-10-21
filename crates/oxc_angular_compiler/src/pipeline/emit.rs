@@ -11,7 +11,6 @@ use crate::ir::expression::IrExpression;
 use crate::output::ast::{
     BinaryOperator, BinaryOperatorExpr, DeclareFunctionStmt, FnParam, FunctionExpr, IfStmt,
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadVarExpr, StmtModifier,
-    clone_output_statement,
 };
 use crate::r3::{CORE, Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
 use oxc_allocator::Box;
@@ -50,7 +49,7 @@ pub fn transform_host(job: &mut HostBindingCompilationJob<'_>) {
 /// Returns the root template function expression. Child views are added to
 /// the job's constant pool as declarations.
 pub fn emit_template_fn<'a>(job: &mut ComponentCompilationJob<'a>) -> FunctionExpr<'a> {
-    let root_fn = emit_view(job.allocator, &job.root);
+    let root_fn = emit_view(job.allocator, &mut job.root);
 
     // Emit child views depth-first, adding them to job.pool.statements
     emit_child_views_to_job(job);
@@ -91,15 +90,15 @@ fn emit_child_views_recursive<'a>(
         emit_child_views_recursive(job, child_xref, all_xrefs);
 
         // Then emit this child view
-        if let Some(unit) = job.views.get(&child_xref) {
+        if let Some(unit) = job.views.get_mut(&child_xref) {
             let view_fn = emit_view(job.allocator, unit);
 
-            if let Some(fn_name) = view_fn.name.clone() {
+            if let Some(fn_name) = view_fn.name {
                 let fn_stmt = OutputStatement::DeclareFunction(Box::new_in(
                     DeclareFunctionStmt {
                         name: fn_name,
-                        params: clone_params(job.allocator, &view_fn.params),
-                        statements: clone_statements(job.allocator, &view_fn.statements),
+                        params: view_fn.params,
+                        statements: view_fn.statements,
                         modifiers: StmtModifier::NONE,
                         source_span: None,
                     },
@@ -114,13 +113,14 @@ fn emit_child_views_recursive<'a>(
 /// Emit a template function for an individual view.
 ///
 /// After the reify phase, view.create_statements and view.update_statements
-/// contain the JavaScript statements for the template function.
-fn emit_view<'a>(allocator: &'a Allocator, view: &ViewCompilationUnit<'a>) -> FunctionExpr<'a> {
+/// contain the JavaScript statements for the template function. They are moved
+/// into the function, leaving the view's lists empty.
+fn emit_view<'a>(allocator: &'a Allocator, view: &mut ViewCompilationUnit<'a>) -> FunctionExpr<'a> {
     let fn_name = view.fn_name.clone();
 
-    // Clone the statements from the view (reify phase has populated these)
-    let create_statements = clone_statements(allocator, &view.create_statements);
-    let update_statements = clone_statements(allocator, &view.update_statements);
+    // Move the statements out of the view (reify phase has populated these)
+    let create_statements = take_statements(allocator, &mut view.create_statements);
+    let update_statements = take_statements(allocator, &mut view.update_statements);
 
     // Generate rf block conditions
     // Angular templates use a render flag (rf) to distinguish between create and update phases:
@@ -144,28 +144,12 @@ fn emit_view<'a>(allocator: &'a Allocator, view: &ViewCompilationUnit<'a>) -> Fu
     FunctionExpr { name: fn_name, params, statements: body, source_span: None }
 }
 
-/// Clone a vec of statements for use in emission.
-fn clone_statements<'a>(
+/// Move the statements out of `statements`, leaving it empty.
+fn take_statements<'a>(
     allocator: &'a Allocator,
-    statements: &OxcVec<'a, OutputStatement<'a>>,
+    statements: &mut OxcVec<'a, OutputStatement<'a>>,
 ) -> OxcVec<'a, OutputStatement<'a>> {
-    let mut result = OxcVec::new_in(&allocator);
-    for stmt in statements.iter() {
-        result.push(clone_output_statement(stmt, &allocator));
-    }
-    result
-}
-
-/// Clone function parameters.
-fn clone_params<'a>(
-    allocator: &'a Allocator,
-    params: &OxcVec<'a, FnParam<'a>>,
-) -> OxcVec<'a, FnParam<'a>> {
-    let mut result = OxcVec::new_in(&allocator);
-    for param in params.iter() {
-        result.push(FnParam { name: param.name.clone() });
-    }
-    result
+    std::mem::replace(statements, OxcVec::new_in(&allocator))
 }
 
 /// Generate an if block for the given render flag.
@@ -221,18 +205,19 @@ fn maybe_generate_rf_block<'a>(
 
 /// Emit a host binding function from HostBindingCompilationJob.
 ///
-/// Returns None if there are no host bindings.
+/// Returns None if there are no host bindings. The root unit's statements are
+/// moved into the function, leaving its lists empty.
 ///
 /// Ported from Angular's `emitHostBindingFunction` in `emit.ts`.
 pub fn emit_host_binding_function<'a>(
-    job: &HostBindingCompilationJob<'a>,
+    job: &mut HostBindingCompilationJob<'a>,
 ) -> Option<FunctionExpr<'a>> {
     let allocator = job.allocator;
-    let unit = &job.root;
+    let unit = &mut job.root;
 
-    // Clone the statements from the unit (reify phase has populated these)
-    let create_statements = clone_statements(allocator, &unit.create_statements);
-    let update_statements = clone_statements(allocator, &unit.update_statements);
+    // Move the statements out of the unit (reify phase has populated these)
+    let create_statements = take_statements(allocator, &mut unit.create_statements);
+    let update_statements = take_statements(allocator, &mut unit.update_statements);
 
     // Return None if there are no statements
     if create_statements.is_empty() && update_statements.is_empty() {
@@ -307,10 +292,8 @@ pub fn compile_template<'a>(
         )));
     }
 
-    // Add child view function declarations from job.pool
-    for stmt in job.pool.statements.iter() {
-        declarations.push(clone_output_statement(stmt, &allocator));
-    }
+    // Move the child view function declarations out of job.pool
+    declarations.extend(take_statements(allocator, &mut job.pool.statements));
 
     TemplateCompilationResult { template_fn, declarations }
 }
@@ -1651,9 +1634,7 @@ pub fn compile_host_bindings<'a>(
             &allocator,
         )));
     }
-    for stmt in job.pool.statements.iter() {
-        declarations.push(clone_output_statement(stmt, &allocator));
-    }
+    declarations.extend(take_statements(allocator, &mut job.pool.statements));
 
     HostBindingCompilationResult { host_binding_fn, host_attrs, host_vars, declarations }
 }

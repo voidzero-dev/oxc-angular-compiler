@@ -18,23 +18,31 @@ use oxc_allocator::Box;
 use crate::ir::enums::{BindingKind, CompatibilityMode};
 use crate::ir::expression::IrExpression;
 use crate::ir::ops::{CreateOp, ExtractedAttributeOp, XrefId};
-use crate::output::ast::{LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression};
+use crate::output::ast::{
+    LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
+    TaggedTemplateLiteralExpr, TemplateLiteralElement, TemplateLiteralExpr,
+};
 use crate::pipeline::compilation::{
     ComponentCompilationJob, ConstValue, HostBindingCompilationJob,
 };
+use crate::pipeline::conversion::cooked_to_raw_text;
 use crate::pipeline::selector::{parse_selector_to_r3_selector, r3_selector_to_output_expr};
 
 /// Represents an attribute value that can be either a string literal or an i18n variable reference.
 ///
 /// This is needed to support i18n attributes where the value is a reference to an i18n
 /// variable (e.g., I18N_0) rather than a literal string.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum AttributeValue<'a> {
     /// A string literal value.
     String(Ident<'a>),
     /// An i18n variable reference (stores just the variable name for efficient comparison).
     /// This will be serialized as a ReadVar expression in the const array.
     I18nVar(Ident<'a>),
+    /// Any other value expression: a string literal tagged with its trusted value
+    /// function (`i0.ɵɵtrustConstantHtml`...``), or an i18n variable wrapped in a
+    /// sanitizer by `resolve_i18n_attr_sanitizers`.
+    Expression(OutputExpression<'a>),
 }
 
 /// Marker values for attribute arrays (matches Angular's AttributeMarker enum).
@@ -64,6 +72,10 @@ enum AttributeMarker {
 /// where duplicate attribute, class, and style values are only allowed in
 /// TemplateDefinitionBuilder compatibility mode.
 struct ElementAttributes<'a> {
+    /// Allocator for the value expressions built by `add`.
+    allocator: &'a oxc_allocator::Allocator,
+    /// Namespace of `@angular/core` imports (`i0`), for trusted value functions.
+    core_namespace: Ident<'a>,
     /// Compatibility mode - determines whether duplicates are allowed.
     compatibility: CompatibilityMode,
     /// Tracks known (kind, name) pairs to prevent duplicates.
@@ -88,8 +100,14 @@ struct ElementAttributes<'a> {
 
 impl<'a> ElementAttributes<'a> {
     /// Creates a new ElementAttributes with the specified compatibility mode.
-    fn new(compatibility: CompatibilityMode) -> Self {
+    fn new(
+        allocator: &'a oxc_allocator::Allocator,
+        core_namespace: Ident<'a>,
+        compatibility: CompatibilityMode,
+    ) -> Self {
         Self {
+            allocator,
+            core_namespace,
             compatibility,
             known: std::collections::HashMap::default(),
             attributes: std::vec::Vec::new(),
@@ -153,7 +171,7 @@ impl<'a> ElementAttributes<'a> {
             BindingKind::Attribute => {
                 // For attributes, we store namespace, name, and value
                 // Extract the actual value from the expression if available
-                let value = Self::extract_attribute_value(attr);
+                let value = self.extract_attribute_value(attr);
 
                 // Check for ngProjectAs attribute - store its value for special handling
                 // ngProjectAs must have a string literal value, not an i18n variable reference
@@ -170,7 +188,7 @@ impl<'a> ElementAttributes<'a> {
             }
             BindingKind::StyleProperty => {
                 // Styles only support string values, not i18n variable references
-                let value = Self::extract_attribute_value(attr);
+                let value = self.extract_attribute_value(attr);
                 let string_value = match value {
                     Some(AttributeValue::String(s)) => Some(s),
                     _ => None,
@@ -214,7 +232,7 @@ impl<'a> ElementAttributes<'a> {
         match attr.binding_kind {
             BindingKind::Attribute => {
                 // For attributes, we store namespace, name, and value
-                let value = Self::extract_attribute_value(attr);
+                let value = self.extract_attribute_value(attr);
 
                 // Check for ngProjectAs attribute - store its value for special handling
                 // ngProjectAs must have a string literal value, not an i18n variable reference
@@ -231,7 +249,7 @@ impl<'a> ElementAttributes<'a> {
             }
             BindingKind::StyleProperty => {
                 // Styles only support string values, not i18n variable references
-                let value = Self::extract_attribute_value(attr);
+                let value = self.extract_attribute_value(attr);
                 let string_value = match value {
                     Some(AttributeValue::String(s)) => Some(s),
                     _ => None,
@@ -261,7 +279,20 @@ impl<'a> ElementAttributes<'a> {
     /// For static attributes, the value is stored as a literal string expression.
     /// For i18n attributes, the value may be a ReadVar expression referencing an i18n variable.
     /// For truthy expressions (e.g., boolean attributes), we return an empty string.
-    fn extract_attribute_value(attr: &ExtractedAttributeOp<'a>) -> Option<AttributeValue<'a>> {
+    ///
+    /// A string literal with a trusted value function becomes a tagged template, as in
+    /// Angular's `ElementAttributes.add`:
+    /// ```typescript
+    /// if (trustedValueFn !== null && ir.isStringLiteral(value)) {
+    ///   array.push(o.taggedTemplate(trustedValueFn, new o.TemplateLiteralExpr(...)));
+    /// } else {
+    ///   array.push(value);
+    /// }
+    /// ```
+    fn extract_attribute_value(
+        &self,
+        attr: &ExtractedAttributeOp<'a>,
+    ) -> Option<AttributeValue<'a>> {
         use crate::ast::expression::AngularExpression;
         use crate::output::ast::LiteralValue;
 
@@ -273,21 +304,26 @@ impl<'a> ElementAttributes<'a> {
                     match output_expr.as_ref() {
                         OutputExpression::Literal(lit) => {
                             if let LiteralValue::String(s) = &lit.value {
-                                return Some(AttributeValue::String(s.clone()));
+                                return Some(self.string_value(attr, s));
                             }
                         }
                         // Handle ReadVar expressions (i18n variable references)
                         OutputExpression::ReadVar(read_var) => {
                             return Some(AttributeValue::I18nVar(read_var.name.clone()));
                         }
-                        _ => {}
+                        // Other expressions (e.g. sanitized i18n variables) are kept as-is.
+                        other => {
+                            return Some(AttributeValue::Expression(
+                                other.clone_in(self.allocator),
+                            ));
+                        }
                     }
                 }
                 // Handle IrExpression::Ast for style values created by parse_extracted_styles
                 IrExpression::Ast(ast_expr) => {
                     if let AngularExpression::LiteralPrimitive(lit) = ast_expr.as_ref() {
                         if let crate::ast::expression::LiteralValue::String(s) = &lit.value {
-                            return Some(AttributeValue::String(s.clone()));
+                            return Some(self.string_value(attr, s));
                         }
                     }
                 }
@@ -297,6 +333,55 @@ impl<'a> ElementAttributes<'a> {
 
         // Fall back to truthy expression check (for boolean attributes)
         if attr.truthy_expression { Some(AttributeValue::String(Ident::from(""))) } else { None }
+    }
+
+    /// A string literal attribute value, tagged with the attribute's trusted value
+    /// function when it has one (e.g. `i0.ɵɵtrustConstantResourceUrl`https://x``).
+    fn string_value(
+        &self,
+        attr: &ExtractedAttributeOp<'a>,
+        value: &Ident<'a>,
+    ) -> AttributeValue<'a> {
+        let Some(trusted_value_fn) = &attr.trusted_value_fn else {
+            return AttributeValue::String(*value);
+        };
+        let allocator = self.allocator;
+        let tag = OutputExpression::ReadProp(Box::new_in(
+            ReadPropExpr {
+                receiver: Box::new_in(
+                    OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: self.core_namespace, source_span: None },
+                        &allocator,
+                    )),
+                    &allocator,
+                ),
+                name: *trusted_value_fn,
+                optional: false,
+                source_span: None,
+            },
+            &allocator,
+        ));
+        let mut elements = OxcVec::with_capacity_in(1, &allocator);
+        elements.push(TemplateLiteralElement {
+            text: *value,
+            raw_text: cooked_to_raw_text(allocator, value.as_str()),
+            source_span: None,
+        });
+        AttributeValue::Expression(OutputExpression::TaggedTemplateLiteral(Box::new_in(
+            TaggedTemplateLiteralExpr {
+                tag: Box::new_in(tag, &allocator),
+                template: Box::new_in(
+                    TemplateLiteralExpr {
+                        elements,
+                        expressions: OxcVec::new_in(&allocator),
+                        source_span: None,
+                    },
+                    &allocator,
+                ),
+                source_span: None,
+            },
+            &allocator,
+        )))
     }
 
     fn is_empty(&self) -> bool {
@@ -342,6 +427,9 @@ fn serialize_attributes<'a>(
                         &allocator,
                     ));
                     elements.push(ConstValue::Expression(read_var));
+                }
+                AttributeValue::Expression(expr) => {
+                    elements.push(ConstValue::Expression(expr.clone_in(allocator)));
                 }
             }
         }
@@ -461,6 +549,9 @@ fn serialize_attributes_to_array_expr<'a>(
                         },
                         &allocator,
                     )));
+                }
+                AttributeValue::Expression(expr) => {
+                    entries.push(expr.clone_in(allocator));
                 }
             }
         }
@@ -622,6 +713,7 @@ enum XrefToAssign {
 pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
     let compatibility = job.compatibility_mode;
+    let core_namespace = job.core_namespace;
 
     // Collect all extracted attributes grouped by target element
     // Ported from const_collection.ts lines 26-37
@@ -639,9 +731,9 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
             loop {
                 let should_remove = if let Some(op) = cursor.current() {
                     if let CreateOp::ExtractedAttribute(attr) = op {
-                        let attrs = all_element_attrs
-                            .entry(attr.target)
-                            .or_insert_with(|| ElementAttributes::new(compatibility));
+                        let attrs = all_element_attrs.entry(attr.target).or_insert_with(|| {
+                            ElementAttributes::new(allocator, core_namespace, compatibility)
+                        });
                         attrs.add(attr);
                         true
                     } else {
@@ -899,7 +991,7 @@ pub fn collect_element_consts_for_host(job: &mut HostBindingCompilationJob<'_>) 
     let compatibility = job.compatibility_mode;
 
     // Collect all extracted attributes from the root unit
-    let mut attrs = ElementAttributes::new(compatibility);
+    let mut attrs = ElementAttributes::new(allocator, job.core_namespace, compatibility);
 
     // First pass: Collect extracted attributes and mark them for removal
     // Use add_for_host which skips Property/TwoWayProperty bindings since those
