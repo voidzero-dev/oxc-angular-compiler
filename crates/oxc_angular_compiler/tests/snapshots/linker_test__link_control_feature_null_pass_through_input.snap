@@ -4,4 +4,4 @@ expression: result.code
 ---
 import * as i0 from "@angular/core";
 export class MyControl {}
-MyControl.ɵdir = i0.ɵɵdefineDirective({ type: MyControl, selectors: [["", "myControl", ""]], signals: true, features: [i0.ɵɵControlFeature(null)] });
+MyControl.ɵdir = /*@__PURE__*/ i0.ɵɵdefineDirective({ type: MyControl, selectors: [["", "myControl", ""]], signals: true, features: [i0.ɵɵControlFeature(null)] });
