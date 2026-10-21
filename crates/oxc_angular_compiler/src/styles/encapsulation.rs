@@ -26,9 +26,9 @@
 //! - `::ng-deep` → removed (deprecated but still supported)
 //! - Media queries, keyframes, etc. → preserved
 
-use std::ops::Range;
+use std::{fmt::Write as _, ops::Range};
 
-use crate::component::AngularVersion;
+use crate::component::{AngularVersion, Prerelease};
 
 /// Comments are replaced by `%COMMENT<n>%` placeholders during processing,
 /// where `<n>` is the comment's index in the extracted list.
@@ -86,6 +86,7 @@ fn strip_comment_placeholders(s: &str) -> (String, String) {
 // Polyfill host markers (matching Angular's shadow_css.ts)
 const POLYFILL_HOST: &str = "-shadowcsshost";
 const POLYFILL_HOST_NO_COMBINATOR: &str = "-shadowcsshost-no-combinator";
+const POLYFILL_HOST_CONTEXT: &str = "-shadowcsscontext";
 
 /// Push a single UTF-8 character starting at byte position `i` from `source` into `result`.
 /// Returns the number of bytes consumed (1 for ASCII, 2-4 for multi-byte).
@@ -113,191 +114,113 @@ fn push_utf8_char(result: &mut String, source: &str, i: usize) -> usize {
 // SafeSelector - Escapes problematic CSS patterns before processing
 // =============================================================================
 
-/// SafeSelector escapes problematic patterns before selector processing
-/// and restores them after. This prevents attribute selector contents,
-/// escaped characters, and :nth-*() expressions from being misinterpreted.
-///
-/// Port of Angular's `SafeSelector` class from shadow_css.ts.
+/// Port of Angular's `SafeSelector`: hides attribute selectors, backslash
+/// escapes and `:nth-*()` arguments behind placeholders while a selector is
+/// split on combinators, so the spaces, `+` and `~` inside them are not taken
+/// for combinators.
+#[derive(Default)]
 struct SafeSelector {
     placeholders: Vec<String>,
     content: String,
 }
 
 impl SafeSelector {
-    /// Creates a new SafeSelector, escaping problematic patterns.
     fn new(selector: &str) -> Self {
         let mut placeholders = Vec::new();
-        let mut index = 0;
-        let mut result = selector.to_string();
 
-        // 1. Escape attribute selectors WITH VALUES: [attr="va lue"] -> __ph-N__
-        // This prevents spaces inside attribute values from being treated as combinators.
-        // We only escape selectors with values (=, ~=, |=, ^=, $=, *=) because:
-        // - Simple attribute presence [attr] doesn't contain problematic characters
-        // - Our generated selectors like [hosta] and [contenta] need to remain visible
-        //   for host detection in contains_host_attr_at_top_level()
-        {
-            let mut new_result = String::new();
-            let bytes = result.as_bytes();
-            let len = bytes.len();
-            let mut i = 0;
-            while i < len {
-                if bytes[i] == b'[' {
-                    // Found start of attribute selector
-                    let attr_start = i;
-                    let mut j = i + 1;
-                    let mut has_value_op = false;
+        // `/(\[[^\]]*\])/g` -> `__ph-N__`
+        let mut escaped = String::with_capacity(selector.len());
+        let mut rest = selector;
+        while let Some(open) = rest.find('[') {
+            let Some(close) = rest[open..].find(']').map(|i| open + i) else {
+                break;
+            };
+            escaped.push_str(&rest[..open]);
+            let _ = write!(escaped, "__ph-{}__", placeholders.len());
+            placeholders.push(rest[open..=close].to_string());
+            rest = &rest[close + 1..];
+        }
+        escaped.push_str(rest);
 
-                    // Scan until we find ] or end of string
-                    while j < len && bytes[j] != b']' {
-                        // Check for value operators: =, ~=, |=, ^=, $=, *=
-                        if bytes[j] == b'=' {
-                            has_value_op = true;
-                        } else if j + 1 < len
-                            && bytes[j + 1] == b'='
-                            && matches!(bytes[j], b'~' | b'|' | b'^' | b'$' | b'*')
-                        {
-                            has_value_op = true;
-                        }
-                        j += 1;
-                    }
-
-                    if j < len && bytes[j] == b']' && has_value_op {
-                        // Found attribute selector with value - escape it
-                        let attr_end = j + 1;
-                        let attr_selector = &result[attr_start..attr_end];
-                        let placeholder = format!("__ph-{}__", index);
-                        placeholders.push(attr_selector.to_string());
-                        index += 1;
-                        new_result.push_str(&placeholder);
-                        i = attr_end;
-                    } else {
-                        // Simple attribute selector without value - keep as-is
-                        new_result.push('[');
-                        i += 1;
-                    }
-                } else {
-                    i += push_utf8_char(&mut new_result, &result, i);
-                }
+        // `/(\\.)/g` -> `__esc-ph-N__` (`.` stops at line terminators)
+        let selector = escaped;
+        let mut escaped = String::with_capacity(selector.len());
+        let mut chars = selector.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\'
+                && let Some(&next) = chars.peek()
+                && !is_js_line_terminator(next)
+            {
+                chars.next();
+                let _ = write!(escaped, "__esc-ph-{}__", placeholders.len());
+                placeholders.push(format!("\\{next}"));
+            } else {
+                escaped.push(c);
             }
-            result = new_result;
         }
 
-        // 2. Escape backslash sequences: \: -> __esc-ph-N__
-        // This handles escaped special characters (e.g., .foo\:bar for class "foo:bar")
-        {
-            let mut new_result = String::new();
-            let bytes = result.as_bytes();
-            let len = bytes.len();
-            let mut i = 0;
-            while i < len {
-                if bytes[i] == b'\\' && i + 1 < len {
-                    // Found escape sequence - capture both backslash and next char
-                    let placeholder = format!("__esc-ph-{}__", index);
-                    let escape_seq = &result[i..i + 2];
-                    placeholders.push(escape_seq.to_string());
-                    index += 1;
-                    new_result.push_str(&placeholder);
-                    i += 2;
-                } else {
-                    i += push_utf8_char(&mut new_result, &result, i);
-                }
-            }
-            result = new_result;
+        // `nthRegex`, `/(:nth-[-\w]+)<_parenSuffix>/g` -> `$1__ph-N__`
+        let selector = escaped;
+        let bytes = selector.as_bytes();
+        let mut content = String::with_capacity(selector.len());
+        let mut copied = 0;
+        let mut at = 0;
+        while let Some(found) = selector[at..].find(":nth-").map(|i| at + i) {
+            let name_end = found
+                + ":nth-".len()
+                + bytes[found + ":nth-".len()..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+                    .count();
+            let close = (name_end > found + ":nth-".len())
+                .then(|| match_paren_suffix(&selector, name_end))
+                .flatten();
+            let Some(close) = close else {
+                at = found + 1;
+                continue;
+            };
+            content.push_str(&selector[copied..name_end]);
+            let _ = write!(content, "__ph-{}__", placeholders.len());
+            placeholders.push(selector[name_end..=close].to_string());
+            copied = close + 1;
+            at = close + 1;
         }
+        content.push_str(&selector[copied..]);
 
-        // 3. Escape :nth-*() expressions: :nth-child(2n + 1) -> :nth-child__ph-N__
-        // This prevents + and spaces inside nth expressions from being treated as combinators.
-        // We need to handle nested parens like :nth-child(3n of :not(p, a), :is(.foo))
-        // Use manual parsing to find matching closing paren (handles any nesting level).
-        let mut new_result = String::new();
-        let mut chars_iter = result.char_indices().peekable();
-
-        while let Some((i, c)) = chars_iter.next() {
-            // Look for :nth-* pattern
-            if c == ':' {
-                let remaining = &result[i..];
-                if remaining.starts_with(":nth-") {
-                    // Find the pseudo name (e.g., :nth-child, :nth-of-type)
-                    let pseudo_end = remaining[5..]
-                        .find(|c: char| !c.is_alphanumeric() && c != '-')
-                        .map(|pos| 5 + pos)
-                        .unwrap_or(remaining.len());
-
-                    let pseudo = &remaining[..pseudo_end];
-
-                    // Check if followed by (
-                    if remaining[pseudo_end..].starts_with('(') {
-                        let paren_start = i + pseudo_end;
-                        // Find matching closing paren
-                        let mut depth = 1;
-                        let mut paren_end = paren_start + 1;
-                        for (j, ch) in result[paren_start + 1..].char_indices() {
-                            match ch {
-                                '(' => depth += 1,
-                                ')' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        paren_end = paren_start + 1 + j;
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if depth == 0 {
-                            // Found matching paren - escape the content
-                            let content = &result[paren_start + 1..paren_end];
-                            let placeholder = format!("__ph-{}__", index);
-                            placeholders.push(format!("({})", content));
-                            index += 1;
-
-                            new_result.push_str(pseudo);
-                            new_result.push_str(&placeholder);
-
-                            // Skip past the processed characters
-                            while let Some(&(idx, _)) = chars_iter.peek() {
-                                if idx <= paren_end {
-                                    chars_iter.next();
-                                } else {
-                                    break;
-                                }
-                            }
-                            continue;
-                        }
-                    }
-                }
-            }
-            new_result.push(c);
-        }
-        result = new_result;
-
-        SafeSelector { placeholders, content: result }
+        Self { placeholders, content }
     }
 
-    /// Returns the escaped content for processing.
-    fn content(&self) -> &str {
-        &self.content
-    }
-
-    /// Restores the original patterns from placeholders.
+    /// `content.replace(/__(?:ph|esc-ph)-(\d+)__/g, (_ph, index) => this.placeholders[+index])`.
+    ///
+    /// A single pass: a placeholder inside a restored value stays as it is.
     fn restore(&self, content: &str) -> String {
-        let mut result = content.to_string();
-
-        // Restore placeholders in reverse order to avoid index shifting issues
-        // Replace __ph-N__ patterns
-        for (idx, replacement) in self.placeholders.iter().enumerate().rev() {
-            let placeholder = format!("__ph-{}__", idx);
-            result = result.replace(&placeholder, replacement);
+        let mut result = String::with_capacity(content.len());
+        let mut copied = 0;
+        let mut from = 0;
+        while let Some(at) = content[from..].find("__").map(|i| from + i) {
+            let rest = &content[at + 2..];
+            let body = rest.strip_prefix("ph-").or_else(|| rest.strip_prefix("esc-ph-"));
+            let parsed = body.and_then(|body| {
+                let digits = body.bytes().take_while(u8::is_ascii_digit).count();
+                (digits > 0 && body[digits..].starts_with("__")).then(|| {
+                    let end = content.len() - body.len() + digits + 2;
+                    (&body[..digits], end)
+                })
+            });
+            let Some((index, end)) = parsed else {
+                from = at + 1;
+                continue;
+            };
+            result.push_str(&content[copied..at]);
+            // An out-of-range index restores as `undefined`, as in JavaScript.
+            match index.parse::<usize>().ok().and_then(|i| self.placeholders.get(i)) {
+                Some(placeholder) => result.push_str(placeholder),
+                None => result.push_str("undefined"),
+            }
+            copied = end;
+            from = end;
         }
-
-        // Replace __esc-ph-N__ patterns
-        for (idx, replacement) in self.placeholders.iter().enumerate().rev() {
-            let placeholder = format!("__esc-ph-{}__", idx);
-            result = result.replace(&placeholder, replacement);
-        }
-
+        result.push_str(&content[copied..]);
         result
     }
 }
@@ -336,7 +259,9 @@ pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
 /// `None` means the latest Angular release. Versions before v22.0.0-rc.0 also
 /// run the legacy Shadow DOM polyfill passes (`polyfill-next-selector`,
 /// `polyfill-rule`, `polyfill-unscoped-rule`, `::shadow`, `::content`); see
-/// [`AngularVersion::uses_shadow_css_polyfills`].
+/// [`AngularVersion::uses_shadow_css_polyfills`]. Versions before
+/// v22.2.0-next.2 predate the CSS nesting support of `ShadowCss`: they scope
+/// a lone `&` and rules without a block, and keep rule bodies as written.
 pub fn shim_css_text_for_version(
     css: &str,
     content_attr: &str,
@@ -365,11 +290,12 @@ pub fn shim_css_text_for_version(
         result = remove_unscoped_rules(&result);
     }
 
-    // Step 3: Handle :host-context() - must be done before :host
-    result = convert_colon_host_context(&result, content_attr, host_attr);
-
-    // Step 4: Handle :host selectors
-    result = convert_colon_host(&result, host_attr);
+    // Step 3: Replace `:host-context(...)` and `:host` with polyfill markers,
+    // then expand them like `_scopeCssText`: `:host` first, then
+    // `:host-context()`. The markers become attributes during scoping.
+    result = insert_polyfill_host(&result);
+    result = convert_colon_host(&result);
+    result = convert_colon_host_context(&result);
 
     // Step 5: Handle ::shadow and ::content (removed in v22)
     if legacy_polyfills {
@@ -383,7 +309,8 @@ pub fn shim_css_text_for_version(
 
     // Step 7: Scope all selectors with the content attribute
     if !content_attr.is_empty() {
-        result = scope_selectors(&result, content_attr, host_attr);
+        let css_nesting = has_css_nesting_support(angular_version);
+        result = scope_selectors(&result, content_attr, host_attr, css_nesting);
     }
 
     // Step 8: Append unscoped rules (without scoping)
@@ -394,7 +321,7 @@ pub fn shim_css_text_for_version(
     // Step 9: Trim, then restore comments. Angular's `_scopeCssText` trims
     // before the comments come back, so newlines kept from a leading or
     // trailing comment survive.
-    restore_comments(result.trim(), &comments)
+    restore_comments(js_trim(&result), &comments)
 }
 
 /// Extract comments and replace them with placeholders.
@@ -966,311 +893,129 @@ pub fn encapsulate_style_for_version(
 }
 
 // =============================================================================
-// Host selector processing
+// JavaScript regex semantics
 // =============================================================================
+//
+// `ShadowCss` is written with regular expressions, and its output (whitespace
+// included) follows from exactly what each one matches. The helpers below
+// reproduce the JavaScript behaviour those expressions rely on.
 
-/// Convert :host-context() selectors with permutation generation.
-///
-/// For a single `:host-context(.dark)`:
-///   - `.dark[host_attr], .dark [host_attr]`
-///
-/// For `:host-context(.one,.two)` (comma-separated inside):
-///   - `.one[host_attr], .one [host_attr], .two[host_attr], .two [host_attr]`
-///
-/// For multiple `:host-context(.a):host-context(.b)`:
-///   - Generates all permutations: `.a.b`, `.a .b`, `.b .a`
-///   - Each with host variants: `perm[host]` and `perm [host]`
-///
-/// When otherSelectors contains `:host`, only one variant per permutation is generated.
-///
-/// See: packages/compiler/src/shadow_css.ts `_combineHostContextSelectors`
-fn convert_colon_host_context(css: &str, content_attr: &str, host_attr: &str) -> String {
-    // IMPORTANT: We must process :host-context only within each CSS rule's selector,
-    // not across the entire CSS. Otherwise, multiple :host-context rules will be
-    // combined exponentially, causing massive output explosion.
-    //
-    // Strategy: Scan through CSS, identify each selector (text before `{`, back to
-    // the previous `{` or `}`), process :host-context only within that selector,
-    // then continue to the next rule. Angular's pattern ends at the next `{` and
-    // applies at any depth, so selectors nested in `@media`/`@supports` count too.
-    // Text that ends at a `}` is a declaration list and is copied as is.
+/// JavaScript's `\s`, which is also what `String.prototype.trim` strips.
+fn is_js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{000B}' | '\u{000C}' | '\r' | ' ' | '\u{00A0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
 
-    let mut result = String::with_capacity(css.len() * 2);
-    let mut chars = css.chars();
-    let mut current_selector = String::new();
-    let mut in_string = false;
-    let mut string_char = '"';
+/// JavaScript's `String.prototype.trim`.
+fn js_trim(s: &str) -> &str {
+    s.trim_matches(is_js_space)
+}
 
-    while let Some(c) = chars.next() {
-        // Handle string literals
-        if in_string || c == '"' || c == '\'' {
-            current_selector.push(c);
-            if !in_string {
-                in_string = true;
-                string_char = c;
-            } else if c == '\\' {
-                // An escaped character (`\"`, `\'`, `\\`) never ends the string.
-                if let Some(next_c) = chars.next() {
-                    current_selector.push(next_c);
-                }
-            } else if c == string_char {
-                in_string = false;
-            }
-            continue;
-        }
+/// A JavaScript line terminator: what `.` never matches and where `^` matches
+/// under the `m` flag.
+fn is_js_line_terminator(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
 
-        match c {
-            '{' => {
-                // End of selector - process :host-context in this selector only
-                let processed_selector = convert_colon_host_context_in_selector(
-                    &current_selector,
-                    content_attr,
-                    host_attr,
-                );
-                result.push_str(&processed_selector);
-                current_selector.clear();
-                result.push('{');
-            }
-            '}' => {
-                result.push_str(&current_selector);
-                current_selector.clear();
-                result.push('}');
-            }
-            _ => current_selector.push(c),
+/// Whether `s` has `pattern` at byte `at`, ignoring ASCII case (the `i` flag).
+fn starts_with_ignore_ascii_case(s: &str, at: usize, pattern: &str) -> bool {
+    s.as_bytes()
+        .get(at..at + pattern.len())
+        .is_some_and(|bytes| bytes.eq_ignore_ascii_case(pattern.as_bytes()))
+}
+
+/// The first byte offset at or after `from` where `pattern` (ASCII) occurs,
+/// ignoring ASCII case.
+fn find_ignore_ascii_case(s: &str, from: usize, pattern: &str) -> Option<usize> {
+    let last = s.len().checked_sub(pattern.len())?;
+    (from..=last).find(|&at| starts_with_ignore_ascii_case(s, at, pattern))
+}
+
+/// Replace every occurrence of `pattern` (ASCII) for which `accept` holds on the
+/// text after it, ignoring ASCII case, like `s.replace(/pattern(?=...)/gi, with)`.
+fn replace_ignore_ascii_case(
+    s: &str,
+    pattern: &str,
+    with: &str,
+    accept: impl Fn(&str) -> bool,
+) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut copied = 0;
+    let mut from = 0;
+    while let Some(at) = find_ignore_ascii_case(s, from, pattern) {
+        let end = at + pattern.len();
+        if accept(&s[end..]) {
+            result.push_str(&s[copied..at]);
+            result.push_str(with);
+            copied = end;
+            from = end;
+        } else {
+            from = at + 1;
         }
     }
-
-    // Handle any remaining selector content
-    if !current_selector.is_empty() {
-        let processed_selector =
-            convert_colon_host_context_in_selector(&current_selector, content_attr, host_attr);
-        result.push_str(&processed_selector);
-    }
-
+    result.push_str(&s[copied..]);
     result
 }
 
-/// Process :host-context within a single CSS selector (before the `{`).
-/// This is called once per CSS rule, preventing exponential multiplication across rules.
-fn convert_colon_host_context_in_selector(
-    selector: &str,
-    content_attr: &str,
-    host_attr: &str,
-) -> String {
-    // Split by top-level commas to handle selector lists
-    // (commas not inside parentheses)
-    let parts: Vec<&str> = split_by_top_level_comma_str(selector);
-
-    let results: Vec<String> = parts
-        .iter()
-        .map(|part| convert_colon_host_context_in_part(part, content_attr, host_attr))
-        .collect();
-
-    results.join(",")
-}
-
-/// Split a string by top-level commas (not inside parentheses or braces).
-fn split_by_top_level_comma_str(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut paren_depth: u32 = 0;
-    let mut brace_depth: u32 = 0;
-
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            '{' => brace_depth += 1,
-            '}' => brace_depth = brace_depth.saturating_sub(1),
-            ',' if paren_depth == 0 && brace_depth == 0 => {
-                result.push(&s[start..i]);
-                start = i + 1;
+/// Whether the text at byte `from` closes an enclosing parenthesis, i.e. matches
+/// `[^)(]*(?:\([^)(]*(?:\([^)(]*(?:\([^)(]*\)[^)(]*)*\)[^)(]*)*\)[^)(]*)*\)`.
+///
+/// `_selectorSplitRe` and the combinator separator of `_applySelectorScope`
+/// use it as a negative lookahead to skip commas and combinators inside
+/// parentheses. Groups before the closing parenthesis may nest three deep.
+fn closes_enclosing_paren(s: &str, from: usize) -> bool {
+    let mut depth = 0u32;
+    for &b in &s.as_bytes()[from..] {
+        match b {
+            b'(' => {
+                depth += 1;
+                if depth > 3 {
+                    return false;
+                }
+            }
+            b')' => {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
             }
             _ => {}
         }
     }
-    result.push(&s[start..]);
-    result
+    false
 }
 
-/// Process :host-context in a single selector part.
-/// Returns true if `after` (the text following a `:host-context` token) begins a
-/// non-empty argument list — `(` then, ignoring whitespace, a character other than
-/// `)`. Mirrors Angular v22's `/:host-context(?=\(\s*[^)\s])/`.
-fn is_nonempty_host_context_arg(after: &str) -> bool {
-    let Some(rest) = after.strip_prefix('(') else {
-        return false;
-    };
-    matches!(rest.trim_start().chars().next(), Some(c) if c != ')')
-}
-
-/// Finds the byte offset of the first `:host-context` that is a real context
-/// selector (followed by a non-empty argument list).
-fn find_valid_host_context(s: &str) -> Option<usize> {
-    let marker = ":host-context";
-    let mut from = 0;
-    while let Some(rel) = s[from..].find(marker) {
-        let pos = from + rel;
-        if is_nonempty_host_context_arg(&s[pos + marker.len()..]) {
-            return Some(pos);
-        }
-        from = pos + marker.len();
-    }
-    None
-}
-
-fn convert_colon_host_context_in_part(css: &str, content_attr: &str, host_attr: &str) -> String {
-    let attr = if host_attr.is_empty() {
-        format!("[{}]", content_attr)
-    } else {
-        format!("[{}]", host_attr)
-    };
-
-    // Find the first :host-context that is actually a context selector, i.e. one
-    // followed by a non-empty argument list. Angular v22 leaves bare
-    // `:host-context`, `:host-context()` and `:host-context( )` literal, so any
-    // such occurrence before the first real one is preserved as a prefix.
-    let host_context_marker = ":host-context";
-    let Some(hc_global_start) = find_valid_host_context(css) else {
-        return css.to_string();
-    };
-
-    // Check if there's a :where() or :is() immediately before the :host-context
-    // Pattern: something:where(:host-context...) or :where(:host-context...)
-    let before_hc = &css[..hc_global_start];
-    let (pseudo_prefix, prefix_start) = find_pseudo_function_before(before_hc);
-
-    // Everything before the pseudo-function (or before :host-context if no pseudo)
-    let preserved_prefix = &css[..prefix_start];
-
-    // The part to process starts from prefix_start
-    let to_process = &css[prefix_start..];
-
-    // Find where the replacement region starts in to_process
-    let hc_local_start = to_process.find(host_context_marker).unwrap_or(0);
-
-    // Build context selector groups by processing all :host-context instances
-    let mut selector_groups: Vec<Vec<String>> = vec![vec![]];
-    let mut current_pos = hc_local_start;
-    let to_process_bytes = to_process.as_bytes();
-
-    while current_pos < to_process.len() {
-        // Find next :host-context
-        let Some(hc_start) = to_process[current_pos..].find(host_context_marker) else {
-            break;
-        };
-        let hc_start = current_pos + hc_start;
-
-        let after_marker = hc_start + host_context_marker.len();
-
-        // Check if followed by (
-        if after_marker >= to_process.len() || to_process_bytes[after_marker] != b'(' {
-            // :host-context with no parens (edge case)
-            // Just skip this :host-context marker and move on
-            current_pos = after_marker;
-            continue;
-        }
-
-        // Find matching closing paren using balanced matching
-        let paren_start = after_marker + 1;
-        let Some(paren_end) = find_matching_paren(to_process, paren_start) else {
-            break; // Unbalanced
-        };
-
-        // Extract the content inside parentheses
-        let inner_content = &to_process[paren_start..paren_end];
-
-        // Split by top-level commas (for :host-context(.a, .b))
-        let comma_separated: Vec<String> = split_by_top_level_comma_str(inner_content)
-            .iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        if !comma_separated.is_empty() {
-            // Duplicate groups for cartesian product
-            let original_length = selector_groups.len();
-            for _ in 1..comma_separated.len() {
-                for i in 0..original_length {
-                    selector_groups.push(selector_groups[i].clone());
-                }
-            }
-
-            // Add each selector to the appropriate group
-            for (i, selector) in comma_separated.iter().enumerate() {
-                for j in 0..original_length {
-                    selector_groups[j + i * original_length].push(selector.clone());
-                }
-            }
-        }
-
-        current_pos = paren_end + 1;
-    }
-
-    // Angular v22: a `:host-context` that is not followed by a non-empty argument
-    // list (bare `:host-context`, `:host-context()`, `:host-context( )`) is no longer
-    // treated as a context selector. It is left literal so the regular selector
-    // scoping prefixes it with the content attribute, e.g.
-    // `:host-context .inner` -> `[contenta]:host-context .inner[contenta]`.
-    if selector_groups.is_empty() || selector_groups[0].is_empty() {
-        return css.to_string();
-    }
-
-    // The "other selectors" are everything after the last :host-context()
-    // Stop at '{' to not include the declaration block
-    let remaining_after = &to_process[current_pos..];
-    let other_end = remaining_after.find('{').unwrap_or(remaining_after.len());
-    let other_selectors = &remaining_after[..other_end];
-
-    // Check if :host appears in other_selectors (before :host conversion)
-    let other_has_host = other_selectors.contains(":host");
-
-    // Generate combined selectors
-    let results: Vec<String> = selector_groups
-        .iter()
-        .flat_map(|group| {
-            combine_host_context_selectors_with_other(
-                group,
-                other_selectors,
-                &pseudo_prefix,
-                &attr,
-                other_has_host,
-            )
-        })
-        .collect();
-
-    // Append the part after other_selectors (the { and everything after)
-    let suffix = &remaining_after[other_end..];
-    format!("{}{}{}", preserved_prefix, results.join(", "), suffix)
-}
-
-/// Find :where() or :is() immediately before :host-context.
-/// Returns (pseudo_prefix like ":where(", position where it starts).
-fn find_pseudo_function_before(before_hc: &str) -> (String, usize) {
-    // Check if ends with :where( or :is(
-    for prefix in &[":where(", ":is("] {
-        if before_hc.ends_with(prefix) {
-            let start = before_hc.len() - prefix.len();
-            return (prefix.to_string(), start);
-        }
-    }
-    (String::new(), before_hc.len())
-}
-
-/// Find the matching closing parenthesis, handling nested parens.
-/// Returns the index of the closing paren (exclusive).
-fn find_matching_paren(s: &str, start: usize) -> Option<usize> {
-    let mut depth = 1;
+/// Match Angular's `_parenSuffix`, `\(((?:\((?:\([^)(]*\)|[^)(]*)+?\)|[^)(]*)+?)\)`,
+/// at byte `at`: a parenthesized group whose content nests at most two deep.
+/// Returns the byte offset of the closing `)`.
+fn match_paren_suffix(s: &str, at: usize) -> Option<usize> {
     let bytes = s.as_bytes();
-
-    for i in start..bytes.len() {
-        match bytes[i] {
-            b'(' => depth += 1,
+    if bytes.get(at) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0u32;
+    for (i, &b) in bytes.iter().enumerate().skip(at + 1) {
+        match b {
+            b'(' => {
+                depth += 1;
+                if depth > 2 {
+                    return None;
+                }
+            }
             b')' => {
-                depth -= 1;
                 if depth == 0 {
                     return Some(i);
                 }
+                depth -= 1;
             }
             _ => {}
         }
@@ -1278,335 +1023,242 @@ fn find_matching_paren(s: &str, start: usize) -> Option<usize> {
     None
 }
 
-/// Combine host-context selectors with other selectors, respecting the Angular algorithm.
-fn combine_host_context_selectors_with_other(
-    context_selectors: &[String],
+/// Port of `ShadowCss._splitOnTopLevelCommas`: split on commas outside
+/// parentheses, stopping at an unbalanced `)` when `return_on_closing_paren`.
+fn split_on_top_level_commas(text: &str, return_on_closing_paren: bool) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut parens = 0i32;
+    let mut prev = 0;
+    for (i, b) in text.bytes().enumerate() {
+        match b {
+            b'(' => parens += 1,
+            b')' => {
+                parens -= 1;
+                if parens < 0 && return_on_closing_paren {
+                    parts.push(&text[prev..i]);
+                    return parts;
+                }
+            }
+            b',' if parens == 0 => {
+                parts.push(&text[prev..i]);
+                prev = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[prev..]);
+    parts
+}
+
+// =============================================================================
+// Host selector processing
+// =============================================================================
+
+/// Port of `_insertPolyfillHostInCssText`: `:host-context` followed by a
+/// non-empty argument list becomes `-shadowcsscontext`, then every other
+/// `:host` becomes `-shadowcsshost`, ignoring case. A bare or empty
+/// `:host-context` is left literal and scoped like any pseudo-class.
+fn insert_polyfill_host(css: &str) -> String {
+    // `/:host-context(?=\(\s*[^)\s])/gim`
+    let css = replace_ignore_ascii_case(css, ":host-context", POLYFILL_HOST_CONTEXT, |after| {
+        after
+            .strip_prefix('(')
+            .and_then(|arg| arg.trim_start_matches(is_js_space).chars().next())
+            .is_some_and(|c| c != ')')
+    });
+    // `/:host(?!\-context)/gim`
+    replace_ignore_ascii_case(&css, ":host", POLYFILL_HOST, |after| {
+        !starts_with_ignore_ascii_case(after, 0, "-context")
+    })
+}
+
+/// Port of `_convertColonHost`: rewrite every `-shadowcsshost(<selector>)<rest>`
+/// (`_cssColonHostRe`, rest running to the next `,` or `{`) into
+/// `-shadowcsshost-no-combinator<selector><rest>`.
+///
+/// `:host(.a)` becomes `-shadowcsshost-no-combinator.a`; a `:host(...)` whose
+/// argument is a selector list is put back as a literal `:host(...)`.
+fn convert_colon_host(css: &str) -> String {
+    let mut result = String::with_capacity(css.len());
+    let mut copied = 0;
+    while let Some(at) = find_ignore_ascii_case(css, copied, POLYFILL_HOST) {
+        let after_marker = at + POLYFILL_HOST.len();
+        let (host_selectors, other_start) = match match_paren_suffix(css, after_marker) {
+            Some(close) => (&css[after_marker + 1..close], close + 1),
+            None => ("", after_marker),
+        };
+        let other_end = css[other_start..].find([',', '{']).map_or(css.len(), |i| other_start + i);
+        let other_selectors = &css[other_start..other_end];
+
+        result.push_str(&css[copied..at]);
+        let parts = split_on_top_level_commas(host_selectors, true);
+        if !host_selectors.is_empty() && parts.len() > 1 {
+            result.push_str(":host(");
+            result.push_str(host_selectors);
+            result.push(')');
+        } else {
+            result.push_str(POLYFILL_HOST_NO_COMBINATOR);
+            let trimmed = js_trim(parts[0]);
+            // `trimmedHostSelector.replace(_polyfillHost, '')`: first occurrence only.
+            result.push_str(&trimmed.replacen(POLYFILL_HOST, "", 1));
+        }
+        result.push_str(other_selectors);
+        copied = other_end;
+    }
+    result.push_str(&css[copied..]);
+    result
+}
+
+/// Port of `_convertColonHostContext`: expand every `-shadowcsscontext(...)`
+/// into the selectors `:host-context()` can match.
+///
+/// Like Angular, the whole stylesheet is split on top-level commas and each
+/// piece is rewritten on its own; the rewrite of a piece stops at the next `{`.
+fn convert_colon_host_context(css: &str) -> String {
+    split_on_top_level_commas(css, false)
+        .into_iter()
+        .map(convert_colon_host_context_in_selector_part)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Port of `_convertColonHostContextInSelectorPart`: replace every match of
+/// `_cssColonHostContextReGlobal`, `(:(where|is)\()?(-shadowcsscontext<parens>([^{]*))`
+/// (case-insensitive), with its expansion.
+fn convert_colon_host_context_in_selector_part(css: &str) -> String {
+    let bytes = css.as_bytes();
+    let mut result = String::with_capacity(css.len());
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let prefix_len = if starts_with_ignore_ascii_case(css, at, ":where(") {
+            7
+        } else if starts_with_ignore_ascii_case(css, at, ":is(") {
+            4
+        } else {
+            0
+        };
+        let context_at = if prefix_len > 0 && is_host_context_call(css, at + prefix_len) {
+            Some(at + prefix_len)
+        } else if is_host_context_call(css, at) {
+            Some(at)
+        } else {
+            None
+        };
+        let Some(context_at) = context_at else {
+            at += 1;
+            continue;
+        };
+        let end = css[context_at..].find('{').map_or(css.len(), |i| context_at + i);
+        result.push_str(&css[copied..at]);
+        result.push_str(&expand_host_context(&css[at..end], &css[at..context_at]));
+        copied = end;
+        at = end;
+    }
+    result.push_str(&css[copied..]);
+    result
+}
+
+/// Whether `-shadowcsscontext(...)` (with valid `_parenSuffix` parentheses)
+/// starts at byte `at`, ignoring case.
+fn is_host_context_call(css: &str, at: usize) -> bool {
+    starts_with_ignore_ascii_case(css, at, POLYFILL_HOST_CONTEXT)
+        && match_paren_suffix(css, at + POLYFILL_HOST_CONTEXT.len()).is_some()
+}
+
+/// The replacement callback of `_convertColonHostContextInSelectorPart`.
+///
+/// `selector_text` is the whole match; `pseudo_prefix` is the `:where(` or
+/// `:is(` it starts with, if any. Each `-shadowcsscontext(a, b)` multiplies the
+/// selector groups; the text after the last one is the "other selectors".
+fn expand_host_context(selector_text: &str, pseudo_prefix: &str) -> String {
+    let mut groups: Vec<Vec<&str>> = vec![vec![]];
+    let mut selector_text = selector_text;
+    while let Some(start) = selector_text.find(POLYFILL_HOST_CONTEXT) {
+        let after_prefix = &selector_text[start + POLYFILL_HOST_CONTEXT.len()..];
+        let Some(args) = after_prefix.strip_prefix('(') else {
+            selector_text = after_prefix;
+            continue;
+        };
+        let mut context_selectors = Vec::new();
+        let mut end = 0;
+        for selector in split_on_top_level_commas(args, true) {
+            end += selector.len() + 1;
+            let trimmed = js_trim(selector);
+            if !trimmed.is_empty() {
+                context_selectors.push(trimmed);
+            }
+        }
+        let groups_len = groups.len();
+        repeat_groups(&mut groups, context_selectors.len());
+        for (i, selector) in context_selectors.iter().enumerate() {
+            for j in 0..groups_len {
+                groups[j + i * groups_len].push(selector);
+            }
+        }
+        // `afterPrefix.substring(endIndex + 1)`
+        selector_text = after_prefix.get(end + 1..).unwrap_or("");
+    }
+    groups
+        .into_iter()
+        .map(|context_selectors| {
+            combine_host_context_selectors(context_selectors, selector_text, pseudo_prefix)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Port of `repeatGroups`: append `multiples - 1` copies of the groups.
+fn repeat_groups<T: Clone>(groups: &mut Vec<Vec<T>>, multiples: usize) {
+    let len = groups.len();
+    for _ in 1..multiples {
+        for j in 0..len {
+            groups.push(groups[j].clone());
+        }
+    }
+}
+
+/// Port of `_combineHostContextSelectors`.
+///
+/// For context selectors `.a`, `.b` the host may sit under or on any of them,
+/// so this builds `.a.b`, `.a .b` and `.b .a` (in Angular's order), each once
+/// with the host marker attached and once as a descendant, unless the other
+/// selectors already contain the host.
+fn combine_host_context_selectors(
+    mut context_selectors: Vec<&str>,
     other_selectors: &str,
     pseudo_prefix: &str,
-    host_attr: &str,
-    other_has_host: bool,
-) -> Vec<String> {
-    if context_selectors.is_empty() {
-        // No context selectors - just return host marker + other
-        return vec![format!("{}{}{}", pseudo_prefix, host_attr, other_selectors)];
+) -> String {
+    let host_marker = POLYFILL_HOST_NO_COMBINATOR;
+    let other_selectors_has_host =
+        find_ignore_ascii_case(other_selectors, 0, POLYFILL_HOST).is_some();
+    let Some(last) = context_selectors.pop() else {
+        return format!("{host_marker}{other_selectors}");
+    };
+    let mut combined = vec![last.to_string()];
+    while let Some(context_selector) = context_selectors.pop() {
+        let len = combined.len();
+        combined.resize(len * 3, String::new());
+        for i in 0..len {
+            let previous = std::mem::take(&mut combined[i]);
+            combined[len * 2 + i] = format!("{previous} {context_selector}");
+            combined[len + i] = format!("{context_selector} {previous}");
+            combined[i] = format!("{context_selector}{previous}");
+        }
     }
-
-    // Generate permutations (compound, ancestor, descendant forms)
-    let permutations = combine_host_context_selectors(context_selectors);
-
-    permutations
+    combined
         .iter()
-        .flat_map(|perm| {
-            if other_has_host {
-                // If other selectors contain :host, only one variant
-                vec![format!("{}{}{}", pseudo_prefix, perm, other_selectors)]
+        .map(|s| {
+            if other_selectors_has_host {
+                format!("{pseudo_prefix}{s}{other_selectors}")
             } else {
-                // Two variants: compound (selector[host]) and descendant (selector [host])
-                // Note: if pseudo_prefix is set, other_selectors already includes the closing paren
-                vec![
-                    format!("{}{}{}{}", pseudo_prefix, perm, host_attr, other_selectors),
-                    format!("{}{} {}{}", pseudo_prefix, perm, host_attr, other_selectors),
-                ]
+                format!(
+                    "{pseudo_prefix}{s}{host_marker}{other_selectors}, {pseudo_prefix}{s} {host_marker}{other_selectors}"
+                )
             }
         })
-        .collect()
-}
-
-/// Combine multiple host-context selectors into all permutations.
-///
-/// For selectors [".a", ".b"], generates:
-///   - ".a.b" (compound)
-///   - ".a .b" (.a ancestor)
-///   - ".b .a" (.b ancestor)
-///
-/// For selectors [".a", ".b", ".c"], generates 9 permutations.
-///
-/// See: packages/compiler/src/shadow_css.ts `_combineHostContextSelectors`
-fn combine_host_context_selectors(context_selectors: &[String]) -> Vec<String> {
-    if context_selectors.is_empty() {
-        return vec![];
-    }
-
-    if context_selectors.len() == 1 {
-        return vec![context_selectors[0].clone()];
-    }
-
-    // Work from right to left as the TypeScript implementation does
-    let mut selectors = context_selectors.to_vec();
-    // Safety: We checked len >= 2 above, so pop() will succeed
-    let Some(last) = selectors.pop() else {
-        return vec![];
-    };
-    let mut combined: Vec<String> = vec![last];
-
-    while let Some(context_selector) = selectors.pop() {
-        let length = combined.len();
-        let mut new_combined: Vec<String> = Vec::with_capacity(length * 3);
-
-        for i in 0..length {
-            let previous = &combined[i];
-
-            // Compound form (no space): contextSelector + previousSelectors
-            new_combined.push(format!("{}{}", context_selector, previous));
-
-            // Ancestor form (with space): contextSelector + ' ' + previousSelectors
-            new_combined.push(format!("{} {}", context_selector, previous));
-
-            // Descendant form (with space): previousSelectors + ' ' + contextSelector
-            new_combined.push(format!("{} {}", previous, context_selector));
-        }
-
-        combined = new_combined;
-    }
-
-    combined
-}
-
-/// Convert :host selectors.
-///
-/// `:host` becomes `[host_attr]`
-/// `:host(.active)` becomes `.active[host_attr]`
-/// Converts `:host` selectors to use polyfill markers.
-///
-/// This function implements Angular's marker-based approach:
-/// 1. Replace `:host` with `POLYFILL_HOST` marker
-/// 2. Process `POLYFILL_HOST(...)` patterns (direct parens)
-/// 3. Process `POLYFILL_HOST` followed by selectors until comma/brace
-///
-/// The actual conversion from markers to host attributes happens later
-/// in `scope_selectors`, after the selector is split by combinators.
-///
-/// Key insight: matching stops at COMMAS, not closing parens of pseudo-functions.
-/// This ensures `:host:not(:host.foo, :host.bar)` is processed correctly.
-/// Replace `:host` with the polyfill marker, skipping the `:host` that begins a
-/// `:host-context` token (mirrors Angular's `_colonHostRe = /:host(?!\-context)/`).
-fn replace_colon_host_marker(css: &str) -> String {
-    let mut result = String::with_capacity(css.len());
-    let mut rest = css;
-    while let Some(pos) = rest.find(":host") {
-        let after = &rest[pos + ":host".len()..];
-        result.push_str(&rest[..pos]);
-        if after.starts_with("-context") {
-            // Leave `:host-context` literal; copy `:host` through unchanged.
-            result.push_str(":host");
-        } else {
-            result.push_str(POLYFILL_HOST);
-        }
-        rest = after;
-    }
-    result.push_str(rest);
-    result
-}
-
-fn convert_colon_host(css: &str, _host_attr: &str) -> String {
-    // Step 1: Replace `:host` with the marker, but NOT the `:host` inside
-    // `:host-context` (Angular v22's `/:host(?!\-context)/`). A bare/empty
-    // `:host-context` is left literal here and scoped with the content attr later.
-    let mut result = replace_colon_host_marker(css);
-
-    // Step 2: Process POLYFILL_HOST(...) patterns - direct parens after marker
-    result = process_host_with_parens(&result);
-
-    // Step 3: Process POLYFILL_HOST followed by selectors until comma/brace
-    // This uses global matching that stops at commas (like Angular's _cssColonHostRe)
-    result = process_host_with_selectors(&result);
-
-    // Note: Marker-to-attr conversion happens in scope_selectors, not here.
-    // This is because Angular does the conversion AFTER splitting by combinators.
-
-    result
-}
-
-/// Process POLYFILL_HOST(...) patterns where parens immediately follow the marker.
-fn process_host_with_parens(css: &str) -> String {
-    let mut result = css.to_string();
-    let pattern = format!("{}(", POLYFILL_HOST);
-
-    loop {
-        let Some(host_start) = result.find(&pattern) else {
-            break;
-        };
-
-        let paren_start = host_start + pattern.len();
-
-        // Find matching closing paren
-        let mut paren_depth = 1;
-        let mut paren_end = paren_start;
-        for (i, c) in result[paren_start..].char_indices() {
-            match c {
-                '(' => paren_depth += 1,
-                ')' => {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
-                        paren_end = paren_start + i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if paren_depth != 0 {
-            break; // Unbalanced parens
-        }
-
-        let inner_content = &result[paren_start..paren_end];
-        let after_host = &result[paren_end + 1..];
-
-        // Get other selectors until comma or brace
-        let other_end = after_host.find(|c: char| c == '{' || c == ',').unwrap_or(after_host.len());
-        let other_selectors = &after_host[..other_end];
-
-        // Split inner by top-level commas
-        let inner_selectors = split_by_top_level_comma(inner_content);
-
-        let replacement = if inner_selectors.len() > 1 {
-            // Angular v22: a `:host(...)` whose argument is a selector list (top-level
-            // commas) is left untouched as a literal `:host(...)`. The later selector
-            // scoping then prefixes it with the content attribute, e.g.
-            // `:host(.a, .b)` -> `[contenta]:host(.a, .b)`.
-            let restored = inner_content.replace(POLYFILL_HOST, ":host");
-            format!(":host({restored}){other_selectors}")
-        } else {
-            // Single selector: convert to the no-combinator host form.
-            inner_selectors
-                .iter()
-                .map(|sel| {
-                    let trimmed = sel.trim();
-                    if trimmed.is_empty() {
-                        return String::new();
-                    }
-                    let stripped = trimmed.replace(POLYFILL_HOST, "");
-                    format!("{}{}{}", POLYFILL_HOST_NO_COMBINATOR, stripped, other_selectors)
-                })
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-        result = format!("{}{}{}", &result[..host_start], replacement, &after_host[other_end..]);
-    }
-
-    result
-}
-
-/// Process POLYFILL_HOST followed by selectors until comma/brace.
-/// This matches Angular's _cssColonHostRe behavior with global matching.
-fn process_host_with_selectors(css: &str) -> String {
-    let mut result = String::with_capacity(css.len() * 2);
-    let mut remaining = css;
-
-    while !remaining.is_empty() {
-        // Find next POLYFILL_HOST
-        let Some(host_pos) = remaining.find(POLYFILL_HOST) else {
-            result.push_str(remaining);
-            break;
-        };
-
-        // Add everything before the marker
-        result.push_str(&remaining[..host_pos]);
-        remaining = &remaining[host_pos..];
-
-        // Check if this is already POLYFILL_HOST_NO_COMBINATOR
-        if remaining.starts_with(POLYFILL_HOST_NO_COMBINATOR) {
-            // Already processed, keep as-is
-            result.push_str(POLYFILL_HOST_NO_COMBINATOR);
-            remaining = &remaining[POLYFILL_HOST_NO_COMBINATOR.len()..];
-            continue;
-        }
-
-        // Skip the POLYFILL_HOST marker
-        remaining = &remaining[POLYFILL_HOST.len()..];
-
-        // Check if followed by ( - already handled by process_host_with_parens
-        if remaining.starts_with('(') {
-            // This shouldn't happen if process_host_with_parens ran first,
-            // but handle it just in case by keeping the marker
-            result.push_str(POLYFILL_HOST);
-            continue;
-        }
-
-        // Find selectors until comma or brace (Angular's [^,{]* pattern)
-        let mut selector_end = 0;
-        for (i, c) in remaining.char_indices() {
-            if c == ',' || c == '{' {
-                break;
-            }
-            selector_end = i + c.len_utf8();
-        }
-
-        let other_selectors = &remaining[..selector_end];
-        remaining = &remaining[selector_end..];
-
-        // Convert to POLYFILL_HOST_NO_COMBINATOR + selectors
-        result.push_str(POLYFILL_HOST_NO_COMBINATOR);
-        result.push_str(other_selectors);
-    }
-
-    result
-}
-
-/// Split a string by top-level commas (not inside parentheses).
-fn split_by_top_level_comma(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut paren_depth: u32 = 0;
-
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            ',' if paren_depth == 0 => {
-                result.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    result.push(&s[start..]);
-    result
-}
-
-/// Reorder a selector to put the host attribute before any pseudo-selectors.
-/// Uses the pattern ([^:\)]*)(:*)(.*)
-/// Examples:
-/// - ":before" -> "[attr]:before"
-/// - ".active" -> ".active[attr]"
-/// - ".active:before" -> ".active[attr]:before"
-/// - ":not(.x)" -> "[attr]:not(.x)"
-/// Reorders a selector to insert the host attribute at the correct position.
-/// Matches Angular's pattern: /([^:\)]*)(:*)(.*)/
-/// - before: everything before first colon or close paren
-/// - colon: any colons at that position
-/// - after: everything else
-fn reorder_selector_with_attr(selector: &str, attr: &str) -> String {
-    if attr.is_empty() {
-        return selector.to_string();
-    }
-
-    // Find the first colon or close paren that's not inside brackets
-    let mut bracket_depth: u32 = 0;
-    let mut split_pos = None;
-    let chars: Vec<char> = selector.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        match c {
-            '[' => bracket_depth += 1,
-            ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            ':' | ')' if bracket_depth == 0 => {
-                split_pos = Some(i);
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    if let Some(pos) = split_pos {
-        let before: String = chars[..pos].iter().collect();
-        let after: String = chars[pos..].iter().collect();
-        format!("{}{}{}", before, attr, after)
-    } else {
-        format!("{}{}", selector, attr)
-    }
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Convert shadow DOM selectors (::shadow, ::content, etc.)
@@ -1632,8 +1284,11 @@ const SCOPED_AT_RULES: &[&str] =
 /// `@font-feature-values`, unknown ones...) keeps its body exactly as written.
 const STRIP_SCOPING_AT_RULES: &[&str] = &["@font-face", "@page"];
 
-/// Scope all CSS selectors with the content attribute.
-fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
+/// Scope all CSS selectors with the content attribute (`_scopeSelectors`).
+///
+/// `css_nesting` turns on the v22.2 behaviour, see [`has_css_nesting_support`].
+fn scope_selectors(css: &str, content_attr: &str, host_attr: &str, css_nesting: bool) -> String {
+    let mut scoper = SelectorScoper::new(content_attr, host_attr, css_nesting);
     let mut result = String::with_capacity(css.len() * 2);
     let mut chars = css.chars().peekable();
     let mut in_at_rule_header = false;
@@ -1644,6 +1299,8 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
     let mut in_comment = false;
     let mut in_declaration = false;
     let mut declaration_depth: u32 = 0;
+    let mut declaration_start = 0; // Where the current rule body starts in `result`
+    let mut rule_has_deep_combinator = false; // Its selector holds `::ng-deep`/`>>>`/`/deep/`
     let mut at_rule_header = String::new(); // Collect the at-rule header text
     let mut in_unscoped_at_rule = false; // Inside an at-rule whose body is not scoped
     let mut strip_unscoped_body = false; // Strip ::ng-deep/:host from that body (@font-face/@page)
@@ -1710,7 +1367,7 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
                 if unscoped_depth == 0 {
                     if strip_unscoped_body {
                         // Strip ::ng-deep, >>>, /deep/, and :host from the collected content
-                        result.push_str(&strip_scoping_selectors(&unscoped_content, host_attr));
+                        result.push_str(&strip_scoping_selectors(&unscoped_content));
                     } else {
                         result.push_str(&unscoped_content);
                     }
@@ -1780,27 +1437,39 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
 
         // If inside a declaration block, just copy content directly
         if in_declaration {
-            result.push(c);
             if c == '{' {
                 declaration_depth += 1;
             } else if c == '}' {
                 declaration_depth -= 1;
                 if declaration_depth == 0 {
                     in_declaration = false;
+                    // From v22.2 a body is either scoped as nested rules or has
+                    // its scoping selectors stripped. Nested rules are not
+                    // scoped yet, so such a body is kept as written.
+                    if css_nesting
+                        && (rule_has_deep_combinator
+                            || !has_nested_block(&result[declaration_start..]))
+                    {
+                        let body = result.split_off(declaration_start);
+                        result.push_str(&strip_scoping_selectors(&body));
+                    }
                 }
             }
+            result.push(c);
             continue;
         }
 
         // Regular selector parsing
         if c == '{' {
             // End of selector, scope it
-            let scoped = scope_selector_list(&current_selector, content_attr, host_attr);
+            rule_has_deep_combinator = contains_deep_combinator(&current_selector);
+            let scoped = scope_rule_selector(&current_selector, &mut scoper);
             result.push_str(&scoped);
             result.push('{');
             current_selector.clear();
             in_declaration = true;
             declaration_depth = 1;
+            declaration_start = result.len();
         } else if c == '}' {
             // A stray `}`: keep the text before it unscoped, in place.
             result.push_str(&current_selector);
@@ -1820,947 +1489,736 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
 }
 
 // =============================================================================
-// Scoping Context - Implements Angular's _shouldScopeIndicator pattern
+// Selector scoping - port of `_scopeSelector` and `_applySelectorScope`
 // =============================================================================
 
-/// Context for tracking scoping state across recursive calls.
-/// This implements Angular's `_shouldScopeIndicator` pattern.
+/// Whether this Angular version's `ShadowCss` has its CSS nesting support
+/// (v22.2.0-next.2+).
 ///
-/// The key insight is:
-/// - Selectors BEFORE :host should NOT be scoped (they match ancestor elements)
-/// - Selectors AFTER :host SHOULD be scoped (they match component descendants)
-/// - This state must persist across recursive calls into pseudo-functions
-#[derive(Clone)]
-struct ScopingContext<'a> {
-    content_attr: &'a str,
-    host_attr: &'a str,
-    /// The host marker string, e.g., "[hosta]"
-    host_marker: String,
-    /// Whether selector parts should be scoped.
-    /// - None: not yet determined
-    /// - Some(false): don't scope (before :host)
-    /// - Some(true): do scope (after :host or no :host in selector)
-    should_scope_indicator: Option<bool>,
-    /// Whether this is the parent (top-level) selector call
-    is_parent_selector: bool,
+/// From that release a selector part that is just `&` is left unscoped, a rule
+/// without a declaration block (`.a;`) is no longer scoped, and a rule body
+/// with no nested rule (or one under a `::ng-deep` selector) has its scoping
+/// selectors stripped like an `@font-face` body. Oxc does not scope nested
+/// rules yet, so a body holding them is kept as written.
+fn has_css_nesting_support(version: Option<AngularVersion>) -> bool {
+    let Some(version) = version else {
+        return true;
+    };
+    if (version.major, version.minor, version.patch) == (22, 2, 0) {
+        return match version.prerelease {
+            None | Some(Prerelease::Rc(_)) => true,
+            Some(Prerelease::Next(n)) => n >= 2,
+            Some(Prerelease::Other) => false,
+        };
+    }
+    version.is_at_least(22, 2, 0)
 }
 
-impl<'a> ScopingContext<'a> {
-    fn new(content_attr: &'a str, host_attr: &'a str, is_parent: bool) -> Self {
-        let host_marker =
-            if host_attr.is_empty() { String::new() } else { format!("[{}]", host_attr) };
+/// Scopes the selectors of one stylesheet, carrying the state Angular keeps on
+/// its `ShadowCss` instance (`_shouldScopeIndicator`, `_safeSelector`).
+struct SelectorScoper<'a> {
+    /// The content attribute, e.g. `_ngcontent-%COMP%` (`scopeSelector`).
+    scope_selector: &'a str,
+    /// The host attribute, e.g. `_nghost-%COMP%` (`hostSelector`).
+    host_selector: &'a str,
+    /// `[scopeSelector]` with any `[is=...]` unwrapped, appended to scoped parts.
+    attr_name: String,
+    /// Whether a selector part that is only `&` stays unscoped (v22.2+).
+    css_nesting: bool,
+    /// `_shouldScopeIndicator`: whether parts are scoped. Parts before a
+    /// `:host` match ancestors of the host and stay unscoped.
+    should_scope: bool,
+    /// `_safeSelector` of the current top-level selector.
+    safe_selector: SafeSelector,
+}
+
+impl<'a> SelectorScoper<'a> {
+    fn new(scope_selector: &'a str, host_selector: &'a str, css_nesting: bool) -> Self {
         Self {
-            content_attr,
-            host_attr,
-            host_marker,
-            should_scope_indicator: None,
-            is_parent_selector: is_parent,
+            scope_selector,
+            host_selector,
+            attr_name: format!("[{}]", unwrap_is_attribute(scope_selector)),
+            css_nesting,
+            should_scope: false,
+            safe_selector: SafeSelector::default(),
         }
     }
 
-    /// Create a child context for recursive calls (not a parent selector)
-    fn child(&self) -> Self {
-        Self {
-            content_attr: self.content_attr,
-            host_attr: self.host_attr,
-            host_marker: self.host_marker.clone(),
-            should_scope_indicator: self.should_scope_indicator,
-            is_parent_selector: false,
+    /// Port of `_scopeSelector`: scope each selector of a list (`, `-joined),
+    /// leaving everything after a `::ng-deep`, `>>>` or `/deep/` unscoped.
+    fn scope_selector(&mut self, selector: &str, is_parent_selector: bool) -> String {
+        let mut result = String::with_capacity(selector.len() * 2);
+        for (i, part) in split_selector_list(selector).into_iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            let mut deep_parts = split_on_deep_combinators(part).into_iter();
+            let shallow_part = deep_parts.next().unwrap_or_default();
+            if self.selector_needs_scoping(shallow_part) {
+                result.push_str(&self.apply_selector_scope(shallow_part, is_parent_selector));
+            } else {
+                result.push_str(shallow_part);
+            }
+            for other_part in deep_parts {
+                result.push(' ');
+                result.push_str(other_part);
+            }
         }
+        result
     }
 
-    /// Check if a selector contains the host marker (either the actual attr or polyfill markers)
-    fn contains_host(&self, selector: &str) -> bool {
-        // Check for actual host attribute marker like [a-host]
-        let has_attr_marker = !self.host_marker.is_empty() && selector.contains(&self.host_marker);
-        // Also check for polyfill markers (-shadowcsshost or -shadowcsshost-no-combinator)
-        let has_polyfill_marker = selector.contains(POLYFILL_HOST);
-        has_attr_marker || has_polyfill_marker
-    }
-
-    /// Initialize or update the scoping indicator based on Angular's logic:
-    /// if (isParentSelector || this._shouldScopeIndicator) {
-    ///   this._shouldScopeIndicator = !hasHost;
-    /// }
-    /// Note: In JavaScript, `_shouldScopeIndicator` uses truthiness:
-    /// - undefined → falsy
-    /// - false → falsy
-    /// - true → truthy
-    /// So we only reinitialize if parent OR indicator is already true (not just Some).
-    fn initialize_scoping(&mut self, has_host: bool) {
-        if self.is_parent_selector || self.should_scope_indicator == Some(true) {
-            self.should_scope_indicator = Some(!has_host);
-        }
-    }
-
-    /// Update the indicator when we encounter :host in a part
-    /// this._shouldScopeIndicator = this._shouldScopeIndicator || partContainsHost
-    fn update_on_host_found(&mut self) {
-        self.should_scope_indicator = Some(true);
-    }
-
-    /// Check if we should scope a part
-    fn should_scope(&self) -> bool {
-        self.should_scope_indicator.unwrap_or(true)
-    }
-
-    /// Check if a selector contains the -no-combinator marker
-    fn contains_polyfill_host_no_combinator(&self, selector: &str) -> bool {
-        selector.contains(POLYFILL_HOST_NO_COMBINATOR)
-    }
-
-    /// Convert polyfill host markers to actual host attributes.
-    /// This implements Angular's _applySimpleSelectorScope logic.
-    fn apply_simple_selector_scope(&self, selector: &str) -> String {
-        // Note: This function should ONLY be called when the selector contains
-        // polyfill host markers. The caller must check contains_polyfill_host first.
-
-        let mut result = selector.to_string();
-
-        // Process -shadowcsshost-no-combinator patterns with reordering
+    /// Port of `_selectorNeedsScoping`: false when some line of the selector
+    /// already starts with the content attribute (`_makeScopeMatcher` builds
+    /// `^(attr)([>\s~+[.,{:][\s\S]*)?$` with the `m` flag).
+    fn selector_needs_scoping(&self, selector: &str) -> bool {
+        let mut line = selector;
         loop {
-            let Some(marker_pos) = result.find(POLYFILL_HOST_NO_COMBINATOR) else {
-                break;
-            };
-
-            let after_marker = &result[marker_pos + POLYFILL_HOST_NO_COMBINATOR.len()..];
-
-            // Find end of attached selector (until whitespace or comma)
-            let mut selector_end = 0;
-            for (i, c) in after_marker.char_indices() {
-                if c.is_whitespace() || c == ',' {
-                    break;
+            if let Some(after) = line.strip_prefix(self.scope_selector) {
+                match after.chars().next() {
+                    None => return false,
+                    Some(c)
+                        if is_js_space(c)
+                            || matches!(c, '>' | '~' | '+' | '[' | '.' | ',' | '{' | ':') =>
+                    {
+                        return false;
+                    }
+                    Some(_) => {}
                 }
-                selector_end = i + c.len_utf8();
             }
-
-            let attached_selector = &after_marker[..selector_end];
-
-            // Apply reordering: before + host_attr + after
-            let converted = reorder_selector_with_attr(attached_selector, &self.host_marker);
-
-            result =
-                format!("{}{}{}", &result[..marker_pos], converted, &after_marker[selector_end..]);
-        }
-
-        // Replace remaining POLYFILL_HOST with host_marker
-        result.replace(POLYFILL_HOST, &self.host_marker)
-    }
-}
-
-/// Scope a comma-separated list of selectors.
-fn scope_selector_list(selector_list: &str, content_attr: &str, host_attr: &str) -> String {
-    // Create the parent context for this top-level call
-    let ctx = ScopingContext::new(content_attr, host_attr, true);
-    scope_selector_list_with_context(selector_list, &ctx)
-}
-
-/// Scope a selector list with a given context (allows recursive calls to share state)
-fn scope_selector_list_with_context(selector_list: &str, parent_ctx: &ScopingContext) -> String {
-    // Preserve leading and trailing whitespace
-    let leading: &str = &selector_list[..selector_list.len() - selector_list.trim_start().len()];
-    let trimmed = selector_list.trim();
-    if trimmed.is_empty() {
-        return selector_list.to_string();
-    }
-    let trailing: &str = &selector_list[selector_list.trim_end().len()..];
-
-    // Create SafeSelector to escape problematic patterns
-    // (attribute selectors, escaped characters, :nth-*() expressions)
-    let safe_selector = SafeSelector::new(trimmed);
-    let safe_content = safe_selector.content();
-
-    // Split by comma (respecting parentheses)
-    let selectors = split_by_comma(safe_content);
-    let scoped: Vec<String> = selectors
-        .iter()
-        .map(|s| {
-            // Each comma-separated selector gets its own context copy
-            let mut ctx = parent_ctx.clone();
-            scope_complex_selector_with_context(s.trim(), &mut ctx)
-        })
-        .collect();
-
-    let scoped_result = scoped.join(", ");
-
-    // Restore escaped patterns
-    let restored = safe_selector.restore(&scoped_result);
-
-    format!("{}{}{}", leading, restored, trailing)
-}
-
-/// Split a string by top-level commas (not inside parentheses).
-fn split_by_comma(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut paren_depth: u32 = 0;
-
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            ',' if paren_depth == 0 => {
-                result.push(&s[start..i]);
-                start = i + 1;
+            match line.char_indices().find(|&(_, c)| is_js_line_terminator(c)) {
+                Some((i, c)) => line = &line[i + c.len_utf8()..],
+                None => return true,
             }
-            _ => {}
         }
     }
 
-    result.push(&s[start..]);
+    /// Port of `_applySelectorScope`.
+    ///
+    /// The selector is split on the combinator separator
+    /// `/( |>|\+|~(?!=))(?!<inside parens>)\s*/g`, and every part is emitted as
+    /// `` `${scopedPart} ${separator} ` ``. That is where Angular's runs of
+    /// spaces come from: `a > b` is split at the space (`a`) and again at the
+    /// `>` (an empty part), giving `a[c]    > b[c]`.
+    fn apply_selector_scope(&mut self, selector: &str, is_parent_selector: bool) -> String {
+        let escaped;
+        let selector = if is_parent_selector {
+            self.safe_selector = SafeSelector::new(selector);
+            escaped = self.safe_selector.content.clone();
+            escaped.as_str()
+        } else {
+            selector
+        };
+
+        let has_host = selector.contains(POLYFILL_HOST_NO_COMBINATOR);
+        // Only reset at the top level, or while scoping is on.
+        if is_parent_selector || self.should_scope {
+            self.should_scope = !has_host;
+        }
+
+        let mut scoped = String::with_capacity(selector.len() * 2);
+        // Oxc deviation (#175): a newline, tab, carriage return or form feed
+        // is a descendant combinator too. Angular only splits on a space, so
+        // `:host:hover\n.child` leaves `.child` unscoped and `.foo\n.bar` keeps
+        // `.foo` unscoped. Whitespace that starts the selector (`.a,\n.b`) is
+        // not a combinator, so it is kept exactly as Angular keeps it.
+        // The extra split is skipped inside a part Angular would scope as one
+        // when that part has host markers that only work together (see
+        // `can_split_on_other_whitespace`); such a part is left as Angular has it.
+        let leading = selector.len() - selector.trim_start_matches(is_js_space).len();
+        let mut start = 0;
+        let mut from = 0;
+        // Start of the part Angular's own split is in, and whether the Oxc-only
+        // split is allowed in it (worked out on the first newline or tab).
+        let mut angular_part_start = 0;
+        let mut other_whitespace_split: Option<bool> = None;
+        while let Some((at, separator, end)) = find_combinator_separator(selector, from, leading) {
+            from = end;
+            let is_other_whitespace =
+                matches!(selector.as_bytes()[at], b'\n' | b'\t' | b'\r' | b'\x0C');
+            if is_other_whitespace
+                && !*other_whitespace_split.get_or_insert_with(|| {
+                    let angular_part_end = find_angular_part_end(selector, angular_part_start, at);
+                    can_split_on_other_whitespace(&selector[angular_part_start..angular_part_end])
+                })
+            {
+                continue;
+            }
+            // A space between a hex escape and a following hex digit (`.\fc ber`
+            // for `.über`) terminates the escape; it is not a combinator.
+            if is_escaped_hex_space(selector, start, at) {
+                continue;
+            }
+            let part = &selector[start..at];
+            let scoped_part = self.scope_pseudo_function_aware_part(part);
+            scoped.push_str(&scoped_part);
+            scoped.push(' ');
+            scoped.push(separator);
+            scoped.push(' ');
+            start = end;
+            if !is_other_whitespace {
+                angular_part_start = end;
+                other_whitespace_split = None;
+            }
+        }
+        let scoped_part = self.scope_pseudo_function_aware_part(&selector[start..]);
+        scoped.push_str(&scoped_part);
+        self.safe_selector.restore(&scoped)
+    }
+
+    /// Port of `_pseudoFunctionAwareScopeSelectorPart`: a part made only of
+    /// `:where(...)`/`:is(...)` has the selectors inside scoped instead.
+    fn scope_pseudo_function_aware_part(&mut self, part: &str) -> String {
+        // Oxc deviation: comment placeholders are detached first. Angular scopes
+        // them as selector text (`.a /* c */ .b` gets a bare `[content]` part
+        // for the comment, and a comment glued to `:where(.one)` turns it into
+        // `[content]:where(.one)`, which changes specificity). The placeholders
+        // restore to blank text or the comment, so they go back in front.
+        if part.contains(COMMENT_PLACEHOLDER_PREFIX) {
+            let (stripped, placeholders) = strip_comment_placeholders(part);
+            if !placeholders.is_empty() {
+                if js_trim(&stripped).is_empty() {
+                    return part.to_string();
+                }
+                return placeholders + &self.scope_pseudo_function_aware_part(&stripped);
+            }
+        }
+
+        // `_cssPrefixWithPseudoSelectorFunction.exec` loop, collecting each
+        // `:where(`/`:is(` up to its balancing `)`.
+        let bytes = part.as_bytes();
+        let mut pseudo_parts: Vec<(usize, usize)> = Vec::new();
+        let mut last_index = 0;
+        while let Some((start, open_end)) = find_where_or_is(part, last_index) {
+            let mut opened = 1;
+            let mut index = open_end;
+            while index < bytes.len() {
+                let c = bytes[index];
+                index += 1;
+                if c == b'(' {
+                    opened += 1;
+                } else if c == b')' {
+                    opened -= 1;
+                    if opened == 0 {
+                        break;
+                    }
+                }
+            }
+            pseudo_parts.push((start, index));
+            last_index = index;
+        }
+
+        // `pseudoSelectorParts.join('') === selectorPart`
+        let covers_part = pseudo_parts.first().map_or(0, |&(start, _)| start) == 0
+            && pseudo_parts.windows(2).all(|w| w[0].1 == w[1].0)
+            && pseudo_parts.last().map_or(0, |&(_, end)| end) == part.len();
+        if covers_part {
+            let mut scoped = String::with_capacity(part.len() * 2);
+            for &(start, end) in &pseudo_parts {
+                let pseudo_part = &part[start..end];
+                let function_len =
+                    if starts_with_ignore_ascii_case(pseudo_part, 0, ":where(") { 7 } else { 4 };
+                // `selectorPart.slice(cssPseudoSelectorFunction.length, -1)`
+                let inner_end =
+                    pseudo_part.char_indices().next_back().map_or(0, |(i, _)| i).max(function_len);
+                let selector_to_scope = &pseudo_part[function_len..inner_end];
+                if selector_to_scope.contains(POLYFILL_HOST_NO_COMBINATOR) {
+                    self.should_scope = true;
+                }
+                let scoped_inner = self.scope_selector(selector_to_scope, false);
+                scoped.push_str(&pseudo_part[..function_len]);
+                scoped.push_str(&scoped_inner);
+                scoped.push(')');
+            }
+            scoped
+        } else {
+            self.should_scope = self.should_scope || part.contains(POLYFILL_HOST_NO_COMBINATOR);
+            if self.should_scope { self.scope_selector_part(part) } else { part.to_string() }
+        }
+    }
+
+    /// Port of the `_scopeSelectorPart` closure of `_applySelectorScope`.
+    fn scope_selector_part(&self, part: &str) -> String {
+        let trimmed = js_trim(part);
+        if trimmed.is_empty() || (self.css_nesting && trimmed == "&") {
+            return part.to_string();
+        }
+        if part.contains(POLYFILL_HOST_NO_COMBINATOR) {
+            let scoped = apply_simple_selector_scope(part, self.host_selector);
+            if has_host_marker_outside_parens(part) {
+                scoped
+            } else {
+                // A host marker inside a pseudo-function, e.g. `:not(:host)`:
+                // the part also gets the content attribute.
+                insert_before_first_colon(&scoped, &self.attr_name)
+            }
+        } else {
+            let without_host = replace_ignore_ascii_case(part, POLYFILL_HOST, "", |_| true);
+            if without_host.is_empty() {
+                trimmed.to_string()
+            } else {
+                insert_before_first_colon(&without_host, &self.attr_name)
+            }
+        }
+    }
+}
+
+/// `scopeSelector.replace(/\[is=([^\]]*)\]/g, (_, ...parts) => parts[0])`.
+fn unwrap_is_attribute(scope_selector: &str) -> String {
+    let mut result = String::with_capacity(scope_selector.len());
+    let mut rest = scope_selector;
+    while let Some(at) = rest.find("[is=") {
+        let value_start = at + "[is=".len();
+        let Some(close) = rest[value_start..].find(']') else {
+            break;
+        };
+        result.push_str(&rest[..at]);
+        result.push_str(&rest[value_start..value_start + close]);
+        rest = &rest[value_start + close + 1..];
+    }
+    result.push_str(rest);
     result
 }
 
-/// Scope a complex selector (may contain combinators).
-/// Scope a complex selector (may contain combinators).
-///
-/// For `one two > three`, we scope each simple selector: `one[attr] two[attr] > three[attr]`
-///
-/// ::ng-deep, >>>, /deep/ are handled specially: parts AFTER these deep combinators
-/// are NOT scoped - they "escape" the encapsulation.
-fn scope_complex_selector_with_context(selector: &str, ctx: &mut ScopingContext) -> String {
-    if selector.is_empty() {
-        return String::new();
-    }
-
-    // Don't scope keyframe selectors
-    if is_keyframe_selector(selector) {
-        return selector.to_string();
-    }
-
-    // Split by deep combinators (::ng-deep, >>>, /deep/)
-    // Parts after the deep combinator are NOT scoped
-    let deep_parts = split_by_deep_combinators(selector);
-
-    let shallow_part = deep_parts[0];
-    let other_parts = &deep_parts[1..];
-
-    // Initialize scoping based on whether the shallow part contains :host
-    let has_host = ctx.contains_host(shallow_part);
-    ctx.initialize_scoping(has_host);
-
-    // Scope only the shallow part (before ::ng-deep)
-    let scoped_shallow = scope_shallow_selector_with_context(shallow_part, ctx);
-
-    // Join with the unscoped other parts (after ::ng-deep becomes a space)
-    if other_parts.is_empty() {
-        scoped_shallow
-    } else {
-        format!("{} {}", scoped_shallow, other_parts.join(" "))
-    }
-}
-
-/// Scope a shallow selector with context tracking.
-/// Implements Angular's _scopeSelector logic with _shouldScopeIndicator.
-fn scope_shallow_selector_with_context(selector: &str, ctx: &mut ScopingContext) -> String {
-    if selector.is_empty() {
-        return String::new();
-    }
-
-    // Split by combinators while preserving them
-    let parts = split_by_combinators(selector);
-
-    let mut result = String::new();
-    for (part, combinator) in parts {
-        let trimmed = part.trim();
-        if trimmed.is_empty() {
-            if !combinator.is_empty() {
-                result.push_str(&normalize_combinator(combinator));
-            }
+/// Split a selector list on `_selectorSplitRe`: a comma outside parentheses
+/// together with one optional space on either side. Other whitespace around
+/// the comma (a newline, say) stays in the selectors.
+fn split_selector_list(selector: &str) -> Vec<&str> {
+    let bytes = selector.as_bytes();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let comma = if bytes[at] == b' ' && bytes.get(at + 1) == Some(&b',') {
+            at + 1
+        } else if bytes[at] == b',' {
+            at
+        } else {
+            at += 1;
+            continue;
+        };
+        if closes_enclosing_paren(selector, comma + 1) {
+            at += 1;
             continue;
         }
-
-        // Check if this part contains the host marker
-        let part_has_host = ctx.contains_host(trimmed);
-
-        // Update the scoping indicator: once we see :host, subsequent parts should be scoped
-        // Angular: this._shouldScopeIndicator = this._shouldScopeIndicator || partContainsHost
-        // IMPORTANT: Angular only updates for parts INSIDE the loop (parts with combinators after).
-        // The final part (after the loop) does NOT get this update - the pseudo-function handler
-        // updates internally as it processes each pseudo-function.
-        if part_has_host && !combinator.is_empty() {
-            ctx.update_on_host_found();
-        }
-
-        // Scope the part based on the indicator
-        let scoped = scope_selector_part_with_context(trimmed, ctx, part_has_host);
-
-        result.push_str(&scoped);
-        if !combinator.is_empty() {
-            result.push_str(&normalize_combinator_with_context(combinator, trimmed));
-        }
+        let end = if bytes.get(comma + 1) == Some(&b' ') { comma + 2 } else { comma + 1 };
+        parts.push(&selector[start..at]);
+        start = end;
+        at = end;
     }
-
-    result
+    parts.push(&selector[start..]);
+    parts
 }
 
-/// Normalize combinator spacing, taking into account hex escape sequences.
-/// When the preceding part ends with a hex escape (escape placeholder + hex digits),
-/// we need to output extra spaces to preserve the hex escape terminator.
-fn normalize_combinator_with_context(combinator: &str, preceding_part: &str) -> String {
-    let trimmed = combinator.trim();
-    if trimmed.is_empty() {
-        // Just whitespace - check if we need extra spaces for hex escape termination
-        if ends_with_hex_escape_pattern(preceding_part) {
-            // Output 3 spaces: original escape terminator + combinator space + extra for clarity
-            "   ".to_string()
+/// `part.split(/(?:>>>)|(?:\/deep\/)|(?:::ng-deep)/g)`.
+fn split_on_deep_combinators(part: &str) -> Vec<&str> {
+    let bytes = part.as_bytes();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let len = deep_combinator_len(&bytes[at..]);
+        if len > 0 {
+            parts.push(&part[start..at]);
+            at += len;
+            start = at;
         } else {
-            " ".to_string()
+            at += 1;
         }
+    }
+    parts.push(&part[start..]);
+    parts
+}
+
+/// The length of the `>>>`, `/deep/` or `::ng-deep` that `bytes` starts with, or 0.
+fn deep_combinator_len(bytes: &[u8]) -> usize {
+    if bytes.starts_with(b">>>") {
+        3
+    } else if bytes.starts_with(b"/deep/") {
+        6
+    } else if bytes.starts_with(b"::ng-deep") {
+        9
     } else {
-        // Non-space combinator (>, +, ~) - add spaces around it
-        format!(" {} ", trimmed)
+        0
     }
 }
 
-/// Check if a selector part ends with a hex escape pattern.
-/// This detects patterns like `__esc-ph-N__` followed by hex digits.
-fn ends_with_hex_escape_pattern(s: &str) -> bool {
-    // Look for __esc-ph-N__ followed by optional hex digits at the end
-    if let Some(esc_pos) = s.rfind("__esc-ph-") {
-        // Find the end of the placeholder (the closing __)
-        let after_start = esc_pos + 9; // length of "__esc-ph-"
-        if let Some(rel_end) = s[after_start..].find("__") {
-            let placeholder_end = after_start + rel_end + 2;
-            // Check if remaining chars (after placeholder) are all hex digits
-            let remaining = &s[placeholder_end..];
-            !remaining.is_empty() && remaining.chars().all(|c| c.is_ascii_hexdigit())
-        } else {
-            false
-        }
-    } else {
-        false
-    }
+/// Whether a selector contains `::ng-deep`, `>>>` or `/deep/`.
+fn contains_deep_combinator(selector: &str) -> bool {
+    let bytes = selector.as_bytes();
+    (0..bytes.len()).any(|at| deep_combinator_len(&bytes[at..]) > 0)
 }
 
-/// Scope a single selector part, respecting the context's should_scope indicator.
-fn scope_selector_part_with_context(
+/// Find the next combinator separator at or after byte `from`, matching
+/// `/( |>|\+|~(?!=))(?!<closes an enclosing paren>)\s*/g`, plus (from byte
+/// `other_whitespace_from` on) a newline, tab, carriage return or form feed,
+/// which is reported as a space.
+/// Returns its start, the separator character and the end of the trailing
+/// whitespace.
+fn find_combinator_separator(
     selector: &str,
-    ctx: &mut ScopingContext,
-    part_has_host: bool,
-) -> String {
-    if selector.is_empty() {
-        return String::new();
-    }
-
-    // Detach any comment placeholders before anything inspects the selector.
-    // A comment can be glued straight onto the selector text (PostCSS reprints
-    // `/* why */\n.foo` as `/* why */.foo`), and every check below is a
-    // whole-string match: with `%COMMENT0%` still attached, `:where(.one)`
-    // stops looking like a pure pseudo-function and gets scoped as
-    // `[content]:where(.one)` instead of `:where(.one[content])` - which is a
-    // real cascade change, since `:where()` contributes no specificity. The
-    // placeholders restore to blank text, so re-emitting them in front is
-    // enough.
-    if selector.contains(COMMENT_PLACEHOLDER_PREFIX) {
-        // `%COMMENT` without a valid index isn't ours - fall through and treat
-        // it as ordinary selector text.
-        let (stripped, placeholders) = strip_comment_placeholders(selector);
-        if !placeholders.is_empty() {
-            if stripped.trim().is_empty() {
-                // Nothing but placeholder(s) - no real selector to scope. Must
-                // not fall through, or a lone comment would become a bare
-                // `[content]` matching every element in the component.
-                return selector.to_string();
-            }
-            return placeholders + &scope_selector_part_with_context(&stripped, ctx, part_has_host);
+    from: usize,
+    other_whitespace_from: usize,
+) -> Option<(usize, char, usize)> {
+    let bytes = selector.as_bytes();
+    (from..bytes.len()).find_map(|at| {
+        let b = bytes[at];
+        let separator = match b {
+            b' ' | b'>' | b'+' => b,
+            b'~' if bytes.get(at + 1) != Some(&b'=') => b,
+            b'\n' | b'\t' | b'\r' | b'\x0C' if at >= other_whitespace_from => b' ',
+            _ => return None,
+        };
+        if closes_enclosing_paren(selector, at + 1) {
+            return None;
         }
-    }
-
-    // If this part IS the host marker, don't add content attr
-    if !ctx.host_marker.is_empty() && selector.trim() == ctx.host_marker {
-        return selector.to_string();
-    }
-
-    // Check if this is a pseudo-function (:where, :is)
-    // These need special handling - we may need to scope their contents
-    if let Some(scoped) = try_scope_pseudo_function_with_context(selector, ctx) {
-        return scoped;
-    }
-
-    // If the selector is NOT purely pseudo-functions but contains host,
-    // update the indicator. This matches Angular's else branch in
-    // _pseudoFunctionAwareScopeSelectorPart.
-    if part_has_host {
-        ctx.update_on_host_found();
-    }
-
-    // Handle polyfill host markers (Angular's _scopeSelectorPart with host markers)
-    if ctx.contains_polyfill_host_no_combinator(selector) {
-        let mut scoped = ctx.apply_simple_selector_scope(selector);
-
-        // If marker is inside a pseudo-function (not outside), also add content attr
-        // Angular uses: if (!p.match(_polyfillHostNoCombinatorOutsidePseudoFunction))
-        // which matches if the marker is NOT followed by [^(]*\) - i.e., IS inside parens
-        if !is_marker_outside_pseudo_function(selector) && !ctx.content_attr.is_empty() {
-            // Add content attr using the reorder pattern
-            scoped = scope_simple_selector(&scoped, ctx.content_attr);
-        }
-        return scoped;
-    }
-
-    // For parts containing the host marker at top level but with other content,
-    // we need to scope the parts after the host
-    if part_has_host && contains_host_attr_at_top_level(selector, ctx.host_attr) {
-        return scope_after_host_with_context(selector, ctx);
-    }
-
-    // Only scope if the indicator says we should
-    if !ctx.should_scope() {
-        return selector.to_string();
-    }
-
-    // Apply the content attribute
-    scope_simple_selector(selector, ctx.content_attr)
+        let rest = &selector[at + 1..];
+        let end = selector.len() - rest.trim_start_matches(is_js_space).len();
+        Some((at, char::from(separator), end))
+    })
 }
 
-/// Check if the polyfill host marker is outside any pseudo-function parentheses.
-/// Returns true if marker is at top level (not inside parens).
-fn is_marker_outside_pseudo_function(selector: &str) -> bool {
-    // Find the marker position
-    let Some(marker_pos) = selector.find(POLYFILL_HOST_NO_COMBINATOR) else {
-        return false;
-    };
+/// Whether the separator at byte `at` is a space ending a hex escape in the part
+/// that starts at byte `start` (`.\fc ber` for `.über`), so not a combinator.
+fn is_escaped_hex_space(selector: &str, start: usize, at: usize) -> bool {
+    has_escape_placeholder(&selector[start..at])
+        && selector.as_bytes().get(at + 1).is_some_and(u8::is_ascii_hexdigit)
+}
 
-    // Check if after the marker, there's a closing paren before an opening paren
-    // Angular regex: (?![^(]*\)) - negative lookahead for [^(]*\)
-    // This means "not followed by (any non-open-paren chars) then close-paren"
-    let after_marker = &selector[marker_pos + POLYFILL_HOST_NO_COMBINATOR.len()..];
+/// End of the part Angular's own split (`/( |>|\+|~(?!=))…\s*/`, no newline or
+/// tab) would produce for the part starting at byte `start`, given that byte
+/// `at` is inside it.
+fn find_angular_part_end(selector: &str, start: usize, at: usize) -> usize {
+    let mut from = at;
+    while let Some((end_at, _, end)) = find_combinator_separator(selector, from, usize::MAX) {
+        if !is_escaped_hex_space(selector, start, end_at) {
+            return end_at;
+        }
+        from = end;
+    }
+    selector.len()
+}
 
-    // If we find ) before ( (or no paren at all), marker is inside parens -> return false
-    // If we find ( before ) (or only () pairs), marker is outside -> return true
-    let mut paren_depth = 0;
-    for c in after_marker.chars() {
-        match c {
-            '(' => {
-                paren_depth += 1;
-            }
-            ')' => {
-                if paren_depth == 0 {
-                    // Found closing paren without matching open -> marker is inside parens
-                    return false;
-                }
-                paren_depth -= 1;
-            }
-            _ => {}
+/// Whether the Oxc-only newline/tab split may cut `part`, a part Angular scopes
+/// as one.
+///
+/// Angular only turns a bare `-shadowcsshost` (the rest of a selector after a
+/// first `:host(...)`, as in `:host(.a)\n:not(:host)`) into the host attribute
+/// while it sits in a part with a `-shadowcsshost-no-combinator` marker. And a
+/// part whose only host marker is inside a pseudo-function (`:where(:host)`)
+/// gets the content attribute in front. Cutting such a part would leak the
+/// marker or scope the host as content, so it is kept whole.
+fn can_split_on_other_whitespace(part: &str) -> bool {
+    let mut from = 0;
+    while let Some(at) = find_ignore_ascii_case(part, from, POLYFILL_HOST) {
+        from = at + POLYFILL_HOST.len();
+        if !starts_with_ignore_ascii_case(part, at, POLYFILL_HOST_NO_COMBINATOR) {
+            return false;
+        }
+        // `_polyfillHostNoCombinatorOutsidePseudoFunction`: `(?![^(]*\))`.
+        let after = &part[at + POLYFILL_HOST_NO_COMBINATOR.len()..];
+        if after.bytes().find(|&b| b == b'(' || b == b')') == Some(b')') {
+            return false;
         }
     }
-    // No unmatched closing paren found -> marker is outside parens
     true
 }
 
-/// Try to scope pseudo-functions (:where, :is, :has, :not) with context tracking.
-/// Returns None if the selector has other parts before the pseudo-function.
-///
-/// This is the context-aware version that implements Angular's `_pseudoFunctionAwareScopeSelectorPart`.
-fn try_scope_pseudo_function_with_context(
-    selector: &str,
-    ctx: &mut ScopingContext,
-) -> Option<String> {
-    let trimmed = selector.trim();
+/// Whether `s` contains a `SafeSelector` escape placeholder (`/__esc-ph-(\d+)__/`).
+fn has_escape_placeholder(s: &str) -> bool {
+    s.match_indices("__esc-ph-").any(|(at, m)| {
+        let rest = &s[at + m.len()..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        digits > 0 && rest[digits..].starts_with("__")
+    })
+}
 
-    // Collect all outer :where() and :is() selectors only.
-    // Angular only scopes inside these pseudo-functions, not :has() or :not().
-    // For :has() and :not(), the content attr goes BEFORE the pseudo-function.
-
-    // Find all pseudo-function parts
-    let mut pseudo_parts: Vec<String> = Vec::new();
-    let mut last_end = 0;
-    let bytes = trimmed.as_bytes();
-
-    let mut search_from = 0;
-    while let Some(mat) = find_where_or_is(trimmed, search_from) {
-        let match_start = mat.start;
-
-        // If there's content before this pseudo-function that's not another pseudo-function,
-        // this selector has other parts
-        if match_start > last_end {
-            let between = &trimmed[last_end..match_start];
-            if !between.is_empty() {
-                // There's content between pseudo-functions - not a pure pseudo-function selector
-                return None;
-            }
+/// Find `:where(` or `:is(` (ignoring case) at or after byte `from`.
+/// Returns the match start and the offset just past its `(`.
+fn find_where_or_is(s: &str, from: usize) -> Option<(usize, usize)> {
+    let bytes = s.as_bytes();
+    (from..bytes.len()).find_map(|at| {
+        if bytes[at] != b':' {
+            None
+        } else if starts_with_ignore_ascii_case(s, at, ":where(") {
+            Some((at, at + 7))
+        } else if starts_with_ignore_ascii_case(s, at, ":is(") {
+            Some((at, at + 4))
+        } else {
+            None
         }
+    })
+}
 
-        // Find the matching closing paren
-        let paren_start = mat.end;
-        let mut paren_depth: u32 = 1;
-        let mut paren_end = paren_start;
+/// `s.match(/([^:]*)(:*)([\s\S]*)/)` reassembled as `before + attr + colons + after`.
+fn insert_before_first_colon(s: &str, attr: &str) -> String {
+    let at = s.find(':').unwrap_or(s.len());
+    format!("{}{attr}{}", &s[..at], &s[at..])
+}
 
-        for i in paren_start..bytes.len() {
-            match bytes[i] {
-                b'(' => paren_depth += 1,
-                b')' => {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
-                        paren_end = i;
-                        break;
+/// Whether some host marker in `part` is outside parentheses: the
+/// `-shadowcsshost-no-combinator(?![^(]*\))` test of `_scopeSelectorPart`
+/// (a marker is inside when a `)` comes before the next `(`).
+fn has_host_marker_outside_parens(part: &str) -> bool {
+    part.match_indices(POLYFILL_HOST_NO_COMBINATOR).any(|(at, m)| {
+        let rest = &part[at + m.len()..];
+        match (rest.find('('), rest.find(')')) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(open), Some(close)) => open < close,
+        }
+    })
+}
+
+/// Port of `_applySimpleSelectorScope` for a part holding a host marker:
+/// each `-shadowcsshost-no-combinator<compound>` becomes the compound with
+/// `[host]` inserted before its first `:` or `)`, then any remaining
+/// `-shadowcsshost` becomes `[host]`.
+fn apply_simple_selector_scope(selector: &str, host_selector: &str) -> String {
+    let replace_by = format!("[{host_selector}]");
+    let mut result = selector.to_string();
+    // `_polyfillHostNoCombinatorRe`: `/-shadowcsshost-no-combinator([^\s,]*)/`
+    while let Some(at) = result.find(POLYFILL_HOST_NO_COMBINATOR) {
+        let compound_start = at + POLYFILL_HOST_NO_COMBINATOR.len();
+        let compound_end = result[compound_start..]
+            .find(|c: char| is_js_space(c) || c == ',')
+            .map_or(result.len(), |i| compound_start + i);
+        let compound = &result[compound_start..compound_end];
+        // `/([^:\)]*)(:*)(.*)/` -> `before + replaceBy + colon + after`
+        let split = compound.find([':', ')']).unwrap_or(compound.len());
+        let replaced = format!("{}{replace_by}{}", &compound[..split], &compound[split..]);
+        result.replace_range(at..compound_end, &replaced);
+    }
+    replace_ignore_ascii_case(&result, POLYFILL_HOST, &replace_by, |_| true)
+}
+
+/// Scope the selector of one rule like `_scopeSelectors` does.
+///
+/// `raw` is the text between the previous rule and this rule's `{`. Like
+/// `processRules`' `_ruleRe`, it is split into rules at `;`, and each rule
+/// keeps its leading whitespace and comments and its trailing whitespace
+/// around the selector. Only the last one owns the block; the rules before it
+/// have none and are only scoped before v22.2.
+fn scope_rule_selector(raw: &str, scoper: &mut SelectorScoper) -> String {
+    let segments = split_outside_strings(raw, b';');
+    let mut result = String::with_capacity(raw.len() * 2);
+    let last = segments.len() - 1;
+    for (i, segment) in segments.into_iter().enumerate() {
+        if i > 0 {
+            result.push(';');
+        }
+        if i < last && scoper.css_nesting {
+            result.push_str(segment);
+        } else {
+            result.push_str(&scope_one_rule_selector(segment, scoper));
+        }
+    }
+    result
+}
+
+/// Scope the selector inside `raw` (`_ruleRe`'s
+/// `(\s*(?:%COMMENT%\s*)*)([^;\{\}]+?)(\s*)`), keeping the text around it.
+fn scope_one_rule_selector(raw: &str, scoper: &mut SelectorScoper) -> String {
+    let mut lead = 0;
+    loop {
+        lead = raw.len() - raw[lead..].trim_start_matches(is_js_space).len();
+        match find_comment_placeholder(raw, lead) {
+            Some((range, _)) if range.start == lead => lead = range.end,
+            _ => break,
+        }
+    }
+    let end = raw.trim_end_matches(is_js_space).len();
+    if lead < end {
+        let selector = &raw[lead..end];
+        let scoped = if selector.contains(['"', '\'']) {
+            unescape_in_strings(&scoper.scope_selector(&escape_in_strings(selector), true))
+        } else {
+            scoper.scope_selector(selector, true)
+        };
+        return format!("{}{scoped}{}", &raw[..lead], &raw[end..]);
+    }
+    // Only whitespace and comments: the regex backtracks so that the selector
+    // is the last whitespace character. A trailing comment placeholder is left
+    // alone (see `scope_pseudo_function_aware_part`).
+    match raw.char_indices().next_back() {
+        Some((at, c)) if is_js_space(c) => {
+            let scoped = scoper.scope_selector(&raw[at..], true);
+            format!("{}{scoped}", &raw[..at])
+        }
+        _ => raw.to_string(),
+    }
+}
+
+/// For each byte of `css`, whether it is inside a quoted string the way
+/// `escapeInStrings` sees it (a backslash skips the next character; the
+/// quotes themselves are outside).
+fn string_mask(css: &str) -> Vec<bool> {
+    let bytes = css.as_bytes();
+    let mut mask = vec![false; bytes.len()];
+    let mut quote = None;
+    let mut at = 0;
+    while at < bytes.len() {
+        let b = bytes[at];
+        if b == b'\\' {
+            at += 2;
+            continue;
+        }
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => mask[at] = true,
+            None if b == b'"' || b == b'\'' => quote = Some(b),
+            None => {}
+        }
+        at += 1;
+    }
+    mask
+}
+
+const SEMI_IN_PLACEHOLDER: &str = "%SEMI_IN_PLACEHOLDER%";
+const COMMA_IN_PLACEHOLDER: &str = "%COMMA_IN_PLACEHOLDER%";
+const COLON_IN_PLACEHOLDER: &str = "%COLON_IN_PLACEHOLDER%";
+
+/// Port of `escapeInStrings` for a selector: `processRules` hides the `;`, `,`
+/// and `:` inside quoted strings, so `a[title="a,b"]` is not split at the comma.
+fn escape_in_strings(selector: &str) -> String {
+    let mask = string_mask(selector);
+    let mut escaped = String::with_capacity(selector.len());
+    for (at, c) in selector.char_indices() {
+        match c {
+            ';' if mask[at] => escaped.push_str(SEMI_IN_PLACEHOLDER),
+            ',' if mask[at] => escaped.push_str(COMMA_IN_PLACEHOLDER),
+            ':' if mask[at] => escaped.push_str(COLON_IN_PLACEHOLDER),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// Port of `unescapeInStrings`, undoing [`escape_in_strings`].
+fn unescape_in_strings(selector: &str) -> String {
+    selector
+        .replace(COMMA_IN_PLACEHOLDER, ",")
+        .replace(SEMI_IN_PLACEHOLDER, ";")
+        .replace(COLON_IN_PLACEHOLDER, ":")
+}
+
+/// Split `css` at every `delimiter` outside quoted strings.
+fn split_outside_strings(css: &str, delimiter: u8) -> Vec<&str> {
+    let mask = string_mask(css);
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (at, &b) in css.as_bytes().iter().enumerate() {
+        if b == delimiter && !mask[at] {
+            parts.push(&css[start..at]);
+            start = at + 1;
+        }
+    }
+    parts.push(&css[start..]);
+    parts
+}
+
+/// Whether a rule body holds a nested block (`rule.content.includes('{')`,
+/// braces inside strings excluded).
+fn has_nested_block(body: &str) -> bool {
+    let mask = string_mask(body);
+    body.bytes().enumerate().any(|(at, b)| b == b'{' && !mask[at])
+}
+
+/// Port of `_stripScopingSelectors`, used for bodies that cannot be scoped
+/// (`@font-face`, `@page` and, from v22.2, rule bodies).
+///
+/// In every rule of `css` (nested blocks are left alone) `>>>`, `/deep/` and
+/// `::ng-deep` become a space, and then so does the first host marker
+/// together with the compound selector attached to it.
+fn strip_scoping_selectors(css: &str) -> String {
+    let mask = string_mask(css);
+    let bytes = css.as_bytes();
+    let mut result = String::with_capacity(css.len());
+    let mut depth = 0u32;
+    let mut segment_start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let b = bytes[at];
+        if b == b'\\' {
+            at += 2;
+            continue;
+        }
+        if !mask[at] {
+            match b {
+                b'{' => {
+                    if depth == 0 {
+                        result.push_str(&strip_rule_scoping(
+                            &css[segment_start..at],
+                            &mask[segment_start..at],
+                        ));
+                        segment_start = at;
                     }
+                    depth += 1;
+                }
+                b'}' if depth > 0 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        result.push_str(&css[segment_start..=at]);
+                        segment_start = at + 1;
+                    }
+                }
+                b'}' | b';' if depth == 0 => {
+                    result.push_str(&strip_rule_scoping(
+                        &css[segment_start..at],
+                        &mask[segment_start..at],
+                    ));
+                    segment_start = at;
                 }
                 _ => {}
             }
         }
-
-        if paren_depth != 0 {
-            return None; // Unbalanced parens
-        }
-
-        // Capture the full pseudo-function including content
-        pseudo_parts.push(trimmed[match_start..=paren_end].to_string());
-        last_end = paren_end + 1;
-        search_from = last_end;
+        at += 1;
     }
-
-    // Check if the entire selector is made up of pseudo-functions
-    if pseudo_parts.is_empty() {
-        return None;
-    }
-
-    let joined: String = pseudo_parts.join("");
-    if joined != trimmed {
-        return None; // Selector has other parts
-    }
-
-    // Process each pseudo-function
-    let scoped_parts: Vec<String> = pseudo_parts
-        .iter()
-        .map(|part| {
-            // Extract the pseudo-function name and inner content
-            let Some(pm) = find_where_or_is(part, 0) else {
-                return part.clone();
-            };
-
-            let prefix_without_paren = &part[..pm.end - 1]; // e.g., ":where"
-            let inner = &part[pm.end..part.len() - 1]; // Content inside parens
-
-            // Check if inner content contains host marker - update context if so
-            if ctx.contains_host(inner) {
-                ctx.update_on_host_found();
-            }
-
-            // Create a child context for recursive scoping
-            let child_ctx = ctx.child();
-
-            // Recursively scope the inner content
-            let scoped_inner = scope_selector_list_with_context(inner, &child_ctx);
-
-            // Update parent context from child if host was found
-            if child_ctx.should_scope_indicator == Some(true) {
-                ctx.update_on_host_found();
-            }
-
-            format!("{}({})", prefix_without_paren, scoped_inner)
-        })
-        .collect();
-
-    Some(scoped_parts.join(""))
-}
-
-/// Scope a simple selector by adding the content attribute.
-fn scope_simple_selector(selector: &str, content_attr: &str) -> String {
-    if selector.is_empty() {
-        return String::new();
-    }
-
-    // Comment placeholders are detached in `scope_selector_part_with_context`,
-    // which is upstream of every caller of this function, so the selector text
-    // here is already placeholder-free.
-
-    // Already has the content attribute
-    let attr = format!("[{}]", content_attr);
-    if selector.contains(&attr) {
-        return selector.to_string();
-    }
-
-    // Don't scope keyframe selectors
-    if is_keyframe_selector(selector) {
-        return selector.to_string();
-    }
-
-    // Handle pseudo-elements first (::before, ::after, etc.)
-    if let Some(pseudo_pos) = find_pseudo_element_start(selector) {
-        let (base, pseudo) = selector.split_at(pseudo_pos);
-        return format!("{}{}{}", base, attr, pseudo);
-    }
-
-    // Handle pseudo-classes (:hover, :first-child, etc.)
-    if let Some(pseudo_pos) = find_pseudo_class_start(selector) {
-        let (base, pseudo) = selector.split_at(pseudo_pos);
-        if base.is_empty() {
-            return format!("{}{}", attr, selector);
-        }
-        return format!("{}{}{}", base, attr, pseudo);
-    }
-
-    format!("{}{}", selector, attr)
-}
-
-/// Normalize combinator spacing to match Angular's format.
-/// Angular outputs ` separator ` for all combinators.
-fn normalize_combinator(combinator: &str) -> String {
-    let trimmed = combinator.trim();
-    if trimmed.is_empty() {
-        // Just whitespace - return single space
-        " ".to_string()
+    if depth == 0 {
+        result.push_str(&strip_rule_scoping(&css[segment_start..], &mask[segment_start..]));
     } else {
-        // Non-space combinator (>, +, ~) - add spaces around it
-        format!(" {} ", trimmed)
+        result.push_str(&css[segment_start..]);
     }
-}
-
-/// Check if the host attr appears at the top level (not inside parentheses).
-fn contains_host_attr_at_top_level(selector: &str, host_attr: &str) -> bool {
-    let host_marker = format!("[{}]", host_attr);
-    let mut depth: u32 = 0;
-    let chars: Vec<char> = selector.chars().collect();
-    let marker_chars: Vec<char> = host_marker.chars().collect();
-
-    for i in 0..chars.len() {
-        match chars[i] {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            _ if depth == 0 && i + marker_chars.len() <= chars.len() => {
-                // Check if marker starts at this position
-                if chars[i..i + marker_chars.len()] == marker_chars[..] {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-/// Split a selector by combinators (space, >, +, ~).
-/// Returns pairs of (selector_part, combinator_with_spaces).
-fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
-    let mut result = Vec::new();
-    let char_indices: Vec<(usize, char)> = selector.char_indices().collect();
-    let mut start = 0_usize; // byte index into selector
-    let mut i = 0_usize; // index into char_indices
-    let mut paren_depth: u32 = 0;
-    let mut bracket_depth: u32 = 0;
-
-    while i < char_indices.len() {
-        let (byte_pos, ch) = char_indices[i];
-        match ch {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            '[' => bracket_depth += 1,
-            ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            ' ' | '\n' | '\t' | '\r' | '>' | '+' | '~'
-                if paren_depth == 0 && bracket_depth == 0 =>
-            {
-                // A space following an escaped hex value and followed by another hex character
-                // (ie: ".\fc ber" for ".über") is not a separator between 2 selectors
-                // Check: if the part ends with an escape placeholder AND next char is hex
-                let part = &selector[start..byte_pos];
-                let next_char_is_hex = i + 1 < char_indices.len()
-                    && ch == ' '
-                    && char_indices[i + 1].1.is_ascii_hexdigit();
-                let part_ends_with_esc_placeholder = part.contains("__esc-ph-");
-
-                if next_char_is_hex && part_ends_with_esc_placeholder {
-                    // This space is part of a CSS hex escape sequence, not a combinator
-                    i += 1;
-                    continue;
-                }
-
-                // Found a potential combinator
-                let part_end = byte_pos;
-
-                // Collect the combinator (may include spaces around it)
-                let combinator_start = byte_pos;
-                while i < char_indices.len()
-                    && matches!(char_indices[i].1, ' ' | '\n' | '\t' | '\r' | '>' | '+' | '~')
-                {
-                    i += 1;
-                }
-
-                let combinator_end =
-                    if i < char_indices.len() { char_indices[i].0 } else { selector.len() };
-
-                // Always push the part, even if empty (to preserve leading combinators)
-                result.push((
-                    &selector[start..part_end],
-                    &selector[combinator_start..combinator_end],
-                ));
-                start = combinator_end;
-                continue;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    // Add the last part
-    if start < selector.len() {
-        result.push((&selector[start..], ""));
-    }
-
     result
 }
 
-/// Split a selector by deep combinators (`>>>`, `/deep/`, `::ng-deep`).
-/// Returns the parts between the deep combinators.
-/// Parts after the first deep combinator are not scoped.
-fn split_by_deep_combinators(selector: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let bytes = selector.as_bytes();
-    let len = bytes.len();
-    let mut start = 0;
-    let mut i = 0;
-
-    while i < len {
-        // Check for `>>>` (3 chars)
-        if i + 3 <= len
-            && selector.is_char_boundary(i)
-            && selector.is_char_boundary(i + 3)
-            && &selector[i..i + 3] == ">>>"
-        {
-            result.push(&selector[start..i]);
-            i += 3;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            start = i;
+/// `rule.selector.replace(_shadowDeepSelectors, ' ').replace(_polyfillHostNoCombinatorRe, ' ')`
+/// on one rule's text. `mask` marks the bytes inside strings, where Angular has
+/// replaced `:` and `,` with placeholders, so `::ng-deep` is not matched there
+/// and `,` does not end the host marker's compound selector.
+fn strip_rule_scoping(rule: &str, mask: &[bool]) -> String {
+    let bytes = rule.as_bytes();
+    let mut stripped = String::with_capacity(rule.len());
+    let mut stripped_mask = Vec::with_capacity(rule.len());
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let len = match deep_combinator_len(&bytes[at..]) {
+            9 if mask[at] || mask[at + 1] => 0,
+            len => len,
+        };
+        if len == 0 {
+            at += 1;
             continue;
         }
-
-        // Check for `/deep/` (6 chars)
-        if i + 6 <= len
-            && selector.is_char_boundary(i)
-            && selector.is_char_boundary(i + 6)
-            && &selector[i..i + 6] == "/deep/"
-        {
-            result.push(&selector[start..i]);
-            i += 6;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            start = i;
-            continue;
-        }
-
-        // Check for `::ng-deep` (9 chars)
-        if i + 9 <= len
-            && selector.is_char_boundary(i)
-            && selector.is_char_boundary(i + 9)
-            && &selector[i..i + 9] == "::ng-deep"
-        {
-            result.push(&selector[start..i]);
-            i += 9;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            start = i;
-            continue;
-        }
-
-        i += 1;
+        stripped.push_str(&rule[copied..at]);
+        stripped_mask.extend_from_slice(&mask[copied..at]);
+        stripped.push(' ');
+        stripped_mask.push(false);
+        at += len;
+        copied = at;
     }
+    stripped.push_str(&rule[copied..]);
+    stripped_mask.extend_from_slice(&mask[copied..]);
 
-    // Add the remaining part
-    if start <= len {
-        result.push(&selector[start..]);
+    if let Some(at) = stripped.find(POLYFILL_HOST_NO_COMBINATOR) {
+        let compound_start = at + POLYFILL_HOST_NO_COMBINATOR.len();
+        let compound_end = stripped[compound_start..]
+            .char_indices()
+            .find(|&(i, c)| is_js_space(c) || (c == ',' && !stripped_mask[compound_start + i]))
+            .map_or(stripped.len(), |(i, _)| compound_start + i);
+        stripped.replace_range(at..compound_end, " ");
     }
-
-    // If nothing was split, return the original selector as the only element
-    if result.is_empty() {
-        result.push(selector);
-    }
-
-    result
-}
-
-/// Scope descendants after :host in a selector with context.
-fn scope_after_host_with_context(selector: &str, ctx: &mut ScopingContext) -> String {
-    if ctx.host_marker.is_empty() {
-        return selector.to_string();
-    }
-
-    if let Some(pos) = selector.find(&ctx.host_marker) {
-        let after_host = &selector[pos + ctx.host_marker.len()..];
-        let before_host = &selector[..pos];
-        let before_and_host = &selector[..pos + ctx.host_marker.len()];
-
-        // Parts before :host should NOT be scoped
-        // Parts after :host SHOULD be scoped
-        // So we mark that we've seen host
-        ctx.update_on_host_found();
-
-        // Check if what follows is a pseudo-selector directly attached (no combinator)
-        let after_trimmed = after_host.trim_start();
-        if after_trimmed.is_empty() {
-            // Handle any content before :host - it should NOT be scoped
-            if before_host.is_empty() {
-                return selector.to_string();
-            }
-            // Return before (unscoped) + host
-            return selector.to_string();
-        }
-
-        // If after_host starts with a pseudo-selector (: but not preceded by a combinator),
-        // it's directly attached to the host and shouldn't be scoped
-        let first_char = after_trimmed.chars().next();
-        if first_char == Some(':') {
-            // Check if there's a combinator somewhere after the pseudo-selector
-            let parts = split_by_combinators(after_trimmed);
-            if parts.len() == 1 && parts[0].1.is_empty() {
-                // Only one part with no combinator - it's all pseudo-selectors on the host
-                return selector.to_string();
-            }
-
-            // There are combinators - scope everything after the first combinator
-            let mut scoped_after = String::new();
-            let mut found_combinator = false;
-            for (part, combinator) in parts {
-                if !found_combinator {
-                    // First part (pseudo-selector attached to host) - don't scope
-                    scoped_after.push_str(part);
-                    if !combinator.is_empty()
-                        && combinator.chars().any(|c| {
-                            c == ' '
-                                || c == '\n'
-                                || c == '\t'
-                                || c == '\r'
-                                || c == '>'
-                                || c == '+'
-                                || c == '~'
-                        })
-                    {
-                        found_combinator = true;
-                    }
-                    scoped_after.push_str(&normalize_combinator_with_context(combinator, part));
-                } else {
-                    // Parts after combinator - scope them
-                    let trimmed = part.trim();
-                    if !trimmed.is_empty() {
-                        scoped_after.push_str(&scope_simple_selector(trimmed, ctx.content_attr));
-                    }
-                    if !combinator.is_empty() {
-                        scoped_after.push_str(&normalize_combinator_with_context(combinator, part));
-                    }
-                }
-            }
-            return format!("{}{}", before_and_host, scoped_after);
-        }
-
-        // Normal case: what follows is not a pseudo-selector, scope it
-        let parts = split_by_combinators(after_host);
-        let mut scoped_after = String::new();
-        for (part, combinator) in parts {
-            let trimmed = part.trim();
-            if !trimmed.is_empty() {
-                scoped_after.push_str(&scope_simple_selector(trimmed, ctx.content_attr));
-            }
-            if !combinator.is_empty() {
-                scoped_after.push_str(&normalize_combinator_with_context(combinator, part));
-            }
-        }
-
-        format!("{}{}", before_and_host, scoped_after)
-    } else {
-        selector.to_string()
-    }
-}
-
-/// Find the start position of a pseudo-element (::).
-fn find_pseudo_element_start(s: &str) -> Option<usize> {
-    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
-    let mut i = 0;
-    let mut in_brackets: u32 = 0;
-
-    while i < char_indices.len() {
-        let (byte_pos, ch) = char_indices[i];
-        match ch {
-            '[' => in_brackets += 1,
-            ']' => in_brackets = in_brackets.saturating_sub(1),
-            ':' if in_brackets == 0
-                && i + 1 < char_indices.len()
-                && char_indices[i + 1].1 == ':' =>
-            {
-                return Some(byte_pos);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Find the start position of a pseudo-class (:), including pseudo-functions.
-/// The caller decides how to handle pseudo-functions vs regular pseudo-classes.
-fn find_pseudo_class_start(s: &str) -> Option<usize> {
-    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
-    let mut i = 0;
-    let mut in_brackets: u32 = 0;
-
-    while i < char_indices.len() {
-        let (byte_pos, ch) = char_indices[i];
-        match ch {
-            '[' => in_brackets += 1,
-            ']' => in_brackets = in_brackets.saturating_sub(1),
-            ':' if in_brackets == 0 => {
-                // Check it's not :: (pseudo-element) - those are handled separately
-                if i + 1 < char_indices.len() && char_indices[i + 1].1 == ':' {
-                    return None;
-                }
-                return Some(byte_pos);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Result of finding a pseudo-function match.
-struct PseudoFunctionMatch {
-    /// Start position of the match (at the `:`)
-    start: usize,
-    /// End position of the match (after the `(`)
-    end: usize,
-}
-
-/// Find `:where(` or `:is(` pattern starting from a given position.
-/// Returns the match info if found, or None.
-fn find_where_or_is(s: &str, start_from: usize) -> Option<PseudoFunctionMatch> {
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    let mut i = start_from;
-
-    while i < len {
-        if bytes[i] == b':' {
-            // Check for `:where(`
-            if i + 7 <= len && &s[i..i + 7] == ":where(" {
-                return Some(PseudoFunctionMatch { start: i, end: i + 7 });
-            }
-            // Check for `:is(`
-            if i + 4 <= len && &s[i..i + 4] == ":is(" {
-                return Some(PseudoFunctionMatch { start: i, end: i + 4 });
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Check if a selector is a keyframe selector (from, to, or percentage).
-fn is_keyframe_selector(selector: &str) -> bool {
-    let trimmed = selector.trim();
-    if trimmed == "from" || trimmed == "to" {
-        return true;
-    }
-    // Check for percentage (e.g., "50%", "100%")
-    if trimmed.ends_with('%') {
-        let without_percent = &trimmed[..trimmed.len() - 1];
-        return without_percent.parse::<f64>().is_ok();
-    }
-    false
+    stripped
 }
 
 // ============================================================================
@@ -3140,147 +2598,6 @@ fn parse_polyfill_unscoped_rule(s: &str) -> Option<(String, String, usize)> {
     Some((selector, body, body_end + 1))
 }
 
-/// Strip scoping selectors (::ng-deep, >>>, /deep/, :host) from CSS text.
-///
-/// This is used for @font-face and @page rules where these selectors should
-/// be removed entirely rather than scoped.
-fn strip_scoping_selectors(css: &str, host_attr: &str) -> String {
-    // Strip ::ng-deep, >>>, /deep/
-    let result = strip_deep_combinators(css);
-
-    // Strip polyfill host markers (-shadowcsshost-no-combinator and -shadowcsshost)
-    // The -no-combinator variant must be replaced first since it's longer
-    let mut result = result.replace(POLYFILL_HOST_NO_COMBINATOR, " ").replace(POLYFILL_HOST, " ");
-
-    // Strip :host (with optional selector in parens)
-    // If host_attr is provided, :host may have already been converted to [host_attr]
-    if !host_attr.is_empty() {
-        let host_marker = format!("[{}]", host_attr);
-        result = result.replace(&host_marker, " ");
-    }
-
-    // Also strip unconverted :host patterns
-    result = strip_host_patterns(&result);
-
-    // Clean up multiple spaces
-    collapse_multiple_spaces(&result)
-}
-
-/// Strip deep combinators (::ng-deep, >>>, /deep/) from a string, replacing with space.
-fn strip_deep_combinators(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        // Check for `::ng-deep`
-        if i + 9 <= len && &s[i..i + 9] == "::ng-deep" {
-            result.push(' ');
-            i += 9;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            continue;
-        }
-
-        // Check for `>>>`
-        if i + 3 <= len && &s[i..i + 3] == ">>>" {
-            result.push(' ');
-            i += 3;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            continue;
-        }
-
-        // Check for `/deep/`
-        if i + 6 <= len && &s[i..i + 6] == "/deep/" {
-            result.push(' ');
-            i += 6;
-            // Skip trailing whitespace
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            continue;
-        }
-
-        i += push_utf8_char(&mut result, s, i);
-    }
-
-    result
-}
-
-/// Strip :host patterns, including :host() with optional content in parens.
-fn strip_host_patterns(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        // Check for `:host`
-        if i + 5 <= len && &s[i..i + 5] == ":host" {
-            let after = i + 5;
-            // Check if followed by `(`
-            if after < len && bytes[after] == b'(' {
-                // Find matching close paren
-                let mut paren_depth = 1;
-                let mut j = after + 1;
-                while j < len && paren_depth > 0 {
-                    if bytes[j] == b'(' {
-                        paren_depth += 1;
-                    } else if bytes[j] == b')' {
-                        paren_depth -= 1;
-                    }
-                    j += 1;
-                }
-                result.push(' ');
-                i = j;
-                // Skip trailing whitespace
-                while i < len && bytes[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-            } else {
-                // Just `:host` without parens
-                result.push(' ');
-                i = after;
-                // Skip trailing whitespace
-                while i < len && bytes[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-            }
-            continue;
-        }
-
-        i += push_utf8_char(&mut result, s, i);
-    }
-
-    result
-}
-
-/// Collapse multiple consecutive spaces into a single space.
-fn collapse_multiple_spaces(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut prev_was_space = false;
-
-    for c in s.chars() {
-        if c == ' ' {
-            if !prev_was_space {
-                result.push(' ');
-                prev_was_space = true;
-            }
-        } else {
-            result.push(c);
-            prev_was_space = false;
-        }
-    }
-
-    result
-}
-
 /// Remove polyfill-unscoped-rule blocks from CSS text.
 ///
 /// This is called after extracting the unscoped rules.
@@ -3410,8 +2727,9 @@ mod tests {
     #[test]
     fn test_strip_scoping_selectors() {
         // Test the strip function directly
-        let result = strip_scoping_selectors(" ::ng-deep @top-left { content: \"Hamlet\";}", "h");
-        assert!(result.starts_with(" "), "Expected leading space, got: {:?}", result);
+        // `::ng-deep` becomes a space; the space after it and the block stay.
+        let result = strip_scoping_selectors(" ::ng-deep @top-left { content: \"Hamlet\";}");
+        assert_eq!(result, "   @top-left { content: \"Hamlet\";}");
     }
 
     #[test]
@@ -3553,9 +2871,9 @@ mod tests {
         );
         assert_eq!(
             shim_css_text("x::content y {}", "contenta", ""),
-            "x[contenta]::content y[contenta] {}"
+            "x[contenta]::content   y[contenta] {}"
         );
-        assert_eq!(shim_v21("x::content y {}", "contenta", ""), "x[contenta] y[contenta] {}");
+        assert_eq!(shim_v21("x::content y {}", "contenta", ""), "x[contenta]   y[contenta] {}");
     }
 
     // ============================================================================

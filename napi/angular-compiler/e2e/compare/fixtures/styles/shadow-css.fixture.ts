@@ -1830,4 +1830,68 @@ export class AtSignInValuesComponent {}
     `.trim(),
     expectedFeatures: ['styles:'],
   },
+  {
+    name: 'shadow-css-combinator-spacing',
+    category: 'styles',
+    description:
+      'Every combinator part is written as `${part} ${separator} `, so runs of spaces around combinators and deep combinators are kept',
+    className: 'CombinatorSpacingComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-combinator-spacing',
+  standalone: true,
+  template: \`<div class="a b">Content</div>\`,
+  styles: [\`.a  >  .b {} .c ~ .d, .e + .f {} :host-context(.x) ::ng-deep .y {} .g,.h , .i {}\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class CombinatorSpacingComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-rule-body-strip',
+    category: 'styles',
+    description:
+      'Angular 22.2 strips the host marker and deep combinators from a rule body without nested rules',
+    className: 'RuleBodyStripComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-rule-body-strip',
+  standalone: true,
+  template: \`<div class="a b">Content</div>\`,
+  styles: [\`.a { content: ":host.foo .bar"; color: red; } .b ::ng-deep .c { content: ">>> x"; }\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class RuleBodyStripComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-nesting-selector',
+    category: 'styles',
+    description: 'Angular 22.2 leaves a lone & and a rule without a block unscoped',
+    className: 'NestingSelectorComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-nesting-selector',
+  standalone: true,
+  template: \`<div class="a">Content</div>\`,
+  styles: [\`& .a {} .b & {} .c; .d {}\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class NestingSelectorComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
 ]
