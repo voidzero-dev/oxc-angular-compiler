@@ -1,0 +1,31 @@
+crates/oxc_angular_compiler/src/component/metadata.rs
+  s_f0a3b7ba04f61b::t_94191e47869026 207-211,913-938
+crates/oxc_angular_compiler/src/ir/enums.rs
+  s_f0a3b7ba04f61b::t_b80d8d412a2135 91-92
+crates/oxc_angular_compiler/src/ir/ops.rs
+  s_f0a3b7ba04f61b::t_7eff6f9513cebb 171-172,239-241,284,330,376,422,1094-1103
+crates/oxc_angular_compiler/src/pipeline/phases/insert_incremental_hydration_runtime.rs
+  s_f0a3b7ba04f61b::t_b40f731559dfef 23-34,36-38
+crates/oxc_angular_compiler/src/r3/identifiers.rs
+  s_f0a3b7ba04f61b::t_d1c56984e6cd7f 479-482
+crates/oxc_angular_compiler/src/pipeline/ingest.rs
+  s_f0a3b7ba04f61b::t_75ce5a03d1866f 34,3317
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_f0a3b7ba04f61b::t_8edd435bb0a7e1 932-946,953,955-957,961-977,984-994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "28749264a78a293a485620bb7c20f116209f5a15",
+  "prompts": {},
+  "sessions": {
+    "s_f0a3b7ba04f61b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4059902c-843c-4b9a-8a80-fcbd6b0ac040",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
