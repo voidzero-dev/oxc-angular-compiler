@@ -29,9 +29,9 @@ use crate::directive::{
 };
 use crate::factory::create_invalid_factory_call;
 use crate::output::ast::{
-    FnParam, FunctionExpr, InstantiateExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
-    LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
-    ReadVarExpr, ReturnStatement,
+    ArrowFunctionBody, ArrowFunctionExpr, FnParam, FunctionExpr, InstantiateExpr,
+    InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
+    LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement,
 };
 use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
 use crate::pipeline::emit::HostBindingCompilationResult;
@@ -322,7 +322,7 @@ fn generate_cmp_definition<'a>(
         false,
     ));
 
-    // 18. consts: [...] or consts: function() { ...initializers...; return [...]; }
+    // 18. consts: [...] or consts: () => { ...initializers...; return [...]; }
     // Per Angular compiler.ts lines 260-268:
     // - If there are const initializers (e.g., for i18n dual-mode), wrap in arrow function
     // - Otherwise, emit as plain literal array
@@ -334,7 +334,7 @@ fn generate_cmp_definition<'a>(
 
         let consts_value = if !job.consts_initializers.is_empty() {
             // Wrap consts in an arrow function that runs initializers first
-            // function() { ...initializers...; return [...consts...]; }
+            // () => { ...initializers...; return [...consts...]; }
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
                 OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
 
@@ -355,11 +355,10 @@ fn generate_cmp_definition<'a>(
                 &allocator,
             )));
 
-            OutputExpression::Function(Box::new_in(
-                FunctionExpr {
-                    name: None,
+            OutputExpression::ArrowFunction(Box::new_in(
+                ArrowFunctionExpr {
                     params: OxcVec::new_in(&allocator),
-                    statements: fn_stmts,
+                    body: ArrowFunctionBody::Statements(fn_stmts),
                     source_span: None,
                 },
                 &allocator,

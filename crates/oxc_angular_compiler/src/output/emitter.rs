@@ -13,6 +13,7 @@
 //!
 //! See: `packages/compiler/src/output/abstract_emitter.ts:126-184`
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use oxc_diagnostics::OxcDiagnostic;
@@ -1047,39 +1048,21 @@ impl JsEmitter {
         expr: &super::ast::LocalizedStringExpr<'_>,
         ctx: &mut EmitterContext,
     ) {
-        // $localize`...` becomes $localize(__makeTemplateObject(cooked, raw), expr1, expr2, ...)
-        const MAKE_TEMPLATE_OBJECT_POLYFILL: &str = "(this&&this.__makeTemplateObject||function(e,t){return Object.defineProperty?Object.defineProperty(e,\"raw\",{value:t}):e.raw=t,e})";
-
-        ctx.print("$localize(");
-        ctx.print(MAKE_TEMPLATE_OBJECT_POLYFILL);
-        ctx.print("(");
-
-        // Cooked strings (message parts)
-        ctx.print("[");
-        for (i, part) in expr.message_parts.iter().enumerate() {
+        // Emitted natively, as Angular's `AbstractEmitterVisitor.visitLocalizedString` and
+        // ngtsc (for ES2015+ targets) do: $localize `raw0${expr0}raw1...`. Only the raw
+        // strings are printed; the engine derives the cooked strings from them.
+        ctx.print("$localize `");
+        for (i, raw) in expr.raw_message_parts.iter().enumerate() {
             if i > 0 {
-                ctx.print(", ");
+                ctx.print("${");
+                if let Some(expression) = expr.expressions.get(i - 1) {
+                    self.visit_expression(expression, ctx);
+                }
+                ctx.print("}");
             }
-            ctx.print(&escape_string(part, false));
+            ctx.print(&template_raw_text(raw));
         }
-        ctx.print("], ");
-
-        // Raw strings
-        ctx.print("[");
-        for (i, part) in expr.raw_message_parts.iter().enumerate() {
-            if i > 0 {
-                ctx.print(", ");
-            }
-            ctx.print(&escape_string(part, false));
-        }
-        ctx.print("])");
-
-        // Expressions
-        for expression in &expr.expressions {
-            ctx.print(", ");
-            self.visit_expression(expression, ctx);
-        }
-        ctx.print(")");
+        ctx.print("`");
     }
 
     fn visit_params(&self, params: &[FnParam<'_>], ctx: &mut EmitterContext) {
@@ -1315,6 +1298,24 @@ pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
     }
     result.push('"');
     result
+}
+
+/// The raw text of a template literal part, printed verbatim like the TypeScript printer
+/// prints a template's `rawText`. The raw text is already escaped for a template literal
+/// (backslashes, backticks and `${`); a stored lone surrogate, which UTF-8 output can't hold,
+/// is printed as its `\uXXXX` escape so the cooked string still holds that code unit.
+fn template_raw_text(raw: &str) -> Cow<'_, str> {
+    if !has_lone_surrogate(raw) {
+        return Cow::Borrowed(raw);
+    }
+    let mut result = String::with_capacity(raw.len() + 4);
+    for piece in pieces(raw) {
+        match piece {
+            Piece::Lone(unit) => push_unicode_escape(&mut result, u32::from(unit)),
+            Piece::Char(c) => result.push(c),
+        }
+    }
+    Cow::Owned(result)
 }
 
 /// Push a `\uXXXX` escape sequence for a 16-bit code unit.
@@ -2499,7 +2500,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emit_localized_string_has_space_before_paren() {
+    fn test_emit_localized_string_as_tagged_template() {
         use crate::output::ast::LocalizedStringExpr;
 
         let emitter = JsEmitter::new();
@@ -2531,8 +2532,8 @@ mod tests {
         ));
 
         let output = emitter.emit_expression(&expr);
-        // Must emit "$localize(" without a space before the opening paren
-        assert!(output.starts_with("$localize("), "Expected '$localize(' but got: {output}");
+        // A native tagged template, as ngtsc emits for ES2015+ targets
+        assert_eq!(output, "$localize `Hello`");
     }
 
     #[test]
@@ -2575,9 +2576,42 @@ mod tests {
         ));
 
         let output = emitter.emit_expression(&expr);
-        // Must not have space before paren and include the expression
-        assert!(output.starts_with("$localize("), "Expected '$localize(' but got: {output}");
-        assert!(output.contains(", name)"), "Expected expression argument but got: {output}");
+        assert_eq!(output, "$localize `Hello ${name}!`");
+    }
+
+    #[test]
+    fn test_emit_localized_string_prints_raw_text_verbatim() {
+        use crate::output::ast::LocalizedStringExpr;
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Cooked `:m|d:x@@id:a ` ${ \` + lone U+D800 + `\nb`, with its raw text escaped as
+        // Angular's `createCookedRawString` does. The lone surrogate is stored as U+FDD0
+        // followed by U+10F800 (see `util::lone_surrogate`).
+        let mut message_parts = oxc_allocator::Vec::new_in(&&alloc);
+        message_parts.push(Ident::from(":m|d:x@@id:a ` ${ \\\u{FDD0}\u{10F800}\nb"));
+        let mut raw_message_parts = oxc_allocator::Vec::new_in(&&alloc);
+        raw_message_parts.push(Ident::from(":m|d\\:x@@id:a \\` $\\{ \\\\\u{FDD0}\u{10F800}\nb"));
+
+        let expr = OutputExpression::LocalizedString(Box::new_in(
+            LocalizedStringExpr {
+                description: None,
+                meaning: None,
+                custom_id: None,
+                message_parts,
+                raw_message_parts,
+                placeholder_names: oxc_allocator::Vec::new_in(&&alloc),
+                expressions: oxc_allocator::Vec::new_in(&&alloc),
+                source_span: None,
+            },
+            &&alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // The raw text is printed as is, line terminators included, like the TypeScript
+        // printer prints `rawText`; only the lone surrogate becomes its escape.
+        assert_eq!(output, "$localize `:m|d\\:x@@id:a \\` $\\{ \\\\\\uD800\nb`");
     }
 
     // ========================================================================

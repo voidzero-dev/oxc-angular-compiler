@@ -167,6 +167,18 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
   },
+  'providers/injectable-use-class-forward-ref': {
+    fields: ['EarlyService.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/injectable-use-class-other': {
+    fields: ['AbstractLogger.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/injectable-use-factory-named-function': {
+    fields: ['FactoryService.ɵfac'],
+    reasons: [FACTORY],
+  },
   'providers/object-members-injectable-use-factory': {
     fields: ['ObjectMembersService.ɵprov'],
     reasons: [INJECTABLE_FACTORY_WRAPPER],

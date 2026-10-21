@@ -56,8 +56,8 @@ use crate::ng_module::{
     extract_ng_module_metadata_in, find_ng_module_decorator, generate_full_ng_module_definition,
 };
 use crate::output::ast::{
-    DeclareFunctionStmt, FunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,
-    ReadVarExpr, StmtModifier,
+    ArrowFunctionBody, ArrowFunctionExpr, DeclareFunctionStmt, FunctionExpr, OutputExpression,
+    OutputStatement, ReadPropExpr, ReadVarExpr, StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
 use crate::parser::ParseTemplateOptions;
@@ -5944,7 +5944,8 @@ pub fn compile_template_for_hmr<'a>(
     // which has a different consts array, causing index out of bounds errors.
     let consts_js = if !job.consts.is_empty() {
         use crate::output::ast::{
-            FunctionExpr, LiteralArrayExpr, OutputExpression, OutputStatement, ReturnStatement,
+            ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression,
+            OutputStatement, ReturnStatement,
         };
 
         let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
@@ -5958,7 +5959,7 @@ pub fn compile_template_for_hmr<'a>(
 
         let consts_expr = if !job.consts_initializers.is_empty() {
             // When there are initializers (e.g., i18n variable declarations), wrap consts
-            // in a function that runs initializers first and returns the array.
+            // in an arrow function that runs initializers first and returns the array.
             // This matches what definition.rs does for the initial component definition.
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
                 OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
@@ -5978,11 +5979,10 @@ pub fn compile_template_for_hmr<'a>(
                 &allocator,
             )));
 
-            OutputExpression::Function(oxc_allocator::Box::new_in(
-                FunctionExpr {
-                    name: None,
+            OutputExpression::ArrowFunction(oxc_allocator::Box::new_in(
+                ArrowFunctionExpr {
                     params: OxcVec::new_in(&allocator),
-                    statements: fn_stmts,
+                    body: ArrowFunctionBody::Statements(fn_stmts),
                     source_span: None,
                 },
                 &allocator,
@@ -6661,7 +6661,7 @@ pub fn compile_template_for_linker<'a>(
         }
 
         let consts_expr = if !job.consts_initializers.is_empty() {
-            // Wrap in function with initializers
+            // Wrap in an arrow function with initializers, as Angular does
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
                 OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
             for stmt in job.consts_initializers.drain(..) {
@@ -6680,11 +6680,10 @@ pub fn compile_template_for_linker<'a>(
                 },
                 &allocator,
             )));
-            OutputExpression::Function(oxc_allocator::Box::new_in(
-                FunctionExpr {
-                    name: None,
+            OutputExpression::ArrowFunction(oxc_allocator::Box::new_in(
+                ArrowFunctionExpr {
                     params: OxcVec::new_in(&allocator),
-                    statements: fn_stmts,
+                    body: ArrowFunctionBody::Statements(fn_stmts),
                     source_span: None,
                 },
                 &allocator,

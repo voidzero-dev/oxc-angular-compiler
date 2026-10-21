@@ -21,8 +21,9 @@ use crate::factory::{
     R3FactoryMetadata, compile_factory_function,
 };
 use crate::output::ast::{
-    FnParam, FunctionExpr, InvokeFunctionExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
-    LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement,
+    ArrowFunctionBody, ArrowFunctionExpr, FnParam, InvokeFunctionExpr, LiteralExpr,
+    LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
+    ReadVarExpr,
 };
 use crate::r3::Identifiers;
 
@@ -96,7 +97,7 @@ fn build_factory_expression<'a>(
             create_factory_delegation(allocator, &metadata.r#type)
         }
 
-        InjectableProvider::UseClass { class_expr, is_forward_ref, deps } => {
+        InjectableProvider::UseClass { class_expr, deps, .. } => {
             match deps {
                 Some(deps) if !deps.is_empty() => {
                     // useClass with deps: use delegated factory with conditional pattern
@@ -118,13 +119,14 @@ fn build_factory_expression<'a>(
                     );
                     result.expression
                 }
-                _ if *is_forward_ref => {
-                    // Forward reference: wrap in arrow function
-                    create_forward_ref_factory(allocator, core_namespace, class_expr)
-                }
                 _ => {
-                    // useClass without deps: delegate to the alternative class's factory
-                    create_factory_delegation(allocator, class_expr)
+                    // useClass without deps: delegate to the class's factory from an arrow,
+                    // `(__ngFactoryType__) => UseClass.ɵfac(__ngFactoryType__)`. ngtsc's
+                    // `delegateToFactory` only delegates directly when both are the same
+                    // node, which a `useClass` never is, and full compilation passes
+                    // `resolveForwardRefs: false`: a `forwardRef(() => X)` is unwrapped to
+                    // `X`, and the arrow body reads it lazily.
+                    create_factory_function(allocator, class_expr)
                 }
             }
         }
@@ -300,59 +302,19 @@ fn create_factory_delegation<'a>(
     ))
 }
 
-/// Creates a forward reference factory: `(t) => resolveForwardRef(Type).ɵfac(t)`
-fn create_forward_ref_factory<'a>(
+/// Creates a factory that delegates to `type_expr`'s factory:
+/// `(__ngFactoryType__) => Type.ɵfac(__ngFactoryType__)`.
+///
+/// See: `createFactoryFunction` in `packages/compiler/src/injectable_compiler_2.ts`
+fn create_factory_function<'a>(
     allocator: &'a Allocator,
-    core_namespace: &'a str,
     type_expr: &OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let param_name = Ident::from("t");
+    let param_name = Ident::from("__ngFactoryType__");
     let mut params = Vec::new_in(&allocator);
-    params.push(FnParam { name: param_name.clone() });
+    params.push(FnParam { name: param_name });
 
-    // resolveForwardRef(Type)
-    let resolve_fn = OutputExpression::ReadProp(Box::new_in(
-        ReadPropExpr {
-            receiver: Box::new_in(
-                OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
-                    &allocator,
-                )),
-                &allocator,
-            ),
-            name: Ident::from(Identifiers::RESOLVE_FORWARD_REF),
-            optional: false,
-            source_span: None,
-        },
-        &allocator,
-    ));
-
-    let mut resolve_args = Vec::new_in(&allocator);
-    resolve_args.push(type_expr.clone_in(allocator));
-
-    let resolved_type = OutputExpression::InvokeFunction(Box::new_in(
-        InvokeFunctionExpr {
-            fn_expr: Box::new_in(resolve_fn, &allocator),
-            args: resolve_args,
-            pure: false,
-            optional: false,
-            source_span: None,
-        },
-        &allocator,
-    ));
-
-    // resolveForwardRef(Type).ɵfac
-    let fac_access = OutputExpression::ReadProp(Box::new_in(
-        ReadPropExpr {
-            receiver: Box::new_in(resolved_type, &allocator),
-            name: Ident::from("ɵfac"),
-            optional: false,
-            source_span: None,
-        },
-        &allocator,
-    ));
-
-    // resolveForwardRef(Type).ɵfac(t)
+    // Type.ɵfac(__ngFactoryType__)
     let mut call_args = Vec::new_in(&allocator);
     call_args.push(OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: param_name, source_span: None },
@@ -361,7 +323,7 @@ fn create_forward_ref_factory<'a>(
 
     let fac_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fac_access, &allocator),
+            fn_expr: Box::new_in(create_factory_delegation(allocator, type_expr), &allocator),
             args: call_args,
             pure: false,
             optional: false,
@@ -370,15 +332,12 @@ fn create_forward_ref_factory<'a>(
         &allocator,
     ));
 
-    // Create the arrow function
-    let mut body = Vec::new_in(&allocator);
-    body.push(OutputStatement::Return(Box::new_in(
-        ReturnStatement { value: fac_call, source_span: None },
-        &allocator,
-    )));
-
-    OutputExpression::Function(Box::new_in(
-        FunctionExpr { name: None, params, statements: body, source_span: None },
+    OutputExpression::ArrowFunction(Box::new_in(
+        ArrowFunctionExpr {
+            params,
+            body: ArrowFunctionBody::Expression(Box::new_in(fac_call, &allocator)),
+            source_span: None,
+        },
         &allocator,
     ))
 }
@@ -388,8 +347,6 @@ fn create_use_factory_wrapper<'a>(
     allocator: &'a Allocator,
     factory: &OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let params = Vec::new_in(&allocator);
-
     // factory()
     let factory_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
@@ -402,14 +359,12 @@ fn create_use_factory_wrapper<'a>(
         &allocator,
     ));
 
-    let mut body = Vec::new_in(&allocator);
-    body.push(OutputStatement::Return(Box::new_in(
-        ReturnStatement { value: factory_call, source_span: None },
-        &allocator,
-    )));
-
-    OutputExpression::Function(Box::new_in(
-        FunctionExpr { name: None, params, statements: body, source_span: None },
+    OutputExpression::ArrowFunction(Box::new_in(
+        ArrowFunctionExpr {
+            params: Vec::new_in(&allocator),
+            body: ArrowFunctionBody::Expression(Box::new_in(factory_call, &allocator)),
+            source_span: None,
+        },
         &allocator,
     ))
 }
@@ -769,5 +724,57 @@ mod tests {
         );
         assert!(output.contains("new ConcreteService"), "Should instantiate the delegate class");
         assert!(output.contains("inject"), "Should inject dependencies");
+    }
+
+    fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
+        OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Ident::from(name), source_span: None },
+            &allocator,
+        ))
+    }
+
+    fn compile_to_js<'a>(allocator: &'a Allocator, metadata: &R3InjectableMetadata<'a>) -> String {
+        let result = compile_injectable(allocator, "i0", metadata);
+        JsEmitter::new().emit_expression(&result.expression)
+    }
+
+    #[test]
+    fn test_compile_injectable_use_factory_without_deps_is_expression_arrow() {
+        // ngtsc 22.2: factory: () => makeIt()
+        let allocator = Allocator::default();
+        let metadata = R3InjectableMetadataBuilder::new()
+            .name(Ident::from("A"))
+            .r#type(read_var(&allocator, "A"))
+            .use_factory(read_var(&allocator, "makeIt"), None)
+            .provided_in_root()
+            .build()
+            .unwrap();
+
+        let output = compile_to_js(&allocator, &metadata);
+        assert!(output.contains("factory:() =>makeIt(),"), "got: {output}");
+    }
+
+    #[test]
+    fn test_compile_injectable_use_class_without_deps_delegates_from_arrow() {
+        // ngtsc 22.2 emits the same factory for `useClass: Other` and
+        // `useClass: forwardRef(() => Other)`:
+        //   factory: __ngFactoryType__ => Other.ɵfac(__ngFactoryType__)
+        for is_forward_ref in [false, true] {
+            let allocator = Allocator::default();
+            let metadata = R3InjectableMetadataBuilder::new()
+                .name(Ident::from("B"))
+                .r#type(read_var(&allocator, "B"))
+                .use_class(read_var(&allocator, "Other"), is_forward_ref, None)
+                .provided_in_root()
+                .build()
+                .unwrap();
+
+            let output = compile_to_js(&allocator, &metadata);
+            assert!(
+                output.contains("factory:(__ngFactoryType__) =>Other.ɵfac(__ngFactoryType__),"),
+                "got: {output}"
+            );
+            assert!(!output.contains("resolveForwardRef"), "got: {output}");
+        }
     }
 }
