@@ -540,7 +540,9 @@ fn extract_dependency<'a>(
 /// Extract constructor dependencies from a class.
 ///
 /// Returns:
-/// - `None` if the class has no constructor (use inherited factory pattern)
+/// - `None` if the class has no constructor but extends another class (use
+///   inherited factory pattern)
+/// - `Some(empty)` if the class has neither a constructor nor a superclass
 /// - `Some(vec)` with the dependencies if constructor exists
 ///
 /// Handles parameter decorators like `@Inject()`, `@Optional()`, `@SkipSelf()`, `@Self()`, `@Host()`.
@@ -568,14 +570,19 @@ pub fn extract_constructor_deps<'a>(
     consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
-    let constructor = class.body.body.iter().find_map(|element| {
+    let Some(constructor) = class.body.body.iter().find_map(|element| {
         if let ClassElement::MethodDefinition(method) = element {
             if method.kind == MethodDefinitionKind::Constructor {
                 return Some(method);
             }
         }
         None
-    })?;
+    }) else {
+        // No constructor: a class with a superclass inherits its factory
+        // (`None`), one without gets an implicit no-arg constructor.
+        // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
+        return if class.heritage.is_some() { None } else { Some(Vec::new_in(&allocator)) };
+    };
 
     // Get the constructor's parameters
     let params = &constructor.value.params;
@@ -885,7 +892,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_injectable_without_constructor_has_no_deps() {
+    fn test_injectable_without_constructor_or_superclass_has_empty_deps() {
         let allocator = Allocator::default();
         let source = r#"
             @Injectable()
@@ -895,7 +902,22 @@ mod tests {
         let metadata = parse_and_extract(&allocator, source);
         assert!(metadata.is_some());
         let metadata = metadata.unwrap();
-        // No constructor = None deps (use inherited factory)
+        // No constructor and no superclass = implicit no-arg constructor
+        assert!(metadata.deps.as_ref().is_some_and(|deps| deps.is_empty()));
+    }
+
+    #[test]
+    fn test_injectable_without_constructor_with_superclass_has_no_deps() {
+        let allocator = Allocator::default();
+        let source = r#"
+            @Injectable()
+            class MyService extends BaseService {}
+        "#;
+
+        let metadata = parse_and_extract(&allocator, source);
+        assert!(metadata.is_some());
+        let metadata = metadata.unwrap();
+        // No constructor but a superclass = None deps (use inherited factory)
         assert!(metadata.deps.is_none());
     }
 

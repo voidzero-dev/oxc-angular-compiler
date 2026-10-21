@@ -43,6 +43,16 @@ pub struct NgModuleMetadata<'a> {
     /// Exported declarations and modules as class names.
     pub exports: Vec<'a, Ident<'a>>,
 
+    /// The `declarations`, `imports` and `exports` expressions as written,
+    /// kept only for a list that is not a plain array of class references
+    /// (a const array, a spread, a `forRoot()` call...), whose names above
+    /// are incomplete. `ɵɵsetNgModuleScope` emits these instead.
+    pub declarations_scope_expr: Option<OutputExpression<'a>>,
+    /// See [`Self::declarations_scope_expr`].
+    pub imports_scope_expr: Option<OutputExpression<'a>>,
+    /// See [`Self::declarations_scope_expr`].
+    pub exports_scope_expr: Option<OutputExpression<'a>>,
+
     /// Providers expression as OutputExpression.
     pub providers: Option<OutputExpression<'a>>,
 
@@ -74,6 +84,9 @@ impl<'a> NgModuleMetadata<'a> {
             imports: Vec::new_in(&allocator),
             raw_imports_expr: None,
             exports: Vec::new_in(&allocator),
+            declarations_scope_expr: None,
+            imports_scope_expr: None,
+            exports_scope_expr: None,
             providers: None,
             bootstrap: Vec::new_in(&allocator),
             schemas: Vec::new_in(&allocator),
@@ -95,10 +108,23 @@ impl<'a> NgModuleMetadata<'a> {
             &allocator,
         ));
 
+        // Like ngtsc in full compilation, the scope is patched on with a
+        // tree-shakeable `ɵɵsetNgModuleScope` call instead of being inlined.
+        // See: packages/compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts
         let mut builder = R3NgModuleMetadataBuilder::new(allocator)
             .r#type(R3Reference::value_only(type_expr))
-            .selector_scope_mode(R3SelectorScopeMode::Inline)
+            .selector_scope_mode(R3SelectorScopeMode::SideEffect)
             .contains_forward_decls(self.contains_forward_decls);
+
+        if let Some(expr) = &self.declarations_scope_expr {
+            builder = builder.declarations_expression(expr.clone_in(allocator));
+        }
+        if let Some(expr) = &self.imports_scope_expr {
+            builder = builder.imports_expression(expr.clone_in(allocator));
+        }
+        if let Some(expr) = &self.exports_scope_expr {
+            builder = builder.exports_expression(expr.clone_in(allocator));
+        }
 
         // Add declarations
         for decl in &self.declarations {
@@ -235,15 +261,19 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
 
             match key_name.as_str() {
                 "declarations" => {
-                    let (identifiers, has_forward_refs) =
+                    let (identifiers, has_forward_refs, is_static) =
                         extract_reference_array(allocator, &prop.value);
                     metadata.declarations = identifiers;
                     if has_forward_refs {
                         metadata.contains_forward_decls = true;
                     }
+                    if !is_static {
+                        metadata.declarations_scope_expr =
+                            convert_oxc_expression(allocator, &prop.value, source_text);
+                    }
                 }
                 "imports" => {
-                    let (identifiers, has_forward_refs) =
+                    let (identifiers, has_forward_refs, is_static) =
                         extract_reference_array(allocator, &prop.value);
                     metadata.imports = identifiers;
                     if has_forward_refs {
@@ -254,13 +284,21 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
                     // and spread elements that are dropped by extract_reference_array.
                     metadata.raw_imports_expr =
                         convert_oxc_expression(allocator, &prop.value, source_text);
+                    if !is_static {
+                        metadata.imports_scope_expr =
+                            metadata.raw_imports_expr.as_ref().map(|e| e.clone_in(allocator));
+                    }
                 }
                 "exports" => {
-                    let (identifiers, has_forward_refs) =
+                    let (identifiers, has_forward_refs, is_static) =
                         extract_reference_array(allocator, &prop.value);
                     metadata.exports = identifiers;
                     if has_forward_refs {
                         metadata.contains_forward_decls = true;
+                    }
+                    if !is_static {
+                        metadata.exports_scope_expr =
+                            convert_oxc_expression(allocator, &prop.value, source_text);
                     }
                 }
                 "providers" => {
@@ -268,7 +306,7 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
                         convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "bootstrap" => {
-                    let (identifiers, has_forward_refs) =
+                    let (identifiers, has_forward_refs, _) =
                         extract_reference_array(allocator, &prop.value);
                     metadata.bootstrap = identifiers;
                     if has_forward_refs {
@@ -354,16 +392,21 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
 }
 
 /// Extract an array of identifiers (for declarations, imports, exports, bootstrap).
-/// Returns the identifiers and whether any forward references were found.
+///
+/// Returns the identifiers, whether any forward references were found, and
+/// whether the identifiers are the whole list: `false` when the value is not
+/// an array literal, or has an element other than a class name or a
+/// `forwardRef(() => Class)` (a spread, a `forRoot()` call...).
 fn extract_reference_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> (Vec<'a, Ident<'a>>, bool) {
+) -> (Vec<'a, Ident<'a>>, bool, bool) {
     let mut result = Vec::new_in(&allocator);
     let mut has_forward_refs = false;
+    let mut is_static = true;
 
     let Expression::ArrayExpression(arr) = expr else {
-        return (result, has_forward_refs);
+        return (result, has_forward_refs, false);
     };
 
     for element in &arr.elements {
@@ -375,6 +418,7 @@ fn extract_reference_array<'a>(
             // Forward reference: forwardRef(() => SomeComponent)
             // Or method call: StoreModule.forRoot(...), EffectsModule.forRoot([...])
             ArrayExpressionElement::CallExpression(call) => {
+                let mut resolved = false;
                 if let Expression::Identifier(id) = &call.callee {
                     if id.name == "forwardRef" {
                         has_forward_refs = true;
@@ -383,23 +427,27 @@ fn extract_reference_array<'a>(
                         {
                             if let Some(Expression::Identifier(inner_id)) = arrow.get_expression() {
                                 result.push(inner_id.name.clone().into());
+                                resolved = true;
                             }
                         }
                     }
                 } else if let Expression::StaticMemberExpression(member) = &call.callee {
                     // Module.forRoot(...) or Module.forChild(...) pattern
-                    // Extract the base class identifier for ɵmod scope resolution
+                    // Extract the base class identifier for ɵmod scope resolution.
+                    // The call may return another module, so the list still
+                    // counts as unresolved.
                     if let Expression::Identifier(id) = &member.object {
                         result.push(id.name.clone().into());
                     }
                 }
+                is_static &= resolved;
             }
             // Spread element or other complex expressions - skip
-            _ => {}
+            _ => is_static = false,
         }
     }
 
-    (result, has_forward_refs)
+    (result, has_forward_refs, is_static)
 }
 
 /// Extract an array of simple identifiers (for schemas).
@@ -425,7 +473,9 @@ fn extract_identifier_array<'a>(
 /// Extract constructor dependencies from a class.
 ///
 /// Returns:
-/// - `None` if the class has no constructor (use inherited factory pattern)
+/// - `None` if the class has no constructor but extends another class (use
+///   inherited factory pattern)
+/// - `Some(empty)` if the class has neither a constructor nor a superclass
 /// - `Some(vec)` with the dependencies if constructor exists
 ///
 /// Handles parameter decorators like `@Inject()`, `@Optional()`, `@SkipSelf()`,
@@ -445,14 +495,19 @@ pub fn extract_constructor_deps<'a>(
     consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
-    let constructor = class.body.body.iter().find_map(|element| {
+    let Some(constructor) = class.body.body.iter().find_map(|element| {
         if let ClassElement::MethodDefinition(method) = element {
             if method.kind == MethodDefinitionKind::Constructor {
                 return Some(method);
             }
         }
         None
-    })?;
+    }) else {
+        // No constructor: a class with a superclass inherits its factory
+        // (`None`), one without gets an implicit no-arg constructor.
+        // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
+        return if class.heritage.is_some() { None } else { Some(Vec::new_in(&allocator)) };
+    };
 
     // Get the constructor's parameters
     let params = &constructor.value.params;

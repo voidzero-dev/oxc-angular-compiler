@@ -18,9 +18,9 @@ use oxc_str::Ident;
 
 use super::metadata::{R3NgModuleMetadata, R3Reference};
 use crate::output::ast::{
-    BinaryOperator, BinaryOperatorExpr, FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr,
-    LiteralExpr, LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement,
-    ReadPropExpr, ReadVarExpr, ReturnStatement,
+    ArrowFunctionBody, ArrowFunctionExpr, FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr,
+    LiteralMapEntry, LiteralMapExpr, OutputExpression, OutputStatement, ParenthesizedExpr,
+    ReadPropExpr, ReadVarExpr,
 };
 use crate::r3::Identifiers;
 
@@ -168,16 +168,13 @@ fn create_reference_array<'a>(
     ));
 
     if wrap_in_function {
-        // () => [Class1, Class2, ...]
-        let params = Vec::new_in(&allocator);
-        let mut body = Vec::new_in(&allocator);
-        body.push(OutputStatement::Return(Box::new_in(
-            ReturnStatement { value: array, source_span: None },
-            &allocator,
-        )));
-
-        OutputExpression::Function(Box::new_in(
-            FunctionExpr { name: None, params, statements: body, source_span: None },
+        // () => [Class1, Class2, ...], like ngtsc's `refsToArray`
+        OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params: Vec::new_in(&allocator),
+                body: ArrowFunctionBody::Expression(Box::new_in(array, &allocator)),
+                source_span: None,
+            },
             &allocator,
         ))
     } else {
@@ -235,46 +232,50 @@ fn create_define_ng_module_call<'a>(
 /// Generates:
 /// ```javascript
 /// (function() {
-///   (typeof ngJitMode === "undefined" || ngJitMode) &&
-///     ɵɵsetNgModuleScope(ModuleClass, {
-///       declarations: [...],
-///       imports: [...],
-///       exports: [...]
-///     });
+///   ɵɵsetNgModuleScope(ModuleClass, {
+///     declarations: [...],
+///     imports: [...],
+///     exports: [...]
+///   });
 /// })()
 /// ```
+///
+/// ngtsc guards the call with `(typeof ngJitMode === "undefined" || ngJitMode)`
+/// so production builds can drop it. That is safe for ngtsc only because it
+/// lists every component's dependencies statically. Oxc compiles one file at
+/// a time and resolves dependencies at runtime with `ɵɵgetComponentDepsFactory`,
+/// which reads the scope this call puts on ɵmod (and only this call registers
+/// the module with the deps tracker). The Vite plugin defines `ngJitMode` as
+/// `false` in production, so a guarded call would leave every component that
+/// is declared in, or imports, an Oxc-compiled NgModule without its directives
+/// and pipes. The call is therefore always made.
 fn create_set_scope_side_effect<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     metadata: &R3NgModuleMetadata<'a>,
 ) -> Option<OutputStatement<'a>> {
-    // Only create if there's something to set
-    if !metadata.has_declarations() && !metadata.has_imports() && !metadata.has_exports() {
-        return None;
-    }
-
-    // Build the scope map
+    // Build the scope map. A list given as a raw expression (one Oxc could
+    // not resolve statically) is emitted as written; the runtime flattens it.
     let mut scope_entries = Vec::new_in(&allocator);
-
-    if metadata.has_declarations() {
-        let decls = create_reference_array(
-            &allocator,
-            &metadata.declarations,
-            metadata.contains_forward_decls,
-        );
-        scope_entries.push(LiteralMapEntry::new(Ident::from("declarations"), decls, false));
+    let fields = [
+        ("declarations", &metadata.declarations, &metadata.declarations_expression),
+        ("imports", &metadata.imports, &metadata.imports_expression),
+        ("exports", &metadata.exports, &metadata.exports_expression),
+    ];
+    for (key, refs, raw) in fields {
+        let value = match raw {
+            Some(raw) => raw.clone_in(allocator),
+            None if !refs.is_empty() => {
+                create_reference_array(allocator, refs, metadata.contains_forward_decls)
+            }
+            None => continue,
+        };
+        scope_entries.push(LiteralMapEntry::new(Ident::from(key), value, false));
     }
 
-    if metadata.has_imports() {
-        let imports =
-            create_reference_array(allocator, &metadata.imports, metadata.contains_forward_decls);
-        scope_entries.push(LiteralMapEntry::new(Ident::from("imports"), imports, false));
-    }
-
-    if metadata.has_exports() {
-        let exports =
-            create_reference_array(allocator, &metadata.exports, metadata.contains_forward_decls);
-        scope_entries.push(LiteralMapEntry::new(Ident::from("exports"), exports, false));
+    // Only create if there's something to set
+    if scope_entries.is_empty() {
+        return None;
     }
 
     let scope_map = OutputExpression::LiteralMap(Box::new_in(
@@ -314,67 +315,27 @@ fn create_set_scope_side_effect<'a>(
         &allocator,
     ));
 
-    // Create: (typeof ngJitMode === "undefined" || ngJitMode)
-    let typeof_expr = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Ident::from("typeof ngJitMode"), source_span: None },
+    // Wrap in IIFE: (function() { setNgModuleScope(...); })()
+    // No ngJitMode guard; see the doc comment above.
+    let params = Vec::new_in(&allocator);
+    let mut body = Vec::new_in(&allocator);
+    body.push(OutputStatement::Expression(Box::new_in(
+        crate::output::ast::ExpressionStatement { expr: set_scope_call, source_span: None },
         &allocator,
-    ));
+    )));
 
-    let undefined_check = OutputExpression::BinaryOperator(Box::new_in(
-        BinaryOperatorExpr {
-            operator: BinaryOperator::Equals,
-            lhs: Box::new_in(typeof_expr, &allocator),
-            rhs: Box::new_in(
-                OutputExpression::Literal(Box::new_in(
-                    LiteralExpr {
-                        value: LiteralValue::String(Ident::from("undefined")),
-                        source_span: None,
-                    },
+    // The parens keep the statement from parsing as a function declaration.
+    let iife_fn = OutputExpression::Parenthesized(Box::new_in(
+        ParenthesizedExpr {
+            expr: Box::new_in(
+                OutputExpression::Function(Box::new_in(
+                    FunctionExpr { name: None, params, statements: body, source_span: None },
                     &allocator,
                 )),
                 &allocator,
             ),
             source_span: None,
         },
-        &allocator,
-    ));
-
-    let ng_jit_mode = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Ident::from("ngJitMode"), source_span: None },
-        &allocator,
-    ));
-
-    let jit_mode_check = OutputExpression::BinaryOperator(Box::new_in(
-        BinaryOperatorExpr {
-            operator: BinaryOperator::Or,
-            lhs: Box::new_in(undefined_check, &allocator),
-            rhs: Box::new_in(ng_jit_mode, &allocator),
-            source_span: None,
-        },
-        &allocator,
-    ));
-
-    // Create: (jitModeCheck) && setNgModuleScope(...)
-    let guarded_call = OutputExpression::BinaryOperator(Box::new_in(
-        BinaryOperatorExpr {
-            operator: BinaryOperator::And,
-            lhs: Box::new_in(jit_mode_check, &allocator),
-            rhs: Box::new_in(set_scope_call, &allocator),
-            source_span: None,
-        },
-        &allocator,
-    ));
-
-    // Wrap in IIFE: (function() { ... })()
-    let params = Vec::new_in(&allocator);
-    let mut body = Vec::new_in(&allocator);
-    body.push(OutputStatement::Expression(Box::new_in(
-        crate::output::ast::ExpressionStatement { expr: guarded_call, source_span: None },
-        &allocator,
-    )));
-
-    let iife_fn = OutputExpression::Function(Box::new_in(
-        FunctionExpr { name: None, params, statements: body, source_span: None },
         &allocator,
     ));
 
@@ -578,8 +539,7 @@ mod tests {
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
-        // Should contain arrow function wrapper
-        assert!(output.contains("function"));
-        assert!(output.contains("return"));
+        // Should contain arrow function wrapper, like ngtsc's refsToArray
+        assert!(output.contains("declarations:() =>[ForwardComponent]"), "got: {output}");
     }
 }

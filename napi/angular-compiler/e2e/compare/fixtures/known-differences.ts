@@ -32,9 +32,6 @@ export interface KnownDifference {
   reasons: string[]
 }
 
-const FACTORY =
-  'ɵfac uses ɵɵgetInheritedFactory where Angular emits a factory that calls the constructor'
-const NG_MODULE_IMPORTS = 'ɵmod includes imports, which Angular omits in full compilation'
 const HOST_ATTRS_ORDER = 'hostAttrs are emitted in a different order'
 const CSS_WS = 'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
 const DEBUG_NAME =
@@ -73,15 +70,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
-  },
-  'class-metadata/class-metadata-ngmodule': {
-    fields: ['TestableModule.ɵfac', 'TestableModule.ɵmod'],
-    statements: ['ɵɵsetNgModuleScope(TestableModule)'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
-  },
-  'class-metadata/class-metadata-pipe': {
-    fields: ['TestablePipe.ɵfac'],
-    reasons: [FACTORY],
   },
   'class-metadata/class-metadata-injectable': {
     fields: [],
@@ -179,115 +167,9 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
   },
-  'host-directives/host-directives-with-providers': {
-    fields: ['DataService.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'i18n/i18n-compliance-element-attributes-should-correctly-bind-to-context-in-nested-template-interpolation-nested-context':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-element-attributes-should-support-i18n-attributes-with-interpolations-on-explicit-ng-template-elements-with-structural-directives-ng-t':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-element-attributes-should-support-interpolation-interpolation-basic': {
-    fields: ['UppercasePipe.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'i18n/i18n-compliance-nested-nodes-should-handle-i18n-attributes-with-bindings-and-nested-elements-in-content-nested-elements':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-nested-nodes-should-handle-i18n-attributes-with-bindings-in-content-and-element-attributes-nested-elements-with-i18n-attributes':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-nested-nodes-should-handle-i18n-attributes-with-bindings-in-content-bindings-in-content':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-nested-nodes-should-support-interpolations-with-complex-expressions-interpolation-complex-expressions':
-    {
-      fields: ['AsyncPipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-ng-container-ng-template-should-be-able-to-act-as-child-elements-inside-i18n-block-child-elements':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-ng-container-ng-template-should-handle-single-translation-message-using-ng-container-single-ng-container':
-    {
-      fields: ['UppercasePipe.ɵfac'],
-      reasons: [FACTORY],
-    },
-  'i18n/i18n-compliance-root-should-support-i18n-message-with-multiple-pipes-multiple-pipes': {
-    fields: ['PipeA.ɵfac', 'PipeB.ɵfac', 'PipeC.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'i18n/i18n-ng-template-deeply-nested': {
-    fields: ['ActorTextPipe.ɵfac', 'UsernamePipe.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'injector/basic-injector': {
-    fields: ['AppModule.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'injector/injector-with-both': {
-    fields: ['FullModule.ɵfac', 'FullModule.ɵmod'],
-    statements: ['ɵɵsetNgModuleScope(FullModule)'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
-  },
-  'injector/injector-with-imports': {
-    fields: ['FeatureModule.ɵfac', 'FeatureModule.ɵmod'],
-    statements: ['ɵɵsetNgModuleScope(FeatureModule)'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
-  },
-  'injector/injector-with-providers': {
-    fields: ['ProvidersModule.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'pipe-compilation/impure-pipe': {
-    fields: ['MyImpurePipe.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'pipe-compilation/minimal-pipe': {
-    fields: ['MinimalPipe.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'pipe-compilation/non-standalone-pipe': {
-    fields: ['LegacyPipe.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'pipe-compilation/pure-pipe': {
-    fields: ['MyPurePipe.ɵfac'],
-    reasons: [FACTORY],
-  },
   'providers/object-members-injectable-use-factory': {
-    fields: ['ObjectMembersService.ɵfac', 'ObjectMembersService.ɵprov'],
-    reasons: [FACTORY, INJECTABLE_FACTORY_WRAPPER],
-  },
-  'providers/object-members-injectable-use-value': {
-    fields: ['ObjectMembersValueService.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/object-members-ng-module': {
-    fields: ['ObjectMembersModule.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/object-members-options-directive-pipe-module': {
-    fields: ['OptionsPipe.ɵfac', 'OptionsModule.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/object-members-options-injectable': {
-    fields: ['OptionsMethodService.ɵfac', 'OptionsGetterService.ɵfac'],
-    reasons: [FACTORY],
+    fields: ['ObjectMembersService.ɵprov'],
+    reasons: [INJECTABLE_FACTORY_WRAPPER],
   },
   'providers/providers-with-change-detection': {
     fields: ['ProvidersWithChangeDetectionComponent.ɵcmp'],
@@ -669,9 +551,5 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: [],
     classes: ['NgArrowFunctionNoContextComponent'],
     reasons: [DEBUG_NAME],
-  },
-  'templates/ng-arrow-function-pipe': {
-    fields: ['TestPipe.ɵfac'],
-    reasons: [FACTORY],
   },
 }

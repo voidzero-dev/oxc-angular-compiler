@@ -89,4 +89,24 @@ export class MinimalPipe implements PipeTransform {
     `.trim(),
     expectedFeatures: ['definePipe'],
   },
+  {
+    type: 'full-transform',
+    name: 'pipe-extends-base-without-constructor',
+    category: 'pipe-compilation',
+    description: 'Pipe that extends a base class without a constructor inherits its factory',
+    className: 'DerivedPipe',
+    sourceCode: `
+import { Pipe, PipeTransform } from '@angular/core';
+
+class BasePipe {}
+
+@Pipe({ name: 'derived' })
+export class DerivedPipe extends BasePipe implements PipeTransform {
+  transform(value: any): any {
+    return value;
+  }
+}
+    `.trim(),
+    expectedFeatures: ['definePipe', 'ɵɵgetInheritedFactory'],
+  },
 ]

@@ -542,4 +542,25 @@ export class ForwardRefProviderComponent {}
     `.trim(),
     expectedFeatures: ['ɵɵdefineComponent', 'providers:'],
   },
+
+  {
+    name: 'injectable-factory-without-constructor',
+    category: 'providers',
+    description:
+      'Injectable without a constructor: a plain factory, or the inherited one when it extends a class',
+    className: 'PlainService',
+    type: 'full-transform',
+    sourceCode: `
+import { Injectable } from '@angular/core';
+
+class BaseService {}
+
+@Injectable({ providedIn: 'root' })
+export class PlainService {}
+
+@Injectable({ providedIn: 'root' })
+export class DerivedService extends BaseService {}
+    `.trim(),
+    expectedFeatures: ['ɵɵdefineInjectable', 'ɵɵgetInheritedFactory'],
+  },
 ]

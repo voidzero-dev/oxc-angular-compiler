@@ -259,8 +259,9 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 
 /// Extract constructor dependencies from a pipe class.
 ///
-/// Returns `Some(Vec<deps>)` if the class has a constructor,
-/// or `None` if there is no constructor (will use inherited factory).
+/// Returns `Some(Vec<deps>)` if the class has a constructor, `Some(empty)` if it
+/// has neither a constructor nor a superclass, or `None` if it has no
+/// constructor but extends another class (will use inherited factory).
 fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -268,14 +269,19 @@ fn extract_constructor_deps<'a>(
     consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
-    let constructor = class.body.body.iter().find_map(|element| {
+    let Some(constructor) = class.body.body.iter().find_map(|element| {
         if let ClassElement::MethodDefinition(method) = element {
             if method.kind == MethodDefinitionKind::Constructor {
                 return Some(method);
             }
         }
         None
-    })?;
+    }) else {
+        // No constructor: a class with a superclass inherits its factory
+        // (`None`), one without gets an implicit no-arg constructor.
+        // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
+        return if class.heritage.is_some() { None } else { Some(Vec::new_in(&allocator)) };
+    };
 
     // Get the constructor's parameters
     let params = &constructor.value.params;
@@ -620,6 +626,30 @@ mod tests {
                 }
                 other => panic!("expected ReadVar token, got {:?}", other),
             }
+        });
+    }
+
+    #[test]
+    fn test_pipe_without_constructor_or_superclass_has_empty_deps() {
+        // ngtsc gives such a class an implicit no-arg constructor, so its
+        // factory calls `new` instead of ɵɵgetInheritedFactory.
+        let code = r#"
+            @Pipe({ name: 'myPipe' })
+            class MyPipe {}
+        "#;
+        assert_metadata(code, |meta| {
+            assert!(meta.deps.as_ref().is_some_and(|deps| deps.is_empty()));
+        });
+    }
+
+    #[test]
+    fn test_pipe_without_constructor_with_superclass_has_no_deps() {
+        let code = r#"
+            @Pipe({ name: 'myPipe' })
+            class MyPipe extends BasePipe {}
+        "#;
+        assert_metadata(code, |meta| {
+            assert!(meta.deps.is_none(), "Should inherit the factory");
         });
     }
 

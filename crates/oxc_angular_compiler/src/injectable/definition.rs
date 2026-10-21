@@ -432,49 +432,65 @@ mod tests {
         assert!(js.contains("DOCUMENT"), "Factory should inject DOCUMENT token, got: {}", js);
     }
 
-    #[test]
-    fn test_injectable_without_constructor_uses_inherited_factory() {
+    /// Compile the `ɵfac` of the first `@Injectable` class in `code`.
+    fn injectable_fac_js(code: &str) -> String {
         use crate::injectable::decorator::extract_injectable_metadata;
         use oxc_ast::ast::Statement;
         use oxc_parser::Parser;
         use oxc_span::SourceType;
 
         let allocator = Allocator::default();
-        let code = r#"
-            @Injectable()
-            class MyService {}
-        "#;
-
-        let source_type = SourceType::tsx();
-        let parser_ret = Parser::new(&allocator, code, source_type).parse();
-
-        let class = parser_ret.program.body.iter().find_map(|stmt| match stmt {
-            Statement::ClassDeclaration(class) => Some(class.as_ref()),
-            _ => None,
-        });
-
-        let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
-        let metadata = metadata.expect("Should extract Injectable metadata");
-
-        // Verify no deps (no constructor)
-        assert!(metadata.deps.is_none(), "Should not have constructor deps");
-
-        // Generate definition
+        let parser_ret = Parser::new(&allocator, code, SourceType::tsx()).parse();
+        let class = parser_ret
+            .program
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Statement::ClassDeclaration(class) if !class.decorators.is_empty() => {
+                    Some(class.as_ref())
+                }
+                _ => None,
+            })
+            .expect("Should find class declaration");
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code))
+            .expect("Should extract Injectable metadata");
         let definition = generate_injectable_definition_from_decorator(
             &allocator,
             "i0",
             &metadata,
             CompilationMode::Full,
+        )
+        .expect("Should generate definition");
+        JsEmitter::new().emit_expression(&definition.fac_definition)
+    }
+
+    #[test]
+    fn test_injectable_without_constructor_or_superclass_calls_constructor() {
+        // ngtsc gives a class with neither a constructor nor a superclass an
+        // implicit no-arg constructor (di.ts getConstructorDependencies).
+        let js = injectable_fac_js(
+            r#"
+            @Injectable()
+            class MyService {}
+        "#,
         );
-        let definition = definition.expect("Should generate definition");
+        assert_eq!(
+            js,
+            "function MyService_Factory(__ngFactoryType__) {\n  return new (__ngFactoryType__ || MyService)();\n}"
+        );
+    }
 
-        let emitter = JsEmitter::new();
-        let js = emitter.emit_expression(&definition.fac_definition);
-
-        // Should use inherited factory pattern
+    #[test]
+    fn test_injectable_without_constructor_with_superclass_uses_inherited_factory() {
+        let js = injectable_fac_js(
+            r#"
+            class Base {}
+            @Injectable()
+            class MyService extends Base {}
+        "#,
+        );
         assert!(
-            js.contains("getInheritedFactory") || js.contains("ɵɵgetInheritedFactory"),
+            js.contains("ɵɵgetInheritedFactory(MyService)"),
             "Factory should use getInheritedFactory when no constructor, got: {}",
             js
         );
