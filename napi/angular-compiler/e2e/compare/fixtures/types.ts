@@ -7,7 +7,13 @@
 
 import type { TransformOptions } from '@oxc-angular/vite/api'
 
-import type { ImportDiff, ExportDiff, ClassDiff, StaticFieldDiff } from '../src/compare.js'
+import type {
+  ImportDiff,
+  ExportDiff,
+  ClassDiff,
+  StaticFieldDiff,
+  StatementDiff,
+} from '../src/compare.js'
 import type { NgtscMode } from '../src/compilers/angular-ngtsc.js'
 import type { FunctionLevelComparison, AstDiff, ClassMetadataDiff } from '../src/types.js'
 
@@ -326,6 +332,9 @@ export interface FixtureResult {
 
   /** Class metadata (setClassMetadata) differences (for full-file comparison) */
   classMetadataDiffs?: ClassMetadataDiff[]
+
+  /** Other top-level statement differences (for full-file comparison) */
+  statementDiffs?: StatementDiff[]
 
   /** Parse errors during comparison (for full-file comparison) */
   parseErrors?: string[]

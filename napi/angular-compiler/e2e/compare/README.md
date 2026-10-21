@@ -116,7 +116,8 @@ e2e/compare/
 3. Compile with Angular (NgtscProgram or template compiler)
 4. Parse both outputs and rename Oxc's const pool (_c0, _c1, etc.) to Angular's names by value
 5. Compare the ASTs: imports, exports, classes, static fields, setClassMetadata calls,
-   top-level functions and constants
+   top-level functions and constants, and every other top-level statement (setClassDebugInfo,
+   setNgModuleScope, ...) and its order
 6. For mismatches: Extract function-level diffs
 ```
 
@@ -140,6 +141,9 @@ so any change inside a string literal (CSS, template text, i18n messages) is a d
 The reference is compiled in `experimental-local` mode by default, which compiles each file on
 its own like Oxc does. Where that differs from a real build (for example `changeDetection`, or a
 class that also has a non-Angular decorator), a fixture sets `ngtscMode: 'full'`.
+
+ngtsc compiles each fixture under the project root (the compare directory), as a real build
+does, so that its `ɵsetClassDebugInfo` calls carry `filePath` and `lineNumber`.
 
 ### Known Differences (Not Bugs)
 
@@ -183,10 +187,15 @@ pnpm compare --fixtures --category control-flow --category animations
 
 `fixtures/known-differences.ts` lists fixtures whose output differs from Angular's in
 documented ways, with every difference (static fields, classes, top-level functions and
-constants, exports, imports, setClassMetadata calls) and the reasons. They are reported as known
+constants, exports, imports, setClassMetadata calls, other top-level statements) and the
+reasons. They are reported as known
 differences instead of failures, but only while the fixture differs in exactly what is listed:
 a difference anywhere else in the same fixture is still a failure, and so is a listed difference
 that no longer occurs, so remove an entry once the difference is fixed.
+
+`GLOBAL_KNOWN_DIFFERENCES` in the same file lists differences that nearly every fixture has
+(the `ɵsetClassDebugInfo` file path and order). A fixture whose only differences are these is
+reported as a known difference too, not as a match.
 
 Factory fixtures have no ngtsc baseline; they only check that Oxc compiles them and are
 reported as skipped.

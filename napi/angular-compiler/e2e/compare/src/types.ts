@@ -405,6 +405,13 @@ export interface FileComparisonDetails {
   }>
   /** Class metadata differences */
   classMetadataDiffs?: ClassMetadataDiff[]
+  /** Other top-level statement differences (setClassDebugInfo, setNgModuleScope, ...) */
+  statementDiffs?: Array<{
+    label: string
+    type: 'missing' | 'extra' | 'different' | 'order'
+    expected?: string
+    actual?: string
+  }>
   /** Function comparison results */
   functionComparison?: FunctionLevelComparison
   /** Parse errors if any */

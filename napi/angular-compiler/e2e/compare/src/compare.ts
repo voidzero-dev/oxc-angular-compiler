@@ -20,6 +20,8 @@ export interface FullFileCompareResult {
   staticFieldDiffs?: StaticFieldDiff[]
   /** Class metadata (setClassMetadata) differences */
   classMetadataDiffs?: ClassMetadataDiff[]
+  /** Other top-level statement differences (setClassDebugInfo, setNgModuleScope, ...) */
+  statementDiffs?: StatementDiff[]
   /** Function-level comparison details (for template functions, etc.) */
   functionComparison?: FunctionLevelComparison
   /** Parse errors if any */
@@ -79,6 +81,27 @@ export interface StaticFieldDiff {
   /** Expected value (from TS) */
   expected?: string
   /** Actual value (from Oxc) */
+  actual?: string
+}
+
+/**
+ * Difference in a top-level statement that no other part of the comparison covers, such as the
+ * `ɵsetClassDebugInfo` and `ɵɵsetNgModuleScope` calls.
+ */
+export interface StatementDiff {
+  /**
+   * The statement's label: `callee(firstArg)` of its first `ɵ` call (e.g.
+   * `ɵsetClassDebugInfo(MyComponent)`), else `#N` for the N-th unlabelled statement. A
+   * `ɵsetClassDebugInfo` call that differs only in its `filePath` is labelled
+   * `ɵsetClassDebugInfo(MyComponent) filePath`, and a statement Oxc emits before one that Angular
+   * emits ahead of it is labelled `order ɵsetClassDebugInfo(MyComponent)`.
+   */
+  label: string
+  /** Type of difference */
+  type: 'missing' | 'extra' | 'different' | 'order'
+  /** Expected statement (from TS) */
+  expected?: string
+  /** Actual statement (from Oxc) */
   actual?: string
 }
 
@@ -156,6 +179,10 @@ function normalizeAst(node: unknown): string {
   return JSON.stringify(unwrapped, (key, value) => {
     if (IGNORED_PROPERTIES.has(key)) {
       return undefined
+    }
+    // A BigInt literal's `value` is a bigint, which JSON.stringify cannot serialize.
+    if (typeof value === 'bigint') {
+      return `${value}n`
     }
     return value
   })
@@ -843,13 +870,27 @@ function compareExports(
     }
   }
 
-  // Find missing exports (in TS but not in Oxc)
+  // Describe what an export points at: its local binding, or the module it re-exports from.
+  const target = (exp: NormalizedExport) =>
+    exp.moduleSource === undefined
+      ? exp.localName || exp.exportName
+      : `${exp.localName || exp.exportName} from "${exp.moduleSource}"`
+
+  // Find missing exports (in TS but not in Oxc), and exports that point at something else
   for (const [name, tsExp] of tsByName) {
-    if (!oxcByName.has(name)) {
+    const oxcExp = oxcByName.get(name)
+    if (!oxcExp) {
       diffs.push({
         type: 'missing',
         exportName: name,
         expected: tsExp.localName || name,
+      })
+    } else if (target(oxcExp) !== target(tsExp)) {
+      diffs.push({
+        type: 'different',
+        exportName: name,
+        expected: target(tsExp),
+        actual: target(oxcExp),
       })
     }
   }
@@ -880,6 +921,33 @@ function isAngularStaticField(member: NormAstNode): boolean {
   )
 }
 
+/** The `ClassName.ɵxxx = value` assignment an expression statement makes, if it is one. */
+function staticFieldAssignment(
+  statement: NormAstNode,
+): { className: string; fieldName: string; value: NormAstNode } | null {
+  const assignment = statement.expression as NormAstNode
+  const target = assignment.left as NormAstNode | undefined
+  const object = target?.object as NormAstNode | undefined
+  const property = target?.property as NormAstNode | undefined
+  if (
+    assignment.type === 'AssignmentExpression' &&
+    assignment.operator === '=' &&
+    target?.type === 'MemberExpression' &&
+    target.computed !== true &&
+    object?.type === 'Identifier' &&
+    typeof object.name === 'string' &&
+    typeof property?.name === 'string' &&
+    property.name.startsWith('ɵ')
+  ) {
+    return {
+      className: object.name,
+      fieldName: property.name,
+      value: assignment.right as NormAstNode,
+    }
+  }
+  return null
+}
+
 /**
  * Extract Angular static fields, both the `static ɵxxx = ...` class fields current Angular and
  * Oxc emit (e.g. `static ɵcmp = i0.ɵɵdefineComponent(...)`) and top-level
@@ -894,21 +962,9 @@ function extractClassStaticFields(program: Program, sourceCode: string): StaticF
   }
   for (const statement of program.body as unknown as NormAstNode[]) {
     if (statement.type === 'ExpressionStatement') {
-      const assignment = statement.expression as NormAstNode
-      const target = assignment.left as NormAstNode | undefined
-      const object = target?.object as NormAstNode | undefined
-      const property = target?.property as NormAstNode | undefined
-      if (
-        assignment.type === 'AssignmentExpression' &&
-        assignment.operator === '=' &&
-        target?.type === 'MemberExpression' &&
-        target.computed !== true &&
-        object?.type === 'Identifier' &&
-        typeof object.name === 'string' &&
-        typeof property?.name === 'string' &&
-        property.name.startsWith('ɵ')
-      ) {
-        push(object.name, property.name, assignment.right as NormAstNode)
+      const assignment = staticFieldAssignment(statement)
+      if (assignment) {
+        push(assignment.className, assignment.fieldName, assignment.value)
       }
       continue
     }
@@ -1815,6 +1871,205 @@ function compareClasses(
 }
 
 /**
+ * A top-level statement that no other part of the comparison covers.
+ */
+interface TopLevelStatement {
+  /** See `StatementDiff.label`. */
+  label: string
+  /** The first `ɵ` call in the statement, which gives the label. */
+  call?: NormAstNode
+  /** Whether it is a `ɵsetClassMetadata(Async)` call, whose content `compareClassMetadata` covers. */
+  isMetadata: boolean
+  node: NormAstNode
+  normalized: string
+  code: string
+}
+
+/** The first (pre-order) call in `node` whose callee is `ɵxxx` or `ns.ɵxxx`, with that name. */
+function firstAngularCall(node: unknown): { call: NormAstNode; name: string } | undefined {
+  let found: { call: NormAstNode; name: string } | undefined
+  const visit = (value: unknown): void => {
+    if (found || value === null || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    const obj = value as NormAstNode
+    if (obj.type === 'CallExpression') {
+      const callee = obj.callee as NormAstNode
+      const name =
+        callee.type === 'MemberExpression' && callee.computed !== true
+          ? (callee.property as NormAstNode).name
+          : callee.name
+      if (typeof name === 'string' && name.startsWith('ɵ')) {
+        found = { call: obj, name }
+        return
+      }
+    }
+    for (const child of Object.values(obj)) visit(child)
+  }
+  visit(node)
+  return found
+}
+
+/**
+ * Extract, in order, every top-level statement that the other extractors do not compare: anything
+ * but imports, `export { ... }` lists, named class/function declarations, variable declarations
+ * with plain identifiers and `ClassName.ɵxxx = ...` assignments. In practice these are the
+ * `ɵsetClassMetadata`, `ɵsetClassDebugInfo` and `ɵɵsetNgModuleScope` calls. The
+ * `ɵsetClassMetadata(Async)` calls are kept so that the statement order can be compared.
+ */
+function extractTopLevelStatements(program: Program, sourceCode: string): TopLevelStatement[] {
+  const statements: TopLevelStatement[] = []
+  const seen = new Map<string, number>()
+  let unlabelled = 0
+
+  for (const topLevel of program.body as unknown as NormAstNode[]) {
+    const declaration =
+      topLevel.type === 'ExportNamedDeclaration' || topLevel.type === 'ExportDefaultDeclaration'
+        ? (topLevel.declaration as NormAstNode | null | undefined)
+        : topLevel
+    if (topLevel.type === 'ImportDeclaration' || topLevel.type === 'EmptyStatement') continue
+    // `export { a, b as c }` and `export ... from` lists are compared by `compareExports`.
+    if (topLevel.type === 'ExportNamedDeclaration' && !declaration) continue
+    if (
+      (declaration?.type === 'ClassDeclaration' || declaration?.type === 'FunctionDeclaration') &&
+      (declaration.id as NormAstNode | null | undefined)?.name
+    ) {
+      continue
+    }
+    if (
+      declaration?.type === 'VariableDeclaration' &&
+      (declaration.declarations as NormAstNode[]).every(
+        (decl) => (decl.id as NormAstNode).type === 'Identifier',
+      )
+    ) {
+      continue
+    }
+    if (topLevel.type === 'ExpressionStatement' && staticFieldAssignment(topLevel)) continue
+
+    const angularCall = firstAngularCall(topLevel)
+    let label: string
+    if (angularCall) {
+      const firstArg = (angularCall.call.arguments as NormAstNode[])[0]
+      label = `${angularCall.name}(${typeof firstArg?.name === 'string' ? firstArg.name : ''})`
+      const count = (seen.get(label) ?? 0) + 1
+      seen.set(label, count)
+      if (count > 1) label += `#${count}`
+    } else {
+      label = `#${++unlabelled}`
+    }
+    statements.push({
+      label,
+      call: angularCall?.call,
+      isMetadata:
+        angularCall?.name === 'ɵsetClassMetadata' || angularCall?.name === 'ɵsetClassMetadataAsync',
+      node: topLevel,
+      normalized: normalizeAst(topLevel),
+      code: sourceCode.slice(topLevel.start, topLevel.end),
+    })
+  }
+
+  return statements
+}
+
+/** Copy `node`, putting `to` where `from` was. */
+function substituteNode(node: unknown, from: unknown, to: unknown): unknown {
+  if (node === from) return to
+  if (node === null || typeof node !== 'object') return node
+  if (Array.isArray(node)) return node.map((item) => substituteNode(item, from, to))
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [key, substituteNode(value, from, to)]),
+  )
+}
+
+/** The string `filePath` value node of a `ɵsetClassDebugInfo(Class, { ... })` call. */
+function debugInfoFilePath(statement: TopLevelStatement): NormAstNode | undefined {
+  if (!statement.label.startsWith('ɵsetClassDebugInfo(')) return undefined
+  const info = (statement.call?.arguments as NormAstNode[] | undefined)?.[1]
+  if (info?.type !== 'ObjectExpression') return undefined
+  for (const property of info.properties as NormAstNode[]) {
+    const key = property.key as NormAstNode | undefined
+    const value = property.value as NormAstNode | undefined
+    if (
+      property.type === 'Property' &&
+      property.computed !== true &&
+      (key?.name === 'filePath' || key?.value === 'filePath') &&
+      value?.type === 'Literal' &&
+      typeof value.value === 'string'
+    ) {
+      return value
+    }
+  }
+  return undefined
+}
+
+/**
+ * Compare the top-level statements from `extractTopLevelStatements` by label, and their order.
+ *
+ * The content of the `ɵsetClassMetadata(Async)` calls, and whether they exist, is left to
+ * `compareClassMetadata`; they only take part in the order check. A statement is reported out of
+ * order when Oxc emits it before a statement that Angular emits ahead of it.
+ */
+function compareTopLevelStatements(
+  oxcStatements: TopLevelStatement[],
+  tsStatements: TopLevelStatement[],
+): StatementDiff[] {
+  const diffs: StatementDiff[] = []
+  const oxcByLabel = new Map(oxcStatements.map((s) => [s.label, s]))
+  const tsByLabel = new Map(tsStatements.map((s) => [s.label, s]))
+
+  for (const ts of tsStatements) {
+    const oxc = oxcByLabel.get(ts.label)
+    if (!oxc) {
+      if (!ts.isMetadata) diffs.push({ label: ts.label, type: 'missing', expected: ts.code })
+      continue
+    }
+    if (ts.isMetadata || oxc.normalized === ts.normalized) continue
+    // Tell a debug info call that differs only in its file path apart from one that differs in
+    // its class name or line number.
+    const oxcPath = debugInfoFilePath(oxc)
+    const tsPath = debugInfoFilePath(ts)
+    if (
+      oxcPath &&
+      tsPath &&
+      normalizeAst(substituteNode(oxc.node, oxcPath, tsPath)) === ts.normalized
+    ) {
+      diffs.push({
+        label: `${ts.label} filePath`,
+        type: 'different',
+        expected: tsPath.value as string,
+        actual: oxcPath.value as string,
+      })
+    } else {
+      diffs.push({ label: ts.label, type: 'different', expected: ts.code, actual: oxc.code })
+    }
+  }
+  for (const oxc of oxcStatements) {
+    if (!tsByLabel.has(oxc.label) && !oxc.isMetadata) {
+      diffs.push({ label: oxc.label, type: 'extra', actual: oxc.code })
+    }
+  }
+
+  const tsOrder = tsStatements.map((s) => s.label).filter((label) => oxcByLabel.has(label))
+  const oxcOrder = oxcStatements.map((s) => s.label).filter((label) => tsByLabel.has(label))
+  const tsIndex = new Map(tsOrder.map((label, i) => [label, i]))
+  for (let i = 0; i < oxcOrder.length; i++) {
+    const index = tsIndex.get(oxcOrder[i])!
+    if (oxcOrder.slice(i + 1).some((later) => tsIndex.get(later)! < index)) {
+      diffs.push({
+        label: `order ${oxcOrder[i]}`,
+        type: 'order',
+        expected: tsOrder.join(', '),
+        actual: oxcOrder.join(', '),
+      })
+    }
+  }
+
+  return diffs
+}
+
+/**
  * Compare two full-file JavaScript outputs semantically.
  *
  * This function performs a comprehensive comparison including:
@@ -1823,6 +2078,8 @@ function compareClasses(
  * - Class definitions
  * - Static field assignments (ClassName.ɵcmp, ClassName.ɵfac, etc.)
  * - Top-level functions and constants (template functions, hoisted `_cN` constants, etc.)
+ * - Every other top-level statement (setClassDebugInfo, setNgModuleScope, ...), and the order of
+ *   these statements and the setClassMetadata calls
  *
  * Every part is compared on its AST, so formatting does not matter but any change inside a
  * string literal does; the source text is never rewritten to make the outputs line up.
@@ -1935,12 +2192,19 @@ export async function compareFullFileSemantically(
     const tsFunctions = extractFunctions(tsResult.program as unknown as Program, normalizedTsCode)
     const functionComparison = compareFunctions(oxcFunctions, tsFunctions)
 
+    // Extract and compare the remaining top-level statements (setClassDebugInfo, ...)
+    const statementDiffs = compareTopLevelStatements(
+      extractTopLevelStatements(oxcResult.program as unknown as Program, normalizedOxcCode),
+      extractTopLevelStatements(tsResult.program as unknown as Program, normalizedTsCode),
+    )
+
     // Determine if there are any differences
     const hasImportDiffs = importDiffs.length > 0
     const hasExportDiffs = exportDiffs.length > 0
     const hasClassDiffs = classDiffs.length > 0
     const hasStaticFieldDiffs = staticFieldDiffs.length > 0
     const hasClassMetadataDiffs = classMetadataDiffs.length > 0
+    const hasStatementDiffs = statementDiffs.length > 0
     const hasFunctionDiffs =
       functionComparison.missingFunctions.length > 0 ||
       functionComparison.extraFunctions.length > 0 ||
@@ -1952,6 +2216,7 @@ export async function compareFullFileSemantically(
       !hasClassDiffs &&
       !hasStaticFieldDiffs &&
       !hasClassMetadataDiffs &&
+      !hasStatementDiffs &&
       !hasFunctionDiffs
 
     if (match) {
@@ -1965,6 +2230,7 @@ export async function compareFullFileSemantically(
       classDiffs: hasClassDiffs ? classDiffs : undefined,
       staticFieldDiffs: hasStaticFieldDiffs ? staticFieldDiffs : undefined,
       classMetadataDiffs: hasClassMetadataDiffs ? classMetadataDiffs : undefined,
+      statementDiffs: hasStatementDiffs ? statementDiffs : undefined,
       functionComparison: hasFunctionDiffs ? functionComparison : undefined,
     }
   } catch (e) {
@@ -2027,6 +2293,8 @@ export function formatFullFileComparison(result: FullFileCompareResult): string 
           break
         case 'different':
           lines.push(`  ~ Different export: ${diff.exportName}`)
+          lines.push(`      expected: ${diff.expected}`)
+          lines.push(`      actual:   ${diff.actual}`)
           break
       }
     }
@@ -2091,6 +2359,27 @@ export function formatFullFileComparison(result: FullFileCompareResult): string 
           break
         case 'different':
           lines.push(`  ~ Different: ${fieldKey}`)
+          lines.push(`      expected: ${truncate(diff.expected || '', 80)}`)
+          lines.push(`      actual:   ${truncate(diff.actual || '', 80)}`)
+          break
+      }
+    }
+    lines.push('')
+  }
+
+  if (result.statementDiffs && result.statementDiffs.length > 0) {
+    lines.push('Top-level statement differences:')
+    for (const diff of result.statementDiffs) {
+      switch (diff.type) {
+        case 'missing':
+          lines.push(`  - Missing: ${diff.label}`)
+          break
+        case 'extra':
+          lines.push(`  + Extra: ${diff.label}`)
+          break
+        case 'different':
+        case 'order':
+          lines.push(`  ~ Different: ${diff.label}`)
           lines.push(`      expected: ${truncate(diff.expected || '', 80)}`)
           lines.push(`      actual:   ${truncate(diff.actual || '', 80)}`)
           break

@@ -3,9 +3,10 @@
  * `category/name`. Each entry lists every difference and why it exists.
  *
  * A listed fixture is reported as a known difference only while it differs in exactly what the
- * entry lists: a difference anywhere else (another static field, class, top-level function or
- * constant, export, import or metadata call) still fails, and so does a listed difference that
- * no longer occurs, so fixed entries get removed.
+ * entry (and `GLOBAL_KNOWN_DIFFERENCES`) lists: a difference anywhere else (another static field,
+ * class, top-level function or constant, export, import, metadata call or top-level statement)
+ * still fails, and so does a listed difference that no longer occurs, so fixed entries get
+ * removed.
  */
 import type { ImportDiff } from '../src/compare.js'
 
@@ -16,12 +17,17 @@ export interface KnownDifference {
   classes?: string[]
   /** Every top-level function or constant that differs, is missing or is extra. */
   functions?: string[]
-  /** Every export that is missing or extra. */
+  /** Every export that is missing, extra or points at another binding. */
   exports?: string[]
   /** Every import difference, exactly as `compareImports` reports it. */
   importDiffs?: ImportDiff[]
   /** Every setClassMetadata difference, as `Class.field`, e.g. `MyComponent.setClassMetadata`. */
   metadataDiffs?: string[]
+  /**
+   * Every other top-level statement that differs, by `StatementDiff.label`, e.g.
+   * `ɵɵsetNgModuleScope(AppModule)`.
+   */
+  statements?: string[]
   /** Why each difference exists. */
   reasons: string[]
 }
@@ -44,6 +50,25 @@ const SET_CLASS_METADATA_IMPORT =
 const ALIASED_INJECTABLE =
   'an aliased @Injectable compiles to a broken ɵprov under ngtsc — its needsFactory check compares the written decorator name, so the factory (and setClassMetadata) are never emitted; Oxc emits a working ɵfac (issue #507, kept deliberately)'
 
+const NG_MODULE_SCOPE =
+  'the ngJitMode-guarded ɵɵsetNgModuleScope call Angular emits after an NgModule is missing'
+const DEBUG_INFO_PATH =
+  'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
+const DEBUG_INFO_LINE =
+  'ɵsetClassDebugInfo lineNumber counts only \\n line breaks where TypeScript also counts \\r, U+2028 and U+2029'
+const DEBUG_INFO_ORDER =
+  'ɵsetClassDebugInfo is emitted before ɵsetClassMetadata where Angular emits it after'
+
+/**
+ * Differences every fixture may have, matched against the labels `KnownDifference` uses. A
+ * fixture whose differences are all documented here or in its own entry is reported as a known
+ * difference with these reasons. They never go stale.
+ */
+export const GLOBAL_KNOWN_DIFFERENCES: Array<{ label: RegExp; reason: string }> = [
+  { label: /^statement ɵsetClassDebugInfo\([^()]+\)(#\d+)? filePath$/, reason: DEBUG_INFO_PATH },
+  { label: /^statement order ɵsetClassDebugInfo\([^()]+\)(#\d+)?$/, reason: DEBUG_INFO_ORDER },
+]
+
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
@@ -51,7 +76,8 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   },
   'class-metadata/class-metadata-ngmodule': {
     fields: ['TestableModule.ɵfac', 'TestableModule.ɵmod'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS],
+    statements: ['ɵɵsetNgModuleScope(TestableModule)'],
+    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
   },
   'class-metadata/class-metadata-pipe': {
     fields: ['TestablePipe.ɵfac'],
@@ -105,6 +131,11 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['AliasedService.ɵfac'],
     metadataDiffs: ['AliasedService.setClassMetadata'],
     reasons: [ALIASED_INJECTABLE],
+  },
+  'edge-cases/unicode-special-escapes': {
+    fields: [],
+    statements: ['ɵsetClassDebugInfo(UnicodeSpecialEscapesComponent)'],
+    reasons: [DEBUG_INFO_LINE, DEBUG_INFO_PATH],
   },
   'edge-cases/multiple-custom-decorators': {
     fields: ['MultiDecoratorComponent.ɵcmp'],
@@ -214,11 +245,13 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   },
   'injector/injector-with-both': {
     fields: ['FullModule.ɵfac', 'FullModule.ɵmod'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS],
+    statements: ['ɵɵsetNgModuleScope(FullModule)'],
+    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
   },
   'injector/injector-with-imports': {
     fields: ['FeatureModule.ɵfac', 'FeatureModule.ɵmod'],
-    reasons: [FACTORY, NG_MODULE_IMPORTS],
+    statements: ['ɵɵsetNgModuleScope(FeatureModule)'],
+    reasons: [FACTORY, NG_MODULE_IMPORTS, NG_MODULE_SCOPE],
   },
   'injector/injector-with-providers': {
     fields: ['ProvidersModule.ɵfac'],
