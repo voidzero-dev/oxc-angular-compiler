@@ -1,0 +1,21 @@
+crates/oxc_angular_compiler/src/linker/mod.rs
+  s_10ef4cb6b3a8e5::t_36e5015db49d63 1611-1617,2228-2230
+crates/oxc_angular_compiler/tests/linker_test.rs
+  s_10ef4cb6b3a8e5::t_20cb6bfde42e5c 472-493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f128c749d27d6e94973d7298b92bc30e253f1a8",
+  "prompts": {},
+  "sessions": {
+    "s_10ef4cb6b3a8e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aa9ff03f551b7b39b",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
