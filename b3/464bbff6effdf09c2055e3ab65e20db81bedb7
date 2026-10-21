@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/styles/encapsulation.rs
+  s_ea1c9a7665ba92::t_deede37dd4e8e3 394-397,992-996,999,1006-1016,1024-1031,1035-1036,1039,1624-1633,1648-1664,1672-1673,1676,1684-1695,1701-1704,1706-1707,1709-1716,1718-1719,1722,1725,1751-1757,1770-1773,1803-1805
+crates/oxc_angular_compiler/tests/shadow_css_test.rs
+  s_ea1c9a7665ba92::t_ad9fd056aa7dfb 1332-1333,1343-1501
+napi/angular-compiler/e2e/compare/fixtures/styles/shadow-css.fixture.ts
+  s_ea1c9a7665ba92::t_a5bcf9355e6871 1702-1811
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b3464bbff6effdf09c2055e3ab65e20db81bedb7",
+  "prompts": {},
+  "sessions": {
+    "s_ea1c9a7665ba92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad3c64857533bfe60",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
