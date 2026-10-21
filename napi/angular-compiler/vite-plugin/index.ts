@@ -25,7 +25,6 @@ import {
   transformAngularFile,
   extractComponentMetadataSync,
   extractComponentUrls,
-  encapsulateStyle,
   compileForHmrSync,
   type TransformOptions,
   type ResolvedResources,
@@ -194,6 +193,13 @@ function markModuleSelfAccepting(mod: ModuleNode): void {
   if (clientModule) {
     clientModule.isSelfAccepting = true
   }
+}
+
+/** A component stylesheet after `preprocessCSS`, with the source it came from. */
+type CompiledStyle = {
+  source: string
+  code: string
+  deps: string[] | undefined
 }
 
 type InlineBuildMinifyOptions = {
@@ -365,6 +371,47 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
   }
 
+  // `preprocessCSS` output for each component stylesheet (normalized path),
+  // tagged with the source text it was built from. Without it one stylesheet
+  // edit is preprocessed up to three times: by `refreshStyleDeps` in
+  // `handleHotUpdate`, by the `@ng/component` endpoint, and by the next
+  // `transform` of the component.
+  //
+  // An entry only lives for one HMR cycle: `handleHotUpdate` clears the map
+  // as it starts. The output can depend on files that are not in the
+  // reported `deps` (Tailwind scans templates for class names), so a later
+  // template edit must still rebuild the styles the endpoint serves, as it
+  // always has.
+  const compiledStyles = new Map<string, CompiledStyle>()
+  // Bumped with every clear, so a compile that started in an earlier cycle
+  // cannot store its (possibly stale) output in the new one.
+  let styleCycle = 0
+
+  function startStyleCycle(): void {
+    styleCycle++
+    compiledStyles.clear()
+  }
+
+  // Preprocess a component stylesheet (SCSS, Less, PostCSS, ...), reusing the
+  // output built earlier in this HMR cycle from the same source text. Throws
+  // what `preprocessCSS` throws; failures are not cached.
+  async function compileStyle(stylePath: string, source: string): Promise<CompiledStyle> {
+    const key = normalizePath(stylePath)
+    const cached = compiledStyles.get(key)
+    if (cached && cached.source === source) return cached
+    const cycle = styleCycle
+    const processed = await preprocessCSS(source, stylePath, resolvedConfig as any)
+    const compiled: CompiledStyle = {
+      source,
+      code: processed.code,
+      deps: processed.deps ? Array.from(processed.deps) : undefined,
+    }
+    // Builds never start a cycle and `resourceCache` already serves their
+    // repeat reads, so only the dev server keeps entries.
+    if (watchMode && cycle === styleCycle) compiledStyles.set(key, compiled)
+    return compiled
+  }
+
   // Re-read and re-preprocess a style file so its dependency registration in
   // `styleDepsCache`/`styleDepOwners` reflects the current `@use`/`@import`
   // set. Without this, a partial added or switched via HMR would never be
@@ -382,7 +429,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
     if (!content.trim()) return
     try {
-      const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+      const processed = await compileStyle(stylePath, content)
       registerStyleDeps(stylePath, processed.deps)
       // A style edited via HMR can pick up new deps (possibly outside the
       // dev-server root); register them with the watcher so their edits reach
@@ -494,7 +541,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // Preprocess styles (SCSS, Less, etc.)
           if (resolvedConfig) {
             try {
-              const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+              const processed = await compileStyle(stylePath, content)
               content = processed.code
               registerStyleDeps(stylePath, processed.deps)
             } catch (e) {
@@ -523,6 +570,17 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
     // Note: NAPI-RS HashMap binds to plain objects at runtime, despite Map type in index.d.ts
     return { resources: { templates, styles } as unknown as ResolvedResources, dependencies }
+  }
+
+  /**
+   * What `resolveResources` returns for a file with no external template or
+   * stylesheet.
+   */
+  function emptyResources(): { resources: ResolvedResources; dependencies: string[] } {
+    return {
+      resources: { templates: {}, styles: {} } as unknown as ResolvedResources,
+      dependencies: [],
+    }
   }
 
   /**
@@ -744,12 +802,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     try {
                       let styleContent = await readFile(stylePath, 'utf-8')
                       if (resolvedConfig) {
-                        const processed = await preprocessCSS(
-                          styleContent,
-                          stylePath,
-                          resolvedConfig as any,
-                        )
-                        styleContent = processed.code
+                        // Read from disk every time; only the preprocessing
+                        // is shared, and only for unchanged text built in
+                        // this HMR cycle (see `compileStyle`).
+                        styleContent = (await compileStyle(stylePath, styleContent)).code
                       }
                       contents.push(styleContent)
                     } catch {
@@ -851,9 +907,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     ? merged
                     : null
 
+                // Same template options as the full transform, which reads
+                // `preserveWhitespaces` from the decorator: without it the
+                // update module strips whitespace the compiled component
+                // keeps, and text nodes shift after every HMR.
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
                   angularVersion: pluginOptions.angularVersion,
                   encapsulation: classMetadata.encapsulation,
+                  preserveWhitespaces: classMetadata.preserveWhitespaces,
                   minifyComponentStyles: getMinifyComponentStyles(),
                 })
 
@@ -959,8 +1020,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // Apply file replacements
           const actualId = pluginOptions.fileReplacements?.[id] ?? id
 
-          // Resolve external resources
-          const { resources, dependencies } = await resolveResources(code, actualId)
+          // Resolve external resources. JIT output never reads them: the Rust
+          // JIT transform turns `templateUrl`/`styleUrl(s)` into
+          // `angular:jit:*` imports that `jitPlugin` loads, and it registers
+          // no components for HMR, so nothing downstream uses the reads or
+          // the bookkeeping below.
+          //
+          // Outside JIT, `extractComponentUrls` is a second full parse of the
+          // file. A file that never spells `templateUrl` or `styleUrl` almost
+          // never has one, so it is compiled with no resources first; the
+          // retry after the transform covers the rare file that does.
+          const mayHaveResourceUrls =
+            !pluginOptions.jit && (code.includes('templateUrl') || code.includes('styleUrl'))
+          let { resources, dependencies } = mayHaveResourceUrls
+            ? await resolveResources(code, actualId)
+            : emptyResources()
 
           // Disable HMR for SSR transforms. SSR bundles must not contain HMR
           // initialization code that dynamically imports @ng/component virtual
@@ -986,7 +1060,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             tsconfigPath: pluginOptions.tsconfig,
           }
 
-          const result = await transformAngularFile(code, actualId, transformOptions, resources)
+          let result = await transformAngularFile(code, actualId, transformOptions, resources)
+
+          // The compiler reads a key the way the parser does, so a component
+          // can still name a resource without the plain text: an escaped key
+          // (`style\u0055rls`) or a computed key folded from a same-file
+          // constant. It then reports the URL as COMPONENT_RESOURCE_NOT_FOUND,
+          // since resources were passed but held none. Any error on the fast
+          // path therefore reruns the file through the full resolution, which
+          // makes the fast path give exactly the old result: with no URL in
+          // the file, `resolveResources` would have passed these same empty
+          // resources.
+          if (!pluginOptions.jit && !mayHaveResourceUrls && result.errors.length > 0) {
+            ;({ resources, dependencies } = await resolveResources(code, actualId))
+            result = await transformAngularFile(code, actualId, transformOptions, resources)
+          }
 
           // Resource deps (templates/styles) plus files the compiler read to
           // resolve imported decorator-metadata values (`result.dependencies`).
@@ -1152,6 +1240,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         },
       },
       async handleHotUpdate(ctx) {
+        // Every file event starts a new HMR cycle for compiled styles, before
+        // anything below can preprocess one (see `compiledStyles`).
+        startStyleCycle()
+
         if (!pluginOptions.liveReload) return
 
         debugHmr('handleHotUpdate file=%s', ctx.file)
@@ -1445,9 +1537,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   }
 
   /**
-   * Plugin to encapsulate component styles.
-   */
-  /**
    * Augment library `.d.ts` files with Angular's Ivy type declarations.
    *
    * Vite/Rolldown don't emit declarations themselves — a separate dts
@@ -1513,38 +1602,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
   }
 
-  function stylesPlugin(): Plugin {
-    return {
-      name: '@oxc-angular/vite-styles',
-      transform: {
-        filter: {
-          id: /ngcomp/,
-        },
-        handler(code, id) {
-          if (!pluginOptions.liveReload) return
-
-          const params = new URL(id, 'http://localhost').searchParams
-          const componentId = params.get('ngcomp')
-          const encapsulation = params.get('e')
-
-          // Only encapsulate for emulated encapsulation (e=0)
-          if (encapsulation === '0' && componentId) {
-            const encapsulated = encapsulateStyle(code, componentId)
-            return {
-              code: encapsulated,
-              map: null,
-            }
-          }
-
-          return undefined
-        },
-      },
-    }
-  }
-
   return [
     angularPlugin(),
-    stylesPlugin(),
     dtsPlugin(),
     angularLinkerPlugin({ angularVersion: pluginOptions.angularVersion }),
     pluginOptions.jit &&
