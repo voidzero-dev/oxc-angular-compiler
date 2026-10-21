@@ -1,0 +1,19 @@
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_bb242e0963a7b4::t_d16713e845dac5 49-50,69-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1b48c1256cbc8fd24998833221923b22ad73802a",
+  "prompts": {},
+  "sessions": {
+    "s_bb242e0963a7b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5df09e8e-2740-4fa5-9eca-9aeab7c6ddbb",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
