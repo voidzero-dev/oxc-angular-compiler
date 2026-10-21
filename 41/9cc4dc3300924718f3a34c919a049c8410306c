@@ -1,0 +1,27 @@
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_1f1786a3e96afa::t_85a524a720945a 333-341,3653-3663
+crates/oxc_angular_compiler/tests/class_decorator_identity_test.rs
+  s_1f1786a3e96afa::t_17f7ac849249f8 276-288
+napi/angular-compiler/index.d.ts
+  s_1f1786a3e96afa::t_f6e403b83486ba 1067-1075
+napi/angular-compiler/src/lib.rs
+  s_1f1786a3e96afa::t_739c83683e9529 390-398,1298
+napi/angular-compiler/test/hmr-fingerprint.test.ts
+  s_1f1786a3e96afa::t_5eed922bcd534d 83-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "419cc4dc3300924718f3a34c919a049c8410306c",
+  "prompts": {},
+  "sessions": {
+    "s_1f1786a3e96afa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac58cde1caab6a147",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
