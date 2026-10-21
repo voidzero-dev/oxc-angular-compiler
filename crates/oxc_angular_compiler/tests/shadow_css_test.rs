@@ -1487,6 +1487,13 @@ fn test_escaped_brace_and_at_outside_string() {
         ng_shim("@media x{.a\\{ .b{}} .c{}"),
         "@media x{.a\\{ .b[_ngcontent-%COMP%]{}} .c[_ngcontent-%COMP%]{}"
     );
+    // An escaped brace ends an at-rule header the same way, so the next rule
+    // is scoped on its own.
+    assert_eq!(
+        ng_shim("@media x\\{ .a{} } .b{}"),
+        "@media x\\{ .a[_ngcontent-%COMP%]{} } .b[_ngcontent-%COMP%]{}"
+    );
+    assert_eq!(ng_shim("@media x\\{ .a{}"), "@media x\\{ .a[_ngcontent-%COMP%]{}");
     // Angular leaves the host marker in that unscoped text too.
     assert_eq!(
         ng_shim(":host .a\\{b{}"),

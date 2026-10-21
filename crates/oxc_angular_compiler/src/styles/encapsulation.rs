@@ -1350,6 +1350,14 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str, css_nesting: 
             let sink = sink!();
             sink.push(c);
             sink.extend(next_c);
+            // An escaped brace also ends an at-rule header: `_ruleRe` reads no
+            // brace into one, so `@media x\{` stays plain text and the next
+            // rule is scoped on its own.
+            if in_at_rule_header && matches!(next_c, Some('{' | '}')) {
+                in_at_rule_header = false;
+                at_rule_header.clear();
+                continue;
+            }
             // A selector still ends there: `_ruleRe` reads no `{` or `}` into
             // one, so the text up to an escaped brace is left unscoped
             // (`.a\{ .b {}` only scopes ` .b`).
