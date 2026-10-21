@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/styles/encapsulation.rs
+  s_4111ceb7f1e6d7::t_4f829a44f67c9a 1730-1733
+crates/oxc_angular_compiler/tests/shadow_css_test.rs
+  s_4111ceb7f1e6d7::t_934e3b86400bbd 1499-1535
+napi/angular-compiler/e2e/compare/fixtures/styles/shadow-css.fixture.ts
+  s_4111ceb7f1e6d7::t_d89aed6328483e 1812-1832
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b47c1e3bd2a3a88bd4cfb03bb243f313a8981bce",
+  "prompts": {},
+  "sessions": {
+    "s_4111ceb7f1e6d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2ef33c2f7dc72b82",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
