@@ -5647,6 +5647,38 @@ fn assert_contains(haystack: &str, needle: &str) {
     assert!(haystack.contains(needle), "Expected to find:\n{needle}\nin:\n{haystack}");
 }
 
+/// `consts` with i18n initializers is an arrow function with a block body, and a message is
+/// a native `$localize` tagged template. Angular 22.2 `ngc` (ES2022):
+///   consts: () => { let i18n_0; ... i18n_0 = $localize `:@@close:Close`; } return [...]; }
+/// Without initializers `consts` stays a plain array.
+#[test]
+fn test_i18n_consts_is_arrow_function_with_native_localize() {
+    let js = compile_i18n_component(r#"<div i18n-title="@@close" title="Close"></div>"#);
+    assert_contains(&js, "consts:() =>{let i18n_0;");
+    assert_contains(&js, "(i18n_0 = $localize `:@@close:Close`);");
+    assert!(!js.contains("makeTemplateObject"), "No template object helper expected:\n{js}");
+
+    let js = compile_i18n_component(r#"<div title="Close"></div>"#);
+    assert_contains(&js, r#"consts:[["title","Close"]]"#);
+}
+
+/// The HMR update's `consts` takes the same arrow form as the component definition.
+#[test]
+fn test_hmr_i18n_consts_is_arrow_function() {
+    let allocator = Allocator::default();
+    let output = oxc_angular_compiler::compile_template_for_hmr(
+        &allocator,
+        r#"<div i18n-title="@@close" title="Close"></div>"#,
+        "Repro",
+        "repro.ts",
+        &ComponentTransformOptions::default(),
+    )
+    .expect("HMR template should compile");
+    let consts = output.consts_js.expect("template should have consts");
+    assert!(consts.starts_with("() =>{"), "Expected an arrow function, got:\n{consts}");
+    assert!(consts.contains("$localize `:@@close:Close`"), "got:\n{consts}");
+}
+
 /// An `i18n-<attr>` message takes the attribute's own value as its text.
 /// Expected output taken from Angular 22.1.5 `ngc`:
 ///   goog.getMsg("Close") / $localize `:@@close:Close`
