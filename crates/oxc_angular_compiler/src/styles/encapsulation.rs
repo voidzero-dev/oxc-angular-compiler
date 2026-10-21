@@ -1727,8 +1727,10 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
             continue;
         }
 
-        // Handle @ rules (media queries, keyframes, etc.)
-        if c == '@' {
+        // Handle @ rules (media queries, keyframes, etc.). An `@` inside a
+        // declaration block or an at-rule header (`url(a@2x.png)`) does not
+        // start an at-rule; it is copied by the branches below.
+        if c == '@' && !in_declaration && !in_at_rule_header {
             // Flush any pending selector
             if !current_selector.is_empty() {
                 result.push_str(&current_selector);

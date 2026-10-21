@@ -1500,6 +1500,43 @@ fn test_unscoped_at_rule_bodies_are_copied_unchanged() {
 }
 
 #[test]
+fn test_at_sign_in_values_does_not_start_an_at_rule() {
+    // An unquoted `@` in the last declaration of a rule (`url(a@2x.png)`,
+    // common in minified CSS) opened an at-rule header that swallowed the
+    // rule's `}` and left every later rule unscoped.
+    for (css, expected) in [
+        (
+            ".a{background:url(a@2x.png)}.b{color:red}.c{color:blue}.d{x:y}",
+            ".a[_ngcontent-%COMP%]{background:url(a@2x.png)}.b[_ngcontent-%COMP%]{color:red}.c[_ngcontent-%COMP%]{color:blue}.d[_ngcontent-%COMP%]{x:y}",
+        ),
+        (
+            ".a{background:url(#m@x)}.b{}.c{}",
+            ".a[_ngcontent-%COMP%]{background:url(#m@x)}.b[_ngcontent-%COMP%]{}.c[_ngcontent-%COMP%]{}",
+        ),
+        (
+            ".a{b:image-set(url(a@1x.png) 1x, url(a@2x.png) 2x)}.b{c:d}",
+            ".a[_ngcontent-%COMP%]{b:image-set(url(a@1x.png) 1x, url(a@2x.png) 2x)}.b[_ngcontent-%COMP%]{c:d}",
+        ),
+        (
+            "@media (min-width: 1px) { .a{background:url(a@2x.png)} .b{c:d} } .c{e:f}",
+            "@media (min-width: 1px) { .a[_ngcontent-%COMP%]{background:url(a@2x.png)} .b[_ngcontent-%COMP%]{c:d} } .c[_ngcontent-%COMP%]{e:f}",
+        ),
+        // An `@` in an at-rule header does not restart the header.
+        (
+            "@supports (background: url(a@2x.png)) { .a{c:d} } .b{c:d}",
+            "@supports (background: url(a@2x.png)) { .a[_ngcontent-%COMP%]{c:d} } .b[_ngcontent-%COMP%]{c:d}",
+        ),
+        // Nested at-rules inside a rule body are copied unchanged.
+        (
+            ".a{@media x{color:red}} .b{c:d}",
+            ".a[_ngcontent-%COMP%]{@media x{color:red}} .b[_ngcontent-%COMP%]{c:d}",
+        ),
+    ] {
+        assert_eq!(ng_shim(css), expected);
+    }
+}
+
+#[test]
 fn test_legacy_polyfills_follow_angular_version() {
     // Angular v22.0.0-rc.0 removed the polyfill passes.
     let css = "polyfill-next-selector {content: 'x > y'} z {}";

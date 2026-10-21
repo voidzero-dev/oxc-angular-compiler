@@ -1809,4 +1809,25 @@ export class DeclarationAtRulesComponent {}
     `.trim(),
     expectedFeatures: ['styles:'],
   },
+
+  {
+    name: 'shadow-css-at-sign-in-values',
+    category: 'styles',
+    description: 'An unquoted @ in a declaration value or at-rule header does not start an at-rule',
+    className: 'AtSignInValuesComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-at-sign-in-values',
+  standalone: true,
+  template: \`<div class="a b c">Content</div>\`,
+  styles: [\`.a{background:url(a@2x.png)}.b{color:red}.c{color:blue}@supports (background: url(a@2x.png)) { .d{color:green} } .e{color:pink}\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class AtSignInValuesComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
 ]
