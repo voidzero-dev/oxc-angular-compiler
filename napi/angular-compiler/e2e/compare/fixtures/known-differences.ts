@@ -33,7 +33,6 @@ export interface KnownDifference {
 }
 
 const HOST_ATTRS_ORDER = 'hostAttrs are emitted in a different order'
-const CSS_WS = 'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
 const DEBUG_NAME =
   'signal(), input() and the other signal APIs lack the ngDevMode `debugName` argument ngtsc adds to class fields'
 const DOM_ONLY =
@@ -47,7 +46,8 @@ const ALIASED_INJECTABLE =
 
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
-const NG_MODULE_SCOPE_ORDER = 'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
+const NG_MODULE_SCOPE_ORDER =
+  'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
 const DEBUG_INFO_PATH =
   'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
 const DEBUG_INFO_LINE =
@@ -202,140 +202,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'schemas/schemas-with-change-detection': {
     fields: ['SchemasWithOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY],
-  },
-  'styles/shadow-css-child-combinator': {
-    fields: ['ChildCombinatorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-deep-combinator': {
-    fields: ['DeepCombinatorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-descendant-selectors': {
-    fields: ['DescendantSelectorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-double-where-host-context': {
-    fields: ['DoubleWhereHostContextComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-has-basic': {
-    fields: ['HasBasicComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-has-with-host': {
-    fields: ['HasWithHostComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-attribute': {
-    fields: ['HostContextAttributeComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-basic': {
-    fields: ['HostContextBasicComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-comma-child': {
-    fields: ['HostContextCommaChildComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-comma-list': {
-    fields: ['HostContextCommaListComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-double': {
-    fields: ['HostContextDoubleComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-host-different': {
-    fields: ['HostContextHostDifferentComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-host-same-element': {
-    fields: ['HostContextHostSameComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-nested-pseudo': {
-    fields: ['HostContextNestedPseudoComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-no-selector': {
-    fields: ['HostContextNoSelectorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-pseudo-not': {
-    fields: ['HostContextPseudoNotComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-tag': {
-    fields: ['HostContextTagComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-context-triple': {
-    fields: ['HostContextTripleComponent.ɵcmp'],
-    reasons: [':host-context selector permutations are in a different order'],
-  },
-  'styles/shadow-css-host-context-with-descendant': {
-    fields: ['HostContextDescendantComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-host-context': {
-    fields: ['HostHostContextComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-host-with-descendant': {
-    fields: ['HostDescendantComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-is-with-host': {
-    fields: ['IsWithHostComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-mixed-host-in-where': {
-    fields: ['MixedHostWhereComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-multiline-selector': {
-    fields: ['MultilineSelectorComponent.ɵcmp'],
-    reasons: ['the newline between selectors in a list is dropped'],
-  },
-  'styles/shadow-css-ng-deep-after-selector': {
-    fields: ['NgDeepAfterSelectorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-ng-deep-with-host': {
-    fields: ['NgDeepWithHostComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-polyfill-rule': {
-    fields: ['PolyfillRuleComponent.ɵcmp'],
-    reasons: [
-      'Angular 22.2 strips the -shadowcsshost-no-combinator marker left in a rule body (part of its CSS nesting support); Oxc keeps it, as Angular 22.0 does',
-    ],
-  },
-  'styles/shadow-css-shadow-piercing': {
-    fields: ['ShadowPiercingComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-sibling-combinators': {
-    fields: ['SiblingCombinatorComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-where-basic': {
-    fields: ['WhereBasicComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-where-host-context': {
-    fields: ['WhereHostContextComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-where-nested': {
-    fields: ['WhereNestedComponent.ɵcmp'],
-    reasons: [CSS_WS],
-  },
-  'styles/shadow-css-where-with-host': {
-    fields: ['WhereWithHostComponent.ɵcmp'],
-    reasons: [CSS_WS],
   },
   'styles/style-onpush-encapsulation': {
     fields: ['OnPushStyleComponent.ɵcmp'],
@@ -534,10 +400,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: [],
     classes: ['ViewCmp'],
     reasons: [DEBUG_NAME],
-  },
-  'templates/case-raw-text': {
-    fields: ['CaseRawTextComponent.ɵcmp'],
-    reasons: [CSS_WS],
   },
   'templates/ng-arrow-function-dollar-event': {
     fields: [],

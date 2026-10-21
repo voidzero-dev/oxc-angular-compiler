@@ -615,9 +615,9 @@ fn test_host_with_element() {
 fn test_host_context_single() {
     // Single :host-context() should generate two variants
     let result = shim_with_host(":host-context(.dark) {}", "contenta", "hosta");
-    // Generates: .dark[hosta], .dark [hosta]
-    assert!(result.contains(".dark[hosta]"));
-    assert!(result.contains(".dark [hosta]"));
+    // Generates: .dark[hosta], .dark [hosta]. The descendant form keeps the
+    // spaces Angular's combinator split emits.
+    assert_eq!(result, ".dark[hosta], .dark   [hosta] {}");
 }
 
 #[test]
@@ -625,16 +625,13 @@ fn test_host_context_multiple_permutations() {
     // Multiple :host-context() should generate permutations
     let result = shim_with_host(":host-context(.one):host-context(.two) {}", "contenta", "hosta");
 
-    // Should generate 3 permutations x 2 variants = 6 total
-    // Compound: .one.two
-    assert!(result.contains(".one.two[hosta]"));
-    assert!(result.contains(".one.two [hosta]"));
-
-    // .one ancestor of .two
-    assert!(result.contains(".one .two[hosta]") || result.contains(".one .two [hosta]"));
-
-    // .two ancestor of .one
-    assert!(result.contains(".two .one[hosta]") || result.contains(".two .one [hosta]"));
+    // 3 permutations (.one.two, .one .two, .two .one) x 2 variants, exactly
+    // as `@angular/compiler` 22.2.2 emits them.
+    assert_eq!(
+        result,
+        ".one.two[hosta], .one.two   [hosta], .one   .two[hosta], .one   .two   [hosta], \
+         .two   .one[hosta], .two   .one   [hosta] {}"
+    );
 }
 
 #[test]
@@ -1559,7 +1556,10 @@ fn test_legacy_polyfills_follow_angular_version() {
         "#menu > .bar { color: blue; }"
     );
 
-    assert_eq!(ng_shim("x::content y {}"), "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}");
+    assert_eq!(
+        ng_shim("x::content y {}"),
+        "x[_ngcontent-%COMP%]::content   y[_ngcontent-%COMP%] {}"
+    );
     assert_css_eq!(
         shim_css_text_for_version("x::shadow > y {}", NG_CONTENT, NG_HOST, V21),
         "x[_ngcontent-%COMP%] > y[_ngcontent-%COMP%] {}"
@@ -1574,7 +1574,7 @@ fn test_legacy_polyfills_follow_angular_version() {
     let rc_0 = AngularVersion::parse("22.0.0-rc.0");
     assert_eq!(
         shim_css_text_for_version("x::content y {}", NG_CONTENT, NG_HOST, rc_0),
-        "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}"
+        "x[_ngcontent-%COMP%]::content   y[_ngcontent-%COMP%] {}"
     );
 }
 
@@ -1583,10 +1583,160 @@ fn test_finalize_component_style_threads_angular_version() {
     let css = "x::content y {}";
     assert_eq!(
         finalize_component_style(css, true, NG_CONTENT, NG_HOST, false, None),
-        "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}"
+        "x[_ngcontent-%COMP%]::content   y[_ngcontent-%COMP%] {}"
     );
     assert_css_eq!(
         finalize_component_style(css, true, NG_CONTENT, NG_HOST, false, V21),
         "x[_ngcontent-%COMP%] y[_ngcontent-%COMP%] {}"
+    );
+}
+
+// ============================================================================
+// Selector whitespace, exactly as `@angular/compiler` 22.2.2 (and 22.1.8 where
+// the versions differ) emits it. `_applySelectorScope` writes each part as
+// `${scopedPart} ${separator} ` and `_scopeSelector` joins the parts around a
+// `::ng-deep` with a space, so runs of spaces are part of Angular's output.
+// ============================================================================
+
+/// The last release before `ShadowCss` gained its CSS nesting support.
+const V22_1: Option<AngularVersion> = Some(AngularVersion::new(22, 1, 8));
+
+fn ng_shim_for(css: &str, version: Option<AngularVersion>) -> String {
+    shim_css_text_for_version(css, NG_CONTENT, NG_HOST, version)
+}
+
+#[test]
+fn test_combinators_keep_angular_spacing() {
+    for version in [None, V22_1] {
+        assert_eq!(
+            ng_shim_for("one two {}", version),
+            "one[_ngcontent-%COMP%]   two[_ngcontent-%COMP%] {}"
+        );
+        assert_eq!(
+            ng_shim_for("one > two {}", version),
+            "one[_ngcontent-%COMP%]    > two[_ngcontent-%COMP%] {}"
+        );
+        assert_eq!(
+            ng_shim_for("one + two {} one ~ two {}", version),
+            "one[_ngcontent-%COMP%]    + two[_ngcontent-%COMP%] {} \
+             one[_ngcontent-%COMP%]    ~ two[_ngcontent-%COMP%] {}"
+        );
+        assert_eq!(
+            ng_shim_for("li:nth-child(2n + 1) a {}", version),
+            "li[_ngcontent-%COMP%]:nth-child(2n + 1)   a[_ngcontent-%COMP%] {}"
+        );
+        // A space ending a hex escape is not a combinator.
+        assert_eq!(ng_shim_for(".\\fc ber {}", version), ".\\fc ber[_ngcontent-%COMP%] {}");
+    }
+}
+
+#[test]
+fn test_deep_combinators_keep_angular_spacing() {
+    assert_eq!(
+        ng_shim("x >>> y {} x /deep/ y {} x ::ng-deep y {}"),
+        "x[_ngcontent-%COMP%]     y {} x[_ngcontent-%COMP%]     y {} x[_ngcontent-%COMP%]     y {}"
+    );
+    assert_eq!(ng_shim(":host ::ng-deep .x {}"), "[_nghost-%COMP%]     .x {}");
+}
+
+#[test]
+fn test_selector_list_keeps_whitespace_around_commas() {
+    // `_selectorSplitRe` only takes one space on each side of the comma.
+    assert_eq!(ng_shim(".foo,\n.bar {}"), ".foo[_ngcontent-%COMP%], \n.bar[_ngcontent-%COMP%] {}");
+    assert_eq!(
+        ng_shim(".a , .b,.c {}"),
+        ".a[_ngcontent-%COMP%], .b[_ngcontent-%COMP%], .c[_ngcontent-%COMP%] {}"
+    );
+    // A comma inside a string does not split the list.
+    assert_eq!(
+        ng_shim("a[title=\"a,b\"], c {}"),
+        "a[title=\"a,b\"][_ngcontent-%COMP%], c[_ngcontent-%COMP%] {}"
+    );
+}
+
+#[test]
+fn test_host_context_permutations_in_angular_order() {
+    assert_eq!(
+        ng_shim(":host-context(.X):host-context(.Y):host-context(.Z) {}"),
+        ".X.Y.Z[_nghost-%COMP%], .X.Y.Z   [_nghost-%COMP%], .X.Y   .Z[_nghost-%COMP%], \
+         .X.Y   .Z   [_nghost-%COMP%], .X.Z   .Y[_nghost-%COMP%], .X.Z   .Y   [_nghost-%COMP%], \
+         .X   .Y.Z[_nghost-%COMP%], .X   .Y.Z   [_nghost-%COMP%], .X   .Y   .Z[_nghost-%COMP%], \
+         .X   .Y   .Z   [_nghost-%COMP%], .X   .Z   .Y[_nghost-%COMP%], .X   .Z   .Y   [_nghost-%COMP%], \
+         .Y.Z   .X[_nghost-%COMP%], .Y.Z   .X   [_nghost-%COMP%], .Y   .Z   .X[_nghost-%COMP%], \
+         .Y   .Z   .X   [_nghost-%COMP%], .Z   .Y   .X[_nghost-%COMP%], .Z   .Y   .X   [_nghost-%COMP%] {}"
+    );
+    assert_eq!(
+        ng_shim(":host-context(.a) .b, .c {}"),
+        ".a[_nghost-%COMP%]   .b[_ngcontent-%COMP%], .a   [_nghost-%COMP%]   .b[_ngcontent-%COMP%], \
+         .c[_ngcontent-%COMP%] {}"
+    );
+    assert_eq!(
+        ng_shim(":where(:host-context(.a)) {}"),
+        ":where(.a[_nghost-%COMP%]), :where(.a   [_nghost-%COMP%]) {}"
+    );
+}
+
+#[test]
+fn test_host_matches_case_insensitively() {
+    assert_eq!(
+        ng_shim(":HOST(.a) :Host-Context(.b) {}"),
+        ".a[_nghost-%COMP%]   .b[_nghost-%COMP%], .b   [_nghost-%COMP%] {}"
+    );
+    // A selector list inside `:host()` is put back as a literal `:host(...)`.
+    assert_eq!(
+        ng_shim(":host(.a, .b) .c {}"),
+        "[_ngcontent-%COMP%]:host(.a, .b)   .c[_ngcontent-%COMP%] {}"
+    );
+}
+
+#[test]
+fn test_css_nesting_era_selectors() {
+    // v22.2 leaves `&` and rules without a block unscoped.
+    assert_eq!(
+        ng_shim("& .a {} .b & {}"),
+        "&   .a[_ngcontent-%COMP%] {} .b[_ngcontent-%COMP%]   & {}"
+    );
+    assert_eq!(
+        ng_shim_for("& .a {} .b & {}", V22_1),
+        "&[_ngcontent-%COMP%]   .a[_ngcontent-%COMP%] {} .b[_ngcontent-%COMP%]   &[_ngcontent-%COMP%] {}"
+    );
+    assert_eq!(ng_shim(".a; .b {}"), ".a; .b[_ngcontent-%COMP%] {}");
+    assert_eq!(ng_shim_for(".a; .b {}", V22_1), ".a[_ngcontent-%COMP%]; .b[_ngcontent-%COMP%] {}");
+}
+
+#[test]
+fn test_css_nesting_era_strips_rule_bodies() {
+    // v22.2 strips the host marker and deep combinators from a rule body.
+    let css = ".a { content: \":host.foo .bar\"; color: red; }";
+    assert_eq!(ng_shim(css), ".a[_ngcontent-%COMP%] { content: \"  .bar\"; color: red; }");
+    assert_eq!(
+        ng_shim_for(css, V22_1),
+        ".a[_ngcontent-%COMP%] { content: \"-shadowcsshost-no-combinator.foo .bar\"; color: red; }"
+    );
+    let css = ".a ::ng-deep .b { content: \">>> x\"; }";
+    assert_eq!(ng_shim(css), ".a[_ngcontent-%COMP%]     .b { content: \"  x\"; }");
+    assert_eq!(ng_shim_for(css, V22_1), ".a[_ngcontent-%COMP%]     .b { content: \">>> x\"; }");
+    // `22.2.0-next.1` predates the change, `next.2` has it.
+    let next_1 = AngularVersion::parse("22.2.0-next.1");
+    let next_2 = AngularVersion::parse("22.2.0-next.2");
+    assert_eq!(ng_shim_for(css, next_1), ng_shim_for(css, V22_1));
+    assert_eq!(ng_shim_for(css, next_2), ng_shim(css));
+    // `@font-face` bodies are stripped in every version.
+    for version in [None, V22_1] {
+        assert_eq!(
+            ng_shim_for("@font-face { :host ::ng-deep font-family {} }", version),
+            "@font-face {     font-family {} }"
+        );
+    }
+}
+
+#[test]
+fn test_newline_combinator_scopes_both_sides() {
+    // Oxc deviation: Angular only splits on a space and emits `.foo\n.bar[c]`
+    // and `[h]:hover\n.child`, leaving `.foo` and `.child` unscoped.
+    assert_eq!(ng_shim(".foo\n.bar {}"), ".foo[_ngcontent-%COMP%]   .bar[_ngcontent-%COMP%] {}");
+    assert_eq!(
+        ng_shim(":host:hover\n.child {}"),
+        "[_nghost-%COMP%]:hover   .child[_ngcontent-%COMP%] {}"
     );
 }
