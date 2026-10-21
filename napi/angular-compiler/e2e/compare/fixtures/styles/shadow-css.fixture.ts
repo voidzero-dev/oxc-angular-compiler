@@ -1699,4 +1699,114 @@ export class PolyfillRuleComponent {}
     `.trim(),
     expectedFeatures: ['styles:'],
   },
+
+  // ==========================================================================
+  // Alignment with Angular v22 shadow_css.ts
+  // ==========================================================================
+
+  {
+    name: 'shadow-css-trim-output',
+    category: 'styles',
+    description: 'Output is trimmed like ShadowCss._scopeCssText',
+    className: 'TrimOutputComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-trim-output',
+  standalone: true,
+  template: \`<div class="a">Content</div>\`,
+  styles: [\`\n\n  .a { color: red; }\n\n  \`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class TrimOutputComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-at-rule-closing-whitespace',
+    category: 'styles',
+    description: 'Whitespace before an at-rule closing brace is kept',
+    className: 'AtRuleClosingWhitespaceComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-at-rule-closing-whitespace',
+  standalone: true,
+  template: \`<div class="a">Content</div>\`,
+  styles: [\`@media screen { .a { color: red; } }  @supports (display: grid) {\n  .a { display: grid; }\n}\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class AtRuleClosingWhitespaceComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-text-before-closing-brace',
+    category: 'styles',
+    description: 'Text with no block before a closing brace stays in place unscoped',
+    className: 'TextBeforeClosingBraceComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-text-before-closing-brace',
+  standalone: true,
+  template: \`<div class="a">Content</div>\`,
+  styles: [\`@media screen { .a {} b } c {}\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class TextBeforeClosingBraceComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-escaped-quote-in-string',
+    category: 'styles',
+    description: 'An escaped quote does not end a string',
+    className: 'EscapedQuoteComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-escaped-quote-in-string',
+  standalone: true,
+  template: \`<div class="a b">Content</div>\`,
+  styles: [\`.a::before { content: "\\\\""; } .b { color: red; } .c[title="x\\\\"y"] { color: blue; }\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class EscapedQuoteComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
+
+  {
+    name: 'shadow-css-declaration-at-rules',
+    category: 'styles',
+    description:
+      'Bodies of at-rules other than the scoped ones are copied unchanged (@property is left out: ngtsc 22.2 namespaces its name to --%NS%x outside ShadowCss)',
+    className: 'DeclarationAtRulesComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-shadow-css-declaration-at-rules',
+  standalone: true,
+  template: \`<div class="a">Content</div>\`,
+  styles: [\`@counter-style thumbs { system: cyclic; symbols: "*"; suffix: " "; } @font-feature-values Font One { @styleset { nice-style: 12; } } .a { color: red; }\`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class DeclarationAtRulesComponent {}
+    `.trim(),
+    expectedFeatures: ['styles:'],
+  },
 ]

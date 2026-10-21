@@ -1329,8 +1329,8 @@ fn test_host_pseudo_with_newline_combinator() {
 }
 
 // ============================================================================
-// Version-dependent passes. Expected strings are the exact output of
-// `@angular/compiler`'s `encapsulateStyle` (22.2.2), not normalized.
+// Alignment with Angular v22 `shadow_css.ts`. Expected strings are the exact
+// output of `@angular/compiler`'s `encapsulateStyle` (22.2.2), not normalized.
 // ============================================================================
 
 const NG_CONTENT: &str = "_ngcontent-%COMP%";
@@ -1338,6 +1338,165 @@ const NG_HOST: &str = "_nghost-%COMP%";
 
 fn ng_shim(css: &str) -> String {
     shim_css_text(css, NG_CONTENT, NG_HOST)
+}
+
+#[test]
+fn test_output_is_trimmed() {
+    assert_eq!(ng_shim("  .a { color: red; }  \n\n"), ".a[_ngcontent-%COMP%] { color: red; }");
+    assert_eq!(ng_shim("\n\n.a {}\n"), ".a[_ngcontent-%COMP%] {}");
+    assert_eq!(ng_shim("   "), "");
+    // Angular trims before restoring comments, so newlines kept from a
+    // trailing comment survive the trim.
+    assert_eq!(ng_shim(".a { } \n/* trailing */\n"), ".a[_ngcontent-%COMP%] { } \n");
+    assert_eq!(ng_shim("\n\n/*# sourceMappingURL=x.map */"), "/*# sourceMappingURL=x.map */");
+}
+
+#[test]
+fn test_whitespace_before_closing_brace_is_kept() {
+    // The whitespace between a rule's `}` and its at-rule's `}` was dropped.
+    assert_eq!(
+        ng_shim("@media screen { .a { color: red; } }"),
+        "@media screen { .a[_ngcontent-%COMP%] { color: red; } }"
+    );
+    assert_eq!(
+        ng_shim("@keyframes foo { 0% { opacity: 0 } 100% { opacity: 1 } }"),
+        "@keyframes _ngcontent-%COMP%_foo { 0% { opacity: 0 } 100% { opacity: 1 } }"
+    );
+}
+
+#[test]
+fn test_text_before_closing_brace_stays_in_place() {
+    // Text with no `{` before a `}` is not a rule. It used to be carried into
+    // the next selector (`b c {}`); Angular leaves it unscoped where it was.
+    assert_eq!(
+        ng_shim("@media screen { .a {} b } c {}"),
+        "@media screen { .a[_ngcontent-%COMP%] {} b } c[_ngcontent-%COMP%] {}"
+    );
+    assert_eq!(ng_shim(".a {} b } c {}"), ".a[_ngcontent-%COMP%] {} b } c[_ngcontent-%COMP%] {}");
+    assert_eq!(
+        ng_shim("@media screen { .a { color: red; } .b }"),
+        "@media screen { .a[_ngcontent-%COMP%] { color: red; } .b }"
+    );
+}
+
+#[test]
+fn test_escaped_quote_does_not_end_string() {
+    // An escaped quote used to end the string early, so the rest of the
+    // stylesheet was read as one string and left unscoped.
+    assert_eq!(
+        ng_shim(".a { content: \"\\\"\"; } .b { color: red; }"),
+        ".a[_ngcontent-%COMP%] { content: \"\\\"\"; } .b[_ngcontent-%COMP%] { color: red; }"
+    );
+    assert_eq!(
+        ng_shim(".a { content: '\\''; } .b { color: red; }"),
+        ".a[_ngcontent-%COMP%] { content: '\\''; } .b[_ngcontent-%COMP%] { color: red; }"
+    );
+    assert_eq!(
+        ng_shim(".a { content: \"\\\\\"; } .b {}"),
+        ".a[_ngcontent-%COMP%] { content: \"\\\\\"; } .b[_ngcontent-%COMP%] {}"
+    );
+    assert_eq!(
+        ng_shim(".a[title=\"x\\\"y\"] { color: red; } .b {}"),
+        ".a[title=\"x\\\"y\"][_ngcontent-%COMP%] { color: red; } .b[_ngcontent-%COMP%] {}"
+    );
+    // The `:host-context()` pass has its own string scanner.
+    assert_eq!(
+        normalize_css(&ng_shim(":host-context(.a) { content: \"\\\"\"; } .b {}")),
+        normalize_css(
+            ".a[_nghost-%COMP%], .a [_nghost-%COMP%] { content: \"\\\"\"; } \
+             .b[_ngcontent-%COMP%] {}"
+        )
+    );
+}
+
+#[test]
+fn test_host_context_inside_conditional_at_rules() {
+    // `:host-context()` was only rewritten at the top level, leaving a
+    // literal `[_ngcontent-%COMP%]:host-context(.dark)` inside `@media`.
+    // (Angular keeps the three spaces around the descendant combinator; the
+    // shim collapses them, see `assert_css_eq!`.)
+    assert_css_eq!(
+        ng_shim("@media screen { :host-context(.dark) .a { color: red; } }"),
+        "@media screen { .dark[_nghost-%COMP%] .a[_ngcontent-%COMP%], \
+         .dark [_nghost-%COMP%] .a[_ngcontent-%COMP%] { color: red; } }"
+    );
+    assert_css_eq!(
+        ng_shim("@supports (display: grid) { :host-context(.dark) { color: red; } }"),
+        "@supports (display: grid) { .dark[_nghost-%COMP%], .dark [_nghost-%COMP%] { color: red; } }"
+    );
+    assert_css_eq!(
+        ng_shim("@media screen { @supports (x: y) { :host-context(.a, .b) p { color: red; } } }"),
+        "@media screen { @supports (x: y) { \
+         .a[_nghost-%COMP%] p[_ngcontent-%COMP%], .a [_nghost-%COMP%] p[_ngcontent-%COMP%], \
+         .b[_nghost-%COMP%] p[_ngcontent-%COMP%], .b [_nghost-%COMP%] p[_ngcontent-%COMP%] \
+         { color: red; } } }"
+    );
+    assert_css_eq!(
+        ng_shim("@media screen { :host-context(.a):host-context(.b) .c {} }"),
+        "@media screen { \
+         .a.b[_nghost-%COMP%] .c[_ngcontent-%COMP%], .a.b [_nghost-%COMP%] .c[_ngcontent-%COMP%], \
+         .a .b[_nghost-%COMP%] .c[_ngcontent-%COMP%], .a .b [_nghost-%COMP%] .c[_ngcontent-%COMP%], \
+         .b .a[_nghost-%COMP%] .c[_ngcontent-%COMP%], .b .a [_nghost-%COMP%] .c[_ngcontent-%COMP%] {} }"
+    );
+    assert_css_eq!(
+        ng_shim("@layer base { :host-context([dir=rtl]) .a { margin-left: 0; } }"),
+        "@layer base { [dir=rtl][_nghost-%COMP%] .a[_ngcontent-%COMP%], \
+         [dir=rtl] [_nghost-%COMP%] .a[_ngcontent-%COMP%] { margin-left: 0; } }"
+    );
+}
+
+#[test]
+fn test_unscoped_at_rule_bodies_are_copied_unchanged() {
+    // Only `@media`, `@supports`, `@document`, `@layer`, `@container`,
+    // `@scope` and `@starting-style` have their body scoped. A declaration
+    // body used to be read as a selector and split off the at-rule
+    // (`@property --x {} syntax: ...`).
+    for css in [
+        "@property --x { syntax: '<length>'; inherits: false; initial-value: 0px; }",
+        "@counter-style thumbs { system: cyclic; symbols: \"\u{1F44D}\"; suffix: \" \"; }",
+        "@font-feature-values Font One { @styleset { nice-style: 12; } }",
+        "@view-transition { navigation: auto; }",
+        "@position-try --custom { top: anchor(bottom); }",
+        "@font-face { font-family: X; src: url(x.woff); }",
+        "@unknown-rule foo { .a { color: red; } }",
+        // The header is matched case-sensitively, like Angular.
+        "@MEDIA screen { .a { color: red; } }",
+    ] {
+        assert_eq!(ng_shim(css), css);
+    }
+    assert_eq!(
+        ng_shim("@property --x { initial-value: \"}\"; } .a {}"),
+        "@property --x { initial-value: \"}\"; } .a[_ngcontent-%COMP%] {}"
+    );
+    assert_eq!(
+        ng_shim("@font-feature-values Font One { @styleset { nice-style: 12; } } .a {}"),
+        "@font-feature-values Font One { @styleset { nice-style: 12; } } .a[_ngcontent-%COMP%] {}"
+    );
+    // Scoped at-rules still are.
+    for (css, expected) in [
+        (
+            "@container (min-width: 1px) { .a { color: red; } }",
+            "@container (min-width: 1px) { .a[_ngcontent-%COMP%] { color: red; } }",
+        ),
+        (
+            "@scope (.card) { img { border: 1px; } }",
+            "@scope (.card) { img[_ngcontent-%COMP%] { border: 1px; } }",
+        ),
+        (
+            "@starting-style { .a { opacity: 0; } }",
+            "@starting-style { .a[_ngcontent-%COMP%] { opacity: 0; } }",
+        ),
+        (
+            "@document url(http://x) { .a { color: red; } }",
+            "@document url(http://x) { .a[_ngcontent-%COMP%] { color: red; } }",
+        ),
+        (
+            "@media screen { @font-face { font-family: X; } .a {} }",
+            "@media screen { @font-face { font-family: X; } .a[_ngcontent-%COMP%] {} }",
+        ),
+    ] {
+        assert_eq!(ng_shim(css), expected);
+    }
 }
 
 #[test]

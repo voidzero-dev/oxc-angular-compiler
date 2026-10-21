@@ -108,10 +108,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     metadataDiffs: ['MyComponent.setClassMetadata'],
     reasons: [CUSTOM_DECORATOR],
   },
-  'full-file/component-with-pipes': {
-    fields: ['ComponentWithPipes.ɵcmp'],
-    reasons: ['component styles keep a leading newline'],
-  },
   'full-transform/full-transform-complex': {
     fields: ['ComplexComponent.ɵcmp'],
     reasons: [CHANGE_DETECTION_V22],
@@ -277,10 +273,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'styles/shadow-css-multiline-selector': {
     fields: ['MultilineSelectorComponent.ɵcmp'],
     reasons: ['the newline between selectors in a list is dropped'],
-  },
-  'styles/shadow-css-ng-deep-basic': {
-    fields: ['NgDeepBasicComponent.ɵcmp'],
-    reasons: ['a leading space is kept before a ::ng-deep selector'],
   },
   'styles/shadow-css-polyfill-rule': {
     fields: ['PolyfillRuleComponent.ɵcmp'],
