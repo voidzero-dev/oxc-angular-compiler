@@ -1,0 +1,65 @@
+crates/oxc_angular_compiler/src/class_debug_info/metadata.rs
+  s_511f48475a7f5f::t_4e6324699d1b90 65-117
+crates/oxc_angular_compiler/src/class_debug_info/mod.rs
+  s_511f48475a7f5f::t_ba1888c8d617db 21
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_511f48475a7f5f::t_27a53e7d3c5afe 3705-3709,3713,3856-3864,4313-4316,4329,4331,5392,5401-5403
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_511f48475a7f5f::t_352ac298962e03 16261-16296
+crates/oxc_angular_compiler/tests/snapshots/integration_test__class_metadata_angular_core_decorators.snap
+  s_2e795a639ec060::t_eb4e7a7a9e953f 5,43-46
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_with_inline_styles.snap
+  s_2e795a639ec060::t_cd9ec929eff8c5 28-31
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_with_multiple_styles.snap
+  s_2e795a639ec060::t_578f3b4b8f57ec 28-31
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_without_styles.snap
+  s_2e795a639ec060::t_c5184adbabaa2c 27-30
+crates/oxc_angular_compiler/tests/snapshots/integration_test__event_before_property_in_bindings.snap
+  s_2e795a639ec060::t_c102b77cb1fbe6 35-38
+crates/oxc_angular_compiler/tests/snapshots/integration_test__host_directives_with_host_aliases.snap
+  s_2e795a639ec060::t_d44e0f03f64f8d 46-49
+crates/oxc_angular_compiler/tests/snapshots/integration_test__host_directives_with_inputs_outputs.snap
+  s_2e795a639ec060::t_1d5186eaa75b0a 44-47
+crates/oxc_angular_compiler/tests/snapshots/integration_test__ngfor_attribute_ordering.snap
+  s_2e795a639ec060::t_9c5ce6d0b31c24 40-43
+crates/oxc_angular_compiler/tests/snapshots/integration_test__output_from_observable_mixed_with_output.snap
+  s_2e795a639ec060::t_7fd9b30cd61cf0 28-31
+crates/oxc_angular_compiler/tests/snapshots/integration_test__output_from_observable_piped.snap
+  s_2e795a639ec060::t_95bce6b0f9069e 30-33
+crates/oxc_angular_compiler/tests/snapshots/integration_test__output_from_observable_property_reference.snap
+  s_2e795a639ec060::t_ca89cd42cb9b15 25-28
+crates/oxc_angular_compiler/tests/snapshots/integration_test__output_from_observable_simple.snap
+  s_2e795a639ec060::t_e4b09159d228c0 25-28
+crates/oxc_angular_compiler/tests/snapshots/integration_test__output_from_observable_with_alias.snap
+  s_2e795a639ec060::t_1042bf71cae891 25-28
+crates/oxc_angular_compiler/tests/snapshots/integration_test__selector_attrs_const_emission.snap
+  s_2e795a639ec060::t_0a29e94f40c4fe 30-33
+crates/oxc_angular_compiler/tests/snapshots/integration_test__standalone_component_uses_full_mode.snap
+  s_2e795a639ec060::t_73e9e313a4bf4f 53-56
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_511f48475a7f5f::t_952b63ebf45738 65-66,70-71,75-76,80-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c84b68ee94c52c15f909ba1841662a156d869215",
+  "prompts": {},
+  "sessions": {
+    "s_2e795a639ec060": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a9732ebf5b7e4b4dd",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_511f48475a7f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aea991d22bf108d27",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
