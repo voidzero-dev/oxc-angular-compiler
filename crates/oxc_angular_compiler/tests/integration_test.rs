@@ -5650,6 +5650,24 @@ fn assert_contains(haystack: &str, needle: &str) {
     assert!(haystack.contains(needle), "Expected to find:\n{needle}\nin:\n{haystack}");
 }
 
+/// `i18n` metadata is trimmed once, as in Angular's `parseI18nMeta`, so the meaning and
+/// description keep their inner spaces. Angular 22.2.2 gives `<p i18n="  m | d  ">` meaning
+/// `"m "` and description `" d"`, and with a custom id `" m | d @@ custom "` keeps the space
+/// before the id:
+///   /** @desc  d @meaning m  */ ... $localize `:m | d:Hello`
+///   MSG_EXTERNAL__custom$$ ... $localize `:m | d @@ custom:Custom`
+#[test]
+fn test_i18n_meta_is_trimmed_once() {
+    let js = compile_i18n_component(
+        r#"<p i18n="  m | d  ">Hello</p><img i18n-alt="  m | d  " alt="Logo" /><p i18n=" m | d @@ custom ">Custom</p>"#,
+    );
+    assert_contains(&js, "/** @desc  d @meaning m  */");
+    assert_contains(&js, r#"__tpl([":m | d:Hello"], [":m | d:Hello"])"#);
+    assert_contains(&js, r#"__tpl([":m | d:Logo"], [":m | d:Logo"])"#);
+    assert_contains(&js, "/** @desc  d  @meaning m  */const MSG_EXTERNAL__custom$$");
+    assert_contains(&js, r#"__tpl([":m | d @@ custom:Custom"], [":m | d @@ custom:Custom"])"#);
+}
+
 /// An `i18n-<attr>` message takes the attribute's own value as its text.
 /// Expected output taken from Angular 22.1.5 `ngc`:
 ///   goog.getMsg("Close") / $localize `:@@close:Close`
