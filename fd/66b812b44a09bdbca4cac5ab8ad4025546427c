@@ -1,0 +1,55 @@
+crates/oxc_angular_compiler/src/component/hmr_fingerprint.rs
+  s_6758e5705fad20::t_0120bf2d95b339 1-190
+crates/oxc_angular_compiler/src/component/mod.rs
+  s_fa02458757e379::t_d128d5b078025b 15,33
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_fa02458757e379::t_f5c7e799787c64 333-339,3051-3052,3155-3158,3644,4728-4744
+crates/oxc_angular_compiler/src/lib.rs
+  s_fa02458757e379::t_bff024bd6b62ec 66-69,71
+crates/oxc_angular_compiler/tests/class_decorator_identity_test.rs
+  s_d5672b490d68c4::t_6a6c07cb398ce4 276-279,281-288
+crates/oxc_angular_compiler/tests/hmr_fingerprint_test.rs
+  s_6758e5705fad20::t_86f66f720238e8 1-54,57,60-78,80,82-95,97,99-109,111-133,135-222,224,226-237,239-257,259-310,312-379,381,383-414,416-420,422-432,434-455,457-470,472-485,487-565
+napi/angular-compiler/index.d.ts
+  s_6758e5705fad20::t_c0b363aab1806c 138-167,1068-1072,1074
+napi/angular-compiler/index.js
+  s_6758e5705fad20::t_29fda9ad5dd3e9 914,937
+napi/angular-compiler/src/lib.rs
+  s_fa02458757e379::t_eef72e6c725e83 390-395,989-1026,1289
+napi/angular-compiler/test/hmr-fingerprint.test.ts
+  s_fa02458757e379::t_47ef0388925d27 1-83
+napi/angular-compiler/vite-plugin/index.ts
+  s_fa02458757e379::t_bf801a51994930 29,477-482,915-923,929-932,934-935,1298,1320-1327,1561-1570,1577-1578,1580,1722-1725,1728-1731,1733,1735-1736,1738
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fd66b812b44a09bdbca4cac5ab8ad4025546427c",
+  "prompts": {},
+  "sessions": {
+    "s_6758e5705fad20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6bd5797772edefe6",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_d5672b490d68c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ae5598bec0e51c9a3",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_fa02458757e379": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a1d751ee257ea1b85",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
