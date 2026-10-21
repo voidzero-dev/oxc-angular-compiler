@@ -1,0 +1,19 @@
+napi/angular-compiler/test/plugin-fast-paths.test.ts
+  s_bb242e0963a7b4::t_0daa9b52b2a32c 137-138,157-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2cc17951bbebf3849f43d0d7aaa8d6fad67b8a85",
+  "prompts": {},
+  "sessions": {
+    "s_bb242e0963a7b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5df09e8e-2740-4fa5-9eca-9aeab7c6ddbb",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
