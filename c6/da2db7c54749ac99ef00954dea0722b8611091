@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/directive/evaluator.rs
+  s_f0a3b7ba04f61b::t_61abe2dcc4a4ab 40,3529,3540-3541
+crates/oxc_angular_compiler/src/util/lone_surrogate.rs
+  s_f0a3b7ba04f61b::t_92e7eb65252334 10-13
+crates/oxc_angular_compiler/tests/lone_surrogate_names_test.rs
+  s_f0a3b7ba04f61b::t_4e90f54c7e014d 290-305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c6da2db7c54749ac99ef00954dea0722b8611091",
+  "prompts": {},
+  "sessions": {
+    "s_f0a3b7ba04f61b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4059902c-843c-4b9a-8a80-fcbd6b0ac040",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
