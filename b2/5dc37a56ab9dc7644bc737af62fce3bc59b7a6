@@ -1,0 +1,31 @@
+crates/oxc_angular_compiler/src/ir/ops.rs
+  s_511f48475a7f5f::t_0737ecad64b75c 1088
+crates/oxc_angular_compiler/src/pipeline/ingest.rs
+  s_511f48475a7f5f::t_14ecad53c6706f 3487-3488
+crates/oxc_angular_compiler/src/pipeline/phases/reify/statements/defer.rs
+  s_511f48475a7f5f::t_9fe5f02db05a2d 212,215-217
+crates/oxc_angular_compiler/src/transform/control_flow.rs
+  s_511f48475a7f5f::t_e3a298b5d6cd41 866-868,874,880-884,898,902,906,1059,1089,1126-1127,1223,1529-1539
+crates/oxc_angular_compiler/src/transform/html_to_r3.rs
+  s_511f48475a7f5f::t_88b15211f9cc0c 2868-2869,2875
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_511f48475a7f5f::t_06ea844abc59e8 598-634
+napi/angular-compiler/e2e/compare/fixtures/defer/defer-with-triggers.fixture.ts
+  s_511f48475a7f5f::t_21f7c11f9b6546 121-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b25dc37a56ab9dc7644bc737af62fce3bc59b7a6",
+  "prompts": {},
+  "sessions": {
+    "s_511f48475a7f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aea991d22bf108d27",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
