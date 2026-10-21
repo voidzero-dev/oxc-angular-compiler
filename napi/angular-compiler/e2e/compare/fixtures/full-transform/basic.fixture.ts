@@ -174,6 +174,7 @@ export class ShadowDomComponent {}
   {
     type: 'component',
     name: 'full-transform-onpush',
+    ngtscMode: 'full',
     category: 'full-transform',
     description: 'Component with OnPush change detection',
     className: 'OnPushComponent',
@@ -724,6 +725,7 @@ export class PreserveWhitespaceComponent {}
   {
     type: 'component',
     name: 'full-transform-complex',
+    ngtscMode: 'full',
     category: 'full-transform',
     description: 'Complex component with multiple features',
     className: 'ComplexComponent',

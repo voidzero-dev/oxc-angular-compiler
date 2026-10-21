@@ -10,6 +10,7 @@ import type { Fixture } from '../types.js'
 export const fixtures: Fixture[] = [
   {
     name: 'change-detection-default',
+    ngtscMode: 'full',
     category: 'component-meta',
     description: 'ChangeDetectionStrategy.Default - check on every cycle',
     className: 'ChangeDetectionDefaultComponent',
@@ -29,6 +30,7 @@ export class ChangeDetectionDefaultComponent {}
   },
   {
     name: 'change-detection-onpush',
+    ngtscMode: 'full',
     category: 'component-meta',
     description: 'ChangeDetectionStrategy.OnPush - check only on input changes',
     className: 'ChangeDetectionOnPushComponent',

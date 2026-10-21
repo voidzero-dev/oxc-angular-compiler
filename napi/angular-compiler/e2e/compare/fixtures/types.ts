@@ -8,6 +8,7 @@
 import type { TransformOptions } from '@oxc-angular/vite/api'
 
 import type { ImportDiff, ExportDiff, ClassDiff, StaticFieldDiff } from '../src/compare.js'
+import type { NgtscMode } from '../src/compilers/angular-ngtsc.js'
 import type { FunctionLevelComparison, AstDiff, ClassMetadataDiff } from '../src/types.js'
 
 /**
@@ -194,6 +195,14 @@ export interface Fixture {
   /** Optional file path override (generated from category/name if not provided) */
   filePath?: string
 
+  /**
+   * ngtsc compilation mode for the reference output (default: 'local').
+   *
+   * 'local' (`experimental-local`) is fast, but it differs from a real build wherever ngtsc
+   * needs more than the file itself; use 'full' for fixtures that depend on that.
+   */
+  ngtscMode?: NgtscMode
+
   // Component metadata for full compilation testing
 
   /** The CSS selector that identifies this component in a template */
@@ -288,8 +297,8 @@ export interface FixtureResult {
   /** Fields that differ in a fixture listed in known-differences.ts but are not documented there */
   undocumentedFields?: string[]
 
-  /** `metadataDiffs` entries declared in known-differences.ts that no longer occur */
-  staleMetadataFields?: string[]
+  /** Entries declared in known-differences.ts whose difference no longer occurs */
+  staleEntries?: string[]
 
   /** Oxc compiler output */
   oxcOutput?: FixtureCompilerOutput

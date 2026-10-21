@@ -11,6 +11,7 @@ import type { Fixture } from '../types.js'
 export const fixtures: Fixture[] = [
   {
     name: 'single-custom-decorator',
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'Component with a single custom class decorator',
     className: 'MyComponent',
@@ -36,6 +37,7 @@ export class MyComponent {}
   },
   {
     name: 'multiple-custom-decorators',
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'Component with multiple custom class decorators',
     className: 'MultiDecoratorComponent',

@@ -61,11 +61,11 @@ const programConfigCache = new Map<string, CachedProgramEntry>()
 const VIRTUAL_MODE_CACHE_KEY = '__virtual_mode__'
 
 /**
- * Cached virtual mode configuration.
+ * Cached virtual mode configurations, one per ngtsc compilation mode.
  * Reused across all virtual mode compilations to avoid re-creating
  * the host and compiler options for each file.
  */
-let virtualModeConfig: CachedProgramEntry | null = null
+const virtualModeConfigs = new Map<NgtscMode, CachedProgramEntry>()
 
 /** Maximum age for cache entries (5 minutes) */
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
@@ -416,12 +416,15 @@ function createHybridResolveHost(
  * @param tsconfigPath - Path to the tsconfig.json file
  * @returns Cached or newly created program configuration
  */
-function getOrCreateCachedConfig(tsconfigPath: string): CachedProgramEntry {
+function getOrCreateCachedConfig(tsconfigPath: string, mode: NgtscMode): CachedProgramEntry {
   // Run cleanup periodically
   cleanupCache()
 
+  // Full and local compilations need separate options, hosts and old programs.
+  const cacheKey = `${tsconfigPath}#${mode}`
+
   // Check if we have a valid cached entry
-  const cached = programConfigCache.get(tsconfigPath)
+  const cached = programConfigCache.get(cacheKey)
   if (cached) {
     // Verify the tsconfig hasn't changed by checking the hash
     const currentRawConfig = ts.sys.readFile(tsconfigPath) ?? ''
@@ -434,7 +437,7 @@ function getOrCreateCachedConfig(tsconfigPath: string): CachedProgramEntry {
     }
 
     // Tsconfig changed - invalidate this entry
-    programConfigCache.delete(tsconfigPath)
+    programConfigCache.delete(cacheKey)
   }
 
   // Evict if needed before adding new entry
@@ -445,9 +448,7 @@ function getOrCreateCachedConfig(tsconfigPath: string): CachedProgramEntry {
   const tsconfigHash = hashString(rawConfig)
 
   // Merge with Angular options first (needed for host creation)
-  // Use skipTypeChecking=true to get experimental-local compilation mode,
-  // which matches OXC's single-file compilation behavior (always Full template mode).
-  const angularOptions = createAngularOptions(true)
+  const angularOptions = createAngularOptions(true, mode)
   const mergedOptions = {
     ...compilerOptions,
     ...angularOptions,
@@ -479,7 +480,7 @@ function getOrCreateCachedConfig(tsconfigPath: string): CachedProgramEntry {
     lastAccessedAt: Date.now(),
   }
 
-  programConfigCache.set(tsconfigPath, entry)
+  programConfigCache.set(cacheKey, entry)
   return entry
 }
 
@@ -532,7 +533,19 @@ function createFileOverrideHost(
 export interface NgtscOptions {
   /** Path to tsconfig.json for real project context */
   tsconfigPath?: string
+  /** ngtsc compilation mode (default: 'local') */
+  mode?: NgtscMode
 }
+
+/**
+ * ngtsc compilation mode.
+ *
+ * - `local`: `experimental-local`, which compiles each file on its own like Oxc does. It is
+ *   fast, but where ngtsc needs information it cannot get from the file alone, its output
+ *   differs from a real build.
+ * - `full`: the `full` compilation mode of a real application build.
+ */
+export type NgtscMode = 'full' | 'local'
 
 /**
  * Create minimal tsconfig options for Angular compilation.
@@ -571,18 +584,22 @@ function createCompilerOptions(rootDir: string): ts.CompilerOptions {
 /**
  * Create Angular compiler options.
  * @param skipTypeChecking - If true, disable expensive type checking (for batch/comparison mode)
+ * @param mode - Compilation mode used when type checking is skipped
  */
-function createAngularOptions(skipTypeChecking = false): Record<string, unknown> {
+function createAngularOptions(
+  skipTypeChecking = false,
+  mode: NgtscMode = 'local',
+): Record<string, unknown> {
   if (skipTypeChecking) {
     // Skip all expensive type checking - we only need the emitted template code
-    // Use 'experimental-local' mode for fast compilation (1.6s vs 23+ min for full mode)
+    // Default to 'experimental-local' mode for fast compilation (1.6s vs 23+ min for full mode)
     // Note: experimental-local produces slightly different output than full mode
     return {
       strictTemplates: false, // Skip template type checking
       strictInjectionParameters: false,
       strictInputAccessModifiers: false,
       enableI18nLegacyMessageIdFormat: false,
-      compilationMode: 'experimental-local', // Fast mode for comparison
+      compilationMode: mode === 'full' ? 'full' : 'experimental-local',
       // Additional options to skip expensive checks
       extendedDiagnostics: undefined, // Skip extended diagnostics
     }
@@ -667,10 +684,11 @@ export async function compileWithNgtsc(
   let host: ts.CompilerHost
   let mergedOptions: CompilerOptions
   let cachedConfig: CachedProgramEntry | undefined
+  const mode = options?.mode ?? 'local'
 
   if (options?.tsconfigPath) {
     // Real project mode: use cached tsconfig and host
-    cachedConfig = getOrCreateCachedConfig(options.tsconfigPath)
+    cachedConfig = getOrCreateCachedConfig(options.tsconfigPath, mode)
 
     // Use the actual file path directly (it should already be absolute)
     absolutePath = path.isAbsolute(filePath)
@@ -692,12 +710,11 @@ export async function compileWithNgtsc(
     const rootDir = compareToolDir
 
     // Get or create the shared virtual mode config
+    let virtualModeConfig = virtualModeConfigs.get(mode)
     if (!virtualModeConfig) {
-      // Create compiler options (only once)
+      // Create compiler options (only once per mode)
       const compilerOptions = createCompilerOptions(rootDir)
-      // Use skipTypeChecking=true to get experimental-local compilation mode,
-      // which matches OXC's single-file compilation behavior (always Full template mode).
-      const angularOptions = createAngularOptions(true)
+      const angularOptions = createAngularOptions(true, mode)
       const mergedCompilerOptions = {
         ...compilerOptions,
         ...angularOptions,
@@ -720,7 +737,8 @@ export async function compileWithNgtsc(
       }
 
       // Also add to program cache for visibility in stats
-      programConfigCache.set(VIRTUAL_MODE_CACHE_KEY, virtualModeConfig)
+      programConfigCache.set(`${VIRTUAL_MODE_CACHE_KEY}#${mode}`, virtualModeConfig)
+      virtualModeConfigs.set(mode, virtualModeConfig)
     }
 
     // Update access time

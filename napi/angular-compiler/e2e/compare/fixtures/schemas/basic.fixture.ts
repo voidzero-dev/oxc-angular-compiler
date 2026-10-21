@@ -400,6 +400,7 @@ export class SchemasWithShadowDomComponent {}
 
   {
     name: 'schemas-with-change-detection',
+    ngtscMode: 'full',
     category: 'schemas',
     description: 'Schemas with OnPush change detection',
     className: 'SchemasWithOnPushComponent',

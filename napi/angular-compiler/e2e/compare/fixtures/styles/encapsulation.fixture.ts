@@ -465,6 +465,7 @@ export class AttributeSelectorComponent {}
 
   {
     name: 'style-onpush-encapsulation',
+    ngtscMode: 'full',
     category: 'styles',
     description: 'OnPush change detection with Emulated encapsulation',
     className: 'OnPushStyleComponent',
@@ -486,6 +487,7 @@ export class OnPushStyleComponent {}
 
   {
     name: 'style-onpush-none',
+    ngtscMode: 'full',
     category: 'styles',
     description: 'OnPush change detection with None encapsulation',
     className: 'OnPushNoneStyleComponent',

@@ -533,6 +533,7 @@ export class AnimationsWithEncapsulationComponent {
 
   {
     name: 'animation-metadata-with-change-detection',
+    ngtscMode: 'full',
     category: 'animations',
     description: 'Animations with OnPush change detection',
     className: 'AnimationsWithOnPushComponent',

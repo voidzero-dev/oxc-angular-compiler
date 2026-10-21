@@ -114,31 +114,32 @@ e2e/compare/
 1. Discover components (glob patterns, metadata extraction)
 2. Compile with OXC (NAPI bindings)
 3. Compile with Angular (NgtscProgram or template compiler)
-4. Normalize both outputs:
-   ├── Format with oxfmt
-   ├── Normalize PURE comments
-   ├── Normalize template literals
-   ├── Normalize nullish coalescing
-   ├── Remap const references (_c0, _c1, etc.)
-   └── Normalize @Inject parameter types
-5. Compare normalized outputs
+4. Parse both outputs and rename Oxc's const pool (_c0, _c1, etc.) to Angular's names by value
+5. Compare the ASTs: imports, exports, classes, static fields, setClassMetadata calls,
+   top-level functions and constants
 6. For mismatches: Extract function-level diffs
 ```
 
 ## Semantic Comparison
 
-The framework handles known differences between compilers:
+Outputs are compared on their ASTs; the source text is never rewritten to make them line up,
+so any change inside a string literal (CSS, template text, i18n messages) is a difference.
 
 ### Handled Automatically
 
-| Difference             | Description                                    |
-| ---------------------- | ---------------------------------------------- |
-| **Formatting**         | Whitespace, indentation normalized via `oxfmt` |
-| **Const ordering**     | Const pool indices remapped by value           |
-| **Variable naming**    | `_r45` vs `_r46` counters (scoped, equivalent) |
-| **PURE comments**      | `/* @__PURE__ */` spacing normalized           |
-| **Nullish coalescing** | `a ?? b` transpilation normalized              |
-| **Parentheses**        | Extra parens removed where equivalent          |
+| Difference            | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| **Formatting**        | Whitespace, indentation, quotes, trailing commas (not in the AST)  |
+| **Const ordering**    | Const pool indices remapped by value                               |
+| **Parentheses**       | `(expr)` compared as `expr`                                        |
+| **Template literals** | An untagged template literal without substitutions equals a string |
+| **Static fields**     | The documented equivalences in `staticFieldValuesEquivalent`       |
+
+### ngtsc Compilation Mode
+
+The reference is compiled in `experimental-local` mode by default, which compiles each file on
+its own like Oxc does. Where that differs from a real build (for example `changeDetection`, or a
+class that also has a non-Angular decorator), a fixture sets `ngtscMode: 'full'`.
 
 ### Known Differences (Not Bugs)
 
@@ -181,10 +182,14 @@ pnpm compare --fixtures --category control-flow --category animations
 ### Known Differences
 
 `fixtures/known-differences.ts` lists fixtures whose output differs from Angular's in
-documented ways, with the static fields that differ and the reasons. They are reported as known
-differences instead of failures, but only while the differences stay inside the listed fields:
-a difference in any other field of the same fixture is still a failure. A listed fixture that
-matches Angular fails too, so remove its entry once the difference is fixed.
+documented ways, with every difference (static fields, classes, top-level functions and
+constants, exports, imports, setClassMetadata calls) and the reasons. They are reported as known
+differences instead of failures, but only while the fixture differs in exactly what is listed:
+a difference anywhere else in the same fixture is still a failure, and so is a listed difference
+that no longer occurs, so remove an entry once the difference is fixed.
+
+Factory fixtures have no ngtsc baseline; they only check that Oxc compiles them and are
+reported as skipped.
 
 ### Generated i18n Fixtures
 

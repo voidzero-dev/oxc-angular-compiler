@@ -3,6 +3,7 @@ import type { Fixture } from '../types.js'
 export const fixtures: Fixture[] = [
   {
     name: 'formfield-alias-repro',
+    ngtscMode: 'full',
     category: 'regressions',
     description: 'Issue #229 repro: [formField] binding with aliased field input',
     className: 'AppComponent',
