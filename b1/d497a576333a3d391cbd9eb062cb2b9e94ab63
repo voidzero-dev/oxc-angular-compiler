@@ -1,0 +1,19 @@
+crates/oxc_angular_compiler/tests/hmr_template_updates_test.rs
+  s_798ff80b12fbda::t_e3d9f857f2f273 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b1d497a576333a3d391cbd9eb062cb2b9e94ab63",
+  "prompts": {},
+  "sessions": {
+    "s_798ff80b12fbda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac5aaa680b1dec307",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
