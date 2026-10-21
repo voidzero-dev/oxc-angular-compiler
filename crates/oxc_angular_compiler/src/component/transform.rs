@@ -4828,6 +4828,9 @@ pub struct ComponentResourceUrls {
     pub template_urls: Vec<String>,
     /// Each component's `styleUrl` / `styleUrls` entries, as written.
     pub style_urls: Vec<String>,
+    /// The files read to resolve an imported URL binding (only with
+    /// `resolve_imported_values`), like [`TransformResult::dependencies`].
+    pub value_dependencies: Vec<String>,
 }
 
 /// The `templateUrl` and `styleUrl(s)` of every `@Component` class in a file:
@@ -4835,10 +4838,14 @@ pub struct ComponentResourceUrls {
 /// [`ResolvedResources`], keyed by these same strings.
 ///
 /// The URLs are read exactly as the transform reads them — the same
-/// [`extract_component_metadata`] over the same consts, with the cross-file
-/// resolver attached under the same `options` (`resolve_imported_values`,
-/// `base_dir`, `tsconfig_path`) — so a URL the transform will look up is never
-/// one this skipped (an imported `const TEMPLATE_URL`, say). Stylesheet
+/// evaluation as [`extract_component_metadata`] over the same consts, with the
+/// cross-file resolver attached under the same `options`
+/// (`resolve_imported_values`, `base_dir`, `tsconfig_path`) — so a URL the
+/// transform will look up is never one this skipped (an imported
+/// `const TEMPLATE_URL`, say). Only the URL properties are evaluated, and the
+/// resolver reads a file only when one of them names an imported binding, so
+/// literal URLs cost no cross-file read even when `host` or `styles` are
+/// imported. Stylesheet
 /// `<link>`s inside a template are only known once the template is parsed;
 /// the transform reports the ones it was not given in
 /// [`TransformResult::missing_link_urls`].
@@ -4855,7 +4862,6 @@ pub fn extract_component_resource_urls(
     let parser_ret = Parser::new(allocator, source, source_type).parse();
     let program = &parser_ret.program;
 
-    let import_map = build_import_map(allocator, &program.body, options.resolved_imports.as_ref());
     #[cfg(feature = "cross_file_elision")]
     let analyzer =
         if options.resolve_imported_values { new_cross_file_analyzer(path, options) } else { None };
@@ -4877,21 +4883,20 @@ pub fn extract_component_resource_urls(
             },
             _ => continue,
         };
-        // `standalone` does not change which URLs a component names.
-        let Some(metadata) = extract_component_metadata(
-            allocator,
-            class,
-            options.implicit_standalone(),
-            &import_map,
-            Some(source),
-            &string_consts,
-        ) else {
+        let Some((template_url, style_urls)) =
+            super::decorator::extract_component_resource_urls_of(allocator, class, &string_consts)
+        else {
             continue;
         };
-        if let Some(template_url) = &metadata.template_url {
+        if let Some(template_url) = template_url {
             urls.template_urls.push(template_url.to_string());
         }
-        urls.style_urls.extend(metadata.style_urls.iter().map(ToString::to_string));
+        urls.style_urls.extend(style_urls.iter().map(ToString::to_string));
+    }
+    #[cfg(feature = "cross_file_elision")]
+    if let Some(analyzer) = &analyzer {
+        urls.value_dependencies.extend(analyzer.take_value_dependencies());
+        urls.value_dependencies.sort_unstable();
     }
     urls
 }

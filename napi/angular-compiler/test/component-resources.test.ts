@@ -286,4 +286,44 @@ describe('template stylesheet links', () => {
     expect(body).toContain('color: green')
     expect(body).not.toContain('color: red')
   })
+
+  it('hot-updates the component when a link added by a template edit later changes', async () => {
+    const templatePath = join(appDir, 'hmr-new-link.component.html')
+    const stylePath = join(appDir, 'hmr-new-link.css')
+    const componentPath = join(appDir, 'hmr-new-link.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-hmr-new-link', templateUrl: './hmr-new-link.component.html' })
+      export class HmrNewLinkComponent {}
+    `
+    writeFileSync(templatePath, '<h1>Hello</h1>')
+    writeFileSync(stylePath, 'h1 { color: red; }')
+    writeFileSync(componentPath, source)
+    const componentId = `${componentPath}@HmrNewLinkComponent`
+    const componentUpdates = (server: any) =>
+      server.ws.send.mock.calls.filter(
+        ([message]: any[]) => message?.event === 'angular:component-update',
+      ).length
+
+    const plugin = getAngularPlugin()
+    const server = await setupPlugin(plugin, 'serve')
+    const { errors } = await transform(plugin, source, componentPath)
+    expect(errors).toEqual([])
+    expect(server.watcher.add).not.toHaveBeenCalledWith(stylePath)
+
+    // The template edit adds the link; only the update module is compiled.
+    writeFileSync(templatePath, '<link rel="stylesheet" href="./hmr-new-link.css"><h1>Hello</h1>')
+    await hotUpdate(plugin, templatePath, server)
+    expect(await requestUpdateModule(server, componentId)).toContain('color: red')
+    expect(server.watcher.add).toHaveBeenCalledWith(stylePath)
+
+    // A later edit to the new stylesheet hot-updates the component.
+    const updatesBefore = componentUpdates(server)
+    writeFileSync(stylePath, 'h1 { color: green; }')
+    await hotUpdate(plugin, stylePath, server)
+    expect(componentUpdates(server)).toBe(updatesBefore + 1)
+    const body = await requestUpdateModule(server, componentId)
+    expect(body).toContain('color: green')
+    expect(body).not.toContain('color: red')
+  })
 })

@@ -270,6 +270,65 @@ export class A {}
         assert!(result.code.contains("IMPORTED_STYLE"), "{}", result.code);
     }
 
+    /// Only the URL properties are evaluated: literal URLs read no other file
+    /// even when `host`, `styles`, inputs or deps are imported, and an
+    /// imported URL reads just the file that declares it.
+    #[test]
+    fn only_url_properties_read_imported_files() {
+        let dir = TempDir::new().unwrap();
+        write(
+            dir.path(),
+            "app/meta.ts",
+            "export const HOST = { class: 'meta' };
+             export const STYLES = ['.meta {}'];
+             export const INPUTS = ['value'];
+",
+        );
+        let urls_file =
+            write(dir.path(), "app/urls.ts", "export const TEMPLATE_URL = './b.component.html';\n");
+        let options = TransformOptions { resolve_imported_values: true, ..Default::default() };
+
+        let literal = r"
+import { Component, Inject } from '@angular/core';
+import { HOST, STYLES, INPUTS } from './meta';
+@Component({
+  selector: 'a-cmp',
+  templateUrl: './a.component.html',
+  styleUrl: './a.component.css',
+  host: HOST,
+  styles: STYLES,
+  inputs: INPUTS,
+})
+export class A {
+  constructor(@Inject(HOST) host: unknown) {}
+}
+";
+        let path = write(dir.path(), "app/a.component.ts", literal);
+        let urls = extract(&path, literal, &options);
+        assert_eq!(urls.template_urls, vec!["./a.component.html"]);
+        assert_eq!(urls.style_urls, vec!["./a.component.css"]);
+        assert_eq!(urls.value_dependencies, Vec::<String>::new());
+
+        let imported = r"
+import { Component } from '@angular/core';
+import { HOST } from './meta';
+import { TEMPLATE_URL } from './urls';
+@Component({ selector: 'b-cmp', templateUrl: TEMPLATE_URL, host: HOST })
+export class B {}
+";
+        let path = write(dir.path(), "app/b.component.ts", imported);
+        let urls = extract(&path, imported, &options);
+        assert_eq!(urls.template_urls, vec!["./b.component.html"]);
+        assert_eq!(urls.value_dependencies.len(), 1, "{:?}", urls.value_dependencies);
+        assert!(
+            urls.value_dependencies[0].ends_with("urls.ts")
+                && std::path::Path::new(&urls.value_dependencies[0]).canonicalize().unwrap()
+                    == std::path::Path::new(&urls_file).canonicalize().unwrap(),
+            "{:?}",
+            urls.value_dependencies
+        );
+    }
+
     /// Without the resolver the extractor and the transform agree that the
     /// imported URLs are unknown.
     #[test]

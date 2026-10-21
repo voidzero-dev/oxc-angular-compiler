@@ -458,6 +458,27 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
   }
 
+  // Register template stylesheet `<link>`s found by an HMR template compile
+  // as direct styles of `owner`, the way `transform` registers its
+  // dependencies: owner maps for `handleHotUpdate`, the watcher, and the
+  // stylesheet's own preprocessor deps. Links a later template edit removes
+  // stay registered until the component `.ts` is transformed again (an edit
+  // to one then sends a harmless extra update).
+  async function registerLinkStyles(owner: string, dir: string, urls: string[]): Promise<void> {
+    if (!watchMode || !viteServer) return
+    for (const url of new Set(urls)) {
+      const stylePath = resolve(dir, url)
+      const normalizedStylePath = normalizePath(stylePath)
+      directStyleUrls.add(normalizedStylePath)
+      resourceToComponent.set(normalizedStylePath, owner)
+      let owners = styleComponentOwners.get(normalizedStylePath)
+      if (!owners) styleComponentOwners.set(normalizedStylePath, (owners = new Set()))
+      owners.add(owner)
+      viteServer.watcher?.add?.(stylePath)
+      await refreshStyleDeps(stylePath)
+    }
+  }
+
   // Component IDs (`filePath@ClassName`) queued for HMR delivery. Populated by
   // `handleHotUpdate` when an external resource or inline template/style change
   // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
@@ -961,6 +982,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   result = compile(
                     await stylesFor([...classMetadata.styleUrls, ...result.templateStyleUrls]),
                   )
+                  // A template edit can add a link the last full transform
+                  // never saw, and this endpoint is all that runs for it.
+                  // Register the links as this component's direct styles so
+                  // later edits to them hot-update it too.
+                  await registerLinkStyles(fileId, dir, result.templateStyleUrls)
                 }
 
                 // A failed compile must not be served as an (empty) update

@@ -6,7 +6,7 @@
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
-    MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
+    MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, PropertyKey,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
@@ -61,21 +61,7 @@ pub fn extract_component_metadata<'a>(
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
-    // Find Angular's @Component decorator
-    let component_decorator = find_component_decorator(&class.decorators, consts)?;
-
-    // Get the decorator call arguments
-    let call_expr = match &component_decorator.expression {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-
-    // Get the first argument (the config object)
-    let config_arg = call_expr.arguments.first()?;
-    let config_obj = match config_arg {
-        Argument::ObjectExpression(obj) => obj,
-        _ => return None,
-    };
+    let config_obj = component_config(class, consts)?;
 
     // Create metadata with defaults (standalone uses implicit_standalone when not explicitly set)
     let mut metadata =
@@ -161,17 +147,7 @@ pub fn extract_component_metadata<'a>(
                     }
                 }
                 "styleUrls" | "styleUrl" => {
-                    // An array literal replaces the URLs read so far; any
-                    // other value adds to them.
-                    if matches!(prop.value, Expression::ArrayExpression(_)) {
-                        metadata.style_urls.clear();
-                    }
-                    crate::directive::evaluate_style_urls(
-                        allocator,
-                        &prop.value,
-                        consts,
-                        &mut metadata.style_urls,
-                    );
+                    read_style_urls(allocator, &prop.value, consts, &mut metadata.style_urls);
                 }
                 "standalone" => {
                     // Only override the implicit value if an explicit boolean is provided
@@ -438,6 +414,73 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
         _ => None,
     }
 }
+/// The `{...}` config object of `class`'s `@Component(...)`, or `None` when
+/// the class has no `@Component` call with an object literal argument.
+fn component_config<'a>(
+    class: &'a Class<'a>,
+    consts: &StringConsts<'_>,
+) -> Option<&'a ObjectExpression<'a>> {
+    let component_decorator = find_component_decorator(&class.decorators, consts)?;
+    let Expression::CallExpression(call_expr) = &component_decorator.expression else {
+        return None;
+    };
+    match call_expr.arguments.first()? {
+        Argument::ObjectExpression(obj) => Some(obj),
+        _ => None,
+    }
+}
+
+/// One `styleUrl` / `styleUrls` property: an array literal replaces the URLs
+/// read so far; any other value adds to them.
+fn read_style_urls<'a>(
+    allocator: &'a Allocator,
+    value: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+    urls: &mut Vec<'a, Ident<'a>>,
+) {
+    if matches!(value, Expression::ArrayExpression(_)) {
+        urls.clear();
+    }
+    crate::directive::evaluate_style_urls(allocator, value, consts, urls);
+}
+
+/// The `templateUrl` and `styleUrl(s)` of `class`'s `@Component`, read exactly
+/// as [`extract_component_metadata`] reads them, and `None` exactly when it
+/// gives `None`. Only those properties are evaluated, so the import value
+/// resolver in `consts` (if any) reads another file only when one of them
+/// names an imported binding — never for `host`, `styles`, inputs or deps.
+pub fn extract_component_resource_urls_of<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<(Option<Ident<'a>>, Vec<'a, Ident<'a>>)> {
+    class.id.as_ref()?;
+    let config_obj = component_config(class, consts)?;
+    let mut template_url = None;
+    let mut style_urls = Vec::new_in(&allocator);
+    for prop in &config_obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
+            if matches!(&prop.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
+            {
+                continue;
+            }
+            match get_property_key_name(&prop.key, consts)?.as_str() {
+                "templateUrl" => {
+                    template_url =
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
+                }
+                "styleUrls" | "styleUrl" => {
+                    read_style_urls(allocator, &prop.value, consts, &mut style_urls);
+                }
+                _ => {}
+            }
+        }
+    }
+    Some((template_url, style_urls))
+}
+
 /// Extract an array of identifiers (for imports).
 fn extract_identifier_array<'a>(
     allocator: &'a Allocator,
