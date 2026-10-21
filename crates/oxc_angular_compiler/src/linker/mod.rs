@@ -1608,7 +1608,13 @@ fn link_directive(
     if host_binding_declarations_js.is_empty() {
         Some(define_call)
     } else {
-        Some(format!("(() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"))
+        // The IIFE only declares the host binding functions and constants before
+        // returning the pure define call, so it is pure too. Without the annotation
+        // bundlers keep unused directives (Angular's linker hoists the
+        // declarations and leaves the define call itself at the top level).
+        Some(format!(
+            "/*@__PURE__*/ (() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"
+        ))
     }
 }
 
@@ -2219,7 +2225,9 @@ fn link_component(
     if declarations.trim().is_empty() {
         Some(define_component)
     } else {
-        Some(format!("(() => {{\n{declarations}\nreturn {define_component};\n}})()"))
+        // Pure for the same reason as in `link_directive`: it only declares the
+        // template functions and pooled constants used by the define call.
+        Some(format!("/*@__PURE__*/ (() => {{\n{declarations}\nreturn {define_component};\n}})()"))
     }
 }
 

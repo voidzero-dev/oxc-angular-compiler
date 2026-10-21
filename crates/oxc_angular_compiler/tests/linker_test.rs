@@ -469,6 +469,28 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "21.0.0", ngImpor
     assert!(result.code.contains("ngDevMode) && i0.ɵsetClassMetadata(C,"), "{}", result.code);
 }
 
+/// When the linker wraps a define call in an IIFE to declare template or host
+/// binding functions and pooled constants, the IIFE itself is annotated. Angular's
+/// linker hoists those declarations and leaves `/* @__PURE__ */ i0.ɵɵdefine*(...)`
+/// as the static field value, so an unannotated IIFE would keep unused classes alive.
+#[test]
+fn test_link_declaration_iife_is_pure() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class C {
+  static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0", type: C, isStandalone: true, selector: "c", ngImport: i0, template: "<b>{{x}}</b><ng-template><i>{{y}}</i></ng-template>" });
+}
+class D {
+  static ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", type: D, isStandalone: true, selector: "[d]", ngImport: i0, host: { properties: { "style": "{ width: w }" } } });
+}
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.code.contains("static ɵcmp = /*@__PURE__*/ (() => {"), "{}", result.code);
+    assert!(result.code.contains("static ɵdir = /*@__PURE__*/ (() => {"), "{}", result.code);
+    assert!(result.code.contains("return /*@__PURE__*/ i0.ɵɵdefineComponent("), "{}", result.code);
+    assert!(result.code.contains("return /*@__PURE__*/ i0.ɵɵdefineDirective("), "{}", result.code);
+}
+
 /// `styleAttribute` is parsed like Angular's `parse_extracted_styles` phase: `;` and `:`
 /// inside quotes or parentheses do not split, and property names are hyphenated. The
 /// expected `hostAttrs` are Angular 22.2.3's babel linker output for the same declaration.
