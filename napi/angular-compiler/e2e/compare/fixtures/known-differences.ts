@@ -29,8 +29,6 @@ const CHANGE_DETECTION_V22 =
   'changeDetection is omitted for OnPush, which is the runtime default from v22, where Angular emits it explicitly'
 const SELECTOR_WHITESPACE =
   'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
-const INJECTABLE_FACTORY_WRAPPER =
-  'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
 const SET_CLASS_METADATA_IMPORT =
   'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
 const ALIASED_INJECTABLE =
@@ -230,9 +228,21 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['MyPurePipe.ɵfac'],
     reasons: [FACTORY],
   },
+  'providers/injectable-use-class-forward-ref': {
+    fields: ['EarlyService.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/injectable-use-class-other': {
+    fields: ['AbstractLogger.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/injectable-use-factory-named-function': {
+    fields: ['FactoryService.ɵfac'],
+    reasons: [FACTORY],
+  },
   'providers/object-members-injectable-use-factory': {
-    fields: ['ObjectMembersService.ɵfac', 'ObjectMembersService.ɵprov'],
-    reasons: [FACTORY, INJECTABLE_FACTORY_WRAPPER],
+    fields: ['ObjectMembersService.ɵfac'],
+    reasons: [FACTORY],
   },
   'providers/object-members-injectable-use-value': {
     fields: ['ObjectMembersValueService.ɵfac'],
