@@ -1,0 +1,51 @@
+crates/oxc_angular_compiler/src/linker/mod.rs
+  s_798ff80b12fbda::t_cb253520c08c7d 1094,1101,1106,1119,1124,1137,1149,1155,1187,1207,1271-1272,1298,1605-1606,2211
+crates/oxc_angular_compiler/tests/linker_test.rs
+  s_798ff80b12fbda::t_2d4730995021fc 411-470
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_control_feature_null_pass_through_input.snap
+  s_ea1c9a7665ba92::t_fded3fcbe999b3 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_control_feature_pass_through_input.snap
+  s_ea1c9a7665ba92::t_ad1ae81171cca0 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_array_format_dotted_key.snap
+  s_ea1c9a7665ba92::t_9537bd3289fff0 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_array_format_with_transform_function.snap
+  s_ea1c9a7665ba92::t_150fb193c722e3 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_dotted_key.snap
+  s_ea1c9a7665ba92::t_0490f7f19cd93e 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_hyphenated_key.snap
+  s_ea1c9a7665ba92::t_b2e05fa44c7b40 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_object_format_dotted_key.snap
+  s_ea1c9a7665ba92::t_c5a46c90b8b606 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_inputs_simple_identifier.snap
+  s_ea1c9a7665ba92::t_7946ca06d9e938 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_outputs_dotted_key.snap
+  s_ea1c9a7665ba92::t_6e547b0bd70106 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_outputs_hyphenated_key.snap
+  s_ea1c9a7665ba92::t_602af87c0fbfbc 7
+crates/oxc_angular_compiler/tests/snapshots/linker_test__link_outputs_simple_identifier.snap
+  s_ea1c9a7665ba92::t_d9eb38665966fb 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "78e2d237040f642a939809ecbfdf5594a318da2d",
+  "prompts": {},
+  "sessions": {
+    "s_798ff80b12fbda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac5aaa680b1dec307",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_ea1c9a7665ba92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad3c64857533bfe60",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
