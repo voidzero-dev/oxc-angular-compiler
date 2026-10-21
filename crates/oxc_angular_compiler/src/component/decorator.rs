@@ -6,7 +6,7 @@
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
-    MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
+    MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, PropertyKey,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
@@ -61,21 +61,7 @@ pub fn extract_component_metadata<'a>(
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
-    // Find Angular's @Component decorator
-    let component_decorator = find_component_decorator(&class.decorators, consts)?;
-
-    // Get the decorator call arguments
-    let call_expr = match &component_decorator.expression {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-
-    // Get the first argument (the config object)
-    let config_arg = call_expr.arguments.first()?;
-    let config_obj = match config_arg {
-        Argument::ObjectExpression(obj) => obj,
-        _ => return None,
-    };
+    let config_obj = component_config(class, consts)?;
 
     // Create metadata with defaults (standalone uses implicit_standalone when not explicitly set)
     let mut metadata =
@@ -113,7 +99,7 @@ pub fn extract_component_metadata<'a>(
                     // for @Component.template field" in local mode,
                     // "template must be a string" otherwise) — pre-existing.
                     metadata.template =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts);
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
                     // The text between the quotes or backticks.
                     metadata.template_span = match &prop.value {
                         Expression::StringLiteral(lit) => Some(lit.span),
@@ -125,8 +111,12 @@ pub fn extract_component_metadata<'a>(
                     .map(|span| Span::new(span.start + 1, span.end - 1));
                 }
                 "templateUrl" => {
+                    // Evaluated like ngtsc's `parseTemplateDeclaration`, so a
+                    // URL imported from another file resolves when the consts
+                    // carry the cross-file resolver. The resource extractor
+                    // (`extract_component_resource_urls`) reads it the same way.
                     metadata.template_url =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts);
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
                 }
                 "styles" => {
                     // ngtsc's `reflectObjectLiteral` drops computed keys and
@@ -157,13 +147,7 @@ pub fn extract_component_metadata<'a>(
                     }
                 }
                 "styleUrls" | "styleUrl" => {
-                    if let Some(urls) = extract_string_array(allocator, &prop.value, consts) {
-                        metadata.style_urls = urls;
-                    } else if let Some(url) =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
-                    {
-                        metadata.style_urls.push(url);
-                    }
+                    read_style_urls(allocator, &prop.value, consts, &mut metadata.style_urls);
                 }
                 "standalone" => {
                     // Only override the implicit value if an explicit boolean is provided
@@ -430,33 +414,71 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
         _ => None,
     }
 }
-/// Extract an array of strings from an expression.
-///
-/// `${...}` interpolations inside individual template-literal elements are
-/// folded against `consts` (e.g. `` styles: [`:host { color: ${COLOR}; }`] ``)
-/// to match Angular's partial evaluator. Identifier elements (`[STYLE_CONST]`)
-/// are likewise resolved.
-fn extract_string_array<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Vec<'a, Ident<'a>>> {
-    let Expression::ArrayExpression(arr) = expr else {
+/// The `{...}` config object of `class`'s `@Component(...)`, or `None` when
+/// the class has no `@Component` call with an object literal argument.
+fn component_config<'a>(
+    class: &'a Class<'a>,
+    consts: &StringConsts<'_>,
+) -> Option<&'a ObjectExpression<'a>> {
+    let component_decorator = find_component_decorator(&class.decorators, consts)?;
+    let Expression::CallExpression(call_expr) = &component_decorator.expression else {
         return None;
     };
+    match call_expr.arguments.first()? {
+        Argument::ObjectExpression(obj) => Some(obj),
+        _ => None,
+    }
+}
 
-    let mut result = Vec::new_in(&allocator);
-    for element in &arr.elements {
-        // ArrayExpressionElement variants that can hold a value expression all
-        // carry one — funnel them through `as_expression()` and let the shared
-        // resolver decide which shapes fold.
-        let Some(elem_expr) = element.as_expression() else { continue };
-        if let Some(value) = crate::directive::extract_string_value(allocator, elem_expr, consts) {
-            result.push(value);
+/// One `styleUrl` / `styleUrls` property: an array literal replaces the URLs
+/// read so far; any other value adds to them.
+fn read_style_urls<'a>(
+    allocator: &'a Allocator,
+    value: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+    urls: &mut Vec<'a, Ident<'a>>,
+) {
+    if matches!(value, Expression::ArrayExpression(_)) {
+        urls.clear();
+    }
+    crate::directive::evaluate_style_urls(allocator, value, consts, urls);
+}
+
+/// The `templateUrl` and `styleUrl(s)` of `class`'s `@Component`, read exactly
+/// as [`extract_component_metadata`] reads them, and `None` exactly when it
+/// gives `None`. Only those properties are evaluated, so the import value
+/// resolver in `consts` (if any) reads another file only when one of them
+/// names an imported binding — never for `host`, `styles`, inputs or deps.
+pub fn extract_component_resource_urls_of<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<(Option<Ident<'a>>, Vec<'a, Ident<'a>>)> {
+    class.id.as_ref()?;
+    let config_obj = component_config(class, consts)?;
+    let mut template_url = None;
+    let mut style_urls = Vec::new_in(&allocator);
+    for prop in &config_obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
+            if matches!(&prop.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
+            {
+                continue;
+            }
+            match get_property_key_name(&prop.key, consts)?.as_str() {
+                "templateUrl" => {
+                    template_url =
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts);
+                }
+                "styleUrls" | "styleUrl" => {
+                    read_style_urls(allocator, &prop.value, consts, &mut style_urls);
+                }
+                _ => {}
+            }
         }
     }
-
-    Some(result)
+    Some((template_url, style_urls))
 }
 
 /// Extract an array of identifiers (for imports).

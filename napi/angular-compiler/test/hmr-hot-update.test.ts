@@ -857,6 +857,32 @@ describe('pendingHmrUpdates race condition', () => {
       renameSync(hiddenPath, componentPath)
     }
   })
+
+  it('names the templateUrl and position of a template error, like the transform', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
+
+    writeFileSync(templatePath, '<h1>\n</h2>')
+    try {
+      const componentHtmlFile = normalizePath(templatePath)
+      await callHandleHotUpdate(
+        plugin,
+        createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer),
+      )
+      const updateMsg = mockServer._wsMessages.find(
+        (m: any) => m.event === 'angular:component-update',
+      )
+      const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+      expect(await invokeAngularMiddleware(middleware, decodeURIComponent(updateMsg.data.id))).toBe(
+        '',
+      )
+      const invalidate = mockServer._wsMessages.find((m: any) => m.event === 'angular:invalidate')
+      expect(invalidate.data.message).toContain('./app.component.html:2:1')
+    } finally {
+      writeFileSync(templatePath, '<h1>Hello</h1>')
+    }
+  })
 })
 
 describe('handleHotUpdate - Issue #185', () => {
@@ -3501,7 +3527,7 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toContain('styles: []')
   })
 
-  it('keeps the styles of a class whose disk `styles` names an imported constant', async () => {
+  it('serves the styles of a class whose disk `styles` names an imported constant', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithRealConfig(plugin)
 
@@ -3513,12 +3539,9 @@ describe('@ng/component endpoint resolves the styles per class', () => {
       `export const PS458_IMP = ['.PS458_IMP_MARKER { color: red; }'];\n`,
     )
 
-    // A cross-file reference is unreadable to the extractor, which sees one
-    // file: the answer is unknown and must not clear the live CSS. The
-    // transform runs on the source exactly as it sits on disk — Vite hands
-    // `transform` the file content and resolveImportedValues follows the
-    // import — so disk source and compiled source are byte-identical and the
-    // stylesResolved leg, not the strip match, is what keeps the styles.
+    // The update is compiled with the transform's options, so
+    // `resolveImportedValues` follows the import for it too and the update
+    // carries the styles the component was compiled with.
     const diskSource = `
       import { Component } from '@angular/core';
       import { PS458_IMP } from './ps458-imp-styles';
@@ -3550,10 +3573,10 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).toContain('two')
-    expect(body).not.toContain('styles:')
+    expect(body).toContain('.PS458_IMP_MARKER[_ngcontent-%COMP%]')
   })
 
-  it('keeps the styles of a class mixing imported `styles` with `styleUrls`', async () => {
+  it('serves both style lists of a class mixing imported `styles` with `styleUrls`', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithRealConfig(plugin)
 
@@ -3566,10 +3589,9 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     writeFileSync(join(appDir, 'ps458-mix.css'), '.PS458_MIX_EXT { color: blue; }\n')
 
-    // The transform resolves the import and compiles BOTH style lists. The
-    // extractor resolves neither `PS458_MIX` nor the inline styles the import
-    // holds — merged would be only the external CSS, a partial answer that
-    // must not be served as the component's styles.
+    // The transform resolves the import and compiles BOTH style lists, and
+    // the update, compiled with the same options, does too: serving only the
+    // external CSS would drop the imported inline styles.
     const diskSource = `
       import { Component } from '@angular/core';
       import { PS458_MIX } from './ps458-mix-styles';
@@ -3603,9 +3625,10 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).toContain('two')
-    // Serving only the external CSS here would silently drop the imported
-    // inline styles the component was compiled with.
-    expect(body).not.toContain('styles:')
+    const inline = body.indexOf('.PS458_MIX_MARKER[_ngcontent-%COMP%]')
+    const external = body.indexOf('.PS458_MIX_EXT[_ngcontent-%COMP%]')
+    expect(inline).toBeGreaterThan(-1)
+    expect(external).toBeGreaterThan(inline)
   })
 
   it('serves the styles of a class whose disk `styles` is a `.concat(...)` call', async () => {

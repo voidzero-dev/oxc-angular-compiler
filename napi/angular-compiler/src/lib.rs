@@ -389,14 +389,35 @@ pub struct TransformResult {
 
     /// For HMR: each compiled component's `@Component` decorator callee as
     /// written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+    ///
+    /// @deprecated Kept for existing callers; the bundled Vite plugin no
+    /// longer reads it. Use `hmrFingerprint` to decide between an HMR update
+    /// and a full reload.
     #[napi(ts_type = "Record<string, string>")]
     pub component_decorators: HashMap<String, String>,
+
+    /// For HMR (`hmr: true`): the fingerprint of the source with the inline
+    /// `template` / `styles` values of the compiled components left out.
+    /// Compare it with `componentHmrFingerprint(newSource, filename,
+    /// compiledClassNames).fingerprint` after an edit: equal means only those
+    /// values changed, so an HMR update is enough.
+    pub hmr_fingerprint: Option<String>,
 
     /// Compilation errors.
     pub errors: Vec<OxcError>,
 
     /// Compilation warnings.
     pub warnings: Vec<OxcError>,
+
+    /// The `href` of each stylesheet `<link>` in a compiled template that was
+    /// not in `resolvedResources.styles`, as written.
+    ///
+    /// ngtsc loads these like `styleUrls`, relative to the component file, but
+    /// they are only known once the template is parsed. A build tool can read
+    /// them, add them to `resolvedResources.styles` and transform again. Each
+    /// one also has a COMPONENT_RESOURCE_NOT_FOUND entry in `errors` (one per
+    /// component that links it).
+    pub missing_link_urls: Vec<String>,
 
     /// `.d.ts` type declarations for Angular classes.
     ///
@@ -620,6 +641,12 @@ pub fn generate_style_module(component_id: String, styles: Vec<String>) -> Strin
 /// # Returns
 ///
 /// A tuple of (hmr_module_code, component_id) or errors.
+///
+/// @deprecated Compiles the template alone, with only the options passed
+/// here: no file path for i18n message names or error locations, and the
+/// caller has to find the template, styles and `preserveWhitespaces` itself.
+/// Use `compileComponentHmrUpdate`, which compiles the update from the
+/// component's source with the transform's options.
 #[napi]
 pub fn compile_for_hmr_sync(
     template: String,
@@ -706,6 +733,7 @@ pub fn compile_for_hmr_sync(
                 hmr_module,
                 component_id,
                 template_js,
+                template_style_urls: output.style_urls,
                 // Non-fatal pipeline diagnostics (warnings, advice) — the
                 // update module was still generated. Errors come back through
                 // the `Err` arm instead.
@@ -716,6 +744,7 @@ pub fn compile_for_hmr_sync(
             hmr_module: String::new(),
             component_id,
             template_js: String::new(),
+            template_style_urls: Vec::new(),
             errors: OxcError::from_diagnostics(&file_path, &template, diagnostics),
         },
     }
@@ -733,6 +762,14 @@ pub struct HmrCompileResult {
 
     /// The compiled template function as JavaScript.
     pub template_js: String,
+
+    /// The `href` of each stylesheet `<link>` in the template, as written.
+    ///
+    /// The full transform compiles their contents into the component's styles
+    /// (after the decorator's `styleUrls`), so the caller reads them the same
+    /// way and compiles again with them in `styles`. `styles` is never
+    /// changed here: only the caller can read files.
+    pub template_style_urls: Vec<String>,
 
     /// Compilation errors.
     pub errors: Vec<OxcError>,
@@ -770,6 +807,8 @@ impl Task for CompileForHmrTask {
 /// Compile for HMR (async).
 ///
 /// This is the async version of `compileForHmrSync`.
+///
+/// @deprecated Use `compileComponentHmrUpdate`; see `compileForHmrSync`.
 #[napi]
 pub fn compile_for_hmr(
     template: String,
@@ -785,6 +824,194 @@ pub fn compile_for_hmr(
         styles,
         options: options.unwrap_or_default(),
     })
+}
+
+/// What `compileComponentHmrUpdate` needs besides the source and options.
+#[derive(Default)]
+#[napi(object)]
+pub struct ComponentHmrUpdateOptions {
+    /// `TransformResult.hmrFingerprint` of the source the running component
+    /// was compiled from. When this source has another fingerprint (another
+    /// plugin rewrote the module, say), styles that come out empty are not
+    /// trusted to clear the live ones.
+    pub source_fingerprint: Option<String>,
+
+    /// The class names that fingerprint was taken for: the components the
+    /// transform compiled in the file. Defaults to `className` alone.
+    pub compiled_class_names: Option<Vec<String>>,
+}
+
+/// An HMR update for one component.
+#[derive(Default)]
+#[napi(object)]
+pub struct ComponentHmrUpdateResult {
+    /// The update module, or an empty string when there is nothing to send:
+    /// the class is not a compiled `@Component`, its template is empty, its
+    /// `templateUrl` is missing from the resources (see `missingTemplateUrl`),
+    /// or compiling failed (see `errors`).
+    pub hmr_module: String,
+
+    /// The component ID (path@ClassName).
+    pub component_id: String,
+
+    /// The template function the module installs, as emitted in the ɵcmp.
+    pub template_js: String,
+
+    /// The styles the module installs, as emitted in the ɵcmp, or `null` when
+    /// they are not known and the module keeps the live ones.
+    pub styles: Option<Vec<String>>,
+
+    /// The class's `templateUrl`, as written.
+    pub template_url: Option<String>,
+
+    /// The class's `styleUrl` / `styleUrls` entries, as written.
+    pub style_urls: Vec<String>,
+
+    /// The `href` of each stylesheet `<link>` in the template, as written.
+    pub template_style_urls: Vec<String>,
+
+    /// The `templateUrl` when it was not in the resources. Nothing was
+    /// compiled; read it and call again.
+    pub missing_template_url: Option<String>,
+
+    /// `styleUrls` and template `<link>` hrefs that were not in the
+    /// resources. Read the ones that can be read and call again.
+    pub missing_style_urls: Vec<String>,
+
+    /// The HMR fingerprint of the source for `compiledClassNames` (as
+    /// `componentHmrFingerprint` computes it), or `null` when it did not
+    /// parse.
+    pub fingerprint: Option<String>,
+
+    /// Parse and compile errors (and other diagnostics).
+    pub errors: Vec<OxcError>,
+}
+
+/// Async task for `compileComponentHmrUpdate`.
+pub struct CompileComponentHmrUpdateTask {
+    source: String,
+    filename: String,
+    class_name: String,
+    options: Option<TransformOptions>,
+    resolved_resources: Option<ResolvedResources>,
+    hmr_options: Option<ComponentHmrUpdateOptions>,
+}
+
+#[napi]
+impl Task for CompileComponentHmrUpdateTask {
+    type JsValue = ComponentHmrUpdateResult;
+    type Output = ComponentHmrUpdateResult;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        use oxc_angular_compiler::{
+            ComponentHmrUpdateInput, ResolvedResources as RustResolvedResources,
+            compile_component_hmr_update,
+        };
+
+        let allocator = Allocator::default();
+        let rust_options: RustTransformOptions = self.options.take().unwrap_or_default().into();
+        let rust_resources = self
+            .resolved_resources
+            .take()
+            .map(|r| RustResolvedResources { templates: r.templates, styles: r.styles });
+        let hmr_options = self.hmr_options.take().unwrap_or_default();
+        let compiled_class_names: Option<Vec<&str>> = hmr_options
+            .compiled_class_names
+            .as_ref()
+            .map(|names| names.iter().map(String::as_str).collect());
+        let input = ComponentHmrUpdateInput {
+            class_name: &self.class_name,
+            source_fingerprint: hmr_options.source_fingerprint.as_deref(),
+            compiled_class_names: compiled_class_names.as_deref(),
+        };
+
+        let update = compile_component_hmr_update(
+            &allocator,
+            &self.filename,
+            &self.source,
+            &input,
+            Some(&rust_options),
+            rust_resources.as_ref(),
+        );
+
+        Ok(ComponentHmrUpdateResult {
+            hmr_module: update.module.unwrap_or_default(),
+            component_id: update.component_id,
+            template_js: update.template_js,
+            styles: update.styles,
+            template_url: update.template_url,
+            style_urls: update.style_urls,
+            template_style_urls: update.template_style_urls,
+            missing_template_url: update.missing_template_url,
+            missing_style_urls: update.missing_style_urls,
+            fingerprint: update.fingerprint,
+            errors: OxcError::from_diagnostics(&self.filename, &self.source, update.diagnostics),
+        })
+    }
+
+    fn resolve(&mut self, _: napi::Env, result: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(result)
+    }
+}
+
+/// Compile the HMR update module of one component, with the options of the
+/// full transform (async).
+///
+/// Takes the `source`, `filename`, `options` and `resolvedResources` that
+/// `transformAngularFile` takes, and compiles the update from one parse of
+/// the source: the class's metadata is read like the transform reads it
+/// (imported values included with `resolveImportedValues`), and the template
+/// is compiled with the same options (`preserveWhitespaces`, i18n message
+/// ids, `angularVersion`, `filename` for i18n names and error locations,
+/// template stylesheet links). The module's `template`, `consts`, `decls`,
+/// `vars`, `ngContentSelectors` and `styles` are those of the transform's
+/// ɵcmp, except that constants are numbered from `_c0` and a `@defer` block
+/// of a class with `deferredImports` gets no dependency function.
+///
+/// Resources the class needs but `resolvedResources` lacks come back in
+/// `missingTemplateUrl` / `missingStyleUrls`: read them and call again.
+#[napi]
+pub fn compile_component_hmr_update(
+    source: String,
+    filename: String,
+    class_name: String,
+    options: Option<TransformOptions>,
+    resolved_resources: Option<ResolvedResources>,
+    hmr_options: Option<ComponentHmrUpdateOptions>,
+) -> AsyncTask<CompileComponentHmrUpdateTask> {
+    AsyncTask::new(CompileComponentHmrUpdateTask {
+        source,
+        filename,
+        class_name,
+        options,
+        resolved_resources,
+        hmr_options,
+    })
+}
+
+/// Sync version of `compileComponentHmrUpdate`.
+///
+/// # Errors
+///
+/// Never: compile errors are reported in the result's `errors`.
+#[napi]
+pub fn compile_component_hmr_update_sync(
+    source: String,
+    filename: String,
+    class_name: String,
+    options: Option<TransformOptions>,
+    resolved_resources: Option<ResolvedResources>,
+    hmr_options: Option<ComponentHmrUpdateOptions>,
+) -> napi::Result<ComponentHmrUpdateResult> {
+    CompileComponentHmrUpdateTask {
+        source,
+        filename,
+        class_name,
+        options,
+        resolved_resources,
+        hmr_options,
+    }
+    .compute()
 }
 
 /// URL-encode a component ID for use in import URLs.
@@ -894,84 +1121,42 @@ pub struct ComponentUrls {
 
 /// Extract templateUrl and styleUrls from all @Component decorators in a file.
 ///
-/// This parses a TypeScript file and extracts URL references from all
-/// @Component decorators found in the file.
+/// This parses a TypeScript file and reads the URL references of every
+/// @Component decorator in it the way `transformAngularFile` reads them.
 ///
 /// # Arguments
 ///
 /// * `source` - The TypeScript source code
 /// * `filename` - The filename (used for source type detection)
+/// * `options` - The options the file will be transformed with. Only the
+///   decorator-evaluation ones matter (`resolveImportedValues`, `baseDir`,
+///   `tsconfigPath`, `resolvedImports`): with them, a URL held in a `const`
+///   imported from another file is found as the transform will look it up.
 ///
 /// # Returns
 ///
 /// A `ComponentUrls` containing all template and style URLs found.
-pub fn extract_component_urls_sync(source: String, filename: String) -> ComponentUrls {
-    use oxc_angular_compiler::{
-        build_import_map, collect_string_consts, extract_component_metadata,
-    };
-    use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
-    use oxc_parser::Parser;
-    use oxc_span::SourceType;
-
+pub fn extract_component_urls_sync(
+    source: String,
+    filename: String,
+    options: Option<TransformOptions>,
+) -> ComponentUrls {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(&filename).unwrap_or_default();
-
-    let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-    let program = &parser_ret.program;
-
-    // Build import map for component metadata extraction
-    let import_map = build_import_map(&allocator, &program.body, None);
-    let string_consts = collect_string_consts(&allocator, program);
-
-    let mut template_urls = Vec::new();
-    let mut style_urls = Vec::new();
-
-    // Walk statements looking for class declarations
-    for stmt in &program.body {
-        let class = match stmt {
-            Statement::ClassDeclaration(class) => Some(class.as_ref()),
-            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
-                _ => None,
-            },
-            Statement::ExportDeclaration(export) => match &export.declaration {
-                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
-                _ => None,
-            },
-            _ => None,
-        };
-
-        if let Some(class) = class {
-            // Extract metadata from @Component decorator
-            // Use implicit_standalone=true (v19+ default) since it doesn't affect URL extraction
-            if let Some(metadata) = extract_component_metadata(
-                &allocator,
-                class,
-                true,
-                &import_map,
-                Some(&source),
-                &string_consts,
-            ) {
-                // Collect template URL
-                if let Some(template_url) = &metadata.template_url {
-                    template_urls.push(template_url.to_string());
-                }
-
-                // Collect style URLs
-                for url in &metadata.style_urls {
-                    style_urls.push(url.to_string());
-                }
-            }
-        }
-    }
-
-    ComponentUrls { template_urls, style_urls }
+    let rust_options: RustTransformOptions = options.unwrap_or_default().into();
+    let urls = oxc_angular_compiler::extract_component_resource_urls(
+        &allocator,
+        &filename,
+        &source,
+        Some(&rust_options),
+    );
+    ComponentUrls { template_urls: urls.template_urls, style_urls: urls.style_urls }
 }
 
 /// Async task for extracting component URLs.
 pub struct ExtractComponentUrlsTask {
     source: String,
     filename: String,
+    options: Option<TransformOptions>,
 }
 
 #[napi]
@@ -980,7 +1165,11 @@ impl Task for ExtractComponentUrlsTask {
     type Output = ComponentUrls;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        Ok(extract_component_urls_sync(self.source.clone(), self.filename.clone()))
+        Ok(extract_component_urls_sync(
+            std::mem::take(&mut self.source),
+            std::mem::take(&mut self.filename),
+            self.options.take(),
+        ))
     }
 
     fn resolve(&mut self, _: napi::Env, result: Self::Output) -> napi::Result<Self::JsValue> {
@@ -991,13 +1180,53 @@ impl Task for ExtractComponentUrlsTask {
 /// Extract templateUrl and styleUrls from all @Component decorators in a file (async).
 ///
 /// This is the async version of `extractComponentUrlsSync`. Use this when
-/// extracting URLs in a non-blocking context.
+/// extracting URLs in a non-blocking context. Pass the `TransformOptions` the
+/// file will be transformed with, so the URLs are read the same way.
 #[napi]
 pub fn extract_component_urls(
     source: String,
     filename: String,
+    options: Option<TransformOptions>,
 ) -> AsyncTask<ExtractComponentUrlsTask> {
-    AsyncTask::new(ExtractComponentUrlsTask { source, filename })
+    AsyncTask::new(ExtractComponentUrlsTask { source, filename, options })
+}
+
+/// The HMR fingerprint of a component file.
+#[napi(object)]
+pub struct ComponentHmrFingerprint {
+    /// Hash of the source with the inline `template` / `styles` values of the
+    /// named components left out (their quotes or brackets are kept).
+    pub fingerprint: String,
+    /// The named classes whose `@Component({...})` was read, in source order.
+    pub components: Vec<String>,
+}
+
+/// Take the HMR fingerprint of a component file, from one parse.
+///
+/// Only `classNames` (the components `transformAngularFile` compiled) are
+/// read, through Angular's `@Component` found by its `@angular/core` import.
+/// A `template` / `styles` value is left out only when it is one string,
+/// template literal or (for `styles`) array literal. A source with syntax
+/// errors leaves nothing out.
+///
+/// The result equals `TransformResult.hmrFingerprint` for the same source
+/// and class names, so a build tool can compare the two to decide between an
+/// HMR update (equal: only those values changed) and a full reload.
+#[napi]
+pub fn component_hmr_fingerprint(
+    source: String,
+    filename: String,
+    class_names: Vec<String>,
+) -> ComponentHmrFingerprint {
+    let allocator = Allocator::default();
+    let class_names: Vec<&str> = class_names.iter().map(String::as_str).collect();
+    let result = oxc_angular_compiler::component_hmr_fingerprint(
+        &allocator,
+        &filename,
+        &source,
+        &class_names,
+    );
+    ComponentHmrFingerprint { fingerprint: result.fingerprint, components: result.components }
 }
 
 /// Top-level declarations extracted from a TypeScript file for HMR.
@@ -1263,8 +1492,10 @@ impl Task for TransformAngularFileTask {
             template_updates: result.template_updates,
             style_updates: result.style_updates,
             component_decorators: result.component_decorators,
+            hmr_fingerprint: result.hmr_fingerprint,
             errors,
             warnings: vec![],
+            missing_link_urls: result.missing_link_urls,
             dts_declarations: result
                 .dts_declarations
                 .into_iter()

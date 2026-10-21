@@ -907,10 +907,13 @@ if (!nativeBinding) {
 
 const {
   compileClassMetadata,
+  compileComponentHmrUpdate,
+  compileComponentHmrUpdateSync,
   compileFactory,
   compileForHmr,
   compileForHmrSync,
   compileTemplate,
+  componentHmrFingerprint,
   decodeComponentId,
   encapsulateStyle,
   encodeComponentId,
@@ -929,10 +932,13 @@ const {
   Severity,
 } = nativeBinding
 export { compileClassMetadata }
+export { compileComponentHmrUpdate }
+export { compileComponentHmrUpdateSync }
 export { compileFactory }
 export { compileForHmr }
 export { compileForHmrSync }
 export { compileTemplate }
+export { componentHmrFingerprint }
 export { decodeComponentId }
 export { encapsulateStyle }
 export { encodeComponentId }

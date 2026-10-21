@@ -333,12 +333,34 @@ pub struct TransformResult {
     /// For HMR: maps the ID of each compiled component (path@ClassName) to its
     /// `@Component` decorator's callee as written in the source (`Component`,
     /// `Cmp` for `import { Component as Cmp }`, `ng.Component` for a namespace
-    /// import). It lets a build tool find the decorator the compiler took
-    /// without deciding again which decorators are Angular's.
+    /// import).
+    ///
+    /// Deprecated: kept for existing callers; the bundled Vite plugin no
+    /// longer reads it and uses [`Self::hmr_fingerprint`] instead.
     pub component_decorators: HashMap<String, String>,
+
+    /// For HMR: the fingerprint of the source with the inline `template` /
+    /// `styles` values of the compiled components left out (see
+    /// [`super::component_hmr_fingerprint`]). A build tool compares it with
+    /// the fingerprint of the edited file, taken for the same class names:
+    /// when they are equal, only those values changed and an HMR update is
+    /// enough. `None` unless `hmr` is on.
+    pub hmr_fingerprint: Option<String>,
 
     /// Compilation diagnostics (errors and warnings).
     pub diagnostics: Vec<OxcDiagnostic>,
+
+    /// Stylesheet `<link>`s in compiled templates (`<link rel="stylesheet"
+    /// href="...">`) whose `href` was not in the resolved styles, as written.
+    ///
+    /// ngtsc loads these like `styleUrls`, relative to the component file.
+    /// They are only known once the template is parsed, so a build tool
+    /// learns them here: it can read them, add them to
+    /// [`ResolvedResources::styles`] and transform again. Each entry also has
+    /// a COMPONENT_RESOURCE_NOT_FOUND error in `diagnostics` (one per
+    /// component that links it), and only resources that were passed are
+    /// checked.
+    pub missing_link_urls: Vec<String>,
 
     /// Number of components found in the file.
     pub component_count: usize,
@@ -413,6 +435,12 @@ pub struct HmrTemplateCompileOutput {
     /// Styles extracted from `<style>` tags in the template.
     /// These must be included in the HMR update module to avoid constant pool mismatches.
     pub styles: std::vec::Vec<String>,
+
+    /// The `href`s of the template's stylesheet `<link>`s, as written. The
+    /// full transform loads them like `styleUrls` (see
+    /// [`TransformResult::missing_link_urls`]); an HMR caller reads them the
+    /// same way and passes their contents with the component's other styles.
+    pub style_urls: std::vec::Vec<String>,
 
     /// The consts array as JavaScript code.
     /// This must be included in the HMR update module to match the template function's
@@ -3029,7 +3057,8 @@ pub fn transform_angular_file(
     let parser_ret = Parser::new(allocator, source, source_type).parse();
 
     // Collect parse errors
-    if !parser_ret.diagnostics.is_empty() {
+    let parsed_cleanly = parser_ret.diagnostics.is_empty();
+    if !parsed_cleanly {
         for error in parser_ret.diagnostics {
             result.diagnostics.push(OxcDiagnostic::error(error.to_string()));
         }
@@ -3132,6 +3161,10 @@ pub fn transform_angular_file(
     // by tracking the next index and passing it to each component.
     let mut shared_pool_index: u32 = 0;
 
+    // The components compiled for HMR, whose inline template and styles the
+    // HMR fingerprint leaves out.
+    let mut hmr_compiled_classes: Vec<String> = Vec::new();
+
     // One analyzer serves both cross-file features: the type-only scan for
     // import elision and, when resolve_imported_values is on, the resolver the
     // decorator evaluator reads imported bindings through. It's declared
@@ -3139,15 +3172,7 @@ pub fn transform_angular_file(
     #[cfg(feature = "cross_file_elision")]
     let cross_file_analyzer: Option<CrossFileAnalyzer> =
         if options.cross_file_elision || options.resolve_imported_values {
-            let file_path = std::path::Path::new(path);
-            let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
-            base_dir.map(|base| {
-                CrossFileAnalyzer::new(
-                    base,
-                    options.tsconfig_path.as_deref(),
-                    options.resolve_imported_values,
-                )
-            })
+            new_cross_file_analyzer(path, options)
         } else {
             None
         };
@@ -3207,16 +3232,10 @@ pub fn transform_angular_file(
     // references (e.g. `host: { [ATTR_NAME]: '' }`) the same way the official
     // Angular compiler does. `resolve_imported_values` teaches the evaluator
     // to read imported bindings the way ngtsc's checker does.
-    #[allow(unused_mut)]
-    let mut string_consts = collect_string_consts(allocator, &parser_ret.program);
+    let string_consts = collect_string_consts(allocator, &parser_ret.program);
     #[cfg(feature = "cross_file_elision")]
-    if options.resolve_imported_values
-        && let Some(analyzer) = &cross_file_analyzer
-    {
-        string_consts = string_consts.with_resolver(std::rc::Rc::new(
-            analyzer.value_resolver(std::path::PathBuf::from(path)),
-        ));
-    }
+    let string_consts =
+        with_imported_values(string_consts, cross_file_analyzer.as_ref(), path, options);
 
     // ngtsc's source-file rules (validation/): initializer APIs used outside a
     // class member initializer (UNSUPPORTED_INITIALIZER_API_USAGE).
@@ -3592,7 +3611,8 @@ pub fn transform_angular_file(
                         &import_map,
                         resolved_resources,
                         deferrable_selector,
-                        &import_elision_mut,
+                        Some(&import_elision_mut),
+                        false,
                     ) {
                         Ok(compilation_result) => {
                             // Update the shared pool index for the next component
@@ -3616,6 +3636,9 @@ pub fn transform_angular_file(
                                     class_name, style_url
                                 )));
                             }
+                            result
+                                .missing_link_urls
+                                .extend(compilation_result.missing_link_urls.iter().cloned());
 
                             let component_id = format!("{}@{}", path, class_name);
 
@@ -3639,6 +3662,7 @@ pub fn transform_angular_file(
                                             .to_string(),
                                     );
                                 }
+                                hmr_compiled_classes.push(class_name.clone());
                             }
 
                             // Track the decorator span to remove
@@ -4722,13 +4746,31 @@ pub fn transform_angular_file(
         result.dependencies.extend(analyzer.take_value_dependencies());
     }
 
+    // Taken from this parse, for exactly the classes compiled above, so it
+    // equals what `component_hmr_fingerprint` gives for this source and
+    // these class names.
+    if options.hmr {
+        let fingerprint = if parsed_cleanly {
+            super::hmr_fingerprint::hmr_fingerprint_of_program(
+                &parser_ret.program,
+                source,
+                &string_consts,
+                |name| hmr_compiled_classes.iter().any(|compiled| compiled == name),
+            )
+        } else {
+            super::component_hmr_fingerprint(allocator, path, source, &[])
+        };
+        result.hmr_fingerprint = Some(fingerprint.fingerprint);
+    }
+
     result
 }
 
 /// Result of full component compilation including ɵcmp/ɵfac.
 struct FullCompilationResult {
     /// Compiled template function as JavaScript, for HMR template updates.
-    /// `None` when HMR is off (nothing reads it then) and in partial mode.
+    /// `None` when HMR is off (nothing reads it then), for an HMR update
+    /// compile (see `hmr_update`) and in partial mode.
     template_js: Option<String>,
 
     /// ɵcmp definition as JavaScript.
@@ -4778,6 +4820,394 @@ struct FullCompilationResult {
     /// a missing decorator `styleUrl`: the caller surfaces
     /// COMPONENT_RESOURCE_NOT_FOUND in the result diagnostics.
     missing_link_urls: Vec<String>,
+
+    /// The template fields of the ɵcmp, for an HMR update compile only.
+    hmr_update: Option<HmrUpdateParts>,
+}
+
+/// What an HMR update module needs from a component's full compile: the
+/// definition fields its template decides, as emitted in the ɵcmp.
+struct HmrUpdateParts {
+    template_js: String,
+    /// The template's constant declarations (child view functions, pooled
+    /// constants) the fields refer to.
+    declarations_js: String,
+    consts_js: Option<String>,
+    decls: u32,
+    vars: u32,
+    ng_content_selectors_js: Option<String>,
+    /// The ɵcmp's `styles`.
+    styles: Vec<String>,
+}
+
+/// The analyzer behind both cross-file features (`cross_file_elision`'s
+/// type-only scan and `resolve_imported_values`), resolving modules from
+/// `path`'s directory (or `base_dir`) with `tsconfig_path`'s aliases.
+#[cfg(feature = "cross_file_elision")]
+fn new_cross_file_analyzer(path: &str, options: &TransformOptions) -> Option<CrossFileAnalyzer> {
+    let file_path = std::path::Path::new(path);
+    let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
+    base_dir.map(|base| {
+        CrossFileAnalyzer::new(
+            base,
+            options.tsconfig_path.as_deref(),
+            options.resolve_imported_values,
+        )
+    })
+}
+
+/// `string_consts` with `analyzer`'s import value resolver attached when
+/// `resolve_imported_values` is on, so decorator metadata reads a binding
+/// imported from another file the way ngtsc's checker does.
+#[cfg(feature = "cross_file_elision")]
+fn with_imported_values<'a>(
+    string_consts: crate::directive::StringConsts<'a>,
+    analyzer: Option<&CrossFileAnalyzer>,
+    path: &str,
+    options: &TransformOptions,
+) -> crate::directive::StringConsts<'a> {
+    match analyzer {
+        Some(analyzer) if options.resolve_imported_values => string_consts.with_resolver(
+            std::rc::Rc::new(analyzer.value_resolver(std::path::PathBuf::from(path))),
+        ),
+        _ => string_consts,
+    }
+}
+
+/// The external resources the `@Component` classes of a file name.
+#[derive(Debug, Default)]
+pub struct ComponentResourceUrls {
+    /// Each component's `templateUrl`, as written.
+    pub template_urls: Vec<String>,
+    /// Each component's `styleUrl` / `styleUrls` entries, as written.
+    pub style_urls: Vec<String>,
+    /// The files read to resolve an imported URL binding (only with
+    /// `resolve_imported_values`), like [`TransformResult::dependencies`].
+    pub value_dependencies: Vec<String>,
+}
+
+/// The `templateUrl` and `styleUrl(s)` of every `@Component` class in a file:
+/// the files a build tool reads and passes to [`transform_angular_file`] as
+/// [`ResolvedResources`], keyed by these same strings.
+///
+/// The URLs are read exactly as the transform reads them — the same
+/// evaluation as [`extract_component_metadata`] over the same consts, with the
+/// cross-file resolver attached under the same `options`
+/// (`resolve_imported_values`, `base_dir`, `tsconfig_path`) — so a URL the
+/// transform will look up is never one this skipped (an imported
+/// `const TEMPLATE_URL`, say). Only the URL properties are evaluated, and the
+/// resolver reads a file only when one of them names an imported binding, so
+/// literal URLs cost no cross-file read even when `host` or `styles` are
+/// imported. Stylesheet
+/// `<link>`s inside a template are only known once the template is parsed;
+/// the transform reports the ones it was not given in
+/// [`TransformResult::missing_link_urls`].
+pub fn extract_component_resource_urls(
+    allocator: &Allocator,
+    path: &str,
+    source: &str,
+    options: Option<&TransformOptions>,
+) -> ComponentResourceUrls {
+    let default_options = TransformOptions::default();
+    let options = options.unwrap_or(&default_options);
+
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, source, source_type).parse();
+    let program = &parser_ret.program;
+
+    #[cfg(feature = "cross_file_elision")]
+    let analyzer =
+        if options.resolve_imported_values { new_cross_file_analyzer(path, options) } else { None };
+    let string_consts = collect_string_consts(allocator, program);
+    #[cfg(feature = "cross_file_elision")]
+    let string_consts = with_imported_values(string_consts, analyzer.as_ref(), path, options);
+
+    let mut urls = ComponentResourceUrls::default();
+    for stmt in &program.body {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => class.as_ref(),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        let Some((template_url, style_urls)) =
+            super::decorator::extract_component_resource_urls_of(allocator, class, &string_consts)
+        else {
+            continue;
+        };
+        if let Some(template_url) = template_url {
+            urls.template_urls.push(template_url.to_string());
+        }
+        urls.style_urls.extend(style_urls.iter().map(ToString::to_string));
+    }
+    #[cfg(feature = "cross_file_elision")]
+    if let Some(analyzer) = &analyzer {
+        urls.value_dependencies.extend(analyzer.take_value_dependencies());
+        urls.value_dependencies.sort_unstable();
+    }
+    urls
+}
+
+/// Inputs of [`compile_component_hmr_update`] besides the file and options.
+#[derive(Debug, Default)]
+pub struct ComponentHmrUpdateInput<'s> {
+    /// The class to compile the update for.
+    pub class_name: &'s str,
+    /// The `hmr_fingerprint` of the source the running component was compiled
+    /// from (see [`TransformResult::hmr_fingerprint`]). When given and this
+    /// source has another fingerprint, it differs outside the inline
+    /// `template` / `styles` values, so styles that come out empty are not
+    /// trusted to clear the live ones.
+    pub source_fingerprint: Option<&'s str>,
+    /// The class names that fingerprint was taken for (the file's compiled
+    /// components). Defaults to `class_name` alone.
+    pub compiled_class_names: Option<&'s [&'s str]>,
+}
+
+/// An HMR update for one component, from [`compile_component_hmr_update`].
+#[derive(Debug, Default)]
+pub struct ComponentHmrUpdate {
+    /// The update module (see [`crate::generate_hmr_update_module`]). `None`
+    /// when there is nothing to send: the class is not a compiled
+    /// `@Component`, its template is empty or missing from the resources, or
+    /// compiling it failed (see `diagnostics`).
+    pub module: Option<String>,
+
+    /// The component ID (`path@ClassName`).
+    pub component_id: String,
+
+    /// The template function the module installs, as emitted in the ɵcmp.
+    pub template_js: String,
+
+    /// The styles the module installs, as emitted in the ɵcmp. `None` when
+    /// they are not known (a stylesheet missing from the resources with
+    /// nothing else to send, `styles` the evaluator could not read, or a
+    /// source that differs from `source_fingerprint`); the module then keeps
+    /// the live ones.
+    pub styles: Option<Vec<String>>,
+
+    /// The class's `templateUrl`, as written.
+    pub template_url: Option<String>,
+
+    /// The class's `styleUrl` / `styleUrls` entries, as written.
+    pub style_urls: Vec<String>,
+
+    /// The `href` of each stylesheet `<link>` in the template, as written.
+    pub template_style_urls: Vec<String>,
+
+    /// The `templateUrl` when it was not in the resources. Nothing is compiled
+    /// then; read it and call again.
+    pub missing_template_url: Option<String>,
+
+    /// `styleUrls` and template `<link>` hrefs that were not in the resources.
+    /// Read the ones that can be read and call again.
+    pub missing_style_urls: Vec<String>,
+
+    /// The HMR fingerprint of `source` for `compiled_class_names`, as
+    /// [`super::component_hmr_fingerprint`] computes it. `None` when the
+    /// source did not parse.
+    pub fingerprint: Option<String>,
+
+    /// Errors (and other diagnostics) of the parse and the compile.
+    pub diagnostics: Vec<OxcDiagnostic>,
+}
+
+/// Compile the HMR update module of one component with the options of the
+/// full transform.
+///
+/// Takes the same `options` and `resolved_resources` as
+/// [`transform_angular_file`] and does what it does for the class, from one
+/// parse of `source`: the same metadata extraction (same-file constants and,
+/// with `resolve_imported_values`, imported ones), the same template and style
+/// resolution, and the same template compile (`preserveWhitespaces`, i18n
+/// message ids, Angular version, debug locations for `path`, template
+/// stylesheet links). The update's `template`, `consts`, `decls`, `vars`,
+/// `ngContentSelectors` and `styles` are those of the ɵcmp the transform
+/// emits, with two exceptions:
+///
+/// - constants are numbered from `_c0`, as for the first component of a file
+///   (the update module declares its own);
+/// - `@angular/core` is `i0` (the module binds it) and a `@defer` block whose
+///   class lists `deferredImports` gets no dependency function, since the
+///   dynamic imports would resolve against the module's own URL.
+///
+/// HMR always compiles the full (AOT) output; `jit` and partial
+/// `compilation_mode` are ignored.
+pub fn compile_component_hmr_update(
+    allocator: &Allocator,
+    path: &str,
+    source: &str,
+    input: &ComponentHmrUpdateInput<'_>,
+    options: Option<&TransformOptions>,
+    resolved_resources: Option<&ResolvedResources>,
+) -> ComponentHmrUpdate {
+    let default_options = TransformOptions::default();
+    let options = options.unwrap_or(&default_options);
+    let options_full;
+    let options = if options.jit || options.compilation_mode != crate::CompilationMode::Full {
+        options_full = TransformOptions {
+            jit: false,
+            compilation_mode: crate::CompilationMode::Full,
+            ..options.clone()
+        };
+        &options_full
+    } else {
+        options
+    };
+    let empty_resources = ResolvedResources::default();
+    let resources = resolved_resources.unwrap_or(&empty_resources);
+    let class_name = input.class_name;
+
+    let mut update = ComponentHmrUpdate {
+        component_id: format!("{path}@{class_name}"),
+        ..ComponentHmrUpdate::default()
+    };
+
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, source, source_type).parse();
+    if !parser_ret.diagnostics.is_empty() {
+        update.diagnostics.extend(
+            parser_ret.diagnostics.into_iter().map(|e| OxcDiagnostic::error(e.to_string())),
+        );
+        return update;
+    }
+    let program = &parser_ret.program;
+
+    #[cfg(feature = "cross_file_elision")]
+    let cross_file_analyzer =
+        if options.resolve_imported_values { new_cross_file_analyzer(path, options) } else { None };
+    let string_consts = collect_string_consts(allocator, program);
+    #[cfg(feature = "cross_file_elision")]
+    let string_consts =
+        with_imported_values(string_consts, cross_file_analyzer.as_ref(), path, options);
+
+    let default_class_names = [class_name];
+    let compiled_class_names = input.compiled_class_names.unwrap_or(&default_class_names);
+    let fingerprint = super::hmr_fingerprint::hmr_fingerprint_of_program(
+        program,
+        source,
+        &string_consts,
+        |name| compiled_class_names.contains(&name),
+    )
+    .fingerprint;
+    let source_matches = input.source_fingerprint.is_none_or(|expected| expected == fingerprint);
+    update.fingerprint = Some(fingerprint);
+
+    let Some(class) = program.body.iter().find_map(|stmt| {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => class.as_ref(),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                _ => return None,
+            },
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => class.as_ref(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        class.id.as_ref().is_some_and(|id| id.name == class_name).then_some(class)
+    }) else {
+        return update;
+    };
+    // `jit: true` opts the class out of AOT; the transform compiles no ɵcmp.
+    if find_jit_forced_decorator(class, &string_consts).is_some() {
+        return update;
+    }
+
+    let import_map = build_import_map(allocator, &program.body, options.resolved_imports.as_ref());
+    let Some(mut metadata) = extract_component_metadata(
+        allocator,
+        class,
+        options.implicit_standalone(),
+        &import_map,
+        Some(source),
+        &string_consts,
+    ) else {
+        return update;
+    };
+
+    update.template_url = metadata.template_url.as_ref().map(ToString::to_string);
+    update.style_urls = metadata.style_urls.iter().map(ToString::to_string).collect();
+    let styles_known = metadata.styles_resolved;
+    update.missing_style_urls = resolve_styles(allocator, &mut metadata, Some(resources));
+    let (template, missing_template_url) = resolve_template(&metadata, Some(resources));
+    if missing_template_url.is_some() {
+        update.missing_template_url = missing_template_url;
+        return update;
+    }
+    // An empty template is what an editor's truncate-then-write leaves for a
+    // moment; there is nothing to send until the next save.
+    let Some(template) = template.filter(|template| !template.is_empty()) else {
+        return update;
+    };
+    let template = allocator.alloc_str(&template);
+
+    let (view_queries, content_queries) =
+        extract_class_queries(allocator, class, Some(source), &string_consts);
+    // `i0` like the update module binds it, whatever alias the file needs.
+    let mut namespace_registry = NamespaceRegistry::new(allocator);
+    let compiled = match compile_component_full(
+        allocator,
+        template,
+        &mut metadata,
+        path,
+        source,
+        options,
+        view_queries,
+        content_queries,
+        0,
+        &mut namespace_registry,
+        &import_map,
+        Some(resources),
+        None,
+        None,
+        true,
+    ) {
+        Ok(compiled) => compiled,
+        Err(diagnostics) => {
+            update.diagnostics = diagnostics;
+            return update;
+        }
+    };
+    update.template_style_urls = compiled.template_style_urls;
+    update.missing_style_urls.extend(compiled.missing_link_urls);
+    // `compile_component_full` returns Err for anything that breaks the
+    // output, so what is left does not stop the update.
+    let Some(parts) = compiled.hmr_update else {
+        return update;
+    };
+
+    // A stylesheet that could not be read is not proof the component has no
+    // styles, and neither is an empty answer from a source the running
+    // component was not compiled from: only a complete answer may clear the
+    // live styles. Content that was read is sent either way.
+    let complete = update.missing_style_urls.is_empty() && source_matches;
+    update.styles =
+        (styles_known && (complete || !parts.styles.is_empty())).then_some(parts.styles);
+
+    update.module =
+        Some(crate::hmr::generate_hmr_update_module(&crate::hmr::HmrUpdateModuleOptions {
+            component_id: &update.component_id,
+            class_name,
+            template: Some(crate::hmr::HmrTemplateFields {
+                template_js: &parts.template_js,
+                decls: parts.decls,
+                vars: parts.vars,
+                consts_js: parts.consts_js.as_deref(),
+                ng_content_selectors_js: parts.ng_content_selectors_js.as_deref(),
+            }),
+            styles: update.styles.as_deref(),
+            declarations_js: Some(parts.declarations_js.as_str()).filter(|d| !d.is_empty()),
+        }));
+    update.template_js = parts.template_js;
+    update
 }
 
 /// Compile a component template and generate ɵcmp/ɵfac definitions.
@@ -4848,6 +5278,7 @@ fn compile_component_partial<'a>(
         // URLs at consumer build time.
         template_style_urls: Vec::new(),
         missing_link_urls: Vec::new(),
+        hmr_update: None,
     }
 }
 
@@ -4949,7 +5380,8 @@ fn compile_component_full<'a>(
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
     deferrable_selector: Option<DeferrableSelector<'_>>,
-    import_elision: &ImportElisionAnalyzer<'_>,
+    import_elision: Option<&ImportElisionAnalyzer<'_>>,
+    hmr_update: bool,
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
 
@@ -5037,7 +5469,7 @@ fn compile_component_full<'a>(
     // below, like upstream.
     let mut missing_link_urls = Vec::new();
     let template_style_urls: Vec<String> =
-        r3_result.style_urls.iter().map(|url| url.to_string()).collect();
+        r3_result.style_urls.iter().map(ToString::to_string).collect();
     if let Some(resources) = resolved_resources {
         for style_url in &r3_result.style_urls {
             if let Some(style_contents) = resources.styles.get(style_url.as_str()) {
@@ -5093,6 +5525,7 @@ fn compile_component_full<'a>(
     // selectors; skipped under HMR, like ngc.
     let mut implicitly_deferred_imports = Vec::new();
     if let Some(deferrable_selector) = deferrable_selector
+        && let Some(import_elision) = import_elision
         && !options.hmr
         && let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports
         && raw_imports.entries.iter().all(|entry| matches!(entry, OutputExpression::ReadVar(_)))
@@ -5160,7 +5593,11 @@ fn compile_component_full<'a>(
     // `@defer`.
     let has_defer_block = super::defer_resolver::template_has_defer_block(&r3_result.nodes);
 
-    let defer_resolver_fn = if metadata.deferred_imports.is_empty() {
+    // An HMR update module cannot carry the resolver: its dynamic `import()`s
+    // would resolve against the update module's URL, not the component file.
+    // The update keeps a null dependency function instead (PerComponent mode
+    // below), as `compile_template_for_hmr` always has.
+    let defer_resolver_fn = if metadata.deferred_imports.is_empty() || hmr_update {
         None
     } else if has_defer_block {
         super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
@@ -5174,7 +5611,9 @@ fn compile_component_full<'a>(
     // ingest stage threads `all_deferrable_deps_fn` into each `DeferOp`.
     // Without a resolver, the existing PerBlock-vs-JIT behavior stays in
     // place (and `all_deferrable_deps_fn = None`).
-    let defer_block_deps_emit_mode = if defer_resolver_fn.is_some() {
+    let defer_block_deps_emit_mode = if defer_resolver_fn.is_some()
+        || (hmr_update && !metadata.deferred_imports.is_empty() && has_defer_block)
+    {
         DeferBlockDepsEmitMode::PerComponent
     } else if options.jit {
         DeferBlockDepsEmitMode::PerComponent
@@ -5321,6 +5760,28 @@ fn compile_component_full<'a>(
         declarations_js.push_str(&emitter.emit_statement(decl));
         declarations_js.push('\n');
     }
+
+    // An HMR update replaces the template fields of the live definition, so
+    // it takes them from the definition just built: the same text the full
+    // transform emits. Only the template's declarations go along; the host
+    // binding's belong to fields the update keeps.
+    let hmr_update = hmr_update.then(|| HmrUpdateParts {
+        template_js: cmp_definition_field(&definitions.cmp_definition, "template")
+            .map(|template| emitter.emit_expression(template))
+            .unwrap_or_default(),
+        declarations_js: declarations_js.clone(),
+        consts_js: cmp_definition_field(&definitions.cmp_definition, "consts")
+            .map(|consts| emitter.emit_expression(consts)),
+        decls: job.root.decl_count.unwrap_or(0),
+        vars: job.root.vars.unwrap_or(0),
+        ng_content_selectors_js: cmp_definition_field(
+            &definitions.cmp_definition,
+            "ngContentSelectors",
+        )
+        .map(|selectors| emitter.emit_expression(selectors)),
+        styles: cmp_definition_styles(&definitions.cmp_definition),
+    });
+
     // Emit host binding declarations (pooled constants like pure functions)
     for decl in host_binding_declarations.iter() {
         declarations_js.push_str(&emitter.emit_statement(decl));
@@ -5331,7 +5792,7 @@ fn compile_component_full<'a>(
     // The ɵcmp already contains the template function inline. Only the HMR
     // `template_updates` map reads it, so skip the second template compile
     // otherwise.
-    let template_js = if options.hmr {
+    let template_js = if options.hmr && hmr_update.is_none() {
         Some(
             compile_template_to_js(allocator, template, metadata.class_name.as_str(), file_path)
                 .map_err(|diags| {
@@ -5448,7 +5909,44 @@ fn compile_component_full<'a>(
         implicitly_deferred_imports,
         template_style_urls,
         missing_link_urls,
+        hmr_update,
     })
+}
+
+/// The value of `key` in a `ɵɵdefineComponent({...})` call.
+fn cmp_definition_field<'b, 'a>(
+    cmp_definition: &'b OutputExpression<'a>,
+    key: &str,
+) -> Option<&'b OutputExpression<'a>> {
+    let OutputExpression::InvokeFunction(call) = cmp_definition else { return None };
+    let Some(OutputExpression::LiteralMap(config)) = call.args.first() else { return None };
+    config
+        .entries
+        .iter()
+        .find(|entry| !entry.is_spread && entry.key.as_str() == key)
+        .map(|entry| &entry.value)
+}
+
+/// The finished CSS strings in a `ɵɵdefineComponent({...})` call's `styles`
+/// (encapsulated and minified as configured, empty ones dropped).
+fn cmp_definition_styles(cmp_definition: &OutputExpression<'_>) -> Vec<String> {
+    use crate::output::ast::LiteralValue;
+    let Some(OutputExpression::LiteralArray(styles)) =
+        cmp_definition_field(cmp_definition, "styles")
+    else {
+        return Vec::new();
+    };
+    styles
+        .entries
+        .iter()
+        .filter_map(|style| match style {
+            OutputExpression::Literal(literal) => match &literal.value {
+                LiteralValue::String(style) => Some(style.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
 }
 
 /// Resolve template content from inline or external source.
@@ -5937,6 +6435,8 @@ pub fn compile_template_for_hmr<'a>(
 
     // Extract styles from <style> tags in the template
     let styles: std::vec::Vec<String> = r3_result.styles.iter().map(|s| s.to_string()).collect();
+    let style_urls: std::vec::Vec<String> =
+        r3_result.style_urls.iter().map(ToString::to_string).collect();
 
     // Emit the consts array if present
     // The consts array must be included in HMR updates to ensure the template function's
@@ -6006,6 +6506,7 @@ pub fn compile_template_for_hmr<'a>(
         template_js,
         declarations_js,
         styles,
+        style_urls,
         consts_js,
         decls: job.root.decl_count.unwrap_or(0),
         vars: job.root.vars.unwrap_or(0),

@@ -50,6 +50,49 @@ export declare function compileClassMetadata(
 ): Promise<ClassMetadataNapiCompileResult>
 
 /**
+ * Compile the HMR update module of one component, with the options of the
+ * full transform (async).
+ *
+ * Takes the `source`, `filename`, `options` and `resolvedResources` that
+ * `transformAngularFile` takes, and compiles the update from one parse of
+ * the source: the class's metadata is read like the transform reads it
+ * (imported values included with `resolveImportedValues`), and the template
+ * is compiled with the same options (`preserveWhitespaces`, i18n message
+ * ids, `angularVersion`, `filename` for i18n names and error locations,
+ * template stylesheet links). The module's `template`, `consts`, `decls`,
+ * `vars`, `ngContentSelectors` and `styles` are those of the transform's
+ * ɵcmp, except that constants are numbered from `_c0` and a `@defer` block
+ * of a class with `deferredImports` gets no dependency function.
+ *
+ * Resources the class needs but `resolvedResources` lacks come back in
+ * `missingTemplateUrl` / `missingStyleUrls`: read them and call again.
+ */
+export declare function compileComponentHmrUpdate(
+  source: string,
+  filename: string,
+  className: string,
+  options?: TransformOptions | undefined | null,
+  resolvedResources?: ResolvedResources | undefined | null,
+  hmrOptions?: ComponentHmrUpdateOptions | undefined | null,
+): Promise<ComponentHmrUpdateResult>
+
+/**
+ * Sync version of `compileComponentHmrUpdate`.
+ *
+ * # Errors
+ *
+ * Never: compile errors are reported in the result's `errors`.
+ */
+export declare function compileComponentHmrUpdateSync(
+  source: string,
+  filename: string,
+  className: string,
+  options?: TransformOptions | undefined | null,
+  resolvedResources?: ResolvedResources | undefined | null,
+  hmrOptions?: ComponentHmrUpdateOptions | undefined | null,
+): ComponentHmrUpdateResult
+
+/**
  * Compile a factory function from the provided metadata (async).
  *
  * This generates a factory function that creates instances of the class
@@ -72,6 +115,8 @@ export declare function compileFactory(
  * Compile for HMR (async).
  *
  * This is the async version of `compileForHmrSync`.
+ *
+ * @deprecated Use `compileComponentHmrUpdate`; see `compileForHmrSync`.
  */
 export declare function compileForHmr(
   template: string,
@@ -101,6 +146,12 @@ export declare function compileForHmr(
  * # Returns
  *
  * A tuple of (hmr_module_code, component_id) or errors.
+ *
+ * @deprecated Compiles the template alone, with only the options passed
+ * here: no file path for i18n message names or error locations, and the
+ * caller has to find the template, styles and `preserveWhitespaces` itself.
+ * Use `compileComponentHmrUpdate`, which compiles the update from the
+ * component's source with the transform's options.
  */
 export declare function compileForHmrSync(
   template: string,
@@ -133,6 +184,96 @@ export interface ComponentExtractionResult {
   componentDef?: string
   /** Factory function like `ClassName.ɵfac = function(t) {...}`. */
   factoryDef?: string
+}
+
+/**
+ * Take the HMR fingerprint of a component file, from one parse.
+ *
+ * Only `classNames` (the components `transformAngularFile` compiled) are
+ * read, through Angular's `@Component` found by its `@angular/core` import.
+ * A `template` / `styles` value is left out only when it is one string,
+ * template literal or (for `styles`) array literal. A source with syntax
+ * errors leaves nothing out.
+ *
+ * The result equals `TransformResult.hmrFingerprint` for the same source
+ * and class names, so a build tool can compare the two to decide between an
+ * HMR update (equal: only those values changed) and a full reload.
+ */
+export declare function componentHmrFingerprint(
+  source: string,
+  filename: string,
+  classNames: Array<string>,
+): ComponentHmrFingerprint
+
+/** The HMR fingerprint of a component file. */
+export interface ComponentHmrFingerprint {
+  /**
+   * Hash of the source with the inline `template` / `styles` values of the
+   * named components left out (their quotes or brackets are kept).
+   */
+  fingerprint: string
+  /** The named classes whose `@Component({...})` was read, in source order. */
+  components: Array<string>
+}
+
+/** What `compileComponentHmrUpdate` needs besides the source and options. */
+export interface ComponentHmrUpdateOptions {
+  /**
+   * `TransformResult.hmrFingerprint` of the source the running component
+   * was compiled from. When this source has another fingerprint (another
+   * plugin rewrote the module, say), styles that come out empty are not
+   * trusted to clear the live ones.
+   */
+  sourceFingerprint?: string
+  /**
+   * The class names that fingerprint was taken for: the components the
+   * transform compiled in the file. Defaults to `className` alone.
+   */
+  compiledClassNames?: Array<string>
+}
+
+/** An HMR update for one component. */
+export interface ComponentHmrUpdateResult {
+  /**
+   * The update module, or an empty string when there is nothing to send:
+   * the class is not a compiled `@Component`, its template is empty, its
+   * `templateUrl` is missing from the resources (see `missingTemplateUrl`),
+   * or compiling failed (see `errors`).
+   */
+  hmrModule: string
+  /** The component ID (path@ClassName). */
+  componentId: string
+  /** The template function the module installs, as emitted in the ɵcmp. */
+  templateJs: string
+  /**
+   * The styles the module installs, as emitted in the ɵcmp, or `null` when
+   * they are not known and the module keeps the live ones.
+   */
+  styles?: Array<string>
+  /** The class's `templateUrl`, as written. */
+  templateUrl?: string
+  /** The class's `styleUrl` / `styleUrls` entries, as written. */
+  styleUrls: Array<string>
+  /** The `href` of each stylesheet `<link>` in the template, as written. */
+  templateStyleUrls: Array<string>
+  /**
+   * The `templateUrl` when it was not in the resources. Nothing was
+   * compiled; read it and call again.
+   */
+  missingTemplateUrl?: string
+  /**
+   * `styleUrls` and template `<link>` hrefs that were not in the
+   * resources. Read the ones that can be read and call again.
+   */
+  missingStyleUrls: Array<string>
+  /**
+   * The HMR fingerprint of the source for `compiledClassNames` (as
+   * `componentHmrFingerprint` computes it), or `null` when it did not
+   * parse.
+   */
+  fingerprint?: string
+  /** Parse and compile errors (and other diagnostics). */
+  errors: Array<OxcError>
 }
 
 /** Host metadata extracted from a `@Component` decorator. */
@@ -339,11 +480,13 @@ export declare function extractComponentMetadataSync(
  * Extract templateUrl and styleUrls from all @Component decorators in a file (async).
  *
  * This is the async version of `extractComponentUrlsSync`. Use this when
- * extracting URLs in a non-blocking context.
+ * extracting URLs in a non-blocking context. Pass the `TransformOptions` the
+ * file will be transformed with, so the URLs are read the same way.
  */
 export declare function extractComponentUrls(
   source: string,
   filename: string,
+  options?: TransformOptions | undefined | null,
 ): Promise<ComponentUrls>
 
 /** Extracted component metadata from a `@Component` decorator. */
@@ -572,6 +715,15 @@ export interface HmrCompileResult {
   componentId: string
   /** The compiled template function as JavaScript. */
   templateJs: string
+  /**
+   * The `href` of each stylesheet `<link>` in the template, as written.
+   *
+   * The full transform compiles their contents into the component's styles
+   * (after the decorator's `styleUrls`), so the caller reads them the same
+   * way and compiles again with them in `styles`. `styles` is never
+   * changed here: only the caller can read files.
+   */
+  templateStyleUrls: Array<string>
   /** Compilation errors. */
   errors: Array<OxcError>
 }
@@ -1026,12 +1178,35 @@ export interface TransformResult {
   /**
    * For HMR: each compiled component's `@Component` decorator callee as
    * written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+   *
+   * @deprecated Kept for existing callers; the bundled Vite plugin no
+   * longer reads it. Use `hmrFingerprint` to decide between an HMR update
+   * and a full reload.
    */
   componentDecorators: Record<string, string>
+  /**
+   * For HMR (`hmr: true`): the fingerprint of the source with the inline
+   * `template` / `styles` values of the compiled components left out.
+   * Compare it with `componentHmrFingerprint(newSource, filename,
+   * compiledClassNames).fingerprint` after an edit: equal means only those
+   * values changed, so an HMR update is enough.
+   */
+  hmrFingerprint?: string
   /** Compilation errors. */
   errors: Array<OxcError>
   /** Compilation warnings. */
   warnings: Array<OxcError>
+  /**
+   * The `href` of each stylesheet `<link>` in a compiled template that was
+   * not in `resolvedResources.styles`, as written.
+   *
+   * ngtsc loads these like `styleUrls`, relative to the component file, but
+   * they are only known once the template is parsed. A build tool can read
+   * them, add them to `resolvedResources.styles` and transform again. Each
+   * one also has a COMPONENT_RESOURCE_NOT_FOUND entry in `errors` (one per
+   * component that links it).
+   */
+  missingLinkUrls: Array<string>
   /**
    * `.d.ts` type declarations for Angular classes.
    *
