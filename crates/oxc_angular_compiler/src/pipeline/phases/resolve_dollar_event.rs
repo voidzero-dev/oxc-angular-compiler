@@ -44,87 +44,60 @@ pub fn resolve_dollar_event(job: &mut ComponentCompilationJob<'_>) {
 /// Transform $event in create operations.
 ///
 /// Listener handler ops are transformed as child operations, matching
-/// `transformExpressionsInOp`. Each `LexicalReadExpr('$event')` found is
-/// rewritten to an output `ReadVarExpr`, like Angular's resolveDollarEvent.
+/// `transformExpressionsInOp`. Each listener is walked once: every
+/// `LexicalReadExpr('$event')` found is rewritten to an output `ReadVarExpr`,
+/// like Angular's resolveDollarEvent, and marks the listener as consuming
+/// `$event`, as does a raw AST expression that reads it.
 fn transform_dollar_event_create<'a>(
     ops: &mut crate::ir::list::CreateOpList<'a>,
     expressions: &ExpressionStore<'a>,
     allocator: &'a oxc_allocator::Allocator,
 ) {
     for op in ops.iter_mut() {
+        let found = Cell::new(false);
+        let resolve = |expr: &mut IrExpression<'a>, _flags: VisitorContextFlag| {
+            resolve_dollar_event_in_expr(expr, expressions, allocator, &found);
+        };
         match op {
             CreateOp::Listener(listener) => {
-                // Check handler expression for $event usage
                 if let Some(handler) = &mut listener.handler_expression {
-                    if expression_contains_dollar_event(handler, expressions) {
-                        listener.consumes_dollar_event = true;
-                    }
                     crate::ir::expression::transform_expressions_in_expression(
                         handler,
-                        &|expr, _flags| replace_dollar_event(expr, allocator),
+                        &resolve,
                         VisitorContextFlag::IN_CHILD_OPERATION,
                     );
                 }
-
-                // Check handler ops for $event usage
                 for handler_op in listener.handler_ops.iter_mut() {
-                    let found = Cell::new(false);
                     transform_expressions_in_update_op(
                         handler_op,
-                        &|expr, _flags| {
-                            if expression_contains_dollar_event(expr, expressions) {
-                                found.set(true);
-                            }
-                        },
+                        &resolve,
                         VisitorContextFlag::IN_CHILD_OPERATION,
                     );
-                    if found.get() {
-                        listener.consumes_dollar_event = true;
-                    }
                 }
-                // Rewrite $event reads in handler ops
-                for handler_op in listener.handler_ops.iter_mut() {
-                    transform_expressions_in_update_op(
-                        handler_op,
-                        &|expr, _flags| replace_dollar_event(expr, allocator),
-                        VisitorContextFlag::IN_CHILD_OPERATION,
-                    );
+                if found.get() {
+                    listener.consumes_dollar_event = true;
                 }
             }
+            // Two-way listeners always consume `$event` so they omit this field.
             CreateOp::TwoWayListener(listener) => {
-                // Check handler ops for $event usage
                 for handler_op in listener.handler_ops.iter_mut() {
                     transform_expressions_in_update_op(
                         handler_op,
-                        &|expr, _flags| replace_dollar_event(expr, allocator),
+                        &resolve,
                         VisitorContextFlag::IN_CHILD_OPERATION,
                     );
                 }
             }
             CreateOp::AnimationListener(listener) => {
-                // Check handler ops for $event usage
                 for handler_op in listener.handler_ops.iter_mut() {
-                    let found = Cell::new(false);
                     transform_expressions_in_update_op(
                         handler_op,
-                        &|expr, _flags| {
-                            if expression_contains_dollar_event(expr, expressions) {
-                                found.set(true);
-                            }
-                        },
+                        &resolve,
                         VisitorContextFlag::IN_CHILD_OPERATION,
                     );
-                    if found.get() {
-                        listener.consumes_dollar_event = true;
-                    }
                 }
-                // Rewrite $event reads in handler ops
-                for handler_op in listener.handler_ops.iter_mut() {
-                    transform_expressions_in_update_op(
-                        handler_op,
-                        &|expr, _flags| replace_dollar_event(expr, allocator),
-                        VisitorContextFlag::IN_CHILD_OPERATION,
-                    );
+                if found.get() {
+                    listener.consumes_dollar_event = true;
                 }
             }
             _ => {}
@@ -133,10 +106,20 @@ fn transform_dollar_event_create<'a>(
 }
 
 /// Rewrites `LexicalReadExpr('$event')` to an output `ReadVarExpr` so the read
-/// bypasses name resolution, like Angular's resolveDollarEvent.
-fn replace_dollar_event<'a>(expr: &mut IrExpression<'a>, allocator: &'a oxc_allocator::Allocator) {
-    if let IrExpression::LexicalRead(lexical) = expr {
-        if lexical.name.as_str() == DOLLAR_EVENT {
+/// bypasses name resolution, like Angular's resolveDollarEvent, and records in
+/// `found` that the listener reads `$event`.
+///
+/// The walk visits every IR node, so only this node itself is checked. Raw AST
+/// (`Ast` / `ExpressionRef`) is a leaf to the walk and is searched whole.
+fn resolve_dollar_event_in_expr<'a>(
+    expr: &mut IrExpression<'a>,
+    expressions: &ExpressionStore<'a>,
+    allocator: &'a oxc_allocator::Allocator,
+    found: &Cell<bool>,
+) {
+    match expr {
+        IrExpression::LexicalRead(lexical) if lexical.name.as_str() == DOLLAR_EVENT => {
+            found.set(true);
             *expr = IrExpression::OutputExpr(oxc_allocator::Box::new_in(
                 crate::output::ast::OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                     crate::output::ast::ReadVarExpr {
@@ -148,175 +131,15 @@ fn replace_dollar_event<'a>(expr: &mut IrExpression<'a>, allocator: &'a oxc_allo
                 &allocator,
             ));
         }
-    }
-}
-
-/// Check if an expression contains a $event reference.
-fn expression_contains_dollar_event<'a>(
-    expr: &IrExpression<'a>,
-    expressions: &ExpressionStore<'a>,
-) -> bool {
-    match expr {
-        IrExpression::LexicalRead(lexical) => lexical.name.as_str() == DOLLAR_EVENT,
-        IrExpression::SafeNavigationMigration(m) => {
-            expression_contains_dollar_event(&m.expr, expressions)
+        IrExpression::Ast(ast_expr) if ast_expression_contains_dollar_event(ast_expr) => {
+            found.set(true);
         }
-        IrExpression::SafeTernary(st) => {
-            expression_contains_dollar_event(&st.guard, expressions)
-                || expression_contains_dollar_event(&st.expr, expressions)
+        IrExpression::ExpressionRef(id)
+            if ast_expression_contains_dollar_event(expressions.get(*id)) =>
+        {
+            found.set(true);
         }
-        IrExpression::Ternary(t) => {
-            expression_contains_dollar_event(&t.condition, expressions)
-                || expression_contains_dollar_event(&t.true_expr, expressions)
-                || expression_contains_dollar_event(&t.false_expr, expressions)
-        }
-        IrExpression::SafePropertyRead(sp) => {
-            expression_contains_dollar_event(&sp.receiver, expressions)
-        }
-        IrExpression::SafeKeyedRead(sk) => {
-            expression_contains_dollar_event(&sk.receiver, expressions)
-                || expression_contains_dollar_event(&sk.index, expressions)
-        }
-        IrExpression::SafeInvokeFunction(sf) => {
-            expression_contains_dollar_event(&sf.receiver, expressions)
-                || sf.args.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::AssignTemporary(at) => {
-            expression_contains_dollar_event(&at.expr, expressions)
-        }
-        IrExpression::PipeBinding(pb) => {
-            pb.args.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::PipeBindingVariadic(pbv) => {
-            expression_contains_dollar_event(&pbv.args, expressions)
-        }
-        IrExpression::PureFunction(pf) => {
-            pf.args.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::Interpolation(i) => {
-            i.expressions.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::RestoreView(rv) => {
-            use crate::ir::expression::RestoreViewTarget;
-            if let RestoreViewTarget::Dynamic(e) = &rv.view {
-                expression_contains_dollar_event(e, expressions)
-            } else {
-                false
-            }
-        }
-        IrExpression::ResetView(rv) => expression_contains_dollar_event(&rv.expr, expressions),
-        IrExpression::ConditionalCase(cc) => {
-            cc.expr.as_ref().is_some_and(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::TwoWayBindingSet(tbs) => {
-            expression_contains_dollar_event(&tbs.target, expressions)
-                || expression_contains_dollar_event(&tbs.value, expressions)
-        }
-        IrExpression::StoreLet(sl) => expression_contains_dollar_event(&sl.value, expressions),
-        IrExpression::ConstCollected(cc) => expression_contains_dollar_event(&cc.expr, expressions),
-        IrExpression::Binary(binary) => {
-            expression_contains_dollar_event(&binary.lhs, expressions)
-                || expression_contains_dollar_event(&binary.rhs, expressions)
-        }
-        IrExpression::ResolvedPropertyRead(rpr) => {
-            expression_contains_dollar_event(&rpr.receiver, expressions)
-        }
-        IrExpression::ResolvedBinary(rb) => {
-            expression_contains_dollar_event(&rb.left, expressions)
-                || expression_contains_dollar_event(&rb.right, expressions)
-        }
-        IrExpression::ResolvedCall(rc) => {
-            expression_contains_dollar_event(&rc.receiver, expressions)
-                || rc.args.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        IrExpression::ResolvedKeyedRead(rkr) => {
-            expression_contains_dollar_event(&rkr.receiver, expressions)
-                || expression_contains_dollar_event(&rkr.key, expressions)
-        }
-        IrExpression::ResolvedSafePropertyRead(rspr) => {
-            expression_contains_dollar_event(&rspr.receiver, expressions)
-        }
-        // Check AST expressions for $event
-        IrExpression::Ast(ast_expr) => ast_expression_contains_dollar_event(ast_expr),
-        // DerivedLiteralArray: check entries
-        IrExpression::DerivedLiteralArray(arr) => {
-            arr.entries.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        // DerivedLiteralMap: check values
-        IrExpression::DerivedLiteralMap(map) => {
-            map.values.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-        // ExpressionRef: dereference to stored AngularExpression and check it
-        IrExpression::ExpressionRef(id) => {
-            let stored_expr = expressions.get(*id);
-            ast_expression_contains_dollar_event(stored_expr)
-        }
-        // Leaf expressions without nested content
-        IrExpression::Reference(_)
-        | IrExpression::Context(_)
-        | IrExpression::NextContext(_)
-        | IrExpression::GetCurrentView(_)
-        | IrExpression::ReadVariable(_)
-        | IrExpression::PureFunctionParameter(_)
-        | IrExpression::Empty(_)
-        | IrExpression::ReadTemporary(_)
-        | IrExpression::SlotLiteral(_)
-        | IrExpression::ConstReference(_)
-        | IrExpression::ContextLetReference(_)
-        | IrExpression::TrackContext(_)
-        | IrExpression::OutputExpr(_) => false, // OutputExpr is already converted, no $event
-
-        // LiteralArray: check all elements
-        IrExpression::LiteralArray(arr) => {
-            arr.elements.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-
-        // LiteralMap: check all values
-        IrExpression::LiteralMap(map) => {
-            map.values.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-
-        // Not expression: check inner expression
-        IrExpression::Not(not) => expression_contains_dollar_event(&not.expr, expressions),
-
-        // Unary expression: check inner expression
-        IrExpression::Unary(unary) => expression_contains_dollar_event(&unary.expr, expressions),
-
-        // Typeof expression: check inner expression
-        IrExpression::Typeof(typeof_expr) => {
-            expression_contains_dollar_event(&typeof_expr.expr, expressions)
-        }
-
-        // Void expression: check inner expression
-        IrExpression::Void(void_expr) => {
-            expression_contains_dollar_event(&void_expr.expr, expressions)
-        }
-
-        // ResolvedTemplateLiteral: check all embedded expressions
-        IrExpression::ResolvedTemplateLiteral(rtl) => {
-            rtl.expressions.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-
-        // TaggedTemplateLiteral: check the tag and embedded expressions
-        IrExpression::TaggedTemplateLiteral(ttl) => {
-            expression_contains_dollar_event(&ttl.tag, expressions)
-                || ttl.expressions.iter().any(|e| expression_contains_dollar_event(e, expressions))
-        }
-
-        // SpreadElement: check the inner expression
-        IrExpression::SpreadElement(spread) => {
-            expression_contains_dollar_event(&spread.expr, expressions)
-        }
-
-        // ArrowFunction: check the body expression
-        IrExpression::ArrowFunction(arrow_fn) => {
-            expression_contains_dollar_event(&arrow_fn.body, expressions)
-        }
-
-        // Parenthesized: check the inner expression
-        IrExpression::Parenthesized(paren) => {
-            expression_contains_dollar_event(&paren.expr, expressions)
-        }
+        _ => {}
     }
 }
 

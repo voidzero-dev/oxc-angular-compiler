@@ -6,6 +6,8 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/generate_arrow_functions.ts`.
 
+use std::cell::Cell;
+
 use crate::ir::enums::OpKind;
 use crate::ir::expression::{
     ArrowFunctionExpr, IrExpression, VisitorContextFlag, transform_expressions_in_create_op,
@@ -21,6 +23,8 @@ use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilati
 /// 1. They need to be able to access $event.
 /// 2. We don't need to store them.
 pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
+    let found = Cell::new(false);
+
     // Process each view
     let view_xrefs: Vec<_> = job.all_views().map(|v| v.xref).collect();
 
@@ -32,7 +36,7 @@ pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
                 if !is_listener_op(op) {
                     transform_expressions_in_create_op(
                         op,
-                        &|expr, flags| add_arrow_function(expr, flags),
+                        &|expr, flags| add_arrow_function(expr, flags, &found),
                         VisitorContextFlag::NONE,
                     );
                 }
@@ -42,13 +46,14 @@ pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
             for op in view.update.iter_mut() {
                 transform_expressions_in_update_op(
                     op,
-                    &|expr, flags| add_arrow_function(expr, flags),
+                    &|expr, flags| add_arrow_function(expr, flags, &found),
                     VisitorContextFlag::NONE,
                 );
             }
         }
     }
 
+    job.has_hoisted_arrow_functions = found.get();
     collect_arrow_functions(job);
 }
 
@@ -57,7 +62,12 @@ pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
 ///
 /// The list holds pointers into the expression tree, and phases that rewrite expressions
 /// move arrow functions around, so phases that walk `functions` refresh it first.
+///
+/// When no arrow function was hoisted, every list is already empty and stays so.
 pub fn collect_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
+    if !job.has_hoisted_arrow_functions {
+        return;
+    }
     let view_xrefs: Vec<_> = job.all_views().map(|v| v.xref).collect();
     for xref in view_xrefs {
         if let Some(view) = job.view_mut(xref) {
@@ -82,16 +92,17 @@ fn is_listener_op(op: &CreateOp<'_>) -> bool {
     )
 }
 
-/// Marks a user-written arrow function as hoisted.
+/// Marks a user-written arrow function as hoisted, recording in `found` that one was.
 ///
 /// Arrow functions nested inside another arrow function are part of that function's
 /// body and stay in place.
-fn add_arrow_function(expr: &mut IrExpression<'_>, flags: VisitorContextFlag) {
+fn add_arrow_function(expr: &mut IrExpression<'_>, flags: VisitorContextFlag, found: &Cell<bool>) {
     if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
         return;
     }
     if let IrExpression::ArrowFunction(arrow_fn) = expr {
         arrow_fn.hoisted = true;
+        found.set(true);
     }
 }
 
@@ -101,12 +112,14 @@ fn add_arrow_function(expr: &mut IrExpression<'_>, flags: VisitorContextFlag) {
 /// template and host compilations. Host bindings can contain arrow
 /// function expressions (e.g., in @HostBinding values or event handlers).
 pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>) {
+    let found = Cell::new(false);
+
     // Process create operations (skip listeners)
     for op in job.root.create.iter_mut() {
         if !is_listener_op(op) {
             transform_expressions_in_create_op(
                 op,
-                &|expr, flags| add_arrow_function(expr, flags),
+                &|expr, flags| add_arrow_function(expr, flags, &found),
                 VisitorContextFlag::NONE,
             );
         }
@@ -116,13 +129,14 @@ pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>
     for op in job.root.update.iter_mut() {
         transform_expressions_in_update_op(
             op,
-            &|expr, flags| add_arrow_function(expr, flags),
+            &|expr, flags| add_arrow_function(expr, flags, &found),
             VisitorContextFlag::NONE,
         );
     }
 
     // Collect arrow functions into the root unit's functions set.
     // Only hoisted arrows are collected, matching the template path.
+    job.has_hoisted_arrow_functions = found.get();
     collect_arrow_functions_for_host(job);
 }
 
@@ -130,6 +144,9 @@ pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>
 /// currently in its operations, mirroring [`collect_arrow_functions`] for
 /// template jobs.
 pub fn collect_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>) {
+    if !job.has_hoisted_arrow_functions {
+        return;
+    }
     job.root.functions.clear();
     for ptr in collect_hoisted_arrow_functions(&mut job.root.create, &mut job.root.update) {
         job.root.functions.push(ptr);

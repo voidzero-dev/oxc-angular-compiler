@@ -153,6 +153,8 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
     let mut message_const_indices: FxHashMap<XrefId, u32> = FxHashMap::default();
     // Map: i18n_context xref -> i18n variable name (for attribute bindings)
     let mut i18n_var_names_by_context: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
+    // Map: i18n_context xref -> i18n variable name, for contexts owning an extracted attribute
+    let mut attr_var_names_by_context: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
     // Counter for unique variable names
     let mut i18n_var_counter: usize = 0;
@@ -225,36 +227,33 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
             // This is critical for const_collection to NOT deduplicate attribute arrays that
             // contain different i18n variables.
             // Ported from Angular's i18n_const_collection.ts lines 140-144.
+            // The attributes are updated in one pass once every message is serialized.
             if extracted_attributes_by_i18n_context.contains_key(&ctx_xref) {
-                // Iterate through all views to find and update matching ExtractedAttribute ops
-                let view_xrefs_for_attr_update: Vec<XrefId> =
-                    job.all_views().map(|v| v.xref).collect();
+                attr_var_names_by_context.insert(ctx_xref, var_name_atom);
+            }
+        }
+    }
 
-                for view_xref in view_xrefs_for_attr_update {
-                    if let Some(view) = job.view_mut(view_xref) {
-                        for op in view.create.iter_mut() {
-                            if let CreateOp::ExtractedAttribute(attr_op) = op {
-                                if attr_op.i18n_context == Some(ctx_xref) {
-                                    // Update the value to reference the i18n variable
-                                    let var_expr =
-                                        OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                                            ReadVarExpr {
-                                                name: var_name_atom.clone(),
-                                                source_span: None,
-                                            },
-                                            &allocator,
-                                        ));
-                                    attr_op.value = Some(oxc_allocator::Box::new_in(
-                                        crate::ir::expression::IrExpression::OutputExpr(
-                                            oxc_allocator::Box::new_in(var_expr, &allocator),
-                                        ),
-                                        &allocator,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
+    // Point each i18n extracted attribute at its message's i18n variable.
+    if !attr_var_names_by_context.is_empty() {
+        for view in job.all_views_mut() {
+            for op in view.create.iter_mut() {
+                let CreateOp::ExtractedAttribute(attr_op) = op else { continue };
+                let Some(var_name) =
+                    attr_op.i18n_context.and_then(|ctx| attr_var_names_by_context.get(&ctx))
+                else {
+                    continue;
+                };
+                let var_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                    ReadVarExpr { name: *var_name, source_span: None },
+                    &allocator,
+                ));
+                attr_op.value = Some(oxc_allocator::Box::new_in(
+                    crate::ir::expression::IrExpression::OutputExpr(oxc_allocator::Box::new_in(
+                        var_expr, &allocator,
+                    )),
+                    &allocator,
+                ));
             }
         }
     }
