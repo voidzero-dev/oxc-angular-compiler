@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import { linkAngularPackageSync, type AngularVersion } from '../index.js'
 import { angularLinkerPlugin } from '../vite-plugin/angular-linker-plugin.js'
-import { angular } from '../vite-plugin/index.js'
+import { angular, type PluginOptions } from '../vite-plugin/index.js'
 
 /**
  * Minimal Angular partial declaration fixtures that simulate the structure
@@ -397,15 +397,35 @@ describe('linker: sourcemap', () => {
     expect(JSON.parse(result.map).sources).toEqual([id])
   })
 
-  it('forwards angular() sourceMap to the linker plugin', async () => {
-    const link = async (sourceMap: boolean) => {
+  it('keys the dependency optimizer cache on sourcemap', () => {
+    // The load hook returns `{ code, map }` instead of a string, so prebundled deps
+    // must be rebuilt when the option changes.
+    const nameFor = (options: Parameters<typeof angularLinkerPlugin>[0]) =>
+      (angularLinkerPlugin(options) as any).config({}, { command: 'serve' }).optimizeDeps
+        .rolldownOptions.plugins[0].name
+
+    expect(nameFor({ sourcemap: false })).toBe('angular-linker')
+    expect(nameFor({ sourcemap: true })).toBe('angular-linker+map')
+    expect(nameFor({ angularVersion: { major: 22, minor: 2, patch: 2 }, sourcemap: true })).toBe(
+      'angular-linker@22.2.2+map',
+    )
+  })
+
+  it('follows angular() sourceMap.vendor, like Angular CLI', async () => {
+    const link = async (sourceMap: PluginOptions['sourceMap']) => {
       const plugin = angular({ sourceMap }).find(
         (candidate) => candidate.name === '@oxc-angular/vite-linker',
       ) as any
       return plugin.transform.handler.call({}, PIPE_CHUNK, id)
     }
 
-    expect((await link(false)).map).toBeNull()
-    expect(JSON.parse((await link(true)).map).sources).toEqual([id])
+    // Vendor maps are off by default and `sourceMap: true` only covers scripts.
+    expect((await link(undefined)).map).toBeNull()
+    expect((await link(true)).map).toBeNull()
+    expect((await link({ scripts: true })).map).toBeNull()
+    expect((await link({ scripts: true, vendor: false })).map).toBeNull()
+    expect((await link({ scripts: false, vendor: true })).map).toBeNull()
+    expect(JSON.parse((await link({ scripts: true, vendor: true })).map).sources).toEqual([id])
+    expect(JSON.parse((await link({ vendor: true })).map).sources).toEqual([id])
   })
 })

@@ -111,11 +111,16 @@ export interface AngularLinkerPluginOptions {
  * `optimizeDeps.rolldownOptions.plugins`, not their options, into the optimizer
  * cache key, so the version is part of the name: changing `angularVersion`
  * re-links prebundled deps instead of reusing ones linked for another version.
+ * `sourcemap` changes what the load hook returns, so it adds a `+map` suffix.
  */
-function optimizerPluginName(angularVersion: AngularVersion | undefined): string {
-  if (!angularVersion) return 'angular-linker'
+function optimizerPluginName(
+  angularVersion: AngularVersion | undefined,
+  sourcemap: boolean,
+): string {
+  const map = sourcemap ? '+map' : ''
+  if (!angularVersion) return `angular-linker${map}`
   const { major, minor, patch, prerelease } = angularVersion
-  return `angular-linker@${major}.${minor}.${patch}${prerelease != null ? `-${prerelease}` : ''}`
+  return `angular-linker@${major}.${minor}.${patch}${prerelease != null ? `-${prerelease}` : ''}${map}`
 }
 
 export function angularLinkerPlugin({
@@ -145,7 +150,7 @@ export function angularLinkerPlugin({
             },
             plugins: [
               {
-                name: optimizerPluginName(angularVersion),
+                name: optimizerPluginName(angularVersion, sourcemap),
                 load: {
                   filter: {
                     id: /\.[cm]?js$/,
