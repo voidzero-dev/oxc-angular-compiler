@@ -1,0 +1,23 @@
+napi/angular-compiler/e2e/compare/fixtures/regressions/template-parser-interpolation.fixture.ts
+  s_91a9eec7496df1::t_5ba0961ca7b3ae 1-80
+crates/oxc_angular_compiler/src/parser/expression/parser.rs
+  s_91a9eec7496df1::t_b7def602946044 26-33,1010-1017
+crates/oxc_angular_compiler/src/transform/html_to_r3.rs
+  s_91a9eec7496df1::t_0559af84cba71c 31,1512-1514,1693-1695,1703,1705,1712,1714-1715,1717-1738,3430-3431,3433,3436-3443,4673-4674,4683-4684,4702-4706,4724-4732,4778,4788-4789,4807-4811,4826-4834,4869-4871,4874,4883,4885,4891-4893,4895-4905,4932,4942,5691-5692,5719-5792
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "601dcc99c6ea523fa2d451b9e39eb982acc7587f",
+  "prompts": {},
+  "sessions": {
+    "s_91a9eec7496df1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7db0fd5a3cbcecb9",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
