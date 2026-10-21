@@ -20,12 +20,12 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:MultiStyledComponent,s
     },styles:[".first[_ngcontent-%COMP%] { color: blue; }",".second[_ngcontent-%COMP%] { background: white; }"]});
 }
 (() =>{
-  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(MultiStyledComponent,
-      {className:"MultiStyledComponent",filePath:"multi-styled.component.ts",lineNumber:12}));
-})();
-(() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(MultiStyledComponent,
       [{type:Component,args:[{selector:"app-multi-styled",template:"<div>Content</div>",
           styles:[".first { color: blue; }",".second { background: white; }"]}]}],
       null,null));
+})();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(MultiStyledComponent,
+      {className:"MultiStyledComponent",filePath:"multi-styled.component.ts",lineNumber:12}));
 })();

@@ -16258,6 +16258,42 @@ export class M {}
 }
 
 #[test]
+fn test_ng_module_class_metadata_precedes_scope() {
+    // ngtsc's `insertMetadataStatement` unshifts ɵsetClassMetadata in front
+    // of the ɵmod statements, so it comes before the ɵɵsetNgModuleScope IIFE.
+    let allocator = Allocator::default();
+    let source = r"
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+@NgModule({ imports: [CommonModule] })
+export class M {}
+";
+    let result = transform_angular_file(&allocator, "m.module.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let metadata = result.code.find("ɵsetClassMetadata(M").expect("setClassMetadata");
+    let scope = result.code.find("ɵɵsetNgModuleScope(M").expect("setNgModuleScope");
+    assert!(metadata < scope, "setClassMetadata should come first. Got:\n{}", result.code);
+}
+
+#[test]
+fn test_component_class_metadata_precedes_debug_info() {
+    // ngtsc's `compileResults` pushes the class metadata, then the debug info.
+    // The debug info line counts `\r\n`, `\r`, U+2028 and U+2029 like
+    // TypeScript's `computeLineStarts`.
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';\r\n// \u{2028}\r@Component({ selector: 'c', template: '' })\r\nexport class C {}\n";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let metadata = result.code.find("ɵsetClassMetadata(C").expect("setClassMetadata");
+    let debug_info = result.code.find("ɵsetClassDebugInfo(C").expect("setClassDebugInfo");
+    assert!(metadata < debug_info, "setClassMetadata should come first. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("lineNumber:5"),
+        "class is on line 5 by TypeScript's count. Got:\n{}",
+        result.code
+    );
+}
 fn test_jit_true_ng_module_skips_aot() {
     let allocator = Allocator::default();
     let source = r"

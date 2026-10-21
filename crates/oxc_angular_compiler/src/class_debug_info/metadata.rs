@@ -62,3 +62,56 @@ impl<'a> R3ClassDebugInfo<'a> {
         self
     }
 }
+
+/// The 1-indexed line of byte `offset` in `source`, counting line breaks the
+/// way TypeScript's `computeLineStarts` does: `\r\n`, `\r`, `\n`, U+2028 and
+/// U+2029 each end a line.
+///
+/// ngtsc computes `ɵsetClassDebugInfo`'s `lineNumber` with
+/// `getLineAndCharacterOfPosition`, which uses those line starts.
+pub fn line_number_at(source: &str, offset: usize) -> u32 {
+    let bytes = &source.as_bytes()[..offset.min(source.len())];
+    let mut line = 1u32;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\r' => {
+                line += 1;
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    i += 1;
+                }
+            }
+            b'\n' => line += 1,
+            // U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are
+            // E2 80 A8 / E2 80 A9 in UTF-8.
+            0xE2 if bytes.get(i + 1) == Some(&0x80)
+                && matches!(bytes.get(i + 2), Some(&(0xA8 | 0xA9))) =>
+            {
+                line += 1;
+                i += 2;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_number_at;
+
+    #[test]
+    fn counts_typescript_line_breaks() {
+        assert_eq!(line_number_at("class A {}", 0), 1);
+        assert_eq!(line_number_at("a\nb\nclass", 4), 3);
+        // `\r\n` is one line break, a lone `\r` is another.
+        assert_eq!(line_number_at("a\r\nb\rclass", 6), 3);
+        // U+2028 and U+2029 end lines too.
+        let src = "a\u{2028}b\u{2029}class";
+        assert_eq!(line_number_at(src, src.find("class").unwrap()), 3);
+        // Other non-ASCII characters do not.
+        let src = "é\u{2027}class";
+        assert_eq!(line_number_at(src, src.find("class").unwrap()), 1);
+    }
+}
