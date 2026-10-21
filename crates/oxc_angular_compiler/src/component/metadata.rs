@@ -578,6 +578,11 @@ pub struct HostDirectiveMetadata<'a> {
 
     /// Whether this is a forward reference (requires wrapping in a function).
     pub is_forward_reference: bool,
+
+    /// Whether `inputs` or `outputs` was written, even as an empty array.
+    /// ngtsc keeps those as non-null mappings, so the entry is passed to
+    /// `ɵɵHostDirectivesFeature` as `{ directive }` instead of the bare class.
+    pub has_mapping_keys: bool,
 }
 
 impl<'a> HostDirectiveMetadata<'a> {
@@ -589,6 +594,7 @@ impl<'a> HostDirectiveMetadata<'a> {
             inputs: Vec::new_in(&allocator),
             outputs: Vec::new_in(&allocator),
             is_forward_reference: false,
+            has_mapping_keys: false,
         }
     }
 

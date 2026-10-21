@@ -32,7 +32,6 @@ export interface KnownDifference {
   reasons: string[]
 }
 
-const HOST_ATTRS_ORDER = 'hostAttrs are emitted in a different order'
 const CSS_WS = 'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
 const DEBUG_NAME =
   'signal(), input() and the other signal APIs lack the ngDevMode `debugName` argument ngtsc adds to class fields'
@@ -154,10 +153,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     ],
     reasons: [DOM_ONLY],
   },
-  'full-transform/full-transform-host-attribute': {
-    fields: ['HostAttributeComponent.ɵcmp'],
-    reasons: [HOST_ATTRS_ORDER],
-  },
   'full-transform/full-transform-onpush': {
     fields: ['OnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY],
@@ -165,16 +160,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'full-transform/transform-api-onpush': {
     fields: ['OnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY],
-  },
-  'host-bindings/host-attribute': {
-    fields: ['HostAttributeComponent.ɵcmp'],
-    reasons: [HOST_ATTRS_ORDER],
-  },
-  'host-directives/host-directives-empty-mappings': {
-    fields: ['EmptyMappingsComponent.ɵcmp'],
-    reasons: [
-      'HostDirectivesFeature receives the directive class where Angular passes { directive }',
-    ],
   },
   'host-directives/host-directives-with-change-detection': {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],

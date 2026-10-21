@@ -173,6 +173,128 @@ impl<'a> R3HostMetadata<'a> {
     }
 }
 
+// =============================================================================
+// Host binding merge (shared by @Directive and @Component)
+// =============================================================================
+
+/// The `@HostBinding` and `@HostListener` members of a class, keyed like `host:`
+/// entries: `[hostPropertyName]` → member name, and `(eventName)` →
+/// `member(args)`.
+pub struct MemberHostBindings<'a> {
+    /// `[hostPropertyName]` → member name, for each `@HostBinding`.
+    pub properties: std::vec::Vec<(Ident<'a>, Ident<'a>)>,
+    /// `(eventName)` → `member(args)`, for each `@HostListener`.
+    pub listeners: std::vec::Vec<(Ident<'a>, Ident<'a>)>,
+}
+
+impl<'a> MemberHostBindings<'a> {
+    /// Reads the `@HostBinding` / `@HostListener` members of `class`, in
+    /// member order (the order ngtsc's `filterToMembersWithDecorator` visits).
+    pub fn of(
+        allocator: &'a Allocator,
+        class: &'a Class<'a>,
+        consts: Option<&super::StringConsts<'a>>,
+    ) -> Self {
+        let wrap = |open: char, name: &str, close: char| {
+            Ident::from(allocator.alloc_str(&format!("{open}{name}{close}")))
+        };
+        let properties =
+            super::property_decorators::extract_host_bindings_in(allocator, class, consts)
+                .into_iter()
+                .map(|(host_prop, class_prop)| (wrap('[', host_prop.as_str(), ']'), class_prop))
+                .collect();
+        // `bindings.listeners[eventName] = `${member.name}(${args.join(',')})``
+        let listeners =
+            super::property_decorators::extract_host_listeners_in(allocator, class, consts)
+                .into_iter()
+                .map(|(event_name, method_name, args)| {
+                    let args = args.iter().map(Ident::as_str).collect::<std::vec::Vec<_>>();
+                    let handler = format!("{}({})", method_name.as_str(), args.join(","));
+                    (
+                        wrap('(', event_name.as_str(), ')'),
+                        Ident::from(allocator.alloc_str(&handler)),
+                    )
+                })
+                .collect();
+        Self { properties, listeners }
+    }
+
+    /// Whether the class has no `@HostBinding` / `@HostListener` member.
+    pub fn is_empty(&self) -> bool {
+        self.properties.is_empty() && self.listeners.is_empty()
+    }
+}
+
+/// Merges the `@HostBinding` / `@HostListener` members into the bindings read
+/// from `host:`, the way ngtsc's `extractHostBindings` does, and puts every
+/// kind in the order ngtsc emits it.
+///
+/// ngtsc keeps each kind in a plain object (`parseHostBindings`) and assigns
+/// each member into it (`bindings.properties[name] = ...`), so:
+/// - a member replaces the `host:` entry (or the earlier member) with the same
+///   key, where that entry was, and each key is bound once;
+/// - the entries are in the order they were first written, except that keys
+///   that are array indices (`'2'`, `'[10]'`) come first, in ascending order,
+///   like the keys of any JS object.
+///
+/// Used by both the directive and the component metadata, so `host:` and the
+/// member decorators combine the same way for both.
+pub fn merge_host_bindings<'a, V>(
+    properties: &mut Vec<'a, (Ident<'a>, Ident<'a>)>,
+    listeners: &mut Vec<'a, (Ident<'a>, Ident<'a>)>,
+    attributes: &mut Vec<'a, (Ident<'a>, V)>,
+    members: MemberHostBindings<'a>,
+) {
+    fn upsert<'a>(entries: &mut Vec<'a, (Ident<'a>, Ident<'a>)>, key: Ident<'a>, value: Ident<'a>) {
+        match entries.iter_mut().find(|(k, _)| *k == key) {
+            Some(entry) => entry.1 = value,
+            None => entries.push((key, value)),
+        }
+    }
+    for (key, value) in members.properties {
+        upsert(properties, key, value);
+    }
+    for (key, value) in members.listeners {
+        upsert(listeners, key, value);
+    }
+    sort_like_object_keys(properties, |key| strip_host_key(key, '[', ']'));
+    sort_like_object_keys(listeners, |key| strip_host_key(key, '(', ')'));
+    sort_like_object_keys(attributes, |key| key);
+}
+
+/// `key` without the brackets of a `[property]` / `(event)` host key: the key
+/// ngtsc's `parseHostBindings` stores the binding under.
+fn strip_host_key(key: &str, open: char, close: char) -> &str {
+    key.strip_prefix(open).and_then(|k| k.strip_suffix(close)).unwrap_or(key)
+}
+
+/// Puts `entries` in the order a JS object enumerates the same keys (written
+/// once each): array-index keys first in ascending order, then the rest in
+/// insertion order (ECMAScript's `OrdinaryOwnPropertyKeys`).
+pub(super) fn sort_like_object_keys<'a, V>(
+    entries: &mut Vec<'a, (Ident<'a>, V)>,
+    object_key: impl Fn(&str) -> &str,
+) {
+    // A stable sort, so the other keys keep their order.
+    if entries.iter().any(|(key, _)| array_index(object_key(key.as_str())).is_some()) {
+        entries.sort_by_key(|(key, _)| {
+            array_index(object_key(key.as_str())).map_or((1, 0), |index| (0, index))
+        });
+    }
+}
+
+/// The value of `key` when it's an array index: the canonical decimal form of
+/// an integer below 2³² − 1.
+fn array_index(key: &str) -> Option<u32> {
+    if key.is_empty() || key.len() > 10 || !key.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if key.len() > 1 && key.starts_with('0') {
+        return None;
+    }
+    key.parse::<u32>().ok().filter(|&n| n != u32::MAX)
+}
+
 /// Host directive metadata.
 ///
 /// Corresponds to Angular's `R3HostDirectiveMetadata` interface.
@@ -183,6 +305,11 @@ pub struct R3HostDirectiveMetadata<'a> {
 
     /// Whether the expression is a forward reference.
     pub is_forward_reference: bool,
+
+    /// Whether `inputs` or `outputs` was written, even as an empty array.
+    /// ngtsc keeps those as non-null mappings, so the entry is passed to
+    /// `ɵɵHostDirectivesFeature` as `{ directive }` instead of the bare class.
+    pub has_mapping_keys: bool,
 
     /// Inputs from the host directive that will be exposed on the host.
     /// Key: public name, Value: internal name
@@ -476,39 +603,16 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
             self = self.add_query(query);
         }
 
-        // Extract host bindings from @HostBinding
-        // Wrap with brackets: "class.active" -> "[class.active]"
-        let host_bindings =
-            super::property_decorators::extract_host_bindings_in(allocator, class, consts);
-        for (host_prop, class_prop) in host_bindings {
-            // Add to host.properties with wrapped key
-            let wrapped_key =
-                Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
-            self.host.properties.push((wrapped_key, class_prop));
-        }
-
-        // Extract host listeners from @HostListener
-        // Wrap event name with parentheses and build method expression with args
-        // Reference: Angular's shared.ts:713 - `bindings.listeners[eventName] = \`${member.name}(${args.join(',')})\``
-        let host_listeners =
-            super::property_decorators::extract_host_listeners_in(allocator, class, consts);
-        for (event_name, method_name, args) in host_listeners {
-            // Wrap event name: "click" -> "(click)"
-            let wrapped_key =
-                Ident::from(allocator.alloc_str(&format!("({})", event_name.as_str())));
-
-            // Build method expression with args: "handleClick" + ["$event"] -> "handleClick($event)"
-            let method_expr = if args.is_empty() {
-                Ident::from(allocator.alloc_str(&format!("{}()", method_name.as_str())))
-            } else {
-                let args_str: String =
-                    args.iter().map(|a| a.as_str()).collect::<std::vec::Vec<_>>().join(",");
-                Ident::from(allocator.alloc_str(&format!("{}({})", method_name.as_str(), args_str)))
-            };
-
-            // Add to host.listeners
-            self.host.listeners.push((wrapped_key, method_expr));
-        }
+        // Merge @HostBinding / @HostListener into the `host:` bindings (set
+        // with `Self::host` beforehand, if any), as ngtsc does.
+        let members = MemberHostBindings::of(allocator, class, consts);
+        let host = &mut self.host;
+        merge_host_bindings(
+            &mut host.properties,
+            &mut host.listeners,
+            &mut host.attributes,
+            members,
+        );
 
         self
     }

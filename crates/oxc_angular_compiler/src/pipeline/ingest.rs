@@ -49,7 +49,8 @@ use crate::ir::ops::{
 };
 use crate::output::ast::{OutputExpression, ReadVarExpr};
 use crate::pipeline::compilation::{AliasVariable, ContextVariable};
-use rustc_hash::{FxHashMap, FxHashSet};
+use indexmap::IndexMap;
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::cell::RefCell;
 
 /// Options for ingesting a component template.
@@ -3699,10 +3700,15 @@ pub struct HostBindingInput<'a> {
     pub properties: Vec<'a, R3BoundAttribute<'a>>,
     /// Static host attributes (`attr="value"`).
     /// Uses OutputExpression to match TypeScript's `{[key: string]: o.Expression}`.
-    pub attributes: FxHashMap<Ident<'a>, crate::output::ast::OutputExpression<'a>>,
+    /// Insertion-ordered like that object, since the order is the `hostAttrs` order.
+    pub attributes: HostAttributes<'a>,
     /// Host event bindings (`(event)="handler"`).
     pub events: Vec<'a, R3BoundEvent<'a>>,
 }
+
+/// The static host attributes of a [`HostBindingInput`], in `hostAttrs` order.
+pub type HostAttributes<'a> =
+    IndexMap<Ident<'a>, crate::output::ast::OutputExpression<'a>, FxBuildHasher>;
 
 /// Stores an expression from a host binding and returns an IrExpression that references it.
 fn host_store_and_ref_expr<'a>(

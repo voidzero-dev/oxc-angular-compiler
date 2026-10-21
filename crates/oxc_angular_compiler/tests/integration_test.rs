@@ -18149,3 +18149,114 @@ fn test_i18n_attribute_sanitizers_are_version_gated() {
         );
     }
 }
+
+/// `hostAttrs` follow ngtsc's object order: as written, with array-index keys
+/// first, then a non-empty static style and class (an empty one is dropped).
+#[test]
+fn host_attrs_follow_ngtsc_order() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+@Directive({
+    selector: '[d]',
+    host: { z: 'last', '10': 'ten', role: 'button', '2': 'two', class: '', style: 'color: red' },
+})
+export class D {}
+"#;
+    let result = transform_angular_file(&allocator, "d.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(
+            r#"hostAttrs:["2","two","10","ten","z","last","role","button",2,"color","red"]"#
+        ),
+        "{}",
+        result.code
+    );
+}
+
+/// A `@HostBinding` / `@HostListener` on a key `host:` already binds replaces
+/// that entry where it was written, so the key is bound once (ngtsc's
+/// `extractHostBindings`), for components and directives alike.
+#[test]
+fn host_members_replace_host_entries_once() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, HostBinding, HostListener } from '@angular/core';
+
+@Component({
+    selector: 'app-c',
+    template: '',
+    host: { '[title]': 'hostTitle', '[id]': 'hostId', '(click)': 'fromHost()' },
+})
+export class C {
+    @HostBinding('title') memberTitle = '';
+    @HostListener('click') fromMember() {}
+}
+
+@Directive({
+    selector: '[d]',
+    host: { '[class.on]': 'flag', '(click)': 'fromHost()' },
+})
+export class D {
+    @HostBinding('class.on') memberFlag = false;
+    @HostListener('click') fromMember() {}
+}
+"#;
+    let result = transform_angular_file(&allocator, "c.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"ɵɵdomProperty("title",ctx.memberTitle)("id",ctx.hostId)"#),
+        "{}",
+        result.code
+    );
+    assert!(normalized.contains(r#"ɵɵclassProp("on",ctx.memberFlag);"#), "{}", result.code);
+    assert!(!normalized.contains("ctx.fromHost()"), "{}", result.code);
+    assert_eq!(normalized.matches("returnctx.fromMember();").count(), 2, "{}", result.code);
+}
+
+/// `createHostDirectivesFeatureArg`: an entry is the bare class unless
+/// `inputs` or `outputs` is written (even empty), and a forward reference
+/// wraps the whole array in a function, for directives as for components.
+#[test]
+fn host_directives_feature_arg_matches_angular() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, forwardRef } from '@angular/core';
+
+@Directive({ selector: '[basic]' })
+export class BasicDirective {}
+
+const HOST_DIRECTIVES = [BasicDirective, { directive: BasicDirective, inputs: [] }];
+
+@Component({ selector: 'app-c', template: '', hostDirectives: HOST_DIRECTIVES })
+export class C {}
+
+@Directive({
+    selector: '[d]',
+    hostDirectives: [{ directive: BasicDirective }, forwardRef(() => LaterDirective)],
+})
+export class D {}
+
+@Directive({ selector: '[later]' })
+export class LaterDirective {}
+"#;
+    let result = transform_angular_file(&allocator, "c.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized
+            .contains(r#"ɵɵHostDirectivesFeature([BasicDirective,{directive:BasicDirective}])"#),
+        "{}",
+        result.code
+    );
+    assert!(
+        normalized.contains(
+            r#"ɵɵHostDirectivesFeature(function(){return[BasicDirective,LaterDirective];})"#
+        ),
+        "{}",
+        result.code
+    );
+}
