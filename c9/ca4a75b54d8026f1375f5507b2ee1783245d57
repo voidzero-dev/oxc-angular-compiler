@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/injectable/compiler.rs
+  s_9152231982e5cc::t_8c914f3f603acd 24-26,100,123-129,305-309,313,315,317,326,335-340,362-367,728-779
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_9152231982e5cc::t_7fefb6cc25b725 231-242,244-245
+napi/angular-compiler/e2e/compare/fixtures/providers/injectable-factory-forms.fixture.ts
+  s_9152231982e5cc::t_fe844f89a714f1 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c9ca4a75b54d8026f1375f5507b2ee1783245d57",
+  "prompts": {},
+  "sessions": {
+    "s_9152231982e5cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a44b1ceddf2c7f224",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
