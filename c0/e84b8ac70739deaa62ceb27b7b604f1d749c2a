@@ -1,0 +1,39 @@
+crates/oxc_angular_compiler/src/injectable/decorator.rs
+  s_bb242e0963a7b4::t_a82066e6f47eb4 543-545,573,580-585,895,905-920
+crates/oxc_angular_compiler/src/injectable/definition.rs
+  s_bb242e0963a7b4::t_45e25c3301e2f9 435-436,443-456,462-465,467-481,483-491,493
+crates/oxc_angular_compiler/src/ng_module/compiler.rs
+  s_bb242e0963a7b4::t_f4e1b26ffa6b80 21-23,171-177,235-239,242-251,257-258,260-273,276-278,318-323,325,327-332,542-543
+crates/oxc_angular_compiler/src/ng_module/decorator.rs
+  s_bb242e0963a7b4::t_8e8e8ded70e6f9 46-55,87-89,111-113,116,119-128,264,270-273,276,287-290,293,299-302,309,395-399,403,406,409,421,430,436-438,443,446,450,476-478,498,505-510
+crates/oxc_angular_compiler/src/ng_module/definition.rs
+  s_bb242e0963a7b4::t_a00410dd618e01 13,16,18-24,108,111,776-902
+crates/oxc_angular_compiler/src/ng_module/metadata.rs
+  s_bb242e0963a7b4::t_c2f2d641cc85e4 41-42,70-81,140-142,158-160,198-215,252-254
+crates/oxc_angular_compiler/src/pipe/decorator.rs
+  s_bb242e0963a7b4::t_a34563f4de8b3a 262-264,272,279-284,632-655
+napi/angular-compiler/e2e/compare/fixtures/injector/basic.fixture.ts
+  s_bb242e0963a7b4::t_eac46017dac193 87-134
+napi/angular-compiler/e2e/compare/fixtures/pipe-compilation/basic.fixture.ts
+  s_bb242e0963a7b4::t_ba6b04acf29758 92-111
+napi/angular-compiler/e2e/compare/fixtures/providers/basic.fixture.ts
+  s_bb242e0963a7b4::t_a744fd490d9e3d 545-565
+napi/angular-compiler/test/ng-module-scope-runtime.test.ts
+  s_bb242e0963a7b4::t_d3ceb124050c27 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c0e84b8ac70739deaa62ceb27b7b604f1d749c2a",
+  "prompts": {},
+  "sessions": {
+    "s_bb242e0963a7b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5df09e8e-2740-4fa5-9eca-9aeab7c6ddbb",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
