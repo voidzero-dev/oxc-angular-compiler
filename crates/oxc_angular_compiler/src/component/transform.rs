@@ -330,6 +330,15 @@ pub struct TransformResult {
     /// Maps component ID to list of styles.
     pub style_updates: HashMap<String, Vec<String>>,
 
+    /// For HMR: maps the ID of each compiled component (path@ClassName) to its
+    /// `@Component` decorator's callee as written in the source (`Component`,
+    /// `Cmp` for `import { Component as Cmp }`, `ng.Component` for a namespace
+    /// import).
+    ///
+    /// Deprecated: kept for existing callers; the bundled Vite plugin no
+    /// longer reads it and uses [`Self::hmr_fingerprint`] instead.
+    pub component_decorators: HashMap<String, String>,
+
     /// For HMR: the fingerprint of the source with the inline `template` /
     /// `styles` values of the compiled components left out (see
     /// [`super::component_hmr_fingerprint`]). A build tool compares it with
@@ -3641,6 +3650,17 @@ pub fn transform_angular_file(
                                     component_id.clone(),
                                     compilation_result.template_js.clone().unwrap_or_default(),
                                 );
+                                if let Some(decorator) = component_decorator {
+                                    let callee = match &decorator.expression {
+                                        Expression::CallExpression(call) => call.callee.span(),
+                                        expression => expression.span(),
+                                    };
+                                    result.component_decorators.insert(
+                                        component_id.clone(),
+                                        source[callee.start as usize..callee.end as usize]
+                                            .to_string(),
+                                    );
+                                }
                                 hmr_compiled_classes.push(class_name.clone());
                             }
 

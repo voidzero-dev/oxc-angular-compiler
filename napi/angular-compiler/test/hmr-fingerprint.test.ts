@@ -80,4 +80,12 @@ describe('componentHmrFingerprint', () => {
     const withoutHmr = transformAngularFileSync(SOURCE, 'app.component.ts', {})
     expect(withoutHmr.hmrFingerprint).toBeUndefined()
   })
+
+  it('still reports componentDecorators (deprecated) for existing callers', () => {
+    const result = transformAngularFileSync(SOURCE, 'app.component.ts', { hmr: true })
+    expect(result.componentDecorators).toEqual({
+      'app.component.ts@FirstComponent': 'Component',
+      'app.component.ts@SecondComponent': 'Component',
+    })
+  })
 })

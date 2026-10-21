@@ -1065,6 +1065,15 @@ export interface TransformResult {
   /** Style updates for HMR (component_id → styles). */
   styleUpdates: Map<string, string[]>
   /**
+   * For HMR: each compiled component's `@Component` decorator callee as
+   * written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+   *
+   * @deprecated Kept for existing callers; the bundled Vite plugin no
+   * longer reads it. Use `hmrFingerprint` to decide between an HMR update
+   * and a full reload.
+   */
+  componentDecorators: Record<string, string>
+  /**
    * For HMR (`hmr: true`): the fingerprint of the source with the inline
    * `template` / `styles` values of the compiled components left out.
    * Compare it with `componentHmrFingerprint(newSource, filename,
