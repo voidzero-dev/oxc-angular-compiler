@@ -40,15 +40,14 @@ const DOM_ONLY =
   'templates use ɵɵelementStart/ɵɵlistener where a full ngtsc build of a standalone component without directive dependencies emits the DOM-only ɵɵdomElementStart/ɵɵdomListener'
 const COMPONENT_DEPS =
   'dependencies use the local-compilation ɵɵgetComponentDepsFactory(Cmp, imports) where a full ngtsc build lists the resolved dependencies'
-const INJECTABLE_FACTORY_WRAPPER =
-  'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
 const SET_CLASS_METADATA_IMPORT =
   'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
 const ALIASED_INJECTABLE =
   'an aliased @Injectable compiles to a broken ɵprov under ngtsc — its needsFactory check compares the written decorator name, so the factory (and setClassMetadata) are never emitted; Oxc emits a working ɵfac (issue #507, kept deliberately)'
 
 const NG_MODULE_SCOPE =
-  'the ngJitMode-guarded ɵɵsetNgModuleScope call Angular emits after an NgModule is missing'
+  'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
+const NG_MODULE_SCOPE_ORDER = 'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
 const DEBUG_INFO_PATH =
   'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
 const DEBUG_INFO_LINE =
@@ -67,6 +66,26 @@ export const GLOBAL_KNOWN_DIFFERENCES: Array<{ label: RegExp; reason: string }> 
 ]
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
+  'class-metadata/class-metadata-ngmodule': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(TestableModule)', 'order ɵɵsetNgModuleScope(TestableModule)'],
+    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+  },
+  'injector/injector-with-both': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(FullModule)', 'order ɵɵsetNgModuleScope(FullModule)'],
+    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+  },
+  'injector/injector-with-imports': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(FeatureModule)', 'order ɵɵsetNgModuleScope(FeatureModule)'],
+    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+  },
+  'injector/injector-with-spread-declarations': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(SpreadModule)', 'order ɵɵsetNgModuleScope(SpreadModule)'],
+    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+  },
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
@@ -166,22 +185,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'host-directives/host-directives-with-change-detection': {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
-  },
-  'providers/injectable-use-class-forward-ref': {
-    fields: ['EarlyService.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/injectable-use-class-other': {
-    fields: ['AbstractLogger.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/injectable-use-factory-named-function': {
-    fields: ['FactoryService.ɵfac'],
-    reasons: [FACTORY],
-  },
-  'providers/object-members-injectable-use-factory': {
-    fields: ['ObjectMembersService.ɵprov'],
-    reasons: [INJECTABLE_FACTORY_WRAPPER],
   },
   'providers/providers-with-change-detection': {
     fields: ['ProvidersWithChangeDetectionComponent.ɵcmp'],
@@ -300,17 +303,9 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['NgDeepAfterSelectorComponent.ɵcmp'],
     reasons: [CSS_WS],
   },
-  'styles/shadow-css-ng-deep-basic': {
-    fields: ['NgDeepBasicComponent.ɵcmp'],
-    reasons: ['a leading space is kept before a ::ng-deep selector'],
-  },
   'styles/shadow-css-ng-deep-with-host': {
     fields: ['NgDeepWithHostComponent.ɵcmp'],
     reasons: [CSS_WS],
-  },
-  'styles/shadow-css-polyfill-next-selector': {
-    fields: ['PolyfillNextSelectorComponent.ɵcmp'],
-    reasons: ['a space is added before an empty rule body'],
   },
   'styles/shadow-css-polyfill-rule': {
     fields: ['PolyfillRuleComponent.ɵcmp'],
