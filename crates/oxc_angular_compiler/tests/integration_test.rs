@@ -16331,6 +16331,8 @@ fn test_component_class_metadata_precedes_debug_info() {
         result.code
     );
 }
+
+#[test]
 fn test_jit_true_ng_module_skips_aot() {
     let allocator = Allocator::default();
     let source = r"
