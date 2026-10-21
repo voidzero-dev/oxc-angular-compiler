@@ -1,0 +1,61 @@
+napi/angular-compiler/e2e/compare/README.md
+  s_1744ea5aef3057::t_e0bfd3701707ed 117-119,125-126,130-142,185-192
+napi/angular-compiler/e2e/compare/fixtures/animations/animation-metadata.fixture.ts
+  s_1744ea5aef3057::t_35f594a31da645 536
+napi/angular-compiler/e2e/compare/fixtures/component-meta/change-detection.fixture.ts
+  s_1744ea5aef3057::t_930035ba8fb3fb 13,33
+napi/angular-compiler/e2e/compare/fixtures/edge-cases/custom-decorators.fixture.ts
+  s_1744ea5aef3057::t_a52f6232d6b801 14,40
+napi/angular-compiler/e2e/compare/fixtures/full-transform/basic.fixture.ts
+  s_1744ea5aef3057::t_0bb6af444b4e54 177,728
+napi/angular-compiler/e2e/compare/fixtures/full-transform/transform-api.fixture.ts
+  s_1744ea5aef3057::t_d302ea1a3f2f3f 146
+napi/angular-compiler/e2e/compare/fixtures/host-directives/basic.fixture.ts
+  s_1744ea5aef3057::t_79605116681c16 474
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_1744ea5aef3057::t_d2c31d49b792f7 3,5-8,12,15-20,33-39,50,98,102,110-111,114-115,122-127,135,139,153,265,269,273-274,278-346,354-370,376-379,384-387,400-419,422,426,430-644
+napi/angular-compiler/e2e/compare/fixtures/providers/basic.fixture.ts
+  s_1744ea5aef3057::t_f7d3c50c6b23de 412
+napi/angular-compiler/e2e/compare/fixtures/regressions/class-debug-info.fixture.ts
+  s_1744ea5aef3057::t_873ff0ccca483e 66
+napi/angular-compiler/e2e/compare/fixtures/regressions/formfield-alias.fixture.ts
+  s_1744ea5aef3057::t_1d242312c286f8 6
+napi/angular-compiler/e2e/compare/fixtures/runner.ts
+  s_1744ea5aef3057::t_d1eb48fb3d5d46 17,25,128-131,141-151,161-200,219,293-296,401-403,405,444-451,502,673,740-743,745,907-908,910,913,915
+napi/angular-compiler/e2e/compare/fixtures/schemas/basic.fixture.ts
+  s_1744ea5aef3057::t_b035edeb6ebb33 403
+napi/angular-compiler/e2e/compare/fixtures/styles/encapsulation.fixture.ts
+  s_1744ea5aef3057::t_4806f4c5515e12 468,490
+napi/angular-compiler/e2e/compare/fixtures/types.ts
+  s_1744ea5aef3057::t_eb73472b6094ab 11,198-205,300-301
+napi/angular-compiler/e2e/compare/src/compare.test.ts
+  s_551a7dbfd1ad45::t_b3926660141fa0 1-61
+napi/angular-compiler/e2e/compare/src/compare.ts
+  s_1744ea5aef3057::t_612e2eb5727e9b 104-108,110,122-131,134,140-143,150-151,165-166,168,170-172,175-179,345,347-349,358-359,362-365,370-381,383-385,389-393,447-450,452-453,467-468,471-472,475,488,657,659-660,871-882,884-886,890-894,896-914,921-922,1381,1388,1580-1581,1583-1584,1587-1588,1719-1726,1754-1755,1760-1770,1825,1827-1828,1845-1846,1857-1859,1863-1864,1866-1867,1877-1897,1913,1915-1923,1930,1936
+napi/angular-compiler/e2e/compare/src/compilers/angular-ngtsc.ts
+  s_1744ea5aef3057::t_0b77e4acac5b92 64,68,419,423-425,427,440,451,483,536-537,540-549,587,589-592,595,602,687,691,713,715,717,740-741
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8625afb62e56384d54da479562cf7e336c466365",
+  "prompts": {},
+  "sessions": {
+    "s_1744ea5aef3057": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0e95dc494d96c134",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_551a7dbfd1ad45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4f5d6ba425543afc",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
