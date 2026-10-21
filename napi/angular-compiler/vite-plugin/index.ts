@@ -173,6 +173,16 @@ function describeDiagnostic(diagnostic: { message: string; helpMessage?: string 
 }
 
 /**
+ * True for the compiler's COMPONENT_RESOURCE_NOT_FOUND error: a `templateUrl`,
+ * `styleUrl(s)` entry or template stylesheet `<link>` missing from the
+ * resources. Diagnostics carry no code field, so the code is matched in the
+ * message, where the compiler always writes it as `(COMPONENT_RESOURCE_NOT_FOUND)`.
+ */
+function isResourceNotFound(diagnostic: { message: string }): boolean {
+  return diagnostic.message.includes('(COMPONENT_RESOURCE_NOT_FOUND)')
+}
+
+/**
  * True when `mod` is the module graph node for `normalizedFile` itself, and
  * not a postfixed variant of it.
  *
@@ -480,12 +490,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // an HMR update instead of a full reload.
   const componentFingerprintCache = new Map<string, string>()
 
-  // The resource URLs (as written) the last update of each component
-  // (`filePath@ClassName`) read: its `templateUrl`, then its `styleUrls` and
-  // template stylesheet links. The `@ng/component` endpoint reads them before
-  // it compiles, so a repeat edit needs one compile instead of a first one
-  // that only learns which files to read.
-  const hmrResourceUrls = new Map<string, { templateUrl?: string; styleUrls: string[] }>()
+  // The resource URLs (as written) each component (`filePath@ClassName`)
+  // needs: its `templateUrl`, then its `styleUrls` and template stylesheet
+  // links. `transform` seeds them with the URLs it read for the file (all of
+  // its components' URLs, as it cannot tell them apart), and each update
+  // narrows them to the ones that component read. The `@ng/component`
+  // endpoint reads them before it compiles, so an update needs one compile
+  // instead of a first one that only learns which files to read.
+  const hmrResourceUrls = new Map<string, { templateUrls: string[]; styleUrls: string[] }>()
 
   // Angular Ivy `.d.ts` static member declarations collected across the build,
   // keyed by module id. Populated during `transform` in `compilationMode:
@@ -865,8 +877,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               }
               const known = hmrResourceUrls.get(componentId)
               if (known) {
-                if (known.templateUrl != null) {
-                  await readTemplate(known.templateUrl).catch(() => {})
+                for (const url of known.templateUrls) {
+                  await readTemplate(url).catch(() => {})
                 }
                 for (const url of known.styleUrls) await readStyle(url)
               }
@@ -918,7 +930,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
               if (result.hmrModule) {
                 hmrResourceUrls.set(componentId, {
-                  templateUrl: result.templateUrl ?? undefined,
+                  templateUrls: result.templateUrl != null ? [result.templateUrl] : [],
                   styleUrls: [...result.styleUrls, ...result.templateStyleUrls],
                 })
                 // A template edit can add a link the last full transform
@@ -1047,16 +1059,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // can still name a resource without the plain text: an escaped key
           // (`style\u0055rls`) or a computed key folded from a same-file
           // constant. It then reports the URL as COMPONENT_RESOURCE_NOT_FOUND,
-          // since resources were passed but held none. Any error on the fast
-          // path therefore reruns the file through the full resolution, which
+          // since resources were passed but held none. Such an error on the
+          // fast path reruns the file through the full resolution, which
           // makes the fast path give exactly the old result: with no URL in
           // the file, `resolveResources` would have passed these same empty
-          // resources. Missing template `<link>`s (one error each) are left
-          // to the step below: the URL extraction cannot find them.
+          // resources. Other errors (a template syntax error, say) would come
+          // back the same from the rerun, so they do not trigger it. Missing
+          // template `<link>`s (one error each) are left to the step below:
+          // the URL extraction cannot find them.
           if (
             !pluginOptions.jit &&
             !mayHaveResourceUrls &&
-            result.errors.length > result.missingLinkUrls.length
+            result.errors.filter(isResourceNotFound).length > result.missingLinkUrls.length
           ) {
             ;({ resources, dependencies } = await resolveResources(
               code,
@@ -1233,6 +1247,22 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             componentsByFile.set(actualId, classNamesInFile)
             for (const className of classNamesInFile) {
               debugHmr('registered: %s -> %s', actualId, className)
+            }
+
+            // Hand the endpoint the resources this compile read: the
+            // templates and stylesheets (template `<link>`s included) that
+            // could be read, keyed by URL as written. Without them the first
+            // update of each component would compile once to learn its
+            // `templateUrl` and `styleUrls` and again for its `<link>`s.
+            if (watchMode && !pluginOptions.jit) {
+              const { templates, styles } = plainResources(resources)
+              const urls = {
+                templateUrls: Object.keys(templates),
+                styleUrls: Object.keys(styles),
+              }
+              for (const className of classNamesInFile) {
+                hmrResourceUrls.set(`${actualId}@${className}`, urls)
+              }
             }
 
             // Cache the whole-file fingerprint for cheaply checking whether

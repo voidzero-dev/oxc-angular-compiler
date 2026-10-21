@@ -3,10 +3,13 @@
  *
  * - `transform` skips the `extractComponentUrls` parse for a file that never
  *   spells `templateUrl`/`styleUrl`, and still compiles a file that names a
- *   resource through an escaped key.
+ *   resource through an escaped key. Only a missing-resource error sends the
+ *   file back through the full resolution; a template syntax error does not.
  * - JIT `transform` never reads external resources: its output imports them.
  * - The `@ng/component` endpoint compiles with the decorator's
  *   `preserveWhitespaces`, like the full transform.
+ * - The first update of a component compiles once: `transform` hands the
+ *   endpoint the template and stylesheet URLs it read.
  * - One stylesheet edit is preprocessed once per HMR cycle, not once by
  *   `handleHotUpdate`, once by the endpoint, and once by the next transform.
  */
@@ -24,13 +27,22 @@ import { angular } from '../vite-plugin/index.js'
 // behavior, so the tests can count how often the plugin reaches them.
 const spies = vi.hoisted(() => ({
   extractComponentUrls: undefined as unknown as ReturnType<typeof vi.fn>,
+  transformAngularFile: undefined as unknown as ReturnType<typeof vi.fn>,
+  compileComponentHmrUpdate: undefined as unknown as ReturnType<typeof vi.fn>,
   preprocessCSS: undefined as unknown as ReturnType<typeof vi.fn>,
 }))
 
 vi.mock('#binding', async (importOriginal) => {
   const actual = await importOriginal<typeof import('#binding')>()
   spies.extractComponentUrls = vi.fn(actual.extractComponentUrls)
-  return { ...actual, extractComponentUrls: spies.extractComponentUrls }
+  spies.transformAngularFile = vi.fn(actual.transformAngularFile)
+  spies.compileComponentHmrUpdate = vi.fn(actual.compileComponentHmrUpdate)
+  return {
+    ...actual,
+    extractComponentUrls: spies.extractComponentUrls,
+    transformAngularFile: spies.transformAngularFile,
+    compileComponentHmrUpdate: spies.compileComponentHmrUpdate,
+  }
 })
 
 vi.mock('vite', async (importOriginal) => {
@@ -55,6 +67,8 @@ afterAll(() => {
 
 beforeEach(() => {
   spies.extractComponentUrls.mockClear()
+  spies.transformAngularFile.mockClear()
+  spies.compileComponentHmrUpdate.mockClear()
   spies.preprocessCSS.mockClear()
 })
 
@@ -231,6 +245,33 @@ describe('transform skips the resource URL parse when no URL is spelled', () => 
     expect(code).toContain('ESCAPED_TEMPLATE_MARKER')
     expect(code).toContain('ESCAPED_STYLE_MARKER')
   })
+
+  it('does not rerun the file for a template syntax error', async () => {
+    const plugin = getAngularPlugin()
+    await setupPlugin(plugin, 'build')
+
+    // The rerun only helps with a missing resource; this error would come
+    // back the same from it.
+    const { errors } = await transform(
+      plugin,
+      `
+        import { Component } from '@angular/core';
+        @Component({
+          selector: 'app-broken',
+          template: '<div></span>',
+        })
+        export class BrokenComponent {
+          value = 1;
+        }
+      `,
+      join(appDir, 'broken.component.ts'),
+    )
+
+    expect(errors.length).toBeGreaterThan(0)
+    expect(errors.join('\n')).not.toContain('COMPONENT_RESOURCE_NOT_FOUND')
+    expect(spies.transformAngularFile).toHaveBeenCalledTimes(1)
+    expect(spies.extractComponentUrls).not.toHaveBeenCalled()
+  })
 })
 
 describe('JIT transform', () => {
@@ -392,5 +433,43 @@ describe('stylesheet preprocessing during HMR', () => {
     expect(body).toContain('Hello again')
     expect(body).toContain('color: green')
     expect(preprocessCallsFor(stylePath)).toBe(1)
+  })
+})
+
+describe('first HMR update of a component', () => {
+  it('compiles the update once', async () => {
+    const templatePath = join(appDir, 'first.component.html')
+    const stylePath = join(appDir, 'first.component.css')
+    const linkPath = join(appDir, 'first-link.css')
+    const componentPath = join(appDir, 'first.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-first',
+        templateUrl: './first.component.html',
+        styleUrl: './first.component.css',
+      })
+      export class FirstComponent {}
+    `
+    const template = (text: string) =>
+      `<link rel="stylesheet" href="./first-link.css"><p>${text}</p>`
+    writeFileSync(templatePath, template('FIRST_BEFORE'))
+    writeFileSync(stylePath, '.FIRST_STYLE { color: red; }')
+    writeFileSync(linkPath, '.FIRST_LINK { color: blue; }')
+    writeFileSync(componentPath, source)
+
+    const plugin = getAngularPlugin()
+    const server = await setupPlugin(plugin)
+    const { errors } = await transform(plugin, source, componentPath)
+    expect(errors).toEqual([])
+
+    writeFileSync(templatePath, template('FIRST_AFTER'))
+    await hotUpdate(plugin, templatePath, server)
+    const body = await requestUpdateModule(server, `${componentPath}@FirstComponent`)
+
+    expect(body).toContain('FIRST_AFTER')
+    expect(body).toContain('FIRST_STYLE')
+    expect(body).toContain('FIRST_LINK')
+    expect(spies.compileComponentHmrUpdate).toHaveBeenCalledTimes(1)
   })
 })
