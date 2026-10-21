@@ -307,6 +307,16 @@ fn dev_only_guarded_expression<'a>(
     guarded_expression(allocator, "ngDevMode", expr)
 }
 
+/// Creates: (typeof ngJitMode === "undefined" || ngJitMode) && expr
+///
+/// Ported from Angular's `jitOnlyGuardedExpression` in `util.ts`.
+pub(crate) fn jit_only_guarded_expression<'a>(
+    allocator: &'a Allocator,
+    expr: OutputExpression<'a>,
+) -> OutputExpression<'a> {
+    guarded_expression(allocator, "ngJitMode", expr)
+}
+
 /// Creates: (typeof guard === "undefined" || guard) && expr
 fn guarded_expression<'a>(
     allocator: &'a Allocator,

@@ -16184,6 +16184,48 @@ export class D {}
 }
 
 #[test]
+fn test_ng_module_scope_is_set_by_a_jit_only_side_effect() {
+    // Like ngtsc in full compilation: the class keeps ɵmod with only the
+    // type, and a ngJitMode-guarded IIFE after it patches the scope on.
+    let allocator = Allocator::default();
+    let source = r"
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+
+const SHARED = [CommonModule];
+
+@NgModule({ imports: [SHARED, FormsModule] })
+export class M {}
+";
+    let result = transform_angular_file(&allocator, "m.module.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("static ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({type:M});"),
+        "ɵmod should only have the type. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains(
+            "(function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
+             i0.ɵɵsetNgModuleScope(M,{imports:[SHARED,\n      FormsModule]}));\n})();"
+        ),
+        "Should patch the scope on in a ngJitMode-guarded IIFE. Got:\n{}",
+        result.code
+    );
+
+    // The IIFE must parse as an expression statement, not a function declaration.
+    let parsed =
+        oxc_parser::Parser::new(&allocator, &result.code, oxc_span::SourceType::ts()).parse();
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "Output should parse: {:?}\n{}",
+        parsed.diagnostics,
+        result.code
+    );
+}
+
+#[test]
 fn test_jit_true_ng_module_skips_aot() {
     let allocator = Allocator::default();
     let source = r"

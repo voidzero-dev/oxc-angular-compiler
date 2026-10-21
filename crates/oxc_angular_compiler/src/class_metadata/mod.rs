@@ -19,6 +19,7 @@ pub use builders::{
     build_prop_decorators_metadata, build_prop_decorators_metadata_in,
 };
 pub(crate) use builders::{entity_path, param_type_reference, type_param_names_of};
+pub(crate) use compiler::jit_only_guarded_expression;
 pub use compiler::{
     compile_class_metadata, compile_component_class_metadata,
     compile_component_metadata_async_resolver, compile_opaque_async_class_metadata,

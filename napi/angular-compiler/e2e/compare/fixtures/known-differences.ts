@@ -19,7 +19,6 @@ interface KnownDifference {
   reasons: string[]
 }
 
-const NG_MODULE_IMPORTS = 'ɵmod includes imports, which Angular omits in full compilation'
 const HOST_ATTRS_ORDER = 'hostAttrs are emitted in a different order'
 const CUSTOM_DECORATOR =
   'the reference ngtsc compile leaves a class with a non-Angular decorator uncompiled, so only Oxc emits ɵfac/ɵcmp'
@@ -50,10 +49,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
       },
     ],
     reasons: [SET_CLASS_METADATA_IMPORT],
-  },
-  'class-metadata/class-metadata-ngmodule': {
-    fields: ['TestableModule.ɵmod'],
-    reasons: [NG_MODULE_IMPORTS],
   },
   'class-metadata/class-metadata-with-inject': {
     fields: [],
@@ -135,14 +130,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'host-directives/host-directives-with-change-detection': {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],
     reasons: [CHANGE_DETECTION_V22],
-  },
-  'injector/injector-with-both': {
-    fields: ['FullModule.ɵmod'],
-    reasons: [NG_MODULE_IMPORTS],
-  },
-  'injector/injector-with-imports': {
-    fields: ['FeatureModule.ɵmod'],
-    reasons: [NG_MODULE_IMPORTS],
   },
   'providers/object-members-injectable-use-factory': {
     fields: ['ObjectMembersService.ɵprov'],

@@ -66,6 +66,18 @@ pub struct R3NgModuleMetadata<'a> {
     /// Exported classes.
     pub exports: Vec<'a, R3Reference<'a>>,
 
+    /// The `declarations` expression as written, used by `ɵɵsetNgModuleScope`
+    /// in place of [`Self::declarations`] when the list could not be resolved
+    /// statically (a const array, a spread, a call...). The runtime flattens
+    /// it, like the raw expressions ngtsc emits in local compilation.
+    pub declarations_expression: Option<OutputExpression<'a>>,
+
+    /// The `imports` expression as written; see [`Self::declarations_expression`].
+    pub imports_expression: Option<OutputExpression<'a>>,
+
+    /// The `exports` expression as written; see [`Self::declarations_expression`].
+    pub exports_expression: Option<OutputExpression<'a>>,
+
     /// Custom element schemas.
     pub schemas: Vec<'a, R3Reference<'a>>,
 
@@ -124,6 +136,9 @@ pub struct R3NgModuleMetadataBuilder<'a> {
     declarations: Vec<'a, R3Reference<'a>>,
     imports: Vec<'a, R3Reference<'a>>,
     exports: Vec<'a, R3Reference<'a>>,
+    declarations_expression: Option<OutputExpression<'a>>,
+    imports_expression: Option<OutputExpression<'a>>,
+    exports_expression: Option<OutputExpression<'a>>,
     schemas: Vec<'a, R3Reference<'a>>,
     id: Option<OutputExpression<'a>>,
     selector_scope_mode: R3SelectorScopeMode,
@@ -139,6 +154,9 @@ impl<'a> R3NgModuleMetadataBuilder<'a> {
             declarations: Vec::new_in(&allocator),
             imports: Vec::new_in(&allocator),
             exports: Vec::new_in(&allocator),
+            declarations_expression: None,
+            imports_expression: None,
+            exports_expression: None,
             schemas: Vec::new_in(&allocator),
             id: None,
             selector_scope_mode: R3SelectorScopeMode::Inline,
@@ -173,6 +191,24 @@ impl<'a> R3NgModuleMetadataBuilder<'a> {
     /// Add an export.
     pub fn add_export(mut self, export: R3Reference<'a>) -> Self {
         self.exports.push(export);
+        self
+    }
+
+    /// Set the raw `declarations` expression for `ɵɵsetNgModuleScope`.
+    pub fn declarations_expression(mut self, expr: OutputExpression<'a>) -> Self {
+        self.declarations_expression = Some(expr);
+        self
+    }
+
+    /// Set the raw `imports` expression for `ɵɵsetNgModuleScope`.
+    pub fn imports_expression(mut self, expr: OutputExpression<'a>) -> Self {
+        self.imports_expression = Some(expr);
+        self
+    }
+
+    /// Set the raw `exports` expression for `ɵɵsetNgModuleScope`.
+    pub fn exports_expression(mut self, expr: OutputExpression<'a>) -> Self {
+        self.exports_expression = Some(expr);
         self
     }
 
@@ -212,6 +248,9 @@ impl<'a> R3NgModuleMetadataBuilder<'a> {
             declarations: self.declarations,
             imports: self.imports,
             exports: self.exports,
+            declarations_expression: self.declarations_expression,
+            imports_expression: self.imports_expression,
+            exports_expression: self.exports_expression,
             schemas: self.schemas,
             id: self.id,
             selector_scope_mode: self.selector_scope_mode,
