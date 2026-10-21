@@ -5496,13 +5496,33 @@ fn compile_component_full<'a>(
     // Build ingest options from metadata and transform options
     let component_name_atom = Ident::from_in(metadata.class_name.as_str(), &allocator);
 
-    // OXC is a single-file compiler, equivalent to Angular's local compilation mode.
-    // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
-    // so DomOnly mode is never used for component templates.
-    // See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1257
+    // A full ngtsc build compiles the template in DomOnly mode when the
+    // component is standalone and nothing in its template scope matches
+    // (`hasDirectiveDependencies` in
+    // angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts,
+    // read by `compileComponentFromMetadata`). Its local mode assumes
+    // dependencies, since it cannot see the imported classes. OXC can prove
+    // the scope empty only when `imports` and `deferredImports` are absent or
+    // `[]`: a standalone scope then holds just the component itself
+    // (`StandaloneComponentScopeReader`), with its selector, or
+    // `ng-component` when it has none. Anything less certain stays Full,
+    // which works for every template.
     //
-    // Note: DomOnly mode is still used for host bindings (separate code path).
-    let mode = TemplateCompilationMode::Full;
+    // Note: DomOnly mode is always used for host bindings (separate code path).
+    let mode = if metadata.standalone
+        && metadata.imports_provably_empty
+        && !options.jit
+        && options.angular_version.is_none_or(|v| v.supports_dom_only_templates())
+        && !super::defer_resolver::template_may_match_selectors(
+            &r3_result.nodes,
+            &crate::pipeline::selector::CssSelector::parse(
+                metadata.selector.as_ref().map_or("ng-component", |s| s.as_str()),
+            ),
+        ) {
+        TemplateCompilationMode::DomOnly
+    } else {
+        TemplateCompilationMode::Full
+    };
 
     // Reject overlap between `imports: [X]` and `deferredImports: [X]` —
     // a symbol must be either eager OR deferrable, never both. Mirrors

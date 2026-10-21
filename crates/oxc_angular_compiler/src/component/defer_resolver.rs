@@ -275,6 +275,57 @@ pub(super) fn implicitly_deferred_imports<'a>(
         .collect()
 }
 
+/// Whether any element or template anywhere in the template (`@defer` blocks
+/// included) matches one of `selectors`, as ngc's `R3TargetBinder` matches a
+/// scope's directives. A selectorless component or directive counts as a
+/// match, since nothing here can tell what it resolves to.
+pub(super) fn template_may_match_selectors(
+    nodes: &[R3Node<'_>],
+    selectors: &[CssSelector],
+) -> bool {
+    struct Matcher<'s> {
+        selectors: &'s [CssSelector],
+        matched: bool,
+    }
+
+    impl Matcher<'_> {
+        fn record(&mut self, element: &CssSelector) {
+            self.matched |= self.selectors.iter().any(|selector| selector.matches(element));
+        }
+    }
+
+    impl<'a> R3Visitor<'a> for Matcher<'_> {
+        fn visit_element(&mut self, element: &R3Element<'a>) {
+            self.matched |= !element.directives.is_empty();
+            self.record(&element_selector(
+                &element.name,
+                &element.attributes,
+                &element.inputs,
+                &element.outputs,
+            ));
+            self.visit_element_children(element);
+        }
+
+        fn visit_template(&mut self, template: &R3Template<'a>) {
+            self.matched |= !template.directives.is_empty();
+            self.record(&template_selector(template));
+            self.visit_template_children(template);
+        }
+
+        fn visit_component(&mut self, _component: &R3Component<'a>) {
+            self.matched = true;
+        }
+
+        fn visit_directive(&mut self, _directive: &R3Directive<'a>) {
+            self.matched = true;
+        }
+    }
+
+    let mut matcher = Matcher { selectors, matched: false };
+    visit_all(&mut matcher, nodes);
+    matcher.matched
+}
+
 /// An element as Angular matches directives against it
 /// (`createCssSelectorFromNode` and `getAttrsForDirectiveMatching` in
 /// `packages/compiler/src/render3/view/util.ts`): its static attributes with

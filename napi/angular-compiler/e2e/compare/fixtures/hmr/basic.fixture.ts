@@ -30,7 +30,7 @@ export const fixtures: Fixture[] = [
     description: 'HMR with property binding',
     className: 'HmrPropertyComponent',
     template: `<div [title]="title" [hidden]="isHidden">Content</div>`,
-    expectedFeatures: ['ɵɵdefineComponent', 'ɵɵproperty'],
+    expectedFeatures: ['ɵɵdefineComponent', 'ɵɵdomProperty'],
   },
 
   {
@@ -39,7 +39,7 @@ export const fixtures: Fixture[] = [
     description: 'HMR with event binding',
     className: 'HmrEventComponent',
     template: `<button (click)="onClick($event)">Click me</button>`,
-    expectedFeatures: ['ɵɵdefineComponent', 'ɵɵlistener'],
+    expectedFeatures: ['ɵɵdefineComponent', 'ɵɵdomListener'],
   },
 
   {

@@ -66,6 +66,10 @@ pub fn extract_component_metadata<'a>(
     let mut metadata =
         ComponentMetadata::new(allocator, class_name, class_span, implicit_standalone);
 
+    // Whether `imports` and `deferredImports` are provably empty; a spread or
+    // accessor this loop skips could add them.
+    let mut imports_provably_empty = true;
+
     // Parse each property in the config object
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
@@ -170,6 +174,7 @@ pub fn extract_component_metadata<'a>(
                     }
                 }
                 "imports" => {
+                    imports_provably_empty &= is_empty_array_literal(&prop.value);
                     // For standalone components, we need:
                     // 1. The identifier list for local analysis
                     metadata.imports = extract_identifier_array(allocator, &prop.value);
@@ -178,6 +183,7 @@ pub fn extract_component_metadata<'a>(
                         convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "deferredImports" => {
+                    imports_provably_empty &= is_empty_array_literal(&prop.value);
                     // Symbols explicitly opted into lazy loading via `@defer`.
                     // Mirrors Angular's `@Component.deferredImports` field; in
                     // local compilation this is the only source of deferrable
@@ -241,8 +247,11 @@ pub fn extract_component_metadata<'a>(
                     // Unknown property - ignore
                 }
             }
+        } else {
+            imports_provably_empty = false;
         }
     }
+    metadata.imports_provably_empty = imports_provably_empty;
 
     // Merge @HostBinding/@HostListener members into the `host:` bindings the
     // way ngtsc's `extractHostBindings` does (shared with @Directive).
@@ -373,6 +382,11 @@ fn get_property_key_name<'a>(
         PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
     }
+}
+
+/// Whether `expr` is the array literal `[]`.
+fn is_empty_array_literal(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::ArrayExpression(array) if array.elements.is_empty())
 }
 
 /// Extract a boolean value from an expression.

@@ -7,7 +7,10 @@
 //! template with no error.
 //!
 //! The expected output is ngtsc 22.2.2's for the same template (the default is
-//! the latest release line), in this emitter's spelling.
+//! the latest release line), in this emitter's spelling. The components are
+//! declared `standalone: false` so their templates use the full instructions
+//! (`ɵɵelementStart`) rather than the DOM-only ones a standalone component
+//! without dependencies gets.
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
@@ -29,7 +32,7 @@ fn definition(template: &str) -> String {
 fn definition_for(template: &str, angular_version: Option<AngularVersion>) -> String {
     let source = format!(
         "import {{ Component }} from '@angular/core';\n\
-         @Component({{ selector: 'x', template: `{template}` }})\n\
+         @Component({{ selector: 'x', standalone: false, template: `{template}` }})\n\
          export class X {{ t = ''; on = true; items: any[] = []; go(..._a: any[]) {{}} }}\n"
     );
     let allocator = Allocator::default();

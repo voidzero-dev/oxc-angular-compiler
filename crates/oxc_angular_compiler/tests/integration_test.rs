@@ -1706,14 +1706,12 @@ export class TestComponent {
 // ============================================================================
 
 #[test]
-fn test_standalone_component_uses_full_mode() {
-    // OXC operates as a single-file compiler, equivalent to Angular's local compilation mode.
-    // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
-    // which means DomOnly mode is never used for component templates.
-    // See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1257
-    //
-    // This test ensures standalone components with no imports use Full mode instructions
-    // (ɵɵelementStart) NOT DomOnly mode instructions (ɵɵdomElementStart).
+fn test_standalone_component_without_imports_uses_dom_only_mode() {
+    // A full ngtsc build compiles a standalone component without directive
+    // dependencies in DomOnly mode (`hasDirectiveDependencies` in
+    // angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts).
+    // Without `imports` the template scope holds only the component itself,
+    // which this template does not use, so Oxc can prove the same.
     let allocator = Allocator::default();
     let source = r#"
 import { Component } from '@angular/core';
@@ -1732,22 +1730,10 @@ export class ExternalComponent {
     let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(result.code.contains("ɵɵdomElementStart"), "{}", result.code);
+    assert!(!result.code.contains("ɵɵelementStart"), "{}", result.code);
 
-    // Must use Full mode instructions (elementStart), not DomOnly (domElementStart)
-    assert!(
-        !result.code.contains("domElementStart"),
-        "Standalone component should use Full mode (elementStart), not DomOnly mode (domElementStart).\n\
-         OXC operates in local compilation mode where hasDirectiveDependencies is always true.\n\
-         Output:\n{}",
-        result.code
-    );
-    assert!(
-        result.code.contains("elementStart"),
-        "Expected Full mode instruction ɵɵelementStart in output.\nOutput:\n{}",
-        result.code
-    );
-
-    insta::assert_snapshot!("standalone_component_uses_full_mode", result.code);
+    insta::assert_snapshot!("standalone_component_without_imports_uses_dom_only_mode", result.code);
 }
 
 // ============================================================================
@@ -4978,7 +4964,7 @@ export class TestComponent {
 }
 ";
 
-    // OXC always uses Full mode (elementStart, not domElementStart)
+    // Any import keeps Full mode (elementStart, not domElementStart)
     let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Should use elementStart (Full mode), NOT domElementStart (DomOnly mode)
@@ -4994,15 +4980,22 @@ export class TestComponent {
     );
 }
 
-/// Test that standalone components WITHOUT imports use Full mode (local compilation).
-///
-/// OXC is a single-file compiler, equivalent to Angular's local compilation mode.
-/// In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
-/// so DomOnly mode is never used for component templates.
-/// See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1257
-#[test]
-fn test_dom_only_mode_not_used_for_standalone_without_imports() {
+/// Compiles `source` and returns whether its component template used the
+/// DOM-only instructions, checking that it used one mode throughout.
+fn compiles_dom_only(source: &str, options: Option<&ComponentTransformOptions>) -> bool {
     let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "test.ts", source, options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let dom_only = result.code.contains("ɵɵdomElement");
+    let full = result.code.contains("ɵɵelement");
+    assert!(dom_only != full, "Expected exactly one template mode. Output:\n{}", result.code);
+    dom_only
+}
+
+/// A standalone component without imports uses DomOnly mode, like a full
+/// ngtsc build.
+#[test]
+fn test_dom_only_mode_used_for_standalone_without_imports() {
     let source = r"
 import { Component } from '@angular/core';
 
@@ -5017,19 +5010,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
-
-    // OXC in local compilation mode: always Full mode for component templates
-    assert!(
-        result.code.contains("ɵɵelementStart"),
-        "Standalone component without imports should use ɵɵelementStart (Full mode). Output:\n{}",
-        result.code
-    );
-    assert!(
-        !result.code.contains("ɵɵdomElementStart"),
-        "Standalone component without imports should NOT use ɵɵdomElementStart. Output:\n{}",
-        result.code
-    );
+    assert!(compiles_dom_only(source, None));
 }
 
 /// Test that non-standalone components use Full mode.
@@ -5229,22 +5210,11 @@ fn test_animation_enter_string_literal_only_in_embedded_view() {
     insta::assert_snapshot!("animation_enter_string_literal_only_embedded_view", js);
 }
 
-/// Test that implicit standalone components (no `standalone` in decorator) use Full mode.
-///
-/// Angular 19+ defaults `standalone` to `true` when not specified. However, OXC performs
-/// single-file compilation without NgModule context. Angular's ngtsc (in local compilation
-/// mode) always sets `hasDirectiveDependencies = true` because it can't fully inspect
-/// dependencies. OXC should do the same: only use DomOnly mode when `standalone: true`
-/// is EXPLICITLY set in the decorator.
-///
-/// Components that rely on the implicit default may be declared in NgModules, which
-/// Angular's global compilation handles by setting `hasDirectiveDependencies =
-/// !isStandalone || ...`. Without NgModule context, OXC must be conservative.
-///
-/// See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1326-1339
+/// Implicitly standalone components (Angular 19+ default) use DomOnly mode too:
+/// ngtsc reads `isStandalone` the same way, and declaring such a component in
+/// an NgModule is an error.
 #[test]
-fn test_dom_only_mode_not_used_for_implicit_standalone() {
-    let allocator = Allocator::default();
+fn test_dom_only_mode_used_for_implicit_standalone() {
     let source = r"
 import { Component } from '@angular/core';
 
@@ -5258,34 +5228,17 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    // Angular version 19+ defaults standalone to true, but implicit standalone
-    // should NOT trigger DomOnly mode because the component might be in an NgModule
     let options = ComponentTransformOptions {
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
-
-    // Should use Full mode (elementStart), NOT DomOnly (domElementStart)
-    assert!(
-        result.code.contains("ɵɵelementStart"),
-        "Implicit standalone component should use ɵɵelementStart (Full mode). Output:\n{}",
-        result.code
-    );
-    assert!(
-        !result.code.contains("ɵɵdomElementStart"),
-        "Implicit standalone component should NOT use ɵɵdomElementStart (DomOnly). Output:\n{}",
-        result.code
-    );
+    assert!(compiles_dom_only(source, Some(&options)));
 }
 
-/// Test that implicit standalone components with empty imports also use Full mode.
-///
-/// Even with an empty `imports: []` array, if `standalone` is not explicitly set,
-/// OXC should use Full mode to be safe.
+/// `imports: []` brings nothing into scope, so an implicitly standalone
+/// component keeps DomOnly mode.
 #[test]
-fn test_dom_only_mode_not_used_for_implicit_standalone_with_empty_imports() {
-    let allocator = Allocator::default();
+fn test_dom_only_mode_used_for_implicit_standalone_with_empty_imports() {
     let source = r"
 import { Component } from '@angular/core';
 
@@ -5301,27 +5254,12 @@ export class TestComponent {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
-
-    // Implicit standalone + empty imports should still use Full mode
-    assert!(
-        result.code.contains("ɵɵelementStart"),
-        "Implicit standalone with empty imports should use Full mode. Output:\n{}",
-        result.code
-    );
-    assert!(
-        !result.code.contains("ɵɵdomElementStart"),
-        "Implicit standalone with empty imports should NOT use DomOnly. Output:\n{}",
-        result.code
-    );
+    assert!(compiles_dom_only(source, Some(&options)));
 }
 
-/// Test that standalone components with empty imports use Full mode (local compilation).
-///
-/// OXC always uses Full mode for component templates, matching Angular's local compilation.
+/// Empty `imports` and `deferredImports` keep DomOnly mode.
 #[test]
-fn test_dom_only_mode_not_used_for_standalone_with_empty_imports() {
-    let allocator = Allocator::default();
+fn test_dom_only_mode_used_for_standalone_with_empty_imports() {
     let source = r"
 import { Component } from '@angular/core';
 
@@ -5329,29 +5267,116 @@ import { Component } from '@angular/core';
   selector: 'app-test',
   standalone: true,
   imports: [],
+  deferredImports: [],
   template: `<div>Hello</div>`
 })
 export class TestComponent {}
 ";
 
-    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
-
-    // OXC in local compilation mode: always Full mode for component templates
-    assert!(
-        result.code.contains("ɵɵelementStart"),
-        "Standalone with empty imports should use ɵɵelementStart (Full mode). Output:\n{}",
-        result.code
-    );
-    assert!(
-        !result.code.contains("ɵɵdomElementStart"),
-        "Standalone with empty imports should NOT use ɵɵdomElementStart. Output:\n{}",
-        result.code
-    );
+    assert!(compiles_dom_only(source, None));
 }
 
-/// Test that standalone components with ONLY pipe imports use Full mode (local compilation).
+/// Anything Oxc cannot prove empty keeps Full mode: imports through an
+/// identifier, a spread, `forwardRef`, `deferredImports`, or a spread in the
+/// decorator object that could add them.
+#[test]
+fn test_full_mode_used_when_imports_are_not_provably_empty() {
+    for config in [
+        "imports: SHARED,",
+        "imports: [...SHARED],",
+        "imports: [forwardRef(() => Other)],",
+        "deferredImports: [Other],",
+        "imports: [] as any[],",
+        "...BASE,",
+    ] {
+        let source = format!(
+            "import {{ Component, forwardRef }} from '@angular/core';\n\
+             const SHARED: any[] = [];\n\
+             const BASE = {{}};\n\
+             class Other {{}}\n\
+             @Component({{ selector: 'app-test', {config} template: '<div>@defer {{ <p>x</p> }}</div>' }})\n\
+             export class TestComponent {{}}\n"
+        );
+        assert!(!compiles_dom_only(&source, None), "`{config}` should keep Full mode");
+    }
+}
+
+/// A standalone scope holds the component itself, so a template that uses its
+/// own selector has a directive dependency and keeps Full mode — anywhere in the
+/// template, `@defer` blocks included. Without a selector the component matches
+/// `ng-component`, ngtsc's default.
+#[test]
+fn test_full_mode_used_when_template_matches_own_selector() {
+    for (selector, template) in [
+        ("selector: 'app-tree',", "<span>x</span>@if (on) { <app-tree /> }"),
+        (
+            "selector: 'app-tree',",
+            "<span>x</span>@defer { <app-tree /> } @placeholder { <i>p</i> }",
+        ),
+        ("selector: '[appTree]',", "<span>x</span><ng-template appTree></ng-template>"),
+        ("selector: 'app-tree, [appTree]',", "<div appTree></div>"),
+        ("selector: '.tree',", "<div class=\"a tree\"></div>"),
+        ("", "<span>x</span><ng-component></ng-component>"),
+    ] {
+        let source = format!(
+            "import {{ Component }} from '@angular/core';\n\
+             @Component({{ {selector} template: `{template}` }})\n\
+             export class TreeComponent {{ on = true; }}\n"
+        );
+        assert!(
+            !compiles_dom_only(&source, None),
+            "`{selector}` `{template}` should keep Full mode"
+        );
+    }
+
+    for (selector, template) in [
+        ("selector: 'app-tree:not(.leaf)',", "<app-tree class=\"leaf\"></app-tree>"),
+        ("selector: '[appTree]',", "<div appTreeX></div>"),
+        ("selector: 'app-tree',", "<div>app-tree</div><span>x</span>"),
+        ("", "<div></div>"),
+    ] {
+        let source = format!(
+            "import {{ Component }} from '@angular/core';\n\
+             @Component({{ {selector} template: `{template}` }})\n\
+             export class TreeComponent {{}}\n"
+        );
+        assert!(
+            compiles_dom_only(&source, None),
+            "`{selector}` `{template}` should use DomOnly mode"
+        );
+    }
+}
+
+/// DomOnly templates start at Angular 20.1.0-next.3.
+#[test]
+fn test_dom_only_mode_is_version_gated() {
+    let source = r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-test', standalone: true, template: `<div (click)='go()'>Hello</div>` })
+export class TestComponent { go() {} }
+";
+    for (version, dom_only) in [
+        ("19.2.0", false),
+        ("20.0.7", false),
+        ("20.1.0-next.2", false),
+        ("20.1.0-next.3", true),
+        ("20.1.0", true),
+        ("22.2.2", true),
+    ] {
+        let options = ComponentTransformOptions {
+            angular_version: AngularVersion::parse(version),
+            ..Default::default()
+        };
+        assert_eq!(compiles_dom_only(source, Some(&options)), dom_only, "{version}");
+    }
+}
+
+/// Test that standalone components with ONLY pipe imports use Full mode.
 ///
-/// OXC always uses Full mode for component templates, matching Angular's local compilation.
+/// A full ngtsc build would use DomOnly mode here (pipes are not directive
+/// dependencies), but Oxc cannot tell an imported pipe from a directive within
+/// one file, so any import keeps Full mode, like ngtsc's local compilation.
 #[test]
 fn test_dom_only_mode_not_used_for_standalone_with_pipe_only_imports() {
     let allocator = Allocator::default();
@@ -5372,7 +5397,7 @@ export class TestComponent {
 
     let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
-    // OXC in local compilation mode: always Full mode for component templates
+    // Any import keeps Full mode
     assert!(
         result.code.contains("ɵɵelementStart"),
         "Standalone with pipe-only imports should use ɵɵelementStart (Full mode). Output:\n{}",
@@ -5385,9 +5410,8 @@ export class TestComponent {
     );
 }
 
-/// Test that multiple pipe-only imports also use Full mode (local compilation).
-///
-/// OXC always uses Full mode for component templates, matching Angular's local compilation.
+/// Test that multiple pipe-only imports also use Full mode, as Oxc cannot tell
+/// imported pipes from directives.
 #[test]
 fn test_dom_only_mode_not_used_for_standalone_with_multiple_pipe_imports() {
     let allocator = Allocator::default();
@@ -5406,7 +5430,7 @@ export class TestComponent {}
 
     let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
-    // OXC in local compilation mode: always Full mode for component templates
+    // Any import keeps Full mode
     assert!(
         result.code.contains("ɵɵelementStart"),
         "Multiple pipe-only imports should use Full mode. Output:\n{}",
@@ -18010,12 +18034,14 @@ fn test_lone_surrogate_host_listener_argument_is_diagnostic() {
 // sanitizer by `resolveI18nAttrSanitizers` (19.2.23 / 20.3.22 / 21.2.15 / 22+).
 
 /// Compiles `template` in a component for `version` and returns the code with
-/// all whitespace removed.
+/// all whitespace removed. The component is `standalone: false`, like the
+/// compliance test cases ported here, so the template uses the full
+/// instructions.
 fn compile_component_compact(template: &str, version: Option<AngularVersion>) -> String {
     let allocator = Allocator::default();
     let source = format!(
         "import {{ Component }} from '@angular/core';\n\
-         @Component({{ selector: 'my-component', template: {template:?} }})\n\
+         @Component({{ selector: 'my-component', standalone: false, template: {template:?} }})\n\
          export class MyComponent {{}}\n"
     );
     let options = ComponentTransformOptions { angular_version: version, ..Default::default() };
