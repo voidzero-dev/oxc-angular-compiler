@@ -1,0 +1,49 @@
+crates/oxc_angular_compiler/src/component/decorator.rs
+  s_2e795a639ec060::t_64e67411a6c17a 116,128-131,133,164-167,169-174
+crates/oxc_angular_compiler/src/component/mod.rs
+  s_f9a1acc2593ab8::t_e9eeecafe21854 40-45
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_2e795a639ec060::t_283ff99cdd2e10 343-354,429-434,3160,3220,3222-3223,3623-3625,4790-4898,5156,6056-6057,6127
+crates/oxc_angular_compiler/src/directive/decorator.rs
+  s_2e795a639ec060::t_db838bf05d9fa1 718-788
+crates/oxc_angular_compiler/src/directive/mod.rs
+  s_2e795a639ec060::t_d3a37971a18b54 31-33
+crates/oxc_angular_compiler/src/lib.rs
+  s_f9a1acc2593ab8::t_11aa3398f6a4e7 67-72
+crates/oxc_angular_compiler/tests/component_resource_urls_test.rs
+  s_2e795a639ec060::t_22a55da7d2104d 1-282
+napi/angular-compiler/README.md
+  s_2e795a639ec060::t_b72c7455037c71 45,93-96,98-100
+napi/angular-compiler/index.d.ts
+  s_2e795a639ec060::t_fe5c02e2853b91 342-343,348,577-585,1046-1056
+napi/angular-compiler/src/lib.rs
+  s_2e795a639ec060::t_867d6b863f98ac 401-410,719,730,749-756,917-918,924-927,932-936,938-945,952,961-965,976-977,982,984,1252
+napi/angular-compiler/test/component-resources.test.ts
+  s_2e795a639ec060::t_1d8b8d4970ef08 1-289
+napi/angular-compiler/vite-plugin/index.ts
+  s_2e795a639ec060::t_80db1193b36c26 157-169,506-509,514,516,518-519,548-585,588-591,593,595-602,605-606,614-615,861-872,874-939,942,948-964,1088-1089,1099-1101,1107-1110,1121-1132,1136-1156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d4ab5c3a85a1aded761998dacafa712b0d636943",
+  "prompts": {},
+  "sessions": {
+    "s_2e795a639ec060": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a9732ebf5b7e4b4dd",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_f9a1acc2593ab8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a284e69fb58998e02",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
