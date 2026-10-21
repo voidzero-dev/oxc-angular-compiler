@@ -595,6 +595,43 @@ fn test_defer_on_viewport() {
     insta::assert_snapshot!("defer_on_viewport", js);
 }
 
+#[test]
+fn test_defer_idle_timeout() {
+    // Angular's reify passes `trigger.timeout` to every idle instruction
+    // (`on`, `prefetch on` and `hydrate on`) when one is given.
+    let js = compile_template_to_js(
+        "@defer (on idle(100ms); prefetch on idle(2s)) {a} @defer (on idle; hydrate on idle(250)) {b}",
+        "TestComponent",
+    );
+    for expected in [
+        "i0.ɵɵdeferOnIdle(100);",
+        "i0.ɵɵdeferPrefetchOnIdle(2000);",
+        "i0.ɵɵdeferOnIdle();",
+        "i0.ɵɵdeferHydrateOnIdle(250);",
+    ] {
+        assert!(js.contains(expected), "expected `{expected}` in:\n{js}");
+    }
+}
+
+#[test]
+fn test_defer_idle_timeout_needs_v22() {
+    // Before v22, Angular's `createIdleTrigger` rejects any parameter.
+    let allocator = Allocator::default();
+    let template = "@defer (on idle(100ms)) {a}";
+    let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+    let options = TransformOptions {
+        angular_version: Some(AngularVersion::new(21, 2, 0)),
+        ..TransformOptions::default()
+    };
+    let r3_result =
+        HtmlToR3Transform::new(&allocator, template, options).transform(&html_result.nodes);
+    let errors: Vec<_> = r3_result.errors.iter().map(|e| e.msg.as_str()).collect();
+    assert!(
+        errors.iter().any(|e| e.contains("\"idle\" trigger cannot have parameters")),
+        "expected the pre-v22 idle parameter error, got: {errors:?}"
+    );
+}
+
 /// Reproduces voidzero-dev/oxc-angular-compiler#289 (aligned with Angular's
 /// local-compilation behavior): a `@defer` block on a component whose lazy
 /// dependency is declared in the `@Component.deferredImports` array must emit

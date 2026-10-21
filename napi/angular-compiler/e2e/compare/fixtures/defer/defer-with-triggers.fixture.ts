@@ -118,4 +118,29 @@ export class DeferImmediateComponent {}
     `.trim(),
     expectedFeatures: ['ɵɵdefer', 'ɵɵdeferOnImmediate'],
   },
+  {
+    name: 'defer-on-idle-timeout',
+    category: 'defer',
+    description: '@defer with idle timeouts on the main, prefetch and hydrate triggers',
+    className: 'DeferIdleTimeoutComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-defer-on-idle-timeout',
+  standalone: true,
+  template: \`
+    @defer (on idle(100ms); prefetch on idle(2s)) {
+      <div>Loaded when idle</div>
+    }
+    @defer (on idle; hydrate on idle(250)) {
+      <div>Hydrated when idle</div>
+    }
+  \`,
+})
+export class DeferIdleTimeoutComponent {}
+    `.trim(),
+    expectedFeatures: ['ɵɵdefer', 'ɵɵdeferOnIdle', 'ɵɵdeferPrefetchOnIdle', 'ɵɵdeferHydrateOnIdle'],
+  },
 ]
