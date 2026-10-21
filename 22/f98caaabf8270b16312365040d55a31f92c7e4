@@ -1,0 +1,19 @@
+crates/oxc_angular_compiler/src/component/cross_file_elision.rs
+  s_551a7dbfd1ad45::t_46c45f717e2f69 23,51-54,657-659,873,883,991,997-1042,1046,1059,1076-1081,1099,1118,1136,1152,1165,1174,1185,1201,1210-1218,1225,1227-1229,1239,1244,2019-2065
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "22f98caaabf8270b16312365040d55a31f92c7e4",
+  "prompts": {},
+  "sessions": {
+    "s_551a7dbfd1ad45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4f5d6ba425543afc",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
