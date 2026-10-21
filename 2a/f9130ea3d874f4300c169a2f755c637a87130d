@@ -1,0 +1,29 @@
+crates/oxc_angular_compiler/src/component/cross_file_elision.rs
+  s_6c0f2e038d3650::t_c126c2a5918a9e 83-86,122-125,128,134,137-146,149,178-179,219,473,491-517,1196,1914-1938
+crates/oxc_angular_compiler/tests/defer_implicit_imports_test.rs
+  s_0673db97cc1822::t_e835db24b9bb90 414-532
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2af9130ea3d874f4300c169a2f755c637a87130d",
+  "prompts": {},
+  "sessions": {
+    "s_0673db97cc1822": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aac6388f4bd51ed93",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_6c0f2e038d3650": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8dfb6f22b9a61062",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
