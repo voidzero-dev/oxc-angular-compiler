@@ -1,0 +1,65 @@
+crates/oxc_angular_compiler/src/component/definition.rs
+  s_ea1c9a7665ba92::t_6f729e7a6c8b40 418
+crates/oxc_angular_compiler/src/component/metadata.rs
+  s_ea1c9a7665ba92::t_f0e73ad51c813c 222-236,954-979
+crates/oxc_angular_compiler/src/lib.rs
+  s_e83d09f3aacd9d::t_5043e440694fcb 87-89
+crates/oxc_angular_compiler/src/linker/mod.rs
+  s_ea1c9a7665ba92::t_321fb2dc0b497c 2149-2154
+crates/oxc_angular_compiler/src/styles/encapsulation.rs
+  s_ea1c9a7665ba92::t_04443dc03315f4 31-32,308-309,331-345,350-351,354,360-366,374-377,952-963,3431-3435,3438,3447,3454,3464,3481,3492,3505,3518,3529-3530,3534-3558
+crates/oxc_angular_compiler/src/styles/minify.rs
+  s_ea1c9a7665ba92::t_eba3376f2421fd 3-4,9-11,18,21,67
+crates/oxc_angular_compiler/src/styles/mod.rs
+  s_ea1c9a7665ba92::t_4f2168d59e55ea 10-12
+crates/oxc_angular_compiler/tests/shadow_css_test.rs
+  s_ea1c9a7665ba92::t_57bf593721e585 12-15,44-49,342-343,348-349,1161-1168,1215-1218,1229-1231,1233,1310,1330-1396
+napi/angular-compiler/index.d.ts
+  s_3fc362be4abda1::t_e8a71eeb3bd554 255-257,275-279
+napi/angular-compiler/src/lib.rs
+  s_e83d09f3aacd9d::t_9f36dafdf845aa 30-31,675,858-860,878-883
+napi/angular-compiler/vite-plugin/index.ts
+  s_1744ea5aef3057::t_ddb26e163f1895 1532
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_ea1c9a7665ba92::t_3cef38cd18dfd8 287-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2f895602af87600014b6cfbcd7f7cbe806ac7521",
+  "prompts": {},
+  "sessions": {
+    "s_1744ea5aef3057": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0e95dc494d96c134",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_3fc362be4abda1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a237fd75f168825f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_e83d09f3aacd9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab20be3c84c4262f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_ea1c9a7665ba92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad3c64857533bfe60",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
