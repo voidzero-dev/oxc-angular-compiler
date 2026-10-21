@@ -1,0 +1,21 @@
+crates/oxc_angular_compiler/src/styles/encapsulation.rs
+  s_6f6ea19725592f::t_5f61bde654ad1d 969-970,976-992,994,1340-1366,1661-1664,1670-1671,1818,1831,1887,1892,1905,1923-1924,1926-1928,2701-2744
+crates/oxc_angular_compiler/tests/shadow_css_test.rs
+  s_6f6ea19725592f::t_6738592178279c 1409-1516
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cda58411f685060135a3a75d88ed3bf39c10bb74",
+  "prompts": {},
+  "sessions": {
+    "s_6f6ea19725592f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4320b9d30229890f",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
