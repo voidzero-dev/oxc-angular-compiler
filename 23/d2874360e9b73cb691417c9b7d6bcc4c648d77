@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_91a9eec7496df1::t_a0ae18d9d2fcf4 5653-5670
+crates/oxc_angular_compiler/src/transform/html_to_r3.rs
+  s_91a9eec7496df1::t_d3e68caebbfe77 500,505-507,5120-5126,5136-5165,5175,5669-5699
+napi/angular-compiler/e2e/compare/fixtures/regressions/i18n-meta-trim.fixture.ts
+  s_91a9eec7496df1::t_7ef3890bccddec 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "23d2874360e9b73cb691417c9b7d6bcc4c648d77",
+  "prompts": {},
+  "sessions": {
+    "s_91a9eec7496df1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7db0fd5a3cbcecb9",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
