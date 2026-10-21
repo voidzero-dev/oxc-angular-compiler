@@ -200,118 +200,93 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
 
 /// Parses a CSS style string into property-value pairs.
 ///
-/// Handles:
-/// - Basic syntax: "color: red; height: auto"
-/// - Parentheses: "background: url(foo.png)"
-/// - Quoted values: "content: 'hello'"
+/// A 1:1 port of Angular's `parse()` (`parse_extracted_styles.ts`, shared with
+/// the Domino fork's `style_parser.js`), quirks included:
+/// - `;` and `:` inside parentheses or quotes are part of the value.
+/// - A declaration with an empty value is kept (`a:;` gives `a` = `""`).
+/// - A `;` before any `name:` does not start a new property, so `x;a:b` gives
+///   the property `x;a`, and `a:b;;c:d` gives `;c` for the second one.
+/// - The escaped-quote check reads the quote itself rather than the character
+///   before it, so a matching quote always closes, even after a backslash.
 pub fn parse_style_string(value: &str) -> std::vec::Vec<(String, String)> {
     let mut styles = std::vec::Vec::new();
-    let mut chars = value.chars().peekable();
+    // Every character the parser looks at is ASCII, so byte offsets are char
+    // boundaries and match Angular's UTF-16 offsets for slicing purposes.
+    let bytes = value.as_bytes();
 
-    let mut paren_depth = 0;
-    let mut quote_char: Option<char> = None;
+    let mut i = 0;
+    let mut paren_depth = 0i32;
+    // `0` means not inside a quote.
+    let mut quote = 0u8;
+    let mut value_start = 0;
+    let mut prop_start = 0;
+    // Angular's `currentProp` is `string | null`; both `null` and `''` are
+    // falsy, so an empty string stands for both.
     let mut current_prop = String::new();
-    let mut current_value = String::new();
-    let mut in_value = false;
-    let mut prev_char = '\0';
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '(' => {
-                paren_depth += 1;
-                if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
+    while i < bytes.len() {
+        let token = bytes[i];
+        i += 1;
+        match token {
+            b'(' => paren_depth += 1,
+            b')' => paren_depth -= 1,
+            b'\'' | b'"' => {
+                if quote == 0 {
+                    quote = token;
+                } else if quote == token {
+                    quote = 0;
                 }
             }
-            ')' => {
-                paren_depth -= 1;
-                if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
-                }
+            b':' if current_prop.is_empty() && paren_depth == 0 && quote == 0 => {
+                current_prop = hyphenate(js_trim(&value[prop_start..i - 1]));
+                value_start = i;
             }
-            '\'' | '"' => {
-                if quote_char.is_none() {
-                    quote_char = Some(ch);
-                } else if quote_char == Some(ch) && prev_char != '\\' {
-                    quote_char = None;
-                }
-                if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
-                }
+            b';' if !current_prop.is_empty()
+                && value_start > 0
+                && paren_depth == 0
+                && quote == 0 =>
+            {
+                let style_val = js_trim(&value[value_start..i - 1]).to_string();
+                styles.push((std::mem::take(&mut current_prop), style_val));
+                prop_start = i;
+                value_start = 0;
             }
-            ':' => {
-                if quote_char.is_none() && paren_depth == 0 && !in_value {
-                    in_value = true;
-                } else if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
-                }
-            }
-            ';' => {
-                if quote_char.is_none() && paren_depth == 0 {
-                    // End of property
-                    let prop = hyphenate(current_prop.trim());
-                    let val = current_value.trim().to_string();
-                    if !prop.is_empty() && !val.is_empty() {
-                        styles.push((prop, val));
-                    }
-                    current_prop.clear();
-                    current_value.clear();
-                    in_value = false;
-                } else if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
-                }
-            }
-            _ => {
-                if in_value {
-                    current_value.push(ch);
-                } else {
-                    current_prop.push(ch);
-                }
-            }
+            _ => {}
         }
-        prev_char = ch;
     }
 
-    // Handle last property without trailing semicolon
-    let prop = hyphenate(current_prop.trim());
-    let val = current_value.trim().to_string();
-    if !prop.is_empty() && !val.is_empty() {
-        styles.push((prop, val));
+    if !current_prop.is_empty() && value_start > 0 {
+        let style_val = js_trim(&value[value_start..]).to_string();
+        styles.push((current_prop, style_val));
     }
 
     styles
 }
 
+/// `String.prototype.trim`: Unicode white space and line terminators, plus
+/// U+FEFF but not U+0085.
+fn js_trim(value: &str) -> &str {
+    value.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{FEFF}')
+}
+
 /// Converts camelCase to kebab-case.
 ///
 /// Matches Angular's `hyphenate` function from `parse_extracted_styles.ts`.
-/// Inserts a hyphen before uppercase letters that follow lowercase letters,
-/// then converts the entire string to lowercase.
+/// Inserts a hyphen between an ASCII lowercase letter and a following ASCII
+/// uppercase letter (`/[a-z][A-Z]/g`), then lowercases the whole string like
+/// `String.prototype.toLowerCase`.
 ///
 /// Example: `backgroundColor` -> `background-color`
 pub fn hyphenate(value: &str) -> String {
     let mut result = String::with_capacity(value.len() + 4);
-    let chars: Vec<char> = value.chars().collect();
-
-    for (i, &ch) in chars.iter().enumerate() {
-        // Insert hyphen if current char is uppercase and previous char is lowercase
-        // This matches TypeScript's /[a-z][A-Z]/g regex behavior
-        if ch.is_ascii_uppercase() && i > 0 && chars[i - 1].is_ascii_lowercase() {
+    let mut prev_lower = false;
+    for ch in value.chars() {
+        if ch.is_ascii_uppercase() && prev_lower {
             result.push('-');
         }
-        result.push(ch.to_ascii_lowercase());
+        prev_lower = ch.is_ascii_lowercase();
+        result.push(ch);
     }
-    result
+    result.to_lowercase()
 }
 
 /// Extracts a string value from an IrExpression.
@@ -462,5 +437,51 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
         } else if !cursor.move_next() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hyphenate, parse_style_string};
+
+    /// The `[name, value, name, value, ...]` array Angular's `parse()` returns.
+    fn parse(value: &str) -> std::vec::Vec<String> {
+        parse_style_string(value).into_iter().flat_map(|(k, v)| [k, v]).collect()
+    }
+
+    // Expected values are what Angular 22.2's `parse()` returns for the same input.
+    #[test]
+    fn parses_like_angular_style_parser() {
+        assert_eq!(parse("color: red; height: auto"), ["color", "red", "height", "auto"]);
+        assert_eq!(parse("width:100px;"), ["width", "100px"]);
+        assert!(parse("").is_empty());
+        assert!(parse("color").is_empty());
+        // Empty values are kept.
+        assert_eq!(parse("a:;b:c"), ["a", "", "b", "c"]);
+        assert_eq!(parse("a:"), ["a", ""]);
+        // A `;` before `name:` does not start a new property.
+        assert_eq!(parse("x;a:b"), ["x;a", "b"]);
+        assert_eq!(parse("a:b;;c:d"), ["a", "b", ";c", "d"]);
+        assert_eq!(parse(";a:b"), [";a", "b"]);
+        // An empty name does not take the value; the next `:` starts again.
+        assert_eq!(parse(":a:b"), [":a", "b"]);
+        // `;` and `:` inside parentheses and quotes stay in the value.
+        assert_eq!(
+            parse("background: url(\"a;b:c\"); content: 'x;y'"),
+            ["background", "url(\"a;b:c\")", "content", "'x;y'"]
+        );
+        // A backslash does not keep a matching quote from closing.
+        assert_eq!(parse(r#"content: "a\"; color: red"#), ["content", r#""a\""#, "color", "red"]);
+        // camelCase names are hyphenated.
+        assert_eq!(parse("backgroundColor: red"), ["background-color", "red"]);
+    }
+
+    #[test]
+    fn hyphenates_like_angular() {
+        assert_eq!(hyphenate("backgroundColor"), "background-color");
+        assert_eq!(hyphenate("WebkitAppearance"), "webkit-appearance");
+        assert_eq!(hyphenate("aBC"), "a-bc");
+        // `toLowerCase` lowercases non-ASCII letters too.
+        assert_eq!(hyphenate("ÄB"), "äb");
     }
 }
