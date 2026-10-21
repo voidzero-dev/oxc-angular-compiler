@@ -3036,6 +3036,25 @@ pub fn transform_angular_file(
         // Still continue to try to generate output for partial results
     }
 
+    // One semantic model of the source program, shared by import elision,
+    // the initializer-API validation and the TDZ hoist below. The program is
+    // never mutated after parsing (edits are applied to the source text), so
+    // it stays valid for all three. Only the validation reads the node store,
+    // so build it only when that rule will run.
+    //
+    // Semantic builder errors (redeclarations, etc.) are intentionally
+    // dropped: the parser already captured syntax errors into
+    // `result.diagnostics` above, and Semantic-level diagnostics aren't
+    // actionable for these passes — we treat the input as best-effort and
+    // rely on the host build to surface genuine errors. The JIT path (see
+    // `transform_angular_file_jit`) follows the same convention.
+    let semantic = oxc_semantic::SemanticBuilder::new()
+        .with_build_nodes(crate::validation::initializer_api_usage_needs_semantic(
+            &parser_ret.program,
+        ))
+        .build(&parser_ret.program)
+        .semantic;
+
     // Run import elision analysis on the original program.
     // This identifies type-only imports that can be removed.
     // Must run BEFORE transformation to capture correct type vs value references.
@@ -3043,8 +3062,9 @@ pub fn transform_angular_file(
     // `@Inject` tokens (`args: [TOKEN]`) and member decorators (`{type: Input}`)
     // by their imported names, so those imports must stay whenever metadata
     // will be emitted (ngtsc keeps them too).
-    let import_elision = ImportElisionAnalyzer::analyze(
+    let import_elision = ImportElisionAnalyzer::analyze_with_semantic(
         &parser_ret.program,
+        &semantic,
         options.emit_class_metadata && !options.advanced_optimizations,
     );
 
@@ -3200,9 +3220,10 @@ pub fn transform_angular_file(
 
     // ngtsc's source-file rules (validation/): initializer APIs used outside a
     // class member initializer (UNSUPPORTED_INITIALIZER_API_USAGE).
-    result.diagnostics.extend(crate::validation::initializer_api_usage_errors(
+    result.diagnostics.extend(crate::validation::initializer_api_usage_errors_with_semantic(
         &parser_ret.program,
         &string_consts,
+        &semantic,
     ));
 
     #[cfg(feature = "cross_file_elision")]
@@ -4643,28 +4664,19 @@ pub fn transform_angular_file(
     // reference at class-definition time and throw `ReferenceError`. See
     // issue #287.
     //
-    // The hoister resolves identifier references through `oxc_semantic` so
-    // a nested-scope shadow of a top-level name can't be mistaken for the
-    // top-level binding itself.
+    // The hoister resolves identifier references through `oxc_semantic` (the
+    // file-level model built after parsing) so a nested-scope shadow of a
+    // top-level name can't be mistaken for the top-level binding itself.
     //
-    // Gate the Semantic build behind a cheap top-level scan: a real Angular
-    // codebase contains plenty of plain `.ts` helpers, type-only modules, and
-    // services without `@Injectable` that we route through this function. For
-    // those, building a full symbol table just to discover there's nothing to
-    // hoist is pure overhead.
+    // Gate the hoist behind a cheap top-level scan: a real Angular codebase
+    // contains plenty of plain `.ts` helpers, type-only modules, and services
+    // without `@Injectable` that we route through this function, and for
+    // those there is nothing to hoist.
     if program_has_angular_decorated_class(&parser_ret.program, &import_map, &string_consts) {
-        // Semantic builder errors (redeclarations, etc.) are intentionally
-        // dropped: the parser already captured syntax errors into
-        // `result.diagnostics` upstream, and Semantic-level diagnostics here
-        // aren't actionable for the hoist pass — we treat the input as
-        // best-effort and rely on the host build to surface genuine errors.
-        // The JIT path (see ~line 1380) follows the same convention.
-        let hoist_semantic =
-            oxc_semantic::SemanticBuilder::new().build(&parser_ret.program).semantic;
         edits.extend(collect_hoist_edits(
             &parser_ret.program,
             source,
-            &hoist_semantic,
+            &semantic,
             &import_map,
             &string_consts,
         ));

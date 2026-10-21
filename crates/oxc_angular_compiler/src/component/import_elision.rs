@@ -90,8 +90,16 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// decorators are stripped outright and the imports can be dropped.
     pub fn analyze(program: &'a Program<'a>, emit_metadata: bool) -> Self {
         let semantic_ret = SemanticBuilder::new().build(program);
-        let semantic = &semantic_ret.semantic;
+        Self::analyze_with_semantic(program, &semantic_ret.semantic, emit_metadata)
+    }
 
+    /// [`Self::analyze`] with a semantic model the caller already built for
+    /// `program`, so one build can serve several passes.
+    pub fn analyze_with_semantic(
+        program: &'a Program<'a>,
+        semantic: &Semantic<'a>,
+        emit_metadata: bool,
+    ) -> Self {
         let mut type_only_specifiers = FxHashSet::default();
         let mut value_reference_counts = FxHashMap::default();
         let mut declaration_specifiers = Vec::new();
