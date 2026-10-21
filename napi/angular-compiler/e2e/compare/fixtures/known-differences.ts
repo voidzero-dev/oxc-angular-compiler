@@ -80,6 +80,11 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     statements: ['ɵɵsetNgModuleScope(SpreadModule)'],
     reasons: [NG_MODULE_SCOPE],
   },
+  'injector/injector-with-exports': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(ExportingModule)'],
+    reasons: [NG_MODULE_SCOPE],
+  },
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
