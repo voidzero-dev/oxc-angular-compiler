@@ -351,6 +351,7 @@ async function compareFilesProjectWide(
           classDiffs: comparison.classDiffs,
           staticFieldDiffs: comparison.staticFieldDiffs,
           classMetadataDiffs: comparison.classMetadataDiffs,
+          statementDiffs: comparison.statementDiffs,
           functionComparison: comparison.functionComparison,
           parseErrors: comparison.parseErrors,
         }
@@ -519,6 +520,9 @@ function summarizeComparisonDetails(
   }
   if (details.classMetadataDiffs?.length) {
     parts.push(`${details.classMetadataDiffs.length} metadata diff(s)`)
+  }
+  if (details.statementDiffs?.length) {
+    parts.push(`${details.statementDiffs.length} statement diff(s)`)
   }
   if (details.functionComparison) {
     const fc = details.functionComparison

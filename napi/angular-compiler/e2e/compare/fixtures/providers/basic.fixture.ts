@@ -409,6 +409,7 @@ export class ProvidersWithEncapsulationComponent {}
 
   {
     name: 'providers-with-change-detection',
+    ngtscMode: 'full',
     category: 'providers',
     description: 'Providers with OnPush change detection',
     className: 'ProvidersWithChangeDetectionComponent',

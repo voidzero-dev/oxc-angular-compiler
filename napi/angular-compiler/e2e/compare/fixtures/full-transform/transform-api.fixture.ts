@@ -143,6 +143,7 @@ export class NoEncapsulationComponent {}
   {
     type: 'full-transform',
     name: 'transform-api-onpush',
+    ngtscMode: 'full',
     category: 'full-transform',
     description: 'Full file transformation with OnPush change detection',
     className: 'OnPushComponent',

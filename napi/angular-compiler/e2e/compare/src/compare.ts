@@ -2,20 +2,7 @@ import { diffLines } from 'diff'
 import { parseSync, type StaticImport, type StaticExport } from 'oxc-parser'
 import { format as formatWithOxfmt, type FormatOptions } from 'oxfmt'
 
-import { normalizeTemplateLiterals } from './normalize-template-literals.js'
 import type { FunctionLevelComparison, FunctionDiff, AstDiff, ClassMetadataDiff } from './types.js'
-
-/**
- * Result of comparing two pieces of JavaScript code semantically.
- */
-export interface CompareResult {
-  /** Whether the two pieces of code are semantically equivalent */
-  match: boolean
-  /** Function-level comparison details */
-  functionComparison?: FunctionLevelComparison
-  /** Legacy differences found (deprecated) */
-  diff?: AstDiff[]
-}
 
 /**
  * Result of comparing full-file outputs semantically.
@@ -33,6 +20,8 @@ export interface FullFileCompareResult {
   staticFieldDiffs?: StaticFieldDiff[]
   /** Class metadata (setClassMetadata) differences */
   classMetadataDiffs?: ClassMetadataDiff[]
+  /** Other top-level statement differences (setClassDebugInfo, setNgModuleScope, ...) */
+  statementDiffs?: StatementDiff[]
   /** Function-level comparison details (for template functions, etc.) */
   functionComparison?: FunctionLevelComparison
   /** Parse errors if any */
@@ -96,6 +85,27 @@ export interface StaticFieldDiff {
 }
 
 /**
+ * Difference in a top-level statement that no other part of the comparison covers, such as the
+ * `ɵsetClassDebugInfo` and `ɵɵsetNgModuleScope` calls.
+ */
+export interface StatementDiff {
+  /**
+   * The statement's label: `callee(firstArg)` of its first `ɵ` call (e.g.
+   * `ɵsetClassDebugInfo(MyComponent)`), else `#N` for the N-th unlabelled statement. A
+   * `ɵsetClassDebugInfo` call that differs only in its `filePath` is labelled
+   * `ɵsetClassDebugInfo(MyComponent) filePath`, and a statement Oxc emits before one that Angular
+   * emits ahead of it is labelled `order ɵsetClassDebugInfo(MyComponent)`.
+   */
+  label: string
+  /** Type of difference */
+  type: 'missing' | 'extra' | 'different' | 'order'
+  /** Expected statement (from TS) */
+  expected?: string
+  /** Actual statement (from Oxc) */
+  actual?: string
+}
+
+/**
  * Properties to ignore when normalizing AST nodes for comparison.
  * These properties contain cosmetic/location information that doesn't affect semantics.
  */
@@ -114,10 +124,13 @@ const IGNORED_PROPERTIES = new Set([
 ])
 
 /**
- * Unwrap ParenthesizedExpression nodes since they don't affect semantics.
- * This normalizes `(expr)` to just `expr`.
+ * Rewrite syntax that has the same meaning into one form:
+ *
+ * - `(expr)` becomes `expr`
+ * - an untagged template literal without substitutions (`\`a\``) becomes the string literal
+ *   with the same value (`"a"`). Tagged templates keep their form: the tag sees the raw strings.
  */
-function unwrapParenthesized(node: unknown): unknown {
+function unwrapParenthesized(node: unknown, tagged = false): unknown {
   if (node === null || typeof node !== 'object') {
     return node
   }
@@ -129,22 +142,36 @@ function unwrapParenthesized(node: unknown): unknown {
     return unwrapParenthesized(obj.expression)
   }
 
+  const quasis = obj.quasis as Array<{ value: { cooked: unknown } }> | undefined
+  if (
+    !tagged &&
+    obj.type === 'TemplateLiteral' &&
+    quasis?.length === 1 &&
+    (obj.expressions as unknown[]).length === 0
+  ) {
+    return { type: 'Literal', value: quasis[0].value.cooked }
+  }
+
   // Recursively process arrays
   if (Array.isArray(node)) {
-    return node.map(unwrapParenthesized)
+    return node.map((item) => unwrapParenthesized(item))
   }
 
   // Recursively process object properties
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(obj)) {
-    result[key] = unwrapParenthesized(value)
+    result[key] = unwrapParenthesized(
+      value,
+      obj.type === 'TaggedTemplateExpression' && key === 'quasi',
+    )
   }
   return result
 }
 
 /**
  * Normalize AST to a canonical JSON string representation.
- * This excludes location and cosmetic properties, and unwraps parenthesized expressions.
+ * This excludes location and cosmetic properties, and rewrites equivalent syntax into one form
+ * (see `unwrapParenthesized`).
  */
 function normalizeAst(node: unknown): string {
   // First unwrap parenthesized expressions
@@ -153,74 +180,32 @@ function normalizeAst(node: unknown): string {
     if (IGNORED_PROPERTIES.has(key)) {
       return undefined
     }
+    // A BigInt literal's `value` is a bigint, which JSON.stringify cannot serialize.
+    if (typeof value === 'bigint') {
+      return `${value}n`
+    }
     return value
   })
 }
 
 /**
- * Build a mapping from const names (_c0, _c1, etc.) to their normalized values.
- * This allows us to compare consts by value rather than by name.
- *
- * Handles both array constants and function constants:
- * - Array: const _c0 = ["value"];
- * - Function: const _c1 = (a0) => ({...});
+ * Map each top-level `const _cN = ...` (the constants the template compiler hoists) to its
+ * normalized AST, so constants can be paired by value rather than by name.
  */
-function buildConstValueMap(code: string): Map<string, string> {
+function buildConstValueMap(program: Program): Map<string, string> {
   const constMap = new Map<string, string>()
-  const constNamePattern = /^_c\d+$/
-
-  // Parse the code using AST
-  const ast = parseSync('file.js', code, { sourceType: 'module' })
-
-  for (const stmt of ast.program.body) {
-    // Only process const declarations
-    if (
-      stmt.type !== 'VariableDeclaration' ||
-      stmt.kind !== 'const' ||
-      stmt.declarations.length !== 1
-    ) {
+  for (const stmt of program.body as unknown as NormAstNode[]) {
+    const declarations = (stmt.declarations ?? []) as NormAstNode[]
+    if (stmt.type !== 'VariableDeclaration' || stmt.kind !== 'const' || declarations.length !== 1) {
       continue
     }
-
-    const decl = stmt.declarations[0]
-
-    // Check if identifier matches _c\d+ pattern
-    if (decl.id.type !== 'Identifier' || !constNamePattern.test(decl.id.name)) {
-      continue
-    }
-
-    const constName = decl.id.name
-    const init = decl.init
-
-    if (!init) {
-      continue
-    }
-
-    // Handle ArrayExpression: const _c0 = ["value"];
-    if (init.type === 'ArrayExpression') {
-      const constValue = code.slice(init.start, init.end)
-      // Normalize the value by removing ALL whitespace for canonical comparison
-      // This handles formatting differences (Oxc uses newlines/tabs, NG uses inline)
-      const normalizedValue = constValue
-        .replace(/\s+/g, '') // Remove ALL whitespace
-        .trim()
-      constMap.set(constName, normalizedValue)
-    }
-    // Handle ArrowFunctionExpression: const _c1 = (a0) => ({...});
-    else if (init.type === 'ArrowFunctionExpression') {
-      const constValue = code.slice(init.start, init.end)
-      // Normalize the value for comparison:
-      // 1. Remove all whitespace to get a canonical form
-      // 2. Normalize arrow function syntax variations
-      const normalizedValue = constValue
-        .replace(/\s+/g, '') // Remove ALL whitespace
-        // Normalize single param without parens: "a0=>" to "(a0)=>"
-        .replace(/^([a-zA-Z_]\w*)=>/g, '($1)=>')
-        .trim()
-      constMap.set(constName, normalizedValue)
+    const id = declarations[0].id as NormAstNode
+    const name = id.name
+    if (id.type !== 'Identifier' || typeof name !== 'string' || !/^_c\d+$/.test(name)) continue
+    if (declarations[0].init) {
+      constMap.set(name, normalizeAst(declarations[0].init))
     }
   }
-
   return constMap
 }
 
@@ -379,342 +364,6 @@ function replaceConstReferences(code: string, constMapping: Map<string, string>)
   return result
 }
 
-/**
- * Check if a const value is component metadata that Oxc's template compiler doesn't emit.
- *
- * These patterns are generated by Angular's full compiler for component metadata,
- * but Oxc's template-only compiler doesn't emit them:
- *
- * 1. Attrs arrays: ["selectorName", ""] - for component selectors/inputs
- *    Example: ["matButton", ""], ["bitPrefix", ""]
- *
- * 2. View query predicates: ["refName"] - single-element arrays for view/content queries
- *    Used by @ViewChild("refName"), @ViewChildren("refName"), @ContentChild, @ContentChildren
- *    Example: ["chipSelectButton"], ["prefixContainer"]
- *
- * Both are component metadata that only appears in TypeScript Angular's full-file output.
- */
-function isAttrsConst(value: string): boolean {
-  // Parse the value as an expression using oxc-parser
-  const parseResult = parseSync('expr.js', value, { sourceType: 'script' })
-
-  // Check if parsing succeeded and we have exactly one statement
-  const program = parseResult.program
-  if (program.body.length !== 1) {
-    return false
-  }
-
-  const stmt = program.body[0]
-  if (stmt.type !== 'ExpressionStatement') {
-    return false
-  }
-
-  const expr = stmt.expression
-  if (expr.type !== 'ArrayExpression') {
-    return false
-  }
-
-  const elements = expr.elements
-
-  // Helper to check if an element is a string literal
-  const isStringLiteral = (el: unknown): boolean => {
-    if (el && typeof el === 'object' && 'type' in el && 'value' in el) {
-      return el.type === 'Literal' && typeof el.value === 'string'
-    }
-    return false
-  }
-
-  // Helper to get string value from a literal element
-  const getStringValue = (el: unknown): string | undefined => {
-    if (el && typeof el === 'object' && 'type' in el && 'value' in el) {
-      if (el.type === 'Literal' && typeof el.value === 'string') {
-        return el.value
-      }
-    }
-    return undefined
-  }
-
-  // Attrs arrays: ["matButton", ""] or ["mat-fab", ""]
-  // Pattern: 2 elements, both string Literals, second one is empty string
-  if (elements.length === 2) {
-    const first = elements[0]
-    const second = elements[1]
-    if (isStringLiteral(first) && isStringLiteral(second) && getStringValue(second) === '') {
-      return true
-    }
-  }
-
-  // View query predicates: ["refName"] - single-element string arrays
-  // Used for @ViewChild("refName"), @ViewChildren("refName"), @ContentChild, @ContentChildren
-  // These are NOT emitted by Oxc's template compiler because queries are class-level metadata
-  // Pattern: 1 element which is a string Literal
-  if (elements.length === 1) {
-    const first = elements[0]
-    if (isStringLiteral(first)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-/**
- * Remove attrs/query consts from TS code that are NOT present in Oxc output.
- *
- * This function removes component metadata consts (like view query predicates) that only
- * appear in TypeScript Angular's full-file output because Oxc's template compiler doesn't
- * emit them.
- *
- * IMPORTANT: Only removes consts that are in TS but NOT in Oxc. If both outputs have the
- * same const value (e.g., selector arrays that Oxc also emits), it is NOT removed.
- *
- * After removal, remaining constants are renumbered to start from _c0 to align
- * with Oxc's numbering.
- *
- * Uses AST-based removal for correctness with nested structures.
- */
-function removeAttrsConstsNotInOxc(
-  tsCode: string,
-  tsConstMap: Map<string, string>,
-  oxcConstMap: Map<string, string>,
-): string {
-  // Build set of const VALUES present in Oxc output
-  const oxcConstValues = new Set(oxcConstMap.values())
-
-  // Find attrs consts in TS that are NOT in Oxc
-  const attrsConstsToRemove = new Set<string>()
-  for (const [name, value] of tsConstMap) {
-    // Only remove if:
-    // 1. The const looks like attrs/query metadata
-    // 2. The same value does NOT exist in Oxc output
-    if (isAttrsConst(value) && !oxcConstValues.has(value)) {
-      attrsConstsToRemove.add(name)
-    }
-  }
-
-  if (attrsConstsToRemove.size === 0) {
-    return tsCode
-  }
-
-  // Remove the const declarations using AST
-  let result = removeConstDeclarations(tsCode, attrsConstsToRemove)
-
-  // Renumber remaining constants to start from _c0
-  // This ensures Angular's output matches Oxc's constant numbering
-  const remainingConsts: string[] = []
-  for (const name of tsConstMap.keys()) {
-    if (!attrsConstsToRemove.has(name)) {
-      remainingConsts.push(name)
-    }
-  }
-
-  // Sort remaining constants by their numeric suffix
-  remainingConsts.sort((a, b) => {
-    const numA = parseInt(a.replace('_c', ''), 10)
-    const numB = parseInt(b.replace('_c', ''), 10)
-    return numA - numB
-  })
-
-  // Build rename map: old name -> new name (starting from _c0)
-  const renameMap = new Map<string, string>()
-  for (let i = 0; i < remainingConsts.length; i++) {
-    const oldName = remainingConsts[i]
-    const newName = `_c${i}`
-    if (oldName !== newName) {
-      renameMap.set(oldName, newName)
-    }
-  }
-
-  // Replace const references using the rename map
-  if (renameMap.size > 0) {
-    result = replaceConstReferences(result, renameMap)
-  }
-
-  return result
-}
-
-/**
- * Remove const declarations by name using AST-based approach.
- * This correctly handles any const value structure including nested arrays/objects.
- */
-function removeConstDeclarations(code: string, constNamesToRemove: Set<string>): string {
-  const ast = parseSync('file.js', code, { sourceType: 'module' })
-
-  // Collect spans to remove (sorted by start position descending for safe removal)
-  const spansToRemove: Array<{ start: number; end: number }> = []
-
-  for (const stmt of ast.program.body) {
-    if (
-      stmt.type === 'VariableDeclaration' &&
-      stmt.kind === 'const' &&
-      stmt.declarations.length === 1
-    ) {
-      const decl = stmt.declarations[0]
-      if (decl.id.type === 'Identifier' && constNamesToRemove.has(decl.id.name)) {
-        spansToRemove.push({ start: stmt.start, end: stmt.end })
-      }
-    }
-  }
-
-  if (spansToRemove.length === 0) {
-    return code
-  }
-
-  // Sort by start position descending so we can remove from end to start
-  // without affecting earlier positions
-  spansToRemove.sort((a, b) => b.start - a.start)
-
-  let result = code
-  for (const span of spansToRemove) {
-    // Also remove trailing whitespace/newline after the statement
-    let end = span.end
-    while (end < result.length && (result[end] === ' ' || result[end] === '\n')) {
-      end++
-    }
-    result = result.slice(0, span.start) + result.slice(end)
-  }
-
-  return result
-}
-
-/**
- * Remove provider const declarations from code.
- * Providers are component metadata, not template output, and may contain
- * expressions the Angular TS compiler can't handle (showing as "/* unknown * /").
- *
- * Uses AST-based removal for correctness.
- */
-function removeProvidersConst(code: string): string {
-  return removeConstDeclarations(code, new Set(['_providers']))
-}
-
-/**
- * Create a byte-offset to character-index mapping for a string.
- * This pre-computes the mapping once for efficient lookups.
- */
-function createByteToCharMap(str: string): number[] {
-  // For ASCII-only strings, byte offset === char index
-  // Quick check: if all chars are < 128, return empty map as sentinel
-  let hasNonAscii = false
-  for (let i = 0; i < str.length; i++) {
-    if (str.charCodeAt(i) >= 128) {
-      hasNonAscii = true
-      break
-    }
-  }
-  if (!hasNonAscii) {
-    return [] // Empty sentinel means use identity mapping
-  }
-
-  const encoder = new TextEncoder()
-  const map: number[] = [0] // byte 0 -> char 0
-  let byteCount = 0
-
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i)
-    // Handle surrogate pairs (characters outside BMP)
-    // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
-    // Only treat as a pair if followed by a valid low surrogate
-    const isHighSurrogate = code >= 0xd800 && code <= 0xdbff
-    const nextCode = i + 1 < str.length ? str.charCodeAt(i + 1) : 0
-    const isValidPair = isHighSurrogate && nextCode >= 0xdc00 && nextCode <= 0xdfff
-
-    if (isValidPair) {
-      const pair = str.slice(i, i + 2)
-      const bytes = encoder.encode(pair).length
-      for (let b = 0; b < bytes; b++) {
-        byteCount++
-        map[byteCount] = i + 2 // Next char after the pair
-      }
-      i++ // Skip the low surrogate
-    } else {
-      // Single character (including unpaired surrogates)
-      const bytes = encoder.encode(str[i]).length
-      for (let b = 0; b < bytes; b++) {
-        byteCount++
-        map[byteCount] = i + 1 // Next char
-      }
-    }
-  }
-
-  return map
-}
-
-/**
- * Convert a byte offset to a string character index using a pre-computed map.
- */
-function byteOffsetToCharIndex(
-  byteToCharMap: number[],
-  byteOffset: number,
-  strLength: number,
-): number {
-  // Empty map means ASCII-only, use identity mapping
-  if (byteToCharMap.length === 0) {
-    return Math.min(byteOffset, strLength)
-  }
-  if (byteOffset >= byteToCharMap.length) {
-    return strLength
-  }
-  return byteToCharMap[byteOffset] ?? strLength
-}
-
-/**
- * Extract a single function's code from the source by its AST bounds.
- * Handles byte offset to character index conversion for non-ASCII support.
- */
-function extractFunctionCode(code: string, funcAst: FunctionAst, byteToCharMap: number[]): string {
-  // oxc-parser uses 'start' and 'end' directly on nodes (not nested in 'span')
-  // Try both patterns for compatibility
-  let start: number | undefined
-  let end: number | undefined
-
-  if (
-    funcAst.span &&
-    typeof funcAst.span.start === 'number' &&
-    typeof funcAst.span.end === 'number'
-  ) {
-    start = funcAst.span.start
-    end = funcAst.span.end
-  } else if (typeof funcAst.start === 'number' && typeof funcAst.end === 'number') {
-    start = funcAst.start
-    end = funcAst.end
-  }
-
-  if (start !== undefined && end !== undefined) {
-    const startIdx = byteOffsetToCharIndex(byteToCharMap, start, code.length)
-    const endIdx = byteOffsetToCharIndex(byteToCharMap, end, code.length)
-    return code.slice(startIdx, endIdx)
-  }
-
-  // Fallback: re-stringify the AST (less accurate but works)
-  return JSON.stringify(funcAst)
-}
-
-interface FunctionAst {
-  type: 'FunctionDeclaration' | 'FunctionExpression' | 'ArrowFunctionExpression'
-  id?: { name: string } | null
-  span?: { start: number; end: number }
-  start?: number
-  end?: number
-  [key: string]: unknown
-}
-
-interface VariableDeclaration {
-  type: 'VariableDeclaration'
-  declarations: Array<{
-    type: 'VariableDeclarator'
-    id: { type: string; name?: string } | null
-    init: { type: string; [key: string]: unknown } | null
-    span?: { start: number; end: number }
-    start?: number
-    end?: number
-  }>
-  span?: { start: number; end: number }
-  start?: number
-  end?: number
-  [key: string]: unknown
-}
-
 interface Statement {
   type: string
   id?: { name: string } | null
@@ -727,917 +376,48 @@ interface Program {
   [key: string]: unknown
 }
 
-/**
- * Normalize constructor parameter types for @Inject decorated parameters.
- *
- * When a constructor parameter has an @Inject decorator with an injection token
- * (like DOCUMENT), the Angular compiler outputs `{type:undefined}` because the
- * token is not a type. Oxc may preserve the actual type annotation (e.g., Document).
- *
- * This normalizes both outputs to use `type:undefined` for @Inject parameters,
- * which is the canonical form used by Angular's setClassMetadata.
- *
- * Example:
- *   Input:  {type:Document,decorators:[{type:Inject,args:[DOCUMENT]}]}
- *   Output: {type:undefined,decorators:[{type:Inject,args:[DOCUMENT]}]}
- */
-function normalizeInjectParameterTypes(code: string): string {
-  // Match patterns like: {type:SomeType,decorators:[{type:Inject, or {type:Inject,args:
-  // and replace the type with undefined if it has an @Inject decorator
-  //
-  // Pattern matches: {type:IDENTIFIER,decorators:[{type:Inject
-  // Captures the identifier and replaces with undefined
-  return code.replace(
-    /\{type:([A-Z][A-Za-z0-9]*),decorators:\[\{type:Inject/g,
-    '{type:undefined,decorators:[{type:Inject',
-  )
-}
-
-// AST node types for nullish coalescing pattern matching
-interface NullishAstNode {
-  type: string
-  start: number
-  end: number
-  [key: string]: unknown
-}
-
-interface NullishConditionalExpressionNode extends NullishAstNode {
-  type: 'ConditionalExpression'
-  test: NullishAstNode
-  consequent: NullishAstNode
-  alternate: NullishAstNode
-}
-
-interface NullishLogicalExpressionNode extends NullishAstNode {
-  type: 'LogicalExpression'
-  operator: string
-  left: NullishAstNode
-  right: NullishAstNode
-}
-
-interface NullishBinaryExpressionNode extends NullishAstNode {
-  type: 'BinaryExpression'
-  operator: string
-  left: NullishAstNode
-  right: NullishAstNode
-}
-
-interface NullishAssignmentExpressionNode extends NullishAstNode {
-  type: 'AssignmentExpression'
-  operator: string
-  left: NullishAstNode
-  right: NullishAstNode
-}
-
-interface NullishIdentifierNode extends NullishAstNode {
-  type: 'Identifier'
-  name: string
-}
-
-interface NullishUnaryExpressionNode extends NullishAstNode {
-  type: 'UnaryExpression'
-  operator: string
-  argument: NullishAstNode
-}
-
-interface NullishLiteralNode extends NullishAstNode {
-  type: 'Literal'
-  value: unknown
-}
-
-interface NullishParenthesizedExpressionNode extends NullishAstNode {
-  type: 'ParenthesizedExpression'
-  expression: NullishAstNode
-}
-
-interface NullishVariableDeclarationNode extends NullishAstNode {
-  type: 'VariableDeclaration'
-  kind: string
-  declarations: NullishVariableDeclaratorNode[]
-}
-
-interface NullishVariableDeclaratorNode extends NullishAstNode {
-  type: 'VariableDeclarator'
-  id: NullishAstNode
-}
-
-/**
- * Check if an AST node is a nullish coalescing pattern:
- *   Pattern 1: (_a = expr) !== null && _a !== void 0 ? _a : fallback
- *   Pattern 2: expr !== null && expr !== void 0 ? expr : fallback
- *
- * Returns the extracted parts if it matches, null otherwise.
- */
-function matchNullishCoalescingPattern(
-  node: NullishAstNode,
-  code: string,
-): { leftExpr: string; rightExpr: string; tempVarName: string } | null {
-  // Must be a ConditionalExpression
-  if (node.type !== 'ConditionalExpression') return null
-  const conditional = node as NullishConditionalExpressionNode
-
-  // test must be a LogicalExpression with && operator
-  if (conditional.test.type !== 'LogicalExpression') return null
-  const testLogical = conditional.test as NullishLogicalExpressionNode
-  if (testLogical.operator !== '&&') return null
-
-  // Left side of &&: (_a = expr) !== null  OR  expr !== null
-  // This should be a BinaryExpression with !== operator
-  if (testLogical.left.type !== 'BinaryExpression') return null
-  const leftBinary = testLogical.left as NullishBinaryExpressionNode
-  if (leftBinary.operator !== '!==' && leftBinary.operator !== '!=') return null
-
-  // Right side of !== should be null (Literal with value: null in oxc-parser)
-  if (leftBinary.right.type !== 'Literal') return null
-  const nullLiteral = leftBinary.right as NullishLiteralNode
-  if (nullLiteral.value !== null) return null
-
-  // Left side of !== could be:
-  // 1. ParenthesizedExpression containing AssignmentExpression (temp var pattern)
-  // 2. Just an Identifier or other expression (simple pattern)
-  let leftOfBinary = leftBinary.left
-
-  // Unwrap parentheses if needed
-  if (leftOfBinary.type === 'ParenthesizedExpression') {
-    leftOfBinary = (leftOfBinary as NullishParenthesizedExpressionNode).expression
-  }
-
-  // Right side of &&: _a !== void 0  OR  expr !== void 0
-  if (testLogical.right.type !== 'BinaryExpression') return null
-  const rightBinary = testLogical.right as NullishBinaryExpressionNode
-  if (rightBinary.operator !== '!==' && rightBinary.operator !== '!=') return null
-
-  // Right side should be "void 0"
-  if (rightBinary.right.type !== 'UnaryExpression') return null
-  const voidExpr = rightBinary.right as NullishUnaryExpressionNode
-  if (voidExpr.operator !== 'void') return null
-  // In oxc-parser, numeric literals are "Literal" with numeric value
-  if (voidExpr.argument.type !== 'Literal') return null
-  const voidArg = voidExpr.argument as NullishLiteralNode
-  if (voidArg.value !== 0) return null
-
-  // Try to match Pattern 1: (_a = expr) !== null && _a !== void 0 ? _a : fallback
-  if (leftOfBinary.type === 'AssignmentExpression') {
-    const assignmentExpr = leftOfBinary as NullishAssignmentExpressionNode
-
-    // Assignment should be to a temp variable like _a, _b, etc.
-    if (assignmentExpr.left.type !== 'Identifier') return null
-    const tempVar = assignmentExpr.left as NullishIdentifierNode
-    const tempVarName = tempVar.name
-
-    // Check that it's a temp variable pattern (starts with _)
-    if (!tempVarName.startsWith('_')) return null
-
-    // Left side of !== void 0 should be the same temp variable
-    if (rightBinary.left.type !== 'Identifier') return null
-    const rightVarRef = rightBinary.left as NullishIdentifierNode
-    if (rightVarRef.name !== tempVarName) return null
-
-    // consequent should be the same temp variable
-    let consequent = conditional.consequent
-    if (consequent.type === 'ParenthesizedExpression') {
-      consequent = (consequent as NullishParenthesizedExpressionNode).expression
-    }
-    if (consequent.type !== 'Identifier') return null
-    const consequentVar = consequent as NullishIdentifierNode
-    if (consequentVar.name !== tempVarName) return null
-
-    // Extract the left expression (the actual value being null-checked)
-    const leftExpr = code.slice(assignmentExpr.right.start, assignmentExpr.right.end)
-
-    // Extract the right expression (the fallback)
-    const rightExpr = code.slice(conditional.alternate.start, conditional.alternate.end)
-
-    return { leftExpr, rightExpr, tempVarName }
-  }
-
-  // Try to match Pattern 2: expr !== null && expr !== void 0 ? expr : fallback
-  // Both sides of && compare the same expression
-  const leftExprStr = code.slice(leftBinary.left.start, leftBinary.left.end)
-  const rightExprStr = code.slice(rightBinary.left.start, rightBinary.left.end)
-
-  // The expressions must be the same
-  if (leftExprStr !== rightExprStr) return null
-
-  // The consequent must also be the same expression
-  let consequent = conditional.consequent
-  if (consequent.type === 'ParenthesizedExpression') {
-    consequent = (consequent as NullishParenthesizedExpressionNode).expression
-  }
-  const consequentStr = code.slice(consequent.start, consequent.end)
-  if (consequentStr !== leftExprStr) return null
-
-  // Extract the right expression (the fallback)
-  const rightExpr = code.slice(conditional.alternate.start, conditional.alternate.end)
-
-  return { leftExpr: leftExprStr, rightExpr, tempVarName: '' }
-}
-
-/**
- * Recursively walk an AST and collect all nullish coalescing patterns.
- * Returns them sorted by start position descending for safe replacement.
- */
-function collectNullishPatterns(
-  node: NullishAstNode,
-  code: string,
-  patterns: Array<{ start: number; end: number; leftExpr: string; rightExpr: string }>,
-): void {
-  // Try to match this node as a nullish coalescing pattern
-  const match = matchNullishCoalescingPattern(node, code)
-  if (match) {
-    patterns.push({
-      start: node.start,
-      end: node.end,
-      leftExpr: match.leftExpr,
-      rightExpr: match.rightExpr,
-    })
-    // Don't recurse into children of matched patterns - nested patterns
-    // within leftExpr/rightExpr are handled by recursive normalization
-    // in the replacement loop. Collecting them here would cause position
-    // conflicts since the outer pattern's span contains the inner pattern.
-    return
-  }
-
-  // Recursively walk all child nodes (only for non-matched nodes)
-  for (const key of Object.keys(node)) {
-    const value = node[key]
-    if (value && typeof value === 'object') {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (item && typeof item === 'object' && 'type' in item) {
-            collectNullishPatterns(item as NullishAstNode, code, patterns)
-          }
-        }
-      } else if ('type' in value) {
-        collectNullishPatterns(value as NullishAstNode, code, patterns)
-      }
-    }
-  }
-}
-
-/**
- * Collect all "var _a, _b, ...;" declarations (temp variables for nullish coalescing).
- * Returns spans sorted by start position descending for safe removal.
- */
-function collectTempVarDeclarations(
-  ast: { program: { body: unknown[] } },
-  code: string,
-): Array<{ start: number; end: number }> {
-  const spans: Array<{ start: number; end: number }> = []
-
-  for (const stmt of ast.program.body) {
-    const stmtNode = stmt as NullishAstNode
-    if (stmtNode.type === 'VariableDeclaration') {
-      const varDecl = stmtNode as NullishVariableDeclarationNode
-      if (varDecl.kind === 'var') {
-        // Check if ALL declarators are temp variables for nullish coalescing.
-        // TypeScript generates temp vars like _a, _b, _c (single underscore + letter/number).
-        // We must NOT remove helpers like __awaiter, __generator (double underscore).
-        const isTempVar = (name: string): boolean => {
-          // Match _a, _b, ..., _z, _1, _2, etc. but NOT __awaiter, __generator, etc.
-          return /^_[a-z0-9]$/i.test(name)
-        }
-        const allTempVars = varDecl.declarations.every((decl) => {
-          if (decl.id.type === 'Identifier') {
-            const id = decl.id as NullishIdentifierNode
-            return isTempVar(id.name)
-          }
-          return false
-        })
-
-        if (allTempVars && varDecl.declarations.length > 0) {
-          // Include trailing whitespace/newline in removal
-          let end = stmtNode.end
-          while (end < code.length && (code[end] === ' ' || code[end] === '\n')) {
-            end++
-          }
-          spans.push({ start: stmtNode.start, end })
-        }
-      }
-    }
-  }
-
-  return spans
-}
-
-/**
- * Check if an expression contains a logical operator (|| or &&) at ANY level.
- * This helps determine if the expression needs parentheses when used with ??.
- *
- * For example, `x === null || x === void 0 ? void 0 : x.y` has a ConditionalExpression
- * at the top level, but contains a LogicalExpression inside. Mixing this with ??
- * would produce invalid code, so we need to detect logical operators at any depth.
- */
-function containsLogicalOperator(expr: string): boolean {
-  try {
-    const ast = parseSync('expr.js', expr, { sourceType: 'module' })
-    const program = ast.program
-    if (program.body.length !== 1) return false
-    const stmt = program.body[0]
-    if (stmt.type !== 'ExpressionStatement') return false
-    const stmtExpr = (stmt as unknown as { expression: NullishAstNode }).expression
-    return hasLogicalOperatorRecursive(stmtExpr)
-  } catch {
-    // Fallback to string check if parsing fails
-    return expr.includes('||') || expr.includes('&&')
-  }
-}
-
-/**
- * Recursively traverse an AST node to find any LogicalExpression with || or &&.
- */
-function hasLogicalOperatorRecursive(node: NullishAstNode): boolean {
-  if (!node || typeof node !== 'object') return false
-
-  // Check if this node is a LogicalExpression with || or &&
-  if (node.type === 'LogicalExpression') {
-    const op = (node as unknown as { operator: string }).operator
-    if (op === '||' || op === '&&') {
-      return true
-    }
-  }
-
-  // Recursively check all child nodes
-  for (const key of Object.keys(node)) {
-    if (key === 'type' || key === 'start' || key === 'end' || key === 'span') continue
-    const value = (node as Record<string, unknown>)[key]
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (
-          item &&
-          typeof item === 'object' &&
-          hasLogicalOperatorRecursive(item as NullishAstNode)
-        ) {
-          return true
-        }
-      }
-    } else if (value && typeof value === 'object') {
-      if (hasLogicalOperatorRecursive(value as NullishAstNode)) {
-        return true
-      }
-    }
-  }
-
-  return false
-}
-
-/**
- * Normalize nullish coalescing operator differences using AST-based transformation.
- *
- * Oxc preserves the ?? operator while TypeScript transpiles it to:
- *   (_a = expr) !== null && _a !== void 0 ? _a : fallback
- *
- * This function converts the TypeScript transpiled pattern back to ?? syntax
- * so both can be compared equivalently.
- *
- * Example:
- *   Input:  (_a = expr) !== null && _a !== void 0 ? _a : fallback
- *   Output: expr ?? fallback
- *
- * The pattern handles:
- * - Variable names like _a, _b, _c, etc.
- * - Nested expressions as the left operand (including property access and function calls)
- * - Various fallback expressions (including function calls)
- * - Nested nullish coalescing patterns
- */
-function normalizeNullishCoalescing(code: string): string {
-  // Parse the code to get AST
-  let ast
-  try {
-    ast = parseSync('nullish.js', code, { sourceType: 'module' })
-  } catch {
-    // If parsing fails, return code unchanged
-    return code
-  }
-
-  // Collect all temp var declarations to remove
-  const tempVarSpans = collectTempVarDeclarations(ast, code)
-
-  // Collect all nullish coalescing patterns
-  const patterns: Array<{ start: number; end: number; leftExpr: string; rightExpr: string }> = []
-  collectNullishPatterns(ast.program as unknown as NullishAstNode, code, patterns)
-
-  // If nothing to transform, return as-is
-  if (patterns.length === 0 && tempVarSpans.length === 0) {
-    return code
-  }
-
-  // Combine all spans and sort by start position descending for safe replacement
-  const allReplacements: Array<{
-    start: number
-    end: number
-    replacement: string
-  }> = []
-
-  // Add pattern replacements
-  for (const pattern of patterns) {
-    // Handle nested patterns by recursively normalizing leftExpr
-    let normalizedLeft = pattern.leftExpr
-    if (normalizedLeft.includes('!== null') && normalizedLeft.includes('!== void 0')) {
-      normalizedLeft = normalizeNullishCoalescing(normalizedLeft)
-    }
-
-    // Also normalize the rightExpr in case it has nested patterns
-    let normalizedRight = pattern.rightExpr
-    if (normalizedRight.includes('!== null') && normalizedRight.includes('!== void 0')) {
-      normalizedRight = normalizeNullishCoalescing(normalizedRight)
-    }
-
-    // Determine if we need parentheses around the left expression
-    // Parse leftExpr to check if it contains || or &&
-    const leftNeedsParens = containsLogicalOperator(normalizedLeft)
-    const formattedLeft = leftNeedsParens ? `(${normalizedLeft})` : normalizedLeft
-
-    // Also check if right expression needs parentheses
-    // This handles cases like: x ?? y?.prop where y?.prop is transpiled as (y === null || ...)
-    // Also check for yield/await which have low precedence and need parens when on RHS of ??
-    const rightNeedsParens =
-      containsLogicalOperator(normalizedRight) || /^(yield|await)\b/.test(normalizedRight.trim())
-    const formattedRight = rightNeedsParens ? `(${normalizedRight})` : normalizedRight
-
-    // Check if the surrounding context has && or || operators
-    // If so, we need to wrap the entire ?? expression in parentheses
-    const contextNeedsParens = hasMixedLogicalInContext(code, pattern.start, pattern.end)
-    const replacement = `${formattedLeft} ?? ${formattedRight}`
-    const finalReplacement = contextNeedsParens ? `(${replacement})` : replacement
-
-    allReplacements.push({
-      start: pattern.start,
-      end: pattern.end,
-      replacement: finalReplacement,
-    })
-  }
-
-  // Add temp var removal (empty replacement)
-  for (const span of tempVarSpans) {
-    allReplacements.push({
-      start: span.start,
-      end: span.end,
-      replacement: '',
-    })
-  }
-
-  // Sort by start position descending
-  allReplacements.sort((a, b) => b.start - a.start)
-
-  // Apply replacements from end to start
-  let result = code
-  for (const rep of allReplacements) {
-    result = result.slice(0, rep.start) + rep.replacement + result.slice(rep.end)
-  }
-
-  return result
-}
-
-/**
- * Remove parentheses around nullish coalescing expressions for normalization.
- *
- * Oxc wraps nullish coalescing in parens: (expr ?? fallback)
- * After TS normalization, it becomes: expr ?? fallback
- *
- * This function removes the outer parens from Oxc's output to match.
- * It is CONSERVATIVE - only removes parens when it's provably safe.
- */
-function removeNullishCoalescingParens(code: string): string {
-  // Use a manual approach to handle balanced parentheses
-  // Look for patterns like (expr ?? expr) and remove the outer parens
-  let output = ''
-  let i = 0
-
-  while (i < code.length) {
-    if (code[i] === '(') {
-      // Try to match a nullish coalescing expression wrapped in parens
-      const matchResult = tryRemoveNullishParens(code, i)
-      if (matchResult) {
-        output += matchResult.replacement
-        i = matchResult.endIndex
-        continue
-      }
-    }
-    output += code[i]
-    i++
-  }
-
-  return output
-}
-
-/**
- * Try to remove outer parens from a nullish coalescing expression starting at position `start`.
- * Returns { replacement, endIndex } if matched, null otherwise.
- *
- * This function is CONSERVATIVE - it only removes parentheses when:
- * 1. The inner content parses as a single BinaryExpression with `??` operator
- * 2. There are no commas at the top level (would indicate function args)
- * 3. There are no `&&` or `||` operators ANYWHERE in the surrounding statement context
- * 4. The parentheses are truly just wrapping a standalone `??` expression
- */
-function tryRemoveNullishParens(
-  code: string,
-  start: number,
-): { replacement: string; endIndex: number } | null {
-  // We're at a '(' - find the matching ')' and check if it contains ' ?? '
-  let depth = 0
-  let nullishCount = 0
-  let hasTopLevelComma = false
-  let end = -1
-
-  for (let j = start; j < code.length; j++) {
-    const ch = code[j]
-    if (ch === '(') depth++
-    else if (ch === ')') {
-      depth--
-      if (depth === 0) {
-        end = j
-        break
-      }
-    }
-    // Check for ' ?? ' at depth 1 (inside our parens but not nested deeper)
-    if (depth === 1 && code.slice(j, j + 4) === ' ?? ') {
-      nullishCount++
-    }
-    // Check for comma at depth 1 - indicates function arguments, not wrapping parens
-    if (depth === 1 && ch === ',') {
-      hasTopLevelComma = true
-    }
-  }
-
-  // Must have found closing paren, exactly one ?? at top level, and no commas
-  if (end === -1 || nullishCount !== 1 || hasTopLevelComma) return null
-
-  // Extract the inner content (between the outer parens)
-  const inner = code.slice(start + 1, end)
-
-  // Use AST parsing to verify the inner content is a single BinaryExpression with ??
-  if (!isValidNullishExpressionForParenRemoval(inner)) {
-    return null
-  }
-
-  // Check surrounding context for && or || operators
-  // We need to look at the broader statement context, not just immediately adjacent
-  if (hasMixedLogicalInContext(code, start, end)) {
-    return null
-  }
-
-  return {
-    replacement: inner,
-    endIndex: end + 1,
-  }
-}
-
-/**
- * Use AST parsing to verify the expression is a single BinaryExpression with ?? operator.
- * This ensures we're not accidentally mangling complex expressions.
- */
-function isValidNullishExpressionForParenRemoval(expr: string): boolean {
-  try {
-    // Wrap in a minimal expression context for parsing
-    const wrappedCode = `(${expr})`
-    const result = parseSync('temp.js', wrappedCode, { sourceType: 'module' })
-
-    if (result.errors.length > 0) {
-      return false
-    }
-
-    const program = result.program
-    if (program.body.length !== 1) return false
-
-    const stmt = program.body[0]
-    if (stmt.type !== 'ExpressionStatement') return false
-
-    const expression = (stmt as unknown as { expression: NullishAstNode }).expression
-
-    // Must be a BinaryExpression with ?? operator
-    if (expression.type !== 'BinaryExpression') return false
-    const binExpr = expression as unknown as {
-      operator: string
-      left: NullishAstNode
-      right: NullishAstNode
-    }
-    if (binExpr.operator !== '??') return false
-
-    // Check that neither side contains && or || at any level
-    // This prevents issues like (a && b ?? c) which would be invalid without parens
-    if (hasLogicalOperatorRecursive(binExpr.left) || hasLogicalOperatorRecursive(binExpr.right)) {
-      return false
-    }
-
-    return true
-  } catch {
-    // If parsing fails, be conservative and don't remove parens
-    return false
-  }
-}
-
-/**
- * Check if the surrounding context contains && or || that would mix with ??.
- *
- * JavaScript doesn't allow mixing ?? with && or || without explicit parentheses.
- * So if there's any && or || in the same statement/expression context,
- * we must keep the parentheses.
- *
- * This function looks at the broader context by finding the statement boundaries.
- */
-function hasMixedLogicalInContext(code: string, parenStart: number, parenEnd: number): boolean {
-  // Find the start of the current statement/expression context
-  // Look backwards for statement terminators or expression boundaries
-  let contextStart = parenStart
-  let depth = 0
-
-  for (let i = parenStart - 1; i >= 0; i--) {
-    const ch = code[i]
-    if (ch === ')') depth++
-    else if (ch === '(') {
-      if (depth > 0) depth--
-      else {
-        // We're inside another paren group - this defines our context
-        contextStart = i + 1
-        break
-      }
-    } else if (ch === ';' || ch === '{' || ch === '}' || ch === '?' || ch === ':') {
-      contextStart = i + 1
-      break
-    }
-    if (i === 0) contextStart = 0
-  }
-
-  // Find the end of the current statement/expression context
-  let contextEnd = parenEnd
-  depth = 0
-
-  for (let i = parenEnd + 1; i < code.length; i++) {
-    const ch = code[i]
-    if (ch === '(') depth++
-    else if (ch === ')') {
-      if (depth > 0) depth--
-      else {
-        // We're closing a paren that was opened before us
-        contextEnd = i
-        break
-      }
-    } else if (ch === ';' || ch === '{' || ch === '}' || ch === '?' || ch === ':') {
-      contextEnd = i
-      break
-    }
-    if (i === code.length - 1) contextEnd = code.length
-  }
-
-  // Now check for && or || in this context (excluding the content inside our parens)
-  const beforeParen = code.slice(contextStart, parenStart)
-  const afterParen = code.slice(parenEnd + 1, contextEnd)
-
-  // Check for && or || in the surrounding context (not inside our parens)
-  // We need to be careful about && and || that might be inside nested parens
-  if (containsLogicalOperatorInString(beforeParen) || containsLogicalOperatorInString(afterParen)) {
-    return true
-  }
-
-  return false
-}
-
-/**
- * Check if a code string contains && or || at its top level (not inside nested parens).
- */
-function containsLogicalOperatorInString(code: string): boolean {
-  let depth = 0
-
-  for (let i = 0; i < code.length; i++) {
-    const ch = code[i]
-    if (ch === '(' || ch === '[' || ch === '{') depth++
-    else if (ch === ')' || ch === ']' || ch === '}') depth--
-    else if (depth === 0) {
-      // Check for && or ||
-      if (i + 1 < code.length) {
-        const twoChar = code.slice(i, i + 2)
-        if (twoChar === '&&' || twoChar === '||') {
-          return true
-        }
-      }
-    }
-  }
-
-  return false
-}
-
-/**
- * Compare two JavaScript code strings semantically using normalized string comparison.
- *
- * This parses both strings with oxc-parser, normalizes the ASTs (removing location info),
- * and compares the resulting canonical strings.
- *
- * It also normalizes const references (_c0, _c1, etc.) by value, so that const name
- * differences due to different ordering/numbering don't cause false mismatches.
- */
-export async function compareJsSemantically(
-  oxcCode: string,
-  tsCode: string,
-): Promise<CompareResult> {
-  // Fast path: if code strings are identical, they're semantically equivalent
-  if (oxcCode === tsCode) {
-    return { match: true }
-  }
-
-  try {
-    // Format both with oxfmt to normalize formatting
-    const [formattedOxc, formattedTs] = await Promise.all([
-      formatCodeForComparison(oxcCode),
-      formatCodeForComparison(tsCode),
-    ])
-
-    // Fast path after formatting normalization
-    if (formattedOxc === formattedTs) {
-      return { match: true }
-    }
-
-    // Normalize template literals to regular strings (semantically equivalent)
-    let workingOxcCode = normalizeTemplateLiterals(formattedOxc)
-    let workingTsCode = normalizeTemplateLiterals(formattedTs)
-
-    // Normalize PURE comments (oxfmt adds spaces: /* @__PURE__ */ -> /*@__PURE__*/)
-    workingOxcCode = workingOxcCode.replaceAll('/* @__PURE__ */', '/*@__PURE__*/')
-    workingTsCode = workingTsCode.replaceAll('/* @__PURE__ */', '/*@__PURE__*/')
-
-    // Remove trailing commas in objects: ",}" -> "}"
-    workingOxcCode = workingOxcCode.replaceAll(',}', '}')
-    workingTsCode = workingTsCode.replaceAll(',}', '}')
-
-    // Remove trailing commas in arrays: ",]" -> "]"
-    workingOxcCode = workingOxcCode.replaceAll(',]', ']')
-    workingTsCode = workingTsCode.replaceAll(',]', ']')
-
-    // Normalize space before closing brace: " }" -> "}"
-    workingOxcCode = workingOxcCode.replaceAll(' }', '}')
-    workingTsCode = workingTsCode.replaceAll(' }', '}')
-
-    // Normalize @Inject parameter types (Oxc preserves type, Angular uses undefined)
-    workingOxcCode = normalizeInjectParameterTypes(workingOxcCode)
-    workingTsCode = normalizeInjectParameterTypes(workingTsCode)
-
-    // Normalize nullish coalescing (Oxc preserves ??, TS transpiles to ternary)
-    // Apply to TS: convert ternary check to ??
-    // Apply to Oxc: remove outer parens around ?? expression
-    workingTsCode = normalizeNullishCoalescing(workingTsCode)
-    workingOxcCode = removeNullishCoalescingParens(workingOxcCode)
-
-    // Normalize numeric literals: 1e3 → 1000 (OXC emits scientific notation)
-    workingOxcCode = normalizeNumericLiterals(workingOxcCode)
-    workingTsCode = normalizeNumericLiterals(workingTsCode)
-
-    // Normalize inline object literal formatting: collapse multi-line simple objects
-    workingOxcCode = collapseInlineObjectLiterals(workingOxcCode)
-    workingTsCode = collapseInlineObjectLiterals(workingTsCode)
-
-    // Fast path after template/inject/nullish/format normalization
-    if (workingOxcCode === workingTsCode) {
-      return { match: true }
-    }
-
-    // Build const value maps for both to identify metadata consts
-    const tsConstMap = buildConstValueMap(workingTsCode)
-    const oxcConstMapInitial = buildConstValueMap(workingOxcCode)
-
-    // Remove attrs/query consts from TS code that are NOT present in Oxc output.
-    // These are component metadata consts (like view query predicates) that only appear
-    // in TypeScript Angular's full-file output because Oxc's template compiler doesn't emit them.
-    // If both outputs have the same const (e.g., selector arrays), don't remove it.
-    let normalizedTsCode = removeAttrsConstsNotInOxc(workingTsCode, tsConstMap, oxcConstMapInitial)
-
-    // Remove provider consts from both (component metadata, not template output)
-    // TS compiler may output "/* unknown */" for complex provider expressions
-    let normalizedOxcCode = removeProvidersConst(workingOxcCode)
-    normalizedTsCode = removeProvidersConst(normalizedTsCode)
-
-    // Build const value maps AFTER attrs/providers removal
-    const oxcConstMap = buildConstValueMap(normalizedOxcCode)
-    const normalizedTsConstMap = buildConstValueMap(normalizedTsCode)
-
-    // Create mapping from Oxc const names to TS const names based on value equivalence
-    const constMapping = buildConstNameMapping(oxcConstMap, normalizedTsConstMap)
-
-    // Normalize Oxc code by replacing const references to match TS naming
-    normalizedOxcCode = replaceConstReferences(normalizedOxcCode, constMapping)
-
-    // Fast path after const normalization
-    if (normalizedOxcCode === normalizedTsCode) {
-      return { match: true }
-    }
-
-    // Parse both with oxc-parser
-    const oxcResult = parseSync('oxc.js', normalizedOxcCode, { sourceType: 'module' })
-    const tsResult = parseSync('ts.js', normalizedTsCode, { sourceType: 'module' })
-
-    // Check for parse errors
-    if (oxcResult.errors.length > 0 || tsResult.errors.length > 0) {
-      return {
-        match: false,
-        diff: [
-          {
-            path: 'root',
-            type: 'different',
-            expected: tsResult.errors.length > 0 ? 'parse error' : 'valid',
-            actual: oxcResult.errors.length > 0 ? 'parse error' : 'valid',
-          },
-        ],
-      }
-    }
-
-    // Normalize both ASTs and compare as strings
-    const normalizedOxc = normalizeAst(oxcResult.program)
-    const normalizedTs = normalizeAst(tsResult.program)
-
-    if (normalizedOxc === normalizedTs) {
-      return { match: true }
-    }
-
-    // If they don't match, extract function-level details for reporting
-    const oxcFunctions = extractFunctions(
-      oxcResult.program as unknown as Program,
-      normalizedOxcCode,
-    )
-    const tsFunctions = extractFunctions(tsResult.program as unknown as Program, normalizedTsCode)
-
-    // Pass constMapping so that const arrow functions (_c0, _c1, etc.) can be matched
-    // even when they have different indices but equivalent values
-    const functionComparison = compareFunctions(oxcFunctions, tsFunctions, constMapping)
-
-    // IMPORTANT: If all template functions match (no missing, no extra, no diffs),
-    // consider it a match even if there are differences in non-function code like consts.
-    // This handles cases where:
-    // - Const indices differ (_c2 vs _c5) but values/functions are equivalent
-    // - Non-template consts (CSS styles, metadata) differ
-    const hasNoFunctionDifferences =
-      functionComparison.missingFunctions.length === 0 &&
-      functionComparison.extraFunctions.length === 0 &&
-      functionComparison.functionDiffs.length === 0
-
-    if (hasNoFunctionDifferences) {
-      return { match: true, functionComparison }
-    }
-
-    return {
-      match: false,
-      functionComparison,
-    }
-  } catch (e) {
-    return {
-      match: false,
-      diff: [
-        {
-          path: 'root',
-          type: 'different',
-          expected: 'parseable',
-          actual: `error: ${e as Error}`,
-        },
-      ],
-    }
-  }
-}
-
 interface ExtractedFunction {
-  ast: FunctionAst
   code: string
   normalized: string
 }
 
 /**
- * Extract all named function declarations from a program.
- * Returns a map of function name to its AST, code, and normalized representation.
+ * Extract every named top-level function and variable declaration, exported or not.
+ * Returns a map of name to its code and normalized representation.
  *
  * Handles:
- * - FunctionDeclaration: `function foo() { ... }`
- * - VariableDeclaration with FunctionExpression: `const foo = function() { ... }`
- * - VariableDeclaration with ArrowFunctionExpression: `const foo = () => { ... }`
+ * - FunctionDeclaration: `function foo() { ... }`, `export function foo() { ... }`,
+ *   `export default function foo() { ... }`
+ * - VariableDeclaration: `const foo = function() { ... }`, `const _forTrack0 = (item) => item.id`,
+ *   and non-function values such as the hoisted `const _c0 = ["*"]`, whose values are compared too
  */
 function extractFunctions(program: Program, sourceCode: string): Map<string, ExtractedFunction> {
   const functions = new Map<string, ExtractedFunction>()
 
-  // Pre-compute byte-to-char mapping once for all functions
-  const byteToCharMap = createByteToCharMap(sourceCode)
+  // oxc-parser's JS API reports UTF-16 offsets, so they index the string directly.
+  const add = (name: string, node: NormAstNode) => {
+    const code = sourceCode.slice(node.start, node.end)
+    functions.set(name, { code, normalized: normalizeAst(node) })
+  }
 
-  for (const statement of program.body) {
-    // Handle FunctionDeclaration: `function foo() { ... }`
-    if (statement.type === 'FunctionDeclaration' && statement.id?.name) {
-      const funcAst = statement as FunctionAst
-      const code = extractFunctionCode(sourceCode, funcAst, byteToCharMap)
-      const normalized = normalizeAst(funcAst)
-      functions.set(statement.id.name, { ast: funcAst, code, normalized })
+  for (const topLevel of program.body as unknown as NormAstNode[]) {
+    const statement =
+      topLevel.type === 'ExportNamedDeclaration' || topLevel.type === 'ExportDefaultDeclaration'
+        ? (topLevel.declaration as NormAstNode | null | undefined)
+        : topLevel
+    if (!statement) continue
+
+    const id = statement.id as NormAstNode | null | undefined
+    if (statement.type === 'FunctionDeclaration' && typeof id?.name === 'string') {
+      add(id.name, statement)
     }
 
-    // Handle VariableDeclaration with function expressions or arrow functions
-    // Examples: `const _c0 = function() { ... }` or `const _forTrack = (item) => item.id`
     if (statement.type === 'VariableDeclaration') {
-      const varDecl = statement as unknown as VariableDeclaration
-      for (const decl of varDecl.declarations) {
-        if (
-          decl.id?.type === 'Identifier' &&
-          decl.id.name &&
-          decl.init &&
-          (decl.init.type === 'FunctionExpression' || decl.init.type === 'ArrowFunctionExpression')
-        ) {
-          const varName = decl.id.name
-          const funcAst = decl.init as unknown as FunctionAst
-          const code = extractFunctionCode(sourceCode, funcAst, byteToCharMap)
-          const normalized = normalizeAst(funcAst)
-          functions.set(varName, { ast: funcAst, code, normalized })
+      for (const decl of statement.declarations as NormAstNode[]) {
+        const declId = decl.id as NormAstNode
+        const init = decl.init as NormAstNode | null
+        if (declId.type === 'Identifier' && typeof declId.name === 'string' && init) {
+          add(declId.name, init)
         }
       }
     }
@@ -1691,63 +471,35 @@ function computeLineDiff(oxcCode: string, tsCode: string): LineDiff[] {
 }
 
 /**
- * Compare functions from both outputs using normalized string comparison.
+ * Compare top-level declarations from both outputs by name, using normalized ASTs.
  *
- * @param oxcFunctions - Functions extracted from Oxc output
- * @param tsFunctions - Functions extracted from TS output
- * @param constMapping - Mapping from Oxc const names to TS const names (based on value equivalence)
+ * Oxc's `_cN` constants are already renamed to Angular's names (see `replaceConstReferences`),
+ * so names pair up directly.
+ *
+ * @param oxcFunctions - Declarations extracted from Oxc output
+ * @param tsFunctions - Declarations extracted from TS output
  */
 function compareFunctions(
   oxcFunctions: Map<string, ExtractedFunction>,
   tsFunctions: Map<string, ExtractedFunction>,
-  constMapping?: Map<string, string>,
 ): FunctionLevelComparison {
   const missingFunctions: string[] = []
   const extraFunctions: string[] = []
   const functionDiffs: FunctionDiff[] = []
   const matchingFunctions: string[] = []
 
-  // Build a mapping from Oxc function names to their corresponding TS names
-  // This handles const arrow functions like _c5 -> _c2 when they have the same value
-  //
-  // IMPORTANT: Only include mappings where both the Oxc name exists in oxcFunctions
-  // AND the TS name exists in tsFunctions. This prevents array const mappings
-  // (like _c3 -> _c1 for ["animatedContainer"]) from interfering with function matching
-  // after code has been normalized via replaceConstReferences.
-  const oxcNameToTsName = new Map<string, string>()
-  const tsNameToOxcName = new Map<string, string>()
-
-  if (constMapping) {
-    for (const [oxcName, tsName] of constMapping) {
-      // Only apply mapping for _c{N} const FUNCTIONS (not arrays)
-      // Verify that both names actually exist as functions in their respective maps
-      if (
-        /^_c\d+$/.test(oxcName) &&
-        /^_c\d+$/.test(tsName) &&
-        oxcFunctions.has(oxcName) &&
-        tsFunctions.has(tsName)
-      ) {
-        oxcNameToTsName.set(oxcName, tsName)
-        tsNameToOxcName.set(tsName, oxcName)
-      }
-    }
-  }
-
-  // Find functions that match via the const mapping
   const matchedTsFunctions = new Set<string>()
   const matchedOxcFunctions = new Set<string>()
 
-  // First, match functions by their mapped names
-  for (const [oxcName, oxcFunc] of oxcFunctions) {
-    const mappedTsName = oxcNameToTsName.get(oxcName) || oxcName
-    const tsFunc = tsFunctions.get(mappedTsName)
+  for (const [name, oxcFunc] of oxcFunctions) {
+    const tsFunc = tsFunctions.get(name)
 
     if (tsFunc) {
-      matchedOxcFunctions.add(oxcName)
-      matchedTsFunctions.add(mappedTsName)
+      matchedOxcFunctions.add(name)
+      matchedTsFunctions.add(name)
 
       if (oxcFunc.normalized === tsFunc.normalized) {
-        matchingFunctions.push(mappedTsName)
+        matchingFunctions.push(name)
       } else {
         // Compute line diff for reporting
         const lineDiffs = computeLineDiff(oxcFunc.code, tsFunc.code)
@@ -1760,7 +512,7 @@ function compareFunctions(
         }))
         // Store actual code strings for display
         functionDiffs.push({
-          name: mappedTsName,
+          name: name,
           oxcCode: oxcFunc.code,
           tsCode: tsFunc.code,
           diffs,
@@ -1929,8 +681,10 @@ interface StaticFieldAssignment {
   className: string
   /** Field name (e.g., "ɵcmp", "ɵfac") */
   fieldName: string
-  /** Assignment value (normalized) */
+  /** Assignment value source text (for reporting) */
   value: string
+  /** Assignment value AST (for comparison) */
+  node: NormAstNode
 }
 
 /**
@@ -2116,13 +870,27 @@ function compareExports(
     }
   }
 
-  // Find missing exports (in TS but not in Oxc)
+  // Describe what an export points at: its local binding, or the module it re-exports from.
+  const target = (exp: NormalizedExport) =>
+    exp.moduleSource === undefined
+      ? exp.localName || exp.exportName
+      : `${exp.localName || exp.exportName} from "${exp.moduleSource}"`
+
+  // Find missing exports (in TS but not in Oxc), and exports that point at something else
   for (const [name, tsExp] of tsByName) {
-    if (!oxcByName.has(name)) {
+    const oxcExp = oxcByName.get(name)
+    if (!oxcExp) {
       diffs.push({
         type: 'missing',
         exportName: name,
         expected: tsExp.localName || name,
+      })
+    } else if (target(oxcExp) !== target(tsExp)) {
+      diffs.push({
+        type: 'different',
+        exportName: name,
+        expected: target(tsExp),
+        actual: target(oxcExp),
       })
     }
   }
@@ -2141,107 +909,77 @@ function compareExports(
   return diffs
 }
 
+/** Whether a class member is a `static ɵxxx = ...` field, which is compared on its own. */
+function isAngularStaticField(member: NormAstNode): boolean {
+  const key = member.key as NormAstNode | undefined
+  return (
+    member.type === 'PropertyDefinition' &&
+    member.static === true &&
+    key?.type === 'Identifier' &&
+    typeof key.name === 'string' &&
+    key.name.startsWith('ɵ')
+  )
+}
+
+/** The `ClassName.ɵxxx = value` assignment an expression statement makes, if it is one. */
+function staticFieldAssignment(
+  statement: NormAstNode,
+): { className: string; fieldName: string; value: NormAstNode } | null {
+  const assignment = statement.expression as NormAstNode
+  const target = assignment.left as NormAstNode | undefined
+  const object = target?.object as NormAstNode | undefined
+  const property = target?.property as NormAstNode | undefined
+  if (
+    assignment.type === 'AssignmentExpression' &&
+    assignment.operator === '=' &&
+    target?.type === 'MemberExpression' &&
+    target.computed !== true &&
+    object?.type === 'Identifier' &&
+    typeof object.name === 'string' &&
+    typeof property?.name === 'string' &&
+    property.name.startsWith('ɵ')
+  ) {
+    return {
+      className: object.name,
+      fieldName: property.name,
+      value: assignment.right as NormAstNode,
+    }
+  }
+  return null
+}
+
 /**
- * Extract static field assignments from code (e.g., ClassName.ɵcmp = ...).
- */
-/**
- * Extract `static ɵxxx = ...` class fields (e.g. `static ɵcmp = i0.ɵɵdefineComponent(...)`),
- * which the `ClassName.ɵxxx = ...` pattern in extractStaticFieldAssignments does not match.
+ * Extract Angular static fields, both the `static ɵxxx = ...` class fields current Angular and
+ * Oxc emit (e.g. `static ɵcmp = i0.ɵɵdefineComponent(...)`) and top-level
+ * `ClassName.ɵxxx = ...` assignments.
  */
 function extractClassStaticFields(program: Program, sourceCode: string): StaticFieldAssignment[] {
   const fields: StaticFieldAssignment[] = []
+  // oxc-parser's JS API reports UTF-16 offsets, so they index the string directly.
+  const push = (className: string, fieldName: string, node: NormAstNode) => {
+    const value = sourceCode.slice(node.start, node.end).trim()
+    fields.push({ className, fieldName, value, node })
+  }
   for (const statement of program.body as unknown as NormAstNode[]) {
+    if (statement.type === 'ExpressionStatement') {
+      const assignment = staticFieldAssignment(statement)
+      if (assignment) {
+        push(assignment.className, assignment.fieldName, assignment.value)
+      }
+      continue
+    }
     const exported =
       statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration'
     const cls = (exported ? statement.declaration : statement) as NormAstNode | undefined
     const className = (cls?.id as NormAstNode | undefined)?.name
     if (cls?.type !== 'ClassDeclaration' || typeof className !== 'string') continue
     for (const member of (cls.body as NormAstNode).body as NormAstNode[]) {
-      const key = member.key as NormAstNode | undefined
-      const value = member.value as NormAstNode | undefined
-      if (
-        member.type !== 'PropertyDefinition' ||
-        !member.static ||
-        key?.type !== 'Identifier' ||
-        typeof key.name !== 'string' ||
-        !key.name.startsWith('ɵ') ||
-        value?.start === undefined ||
-        value.end === undefined
-      ) {
-        continue
+      if (isAngularStaticField(member) && member.value) {
+        push(className, (member.key as NormAstNode).name as string, member.value as NormAstNode)
       }
-      // oxc-parser's JS API reports UTF-16 offsets, so they index the string directly. Keep
-      // whitespace: collapsing it would also change multi-line template literals.
-      const text = sourceCode.slice(value.start, value.end).trim()
-      fields.push({ className, fieldName: key.name, value: text })
     }
   }
   return fields
-}
-
-function extractStaticFieldAssignments(code: string): StaticFieldAssignment[] {
-  const assignments: StaticFieldAssignment[] = []
-
-  // Match patterns like: ClassName.ɵcmp = ... or ClassName.ɵfac = ...
-  // The assignment value extends until the next semicolon (handling nested structures)
-  const pattern = /([A-Z][A-Za-z0-9_]*)\.(ɵ[a-z]+)\s*=/g
-  let match
-
-  while ((match = pattern.exec(code)) !== null) {
-    const className = match[1]
-    const fieldName = match[2]
-    const assignStart = match.index + match[0].length
-
-    // Find the end of the assignment (matching braces/parens)
-    let depth = 0
-    let inString: string | null = null
-    let escaped = false
-    let assignEnd = -1
-
-    for (let i = assignStart; i < code.length; i++) {
-      const char = code[i]
-
-      if (escaped) {
-        escaped = false
-        continue
-      }
-
-      if (char === '\\') {
-        escaped = true
-        continue
-      }
-
-      if (inString) {
-        if (char === inString) {
-          inString = null
-        }
-        continue
-      }
-
-      if (char === '"' || char === "'" || char === '`') {
-        inString = char
-        continue
-      }
-
-      if (char === '(' || char === '{' || char === '[') {
-        depth++
-      } else if (char === ')' || char === '}' || char === ']') {
-        depth--
-      } else if (char === ';' && depth === 0) {
-        assignEnd = i
-        break
-      }
-    }
-
-    if (assignEnd > assignStart) {
-      const value = code.slice(assignStart, assignEnd).trim()
-      // Normalize the value (remove whitespace variations)
-      const normalizedValue = value.replace(/\s+/g, ' ').replace(/,\s+/g, ',')
-      assignments.push({ className, fieldName, value: normalizedValue })
-    }
-  }
-
-  return assignments
 }
 
 // ============================================================================
@@ -2696,15 +1434,14 @@ export function extractClassMetadataCalls(program: unknown, code: string): Class
  * The argument is an expression fragment (`[...]`, `{...}`, `null`, ...), so
  * parse it and compare normalized ASTs: quote style, indentation, trailing
  * commas and key ordering noise don't matter semantically for these
- * structures. Falls back to whitespace-collapsed text when the fragment
- * can't be parsed.
+ * structures. A fragment that can't be parsed is compared as exact text.
  */
 function normalizeMetadataString(s: string | null): string {
   if (!s) return 'null'
   const parsed = parseSync('metadata.js', `(${s}\n)`, { sourceType: 'module' })
   const stmt = parsed.program.body[0]
   if (parsed.errors.length > 0 || !stmt || stmt.type !== 'ExpressionStatement') {
-    return s.replace(/\s+/g, ' ').trim()
+    return `unparsed:${s}`
   }
   return normalizeAst(stmt.expression)
 }
@@ -2886,233 +1623,6 @@ export function compareClassMetadata(
 }
 
 /**
- * Input metadata extracted from defineComponent's inputs object.
- */
-interface InputMetadata {
-  /** Input index in the inputs array */
-  index: number
-  /** Binding property name (may differ from public name via alias) */
-  bindingName: string
-  /** Whether this input has a transform function */
-  hasTransform: boolean
-  /** Whether this input is required */
-  required: boolean
-  /** Whether this is a signal-based input */
-  isSignal: boolean
-}
-
-/**
- * Extract inputs metadata from defineComponent's inputs object.
- *
- * Input format in compiled output:
- * ```javascript
- * inputs: {
- *   "publicName": [inputIndex, "bindingName"],
- *   "publicName2": [inputIndex, "bindingName", transformFn],
- *   "publicName3": [inputIndex, "bindingName", transformFn, required, isSignal],
- * }
- * ```
- */
-function extractInputsFromDefineComponent(inputsObject: string): Map<string, InputMetadata> {
-  const inputs = new Map<string, InputMetadata>()
-  // Match patterns like: "name": [0, "name"] or "name": [1, "name", transformFn]
-  const pattern = /"([^"]+)"\s*:\s*\[([^\]]+)\]/g
-  let match
-  while ((match = pattern.exec(inputsObject)) !== null) {
-    const publicName = match[1]
-    const valueArray = match[2].split(',').map((s) => s.trim())
-    inputs.set(publicName, {
-      index: parseInt(valueArray[0], 10),
-      bindingName: valueArray[1]?.replace(/"/g, '') || publicName,
-      hasTransform:
-        valueArray[2] !== undefined && valueArray[2] !== 'undefined' && valueArray[2] !== 'null',
-      required: valueArray[3] === 'true',
-      isSignal: valueArray[4] === 'true',
-    })
-  }
-  return inputs
-}
-
-/**
- * Extract outputs metadata from defineComponent's outputs object.
- *
- * Output format in compiled output:
- * ```javascript
- * outputs: {
- *   "publicName": "internalName",
- *   "aliasedName": "propertyName"
- * }
- * ```
- */
-function extractOutputsFromDefineComponent(outputsObject: string): Map<string, string> {
-  const outputs = new Map<string, string>()
-  // Match patterns like: "clicked": "clicked" or "valueChanged": "changed"
-  const pattern = /"([^"]+)"\s*:\s*"([^"]+)"/g
-  let match
-  while ((match = pattern.exec(outputsObject)) !== null) {
-    outputs.set(match[1], match[2])
-  }
-  return outputs
-}
-
-/**
- * Extract inputs and outputs from the ɵcmp defineComponent value.
- *
- * Parses the defineComponent({...}) call to extract the inputs and outputs
- * objects for comparison.
- */
-function extractInputsOutputsFromCmpDefinition(cmpValue: string): {
-  inputs?: Map<string, InputMetadata>
-  outputs?: Map<string, string>
-} {
-  const result: { inputs?: Map<string, InputMetadata>; outputs?: Map<string, string> } = {}
-
-  // Extract inputs object - match inputs: { ... }
-  const inputsMatch = /inputs\s*:\s*\{([^}]*)\}/s.exec(cmpValue)
-  if (inputsMatch) {
-    result.inputs = extractInputsFromDefineComponent(inputsMatch[1])
-  }
-
-  // Extract outputs object - match outputs: { ... }
-  const outputsMatch = /outputs\s*:\s*\{([^}]*)\}/s.exec(cmpValue)
-  if (outputsMatch) {
-    result.outputs = extractOutputsFromDefineComponent(outputsMatch[1])
-  }
-
-  return result
-}
-
-/**
- * Compare input metadata between Oxc and TS outputs.
- * Returns differences found in input declarations.
- */
-function compareInputMetadata(
-  oxcInputs: Map<string, InputMetadata>,
-  tsInputs: Map<string, InputMetadata>,
-  className: string,
-): StaticFieldDiff[] {
-  const diffs: StaticFieldDiff[] = []
-
-  // Check inputs in TS that should be in Oxc
-  for (const [name, metadata] of tsInputs) {
-    const oxcMetadata = oxcInputs.get(name)
-    if (!oxcMetadata) {
-      diffs.push({
-        type: 'missing',
-        className,
-        fieldName: `ɵcmp.inputs.${name}`,
-        expected: JSON.stringify(metadata),
-      })
-    } else {
-      // Compare required flag
-      if (oxcMetadata.required !== metadata.required) {
-        diffs.push({
-          type: 'different',
-          className,
-          fieldName: `ɵcmp.inputs.${name}.required`,
-          expected: String(metadata.required),
-          actual: String(oxcMetadata.required),
-        })
-      }
-      // Compare isSignal flag
-      if (oxcMetadata.isSignal !== metadata.isSignal) {
-        diffs.push({
-          type: 'different',
-          className,
-          fieldName: `ɵcmp.inputs.${name}.isSignal`,
-          expected: String(metadata.isSignal),
-          actual: String(oxcMetadata.isSignal),
-        })
-      }
-      // Compare binding name
-      if (oxcMetadata.bindingName !== metadata.bindingName) {
-        diffs.push({
-          type: 'different',
-          className,
-          fieldName: `ɵcmp.inputs.${name}.bindingName`,
-          expected: metadata.bindingName,
-          actual: oxcMetadata.bindingName,
-        })
-      }
-      // Compare hasTransform flag
-      if (oxcMetadata.hasTransform !== metadata.hasTransform) {
-        diffs.push({
-          type: 'different',
-          className,
-          fieldName: `ɵcmp.inputs.${name}.hasTransform`,
-          expected: String(metadata.hasTransform),
-          actual: String(oxcMetadata.hasTransform),
-        })
-      }
-    }
-  }
-
-  // Check for extra inputs in Oxc not in TS
-  for (const name of oxcInputs.keys()) {
-    if (!tsInputs.has(name)) {
-      diffs.push({
-        type: 'extra',
-        className,
-        fieldName: `ɵcmp.inputs.${name}`,
-        actual: JSON.stringify(oxcInputs.get(name)),
-      })
-    }
-  }
-
-  return diffs
-}
-
-/**
- * Compare output metadata between Oxc and TS outputs.
- * Returns differences found in output declarations.
- */
-function compareOutputMetadata(
-  oxcOutputs: Map<string, string>,
-  tsOutputs: Map<string, string>,
-  className: string,
-): StaticFieldDiff[] {
-  const diffs: StaticFieldDiff[] = []
-
-  // Check outputs in TS that should be in Oxc
-  for (const [publicName, internalName] of tsOutputs) {
-    const oxcInternalName = oxcOutputs.get(publicName)
-    if (!oxcInternalName) {
-      diffs.push({
-        type: 'missing',
-        className,
-        fieldName: `ɵcmp.outputs.${publicName}`,
-        expected: internalName,
-      })
-    } else if (oxcInternalName !== internalName) {
-      diffs.push({
-        type: 'different',
-        className,
-        fieldName: `ɵcmp.outputs.${publicName}`,
-        expected: internalName,
-        actual: oxcInternalName,
-      })
-    }
-  }
-
-  // Check for extra outputs in Oxc not in TS
-  for (const [publicName, internalName] of oxcOutputs) {
-    if (!tsOutputs.has(publicName)) {
-      diffs.push({
-        type: 'extra',
-        className,
-        fieldName: `ɵcmp.outputs.${publicName}`,
-        actual: internalName,
-      })
-    }
-  }
-
-  return diffs
-}
-
-/**
- * Compare static field assignments between Oxc and TS outputs.
- */
-/**
  * Compare two static field values (e.g. the `i0.ɵɵdefineComponent({...})` of `ɵcmp`) by AST,
  * ignoring differences that do not change behaviour:
  *
@@ -3123,19 +1633,15 @@ function compareOutputMetadata(
  * - `pure: true` in `ɵɵdefinePipe`, which is the default
  * - Closure-only i18n metadata that Oxc does not emit: the `goog.getMsg` variable names
  *   (`MSG_EXTERNAL_<id>$$<file>` in Angular) and the `original_code` argument of `goog.getMsg`
+ *
+ * String contents, including whitespace inside them, must match exactly.
  */
-function staticFieldValuesEquivalent(oxcValue: string, tsValue: string): boolean {
-  const oxcKey = canonicalStaticFieldValue(oxcValue)
-  return oxcKey !== null && oxcKey === canonicalStaticFieldValue(tsValue)
+function staticFieldValuesEquivalent(oxcValue: NormAstNode, tsValue: NormAstNode): boolean {
+  return canonicalStaticFieldValue(oxcValue) === canonicalStaticFieldValue(tsValue)
 }
 
-function canonicalStaticFieldValue(value: string): string | null {
-  const result = parseSync('field.js', `(${value});`, { sourceType: 'module' })
-  if (result.errors.length > 0) {
-    return null
-  }
-  const statement = result.program.body[0] as NormAstNode
-  return normalizeAst(canonicalizeNode(statement.expression, new Map()))
+function canonicalStaticFieldValue(value: NormAstNode): string {
+  return normalizeAst(canonicalizeNode(value, new Map()))
 }
 
 /** The string values of an array of string literals, or null if it is not one. */
@@ -3239,7 +1745,6 @@ function canonicalizeNode(node: unknown, closureNames: Map<string, string>): unk
 function compareStaticFields(
   oxcFields: StaticFieldAssignment[],
   tsFields: StaticFieldAssignment[],
-  constMapping: Map<string, string>,
 ): StaticFieldDiff[] {
   const diffs: StaticFieldDiff[] = []
 
@@ -3267,80 +1772,14 @@ function compareStaticFields(
         fieldName: tsField.fieldName,
         expected: tsField.value,
       })
-    } else {
-      // Compare values after applying const mapping
-      let normalizedOxcValue = oxcField.value
-      for (const [from, to] of constMapping) {
-        normalizedOxcValue = normalizedOxcValue.replace(new RegExp(`\\b${from}\\b`, 'g'), to)
-      }
-
-      // Normalize both values for comparison
-      const normalizedTs = tsField.value
-        .replace(/\s+/g, ' ')
-        .replace(/,\s+/g, ',')
-        // Remove trailing commas in objects
-        .replaceAll(',}', '}')
-        // Remove trailing commas in arrays
-        .replaceAll(',]', ']')
-      const normalizedOxc = normalizedOxcValue
-        .replace(/\s+/g, ' ')
-        .replace(/,\s+/g, ',')
-        // Remove trailing commas in objects
-        .replaceAll(',}', '}')
-        // Remove trailing commas in arrays
-        .replaceAll(',]', ']')
-
-      if (
-        normalizedOxc !== normalizedTs &&
-        // Also try the unmapped value: when both sides already use the same const names, the
-        // name mapping can only introduce differences.
-        !staticFieldValuesEquivalent(normalizedOxcValue, tsField.value) &&
-        !staticFieldValuesEquivalent(oxcField.value, tsField.value)
-      ) {
-        // For ɵcmp fields, perform granular input/output comparison
-        if (tsField.fieldName === 'ɵcmp') {
-          const tsInputsOutputs = extractInputsOutputsFromCmpDefinition(tsField.value)
-          const oxcInputsOutputs = extractInputsOutputsFromCmpDefinition(oxcField.value)
-
-          // Compare inputs if present in either
-          if (tsInputsOutputs.inputs || oxcInputsOutputs.inputs) {
-            const inputDiffs = compareInputMetadata(
-              oxcInputsOutputs.inputs || new Map(),
-              tsInputsOutputs.inputs || new Map(),
-              tsField.className,
-            )
-            diffs.push(...inputDiffs)
-          }
-
-          // Compare outputs if present in either
-          if (tsInputsOutputs.outputs || oxcInputsOutputs.outputs) {
-            const outputDiffs = compareOutputMetadata(
-              oxcInputsOutputs.outputs || new Map(),
-              tsInputsOutputs.outputs || new Map(),
-              tsField.className,
-            )
-            diffs.push(...outputDiffs)
-          }
-
-          // Still report the overall difference if there are other differences
-          // beyond inputs/outputs (e.g., template, selectors, etc.)
-          diffs.push({
-            type: 'different',
-            className: tsField.className,
-            fieldName: tsField.fieldName,
-            expected: tsField.value,
-            actual: oxcField.value,
-          })
-        } else {
-          diffs.push({
-            type: 'different',
-            className: tsField.className,
-            fieldName: tsField.fieldName,
-            expected: tsField.value,
-            actual: oxcField.value,
-          })
-        }
-      }
+    } else if (!staticFieldValuesEquivalent(oxcField.node, tsField.node)) {
+      diffs.push({
+        type: 'different',
+        className: tsField.className,
+        fieldName: tsField.fieldName,
+        expected: tsField.value,
+        actual: oxcField.value,
+      })
     }
   }
 
@@ -3368,16 +1807,23 @@ interface ClassInfo {
 }
 
 /**
- * Extract class declarations from the program.
+ * Extract class declarations from the program, exported or not. The `static ɵxxx` fields are
+ * left out: they are compared on their own by `compareStaticFields`.
  */
 function extractClasses(program: Program): Map<string, ClassInfo> {
   const classes = new Map<string, ClassInfo>()
 
-  for (const statement of program.body) {
-    if (statement.type === 'ClassDeclaration' && statement.id?.name) {
-      const normalized = normalizeAst(statement)
-      classes.set(statement.id.name, { name: statement.id.name, normalized })
-    }
+  for (const topLevel of program.body as unknown as NormAstNode[]) {
+    const statement =
+      topLevel.type === 'ExportNamedDeclaration' || topLevel.type === 'ExportDefaultDeclaration'
+        ? (topLevel.declaration as NormAstNode | null | undefined)
+        : topLevel
+    const name = (statement?.id as NormAstNode | null | undefined)?.name
+    if (statement?.type !== 'ClassDeclaration' || typeof name !== 'string') continue
+    const body = statement.body as NormAstNode
+    const members = (body.body as NormAstNode[]).filter((member) => !isAngularStaticField(member))
+    const normalized = normalizeAst({ ...statement, body: { ...body, body: members } })
+    classes.set(name, { name, normalized })
   }
 
   return classes
@@ -3425,6 +1871,205 @@ function compareClasses(
 }
 
 /**
+ * A top-level statement that no other part of the comparison covers.
+ */
+interface TopLevelStatement {
+  /** See `StatementDiff.label`. */
+  label: string
+  /** The first `ɵ` call in the statement, which gives the label. */
+  call?: NormAstNode
+  /** Whether it is a `ɵsetClassMetadata(Async)` call, whose content `compareClassMetadata` covers. */
+  isMetadata: boolean
+  node: NormAstNode
+  normalized: string
+  code: string
+}
+
+/** The first (pre-order) call in `node` whose callee is `ɵxxx` or `ns.ɵxxx`, with that name. */
+function firstAngularCall(node: unknown): { call: NormAstNode; name: string } | undefined {
+  let found: { call: NormAstNode; name: string } | undefined
+  const visit = (value: unknown): void => {
+    if (found || value === null || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    const obj = value as NormAstNode
+    if (obj.type === 'CallExpression') {
+      const callee = obj.callee as NormAstNode
+      const name =
+        callee.type === 'MemberExpression' && callee.computed !== true
+          ? (callee.property as NormAstNode).name
+          : callee.name
+      if (typeof name === 'string' && name.startsWith('ɵ')) {
+        found = { call: obj, name }
+        return
+      }
+    }
+    for (const child of Object.values(obj)) visit(child)
+  }
+  visit(node)
+  return found
+}
+
+/**
+ * Extract, in order, every top-level statement that the other extractors do not compare: anything
+ * but imports, `export { ... }` lists, named class/function declarations, variable declarations
+ * with plain identifiers and `ClassName.ɵxxx = ...` assignments. In practice these are the
+ * `ɵsetClassMetadata`, `ɵsetClassDebugInfo` and `ɵɵsetNgModuleScope` calls. The
+ * `ɵsetClassMetadata(Async)` calls are kept so that the statement order can be compared.
+ */
+function extractTopLevelStatements(program: Program, sourceCode: string): TopLevelStatement[] {
+  const statements: TopLevelStatement[] = []
+  const seen = new Map<string, number>()
+  let unlabelled = 0
+
+  for (const topLevel of program.body as unknown as NormAstNode[]) {
+    const declaration =
+      topLevel.type === 'ExportNamedDeclaration' || topLevel.type === 'ExportDefaultDeclaration'
+        ? (topLevel.declaration as NormAstNode | null | undefined)
+        : topLevel
+    if (topLevel.type === 'ImportDeclaration' || topLevel.type === 'EmptyStatement') continue
+    // `export { a, b as c }` and `export ... from` lists are compared by `compareExports`.
+    if (topLevel.type === 'ExportNamedDeclaration' && !declaration) continue
+    if (
+      (declaration?.type === 'ClassDeclaration' || declaration?.type === 'FunctionDeclaration') &&
+      (declaration.id as NormAstNode | null | undefined)?.name
+    ) {
+      continue
+    }
+    if (
+      declaration?.type === 'VariableDeclaration' &&
+      (declaration.declarations as NormAstNode[]).every(
+        (decl) => (decl.id as NormAstNode).type === 'Identifier',
+      )
+    ) {
+      continue
+    }
+    if (topLevel.type === 'ExpressionStatement' && staticFieldAssignment(topLevel)) continue
+
+    const angularCall = firstAngularCall(topLevel)
+    let label: string
+    if (angularCall) {
+      const firstArg = (angularCall.call.arguments as NormAstNode[])[0]
+      label = `${angularCall.name}(${typeof firstArg?.name === 'string' ? firstArg.name : ''})`
+      const count = (seen.get(label) ?? 0) + 1
+      seen.set(label, count)
+      if (count > 1) label += `#${count}`
+    } else {
+      label = `#${++unlabelled}`
+    }
+    statements.push({
+      label,
+      call: angularCall?.call,
+      isMetadata:
+        angularCall?.name === 'ɵsetClassMetadata' || angularCall?.name === 'ɵsetClassMetadataAsync',
+      node: topLevel,
+      normalized: normalizeAst(topLevel),
+      code: sourceCode.slice(topLevel.start, topLevel.end),
+    })
+  }
+
+  return statements
+}
+
+/** Copy `node`, putting `to` where `from` was. */
+function substituteNode(node: unknown, from: unknown, to: unknown): unknown {
+  if (node === from) return to
+  if (node === null || typeof node !== 'object') return node
+  if (Array.isArray(node)) return node.map((item) => substituteNode(item, from, to))
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [key, substituteNode(value, from, to)]),
+  )
+}
+
+/** The string `filePath` value node of a `ɵsetClassDebugInfo(Class, { ... })` call. */
+function debugInfoFilePath(statement: TopLevelStatement): NormAstNode | undefined {
+  if (!statement.label.startsWith('ɵsetClassDebugInfo(')) return undefined
+  const info = (statement.call?.arguments as NormAstNode[] | undefined)?.[1]
+  if (info?.type !== 'ObjectExpression') return undefined
+  for (const property of info.properties as NormAstNode[]) {
+    const key = property.key as NormAstNode | undefined
+    const value = property.value as NormAstNode | undefined
+    if (
+      property.type === 'Property' &&
+      property.computed !== true &&
+      (key?.name === 'filePath' || key?.value === 'filePath') &&
+      value?.type === 'Literal' &&
+      typeof value.value === 'string'
+    ) {
+      return value
+    }
+  }
+  return undefined
+}
+
+/**
+ * Compare the top-level statements from `extractTopLevelStatements` by label, and their order.
+ *
+ * The content of the `ɵsetClassMetadata(Async)` calls, and whether they exist, is left to
+ * `compareClassMetadata`; they only take part in the order check. A statement is reported out of
+ * order when Oxc emits it before a statement that Angular emits ahead of it.
+ */
+function compareTopLevelStatements(
+  oxcStatements: TopLevelStatement[],
+  tsStatements: TopLevelStatement[],
+): StatementDiff[] {
+  const diffs: StatementDiff[] = []
+  const oxcByLabel = new Map(oxcStatements.map((s) => [s.label, s]))
+  const tsByLabel = new Map(tsStatements.map((s) => [s.label, s]))
+
+  for (const ts of tsStatements) {
+    const oxc = oxcByLabel.get(ts.label)
+    if (!oxc) {
+      if (!ts.isMetadata) diffs.push({ label: ts.label, type: 'missing', expected: ts.code })
+      continue
+    }
+    if (ts.isMetadata || oxc.normalized === ts.normalized) continue
+    // Tell a debug info call that differs only in its file path apart from one that differs in
+    // its class name or line number.
+    const oxcPath = debugInfoFilePath(oxc)
+    const tsPath = debugInfoFilePath(ts)
+    if (
+      oxcPath &&
+      tsPath &&
+      normalizeAst(substituteNode(oxc.node, oxcPath, tsPath)) === ts.normalized
+    ) {
+      diffs.push({
+        label: `${ts.label} filePath`,
+        type: 'different',
+        expected: tsPath.value as string,
+        actual: oxcPath.value as string,
+      })
+    } else {
+      diffs.push({ label: ts.label, type: 'different', expected: ts.code, actual: oxc.code })
+    }
+  }
+  for (const oxc of oxcStatements) {
+    if (!tsByLabel.has(oxc.label) && !oxc.isMetadata) {
+      diffs.push({ label: oxc.label, type: 'extra', actual: oxc.code })
+    }
+  }
+
+  const tsOrder = tsStatements.map((s) => s.label).filter((label) => oxcByLabel.has(label))
+  const oxcOrder = oxcStatements.map((s) => s.label).filter((label) => tsByLabel.has(label))
+  const tsIndex = new Map(tsOrder.map((label, i) => [label, i]))
+  for (let i = 0; i < oxcOrder.length; i++) {
+    const index = tsIndex.get(oxcOrder[i])!
+    if (oxcOrder.slice(i + 1).some((later) => tsIndex.get(later)! < index)) {
+      diffs.push({
+        label: `order ${oxcOrder[i]}`,
+        type: 'order',
+        expected: tsOrder.join(', '),
+        actual: oxcOrder.join(', '),
+      })
+    }
+  }
+
+  return diffs
+}
+
+/**
  * Compare two full-file JavaScript outputs semantically.
  *
  * This function performs a comprehensive comparison including:
@@ -3432,8 +2077,12 @@ function compareClasses(
  * - Export statements (using module.staticExports)
  * - Class definitions
  * - Static field assignments (ClassName.ɵcmp, ClassName.ɵfac, etc.)
- * - Template functions and other functions
+ * - Top-level functions and constants (template functions, hoisted `_cN` constants, etc.)
+ * - Every other top-level statement (setClassDebugInfo, setNgModuleScope, ...), and the order of
+ *   these statements and the setClassMetadata calls
  *
+ * Every part is compared on its AST, so formatting does not matter but any change inside a
+ * string literal does; the source text is never rewritten to make the outputs line up.
  * Uses `showSemanticErrors: true` for additional validation.
  *
  * @param oxcCode - The Oxc-generated JavaScript code
@@ -3450,7 +2099,8 @@ export async function compareFullFileSemantically(
   }
 
   try {
-    // Format both with oxfmt to normalize formatting
+    // Format both with oxfmt. This does not change what is compared (the ASTs), but it lines
+    // the reported source text up for readable diffs.
     const [formattedOxc, formattedTs] = await Promise.all([
       formatCodeForComparison(oxcCode),
       formatCodeForComparison(tsCode),
@@ -3461,92 +2111,17 @@ export async function compareFullFileSemantically(
       return { match: true }
     }
 
-    // Normalize template literals to regular strings (semantically equivalent)
-    let workingOxcCode = normalizeTemplateLiterals(formattedOxc)
-    let workingTsCode = normalizeTemplateLiterals(formattedTs)
-
-    // Normalize PURE comments (oxfmt adds spaces: /* @__PURE__ */ -> /*@__PURE__*/)
-    workingOxcCode = workingOxcCode.replaceAll('/* @__PURE__ */', '/*@__PURE__*/')
-    workingTsCode = workingTsCode.replaceAll('/* @__PURE__ */', '/*@__PURE__*/')
-
-    // Remove trailing commas in objects: ",}" -> "}"
-    workingOxcCode = workingOxcCode.replaceAll(',}', '}')
-    workingTsCode = workingTsCode.replaceAll(',}', '}')
-
-    // Remove trailing commas in arrays: ",]" -> "]"
-    workingOxcCode = workingOxcCode.replaceAll(',]', ']')
-    workingTsCode = workingTsCode.replaceAll(',]', ']')
-
-    // Normalize space before closing brace: " }" -> "}"
-    workingOxcCode = workingOxcCode.replaceAll(' }', '}')
-    workingTsCode = workingTsCode.replaceAll(' }', '}')
-
-    // Normalize @Inject parameter types
-    workingOxcCode = normalizeInjectParameterTypes(workingOxcCode)
-    workingTsCode = normalizeInjectParameterTypes(workingTsCode)
-
-    // Normalize nullish coalescing (Oxc preserves ??, TS transpiles to ternary)
-    // Apply to TS: convert ternary check to ??
-    // Apply to Oxc: remove outer parens around ?? expression
-    workingTsCode = normalizeNullishCoalescing(workingTsCode)
-    workingOxcCode = removeNullishCoalescingParens(workingOxcCode)
-
-    // Normalize numeric literals: 1e3 → 1000 (OXC emits scientific notation)
-    workingOxcCode = normalizeNumericLiterals(workingOxcCode)
-    workingTsCode = normalizeNumericLiterals(workingTsCode)
-
-    // Normalize inline object literal formatting: collapse multi-line simple objects
-    workingOxcCode = collapseInlineObjectLiterals(workingOxcCode)
-    workingTsCode = collapseInlineObjectLiterals(workingTsCode)
-
-    // Fast path after template/inject/nullish/format normalization
-    if (workingOxcCode === workingTsCode) {
-      return { match: true }
-    }
-
-    // Build const value maps for both to identify metadata consts
-    const tsConstMap = buildConstValueMap(workingTsCode)
-    const oxcConstMapInitial = buildConstValueMap(workingOxcCode)
-
-    // Remove attrs/query consts from TS code that are NOT present in Oxc output
-    let normalizedTsCode = removeAttrsConstsNotInOxc(workingTsCode, tsConstMap, oxcConstMapInitial)
-
-    // Remove provider consts from both
-    let normalizedOxcCode = removeProvidersConst(workingOxcCode)
-    normalizedTsCode = removeProvidersConst(normalizedTsCode)
-
-    // Build const value maps after cleanup
-    const oxcConstMap = buildConstValueMap(normalizedOxcCode)
-    const normalizedTsConstMap = buildConstValueMap(normalizedTsCode)
-
-    // Create mapping from Oxc const names to TS const names based on value equivalence
-    const constMapping = buildConstNameMapping(oxcConstMap, normalizedTsConstMap)
-
-    // Normalize Oxc code by replacing const references to match TS naming
-    normalizedOxcCode = replaceConstReferences(normalizedOxcCode, constMapping)
-
-    // Fast path after const normalization
-    if (normalizedOxcCode === normalizedTsCode) {
-      return { match: true }
-    }
-
-    // Parse both with oxc-parser using enhanced options
-    const oxcResult = parseSync('oxc.js', normalizedOxcCode, {
-      sourceType: 'module',
-      showSemanticErrors: true,
-    })
-    const tsResult = parseSync('ts.js', normalizedTsCode, {
-      sourceType: 'module',
-      showSemanticErrors: true,
-    })
+    const parseOptions = { sourceType: 'module', showSemanticErrors: true } as const
+    const oxcParsed = parseSync('oxc.js', formattedOxc, parseOptions)
+    const tsParsed = parseSync('ts.js', formattedTs, parseOptions)
 
     // Check for parse errors
     const parseErrors: string[] = []
-    if (oxcResult.errors.length > 0) {
-      parseErrors.push(...oxcResult.errors.map((e) => `Oxc: ${e.message}`))
+    if (oxcParsed.errors.length > 0) {
+      parseErrors.push(...oxcParsed.errors.map((e) => `Oxc: ${e.message}`))
     }
-    if (tsResult.errors.length > 0) {
-      parseErrors.push(...tsResult.errors.map((e) => `TS: ${e.message}`))
+    if (tsParsed.errors.length > 0) {
+      parseErrors.push(...tsParsed.errors.map((e) => `TS: ${e.message}`))
     }
 
     if (parseErrors.length > 0) {
@@ -3555,6 +2130,27 @@ export async function compareFullFileSemantically(
         parseErrors,
       }
     }
+
+    // Rename Oxc's hoisted `_cN` constants to the Angular name of the constant with the same
+    // value, so that both outputs use the same names when they hoist the same constants in a
+    // different order. The constants themselves are still compared by name below.
+    const constMapping = buildConstNameMapping(
+      buildConstValueMap(oxcParsed.program as unknown as Program),
+      buildConstValueMap(tsParsed.program as unknown as Program),
+    )
+    const normalizedOxcCode = replaceConstReferences(formattedOxc, constMapping)
+    const normalizedTsCode = formattedTs
+
+    // Fast path after const normalization
+    if (normalizedOxcCode === normalizedTsCode) {
+      return { match: true }
+    }
+
+    const oxcResult =
+      normalizedOxcCode === formattedOxc
+        ? oxcParsed
+        : parseSync('oxc.js', normalizedOxcCode, parseOptions)
+    const tsResult = tsParsed
 
     // Extract and compare imports using module.staticImports
     const oxcImports = extractNormalizedImports(oxcResult.module.staticImports)
@@ -3571,31 +2167,36 @@ export async function compareFullFileSemantically(
     const tsClasses = extractClasses(tsResult.program as unknown as Program)
     const classDiffs = compareClasses(oxcClasses, tsClasses)
 
-    // Extract and compare static field assignments, both `ClassName.ɵcmp = ...` and the
+    // Extract and compare the Angular static fields, both `ClassName.ɵcmp = ...` and the
     // `static ɵcmp = ...` class fields that current Angular and Oxc emit.
-    const oxcFields = [
-      ...extractStaticFieldAssignments(normalizedOxcCode),
-      ...extractClassStaticFields(oxcResult.program as unknown as Program, normalizedOxcCode),
-    ]
-    const tsFields = [
-      ...extractStaticFieldAssignments(normalizedTsCode),
-      ...extractClassStaticFields(tsResult.program as unknown as Program, normalizedTsCode),
-    ]
-    const staticFieldDiffs = compareStaticFields(oxcFields, tsFields, constMapping)
+    const oxcFields = extractClassStaticFields(
+      oxcResult.program as unknown as Program,
+      normalizedOxcCode,
+    )
+    const tsFields = extractClassStaticFields(
+      tsResult.program as unknown as Program,
+      normalizedTsCode,
+    )
+    const staticFieldDiffs = compareStaticFields(oxcFields, tsFields)
 
     // Extract and compare class metadata (setClassMetadata calls)
     const oxcClassMetadata = extractClassMetadataCalls(oxcResult.program, normalizedOxcCode)
     const tsClassMetadata = extractClassMetadataCalls(tsResult.program, normalizedTsCode)
     const classMetadataDiffs = compareClassMetadata(oxcClassMetadata, tsClassMetadata)
 
-    // Extract and compare functions (template functions, etc.)
+    // Extract and compare top-level functions and constants (template functions, etc.)
     const oxcFunctions = extractFunctions(
       oxcResult.program as unknown as Program,
       normalizedOxcCode,
     )
     const tsFunctions = extractFunctions(tsResult.program as unknown as Program, normalizedTsCode)
-    // Pass constMapping so that const arrow functions (_c0, _c1, etc.) can be matched
-    const functionComparison = compareFunctions(oxcFunctions, tsFunctions, constMapping)
+    const functionComparison = compareFunctions(oxcFunctions, tsFunctions)
+
+    // Extract and compare the remaining top-level statements (setClassDebugInfo, ...)
+    const statementDiffs = compareTopLevelStatements(
+      extractTopLevelStatements(oxcResult.program as unknown as Program, normalizedOxcCode),
+      extractTopLevelStatements(tsResult.program as unknown as Program, normalizedTsCode),
+    )
 
     // Determine if there are any differences
     const hasImportDiffs = importDiffs.length > 0
@@ -3603,6 +2204,7 @@ export async function compareFullFileSemantically(
     const hasClassDiffs = classDiffs.length > 0
     const hasStaticFieldDiffs = staticFieldDiffs.length > 0
     const hasClassMetadataDiffs = classMetadataDiffs.length > 0
+    const hasStatementDiffs = statementDiffs.length > 0
     const hasFunctionDiffs =
       functionComparison.missingFunctions.length > 0 ||
       functionComparison.extraFunctions.length > 0 ||
@@ -3614,6 +2216,7 @@ export async function compareFullFileSemantically(
       !hasClassDiffs &&
       !hasStaticFieldDiffs &&
       !hasClassMetadataDiffs &&
+      !hasStatementDiffs &&
       !hasFunctionDiffs
 
     if (match) {
@@ -3627,6 +2230,7 @@ export async function compareFullFileSemantically(
       classDiffs: hasClassDiffs ? classDiffs : undefined,
       staticFieldDiffs: hasStaticFieldDiffs ? staticFieldDiffs : undefined,
       classMetadataDiffs: hasClassMetadataDiffs ? classMetadataDiffs : undefined,
+      statementDiffs: hasStatementDiffs ? statementDiffs : undefined,
       functionComparison: hasFunctionDiffs ? functionComparison : undefined,
     }
   } catch (e) {
@@ -3689,6 +2293,8 @@ export function formatFullFileComparison(result: FullFileCompareResult): string 
           break
         case 'different':
           lines.push(`  ~ Different export: ${diff.exportName}`)
+          lines.push(`      expected: ${diff.expected}`)
+          lines.push(`      actual:   ${diff.actual}`)
           break
       }
     }
@@ -3753,6 +2359,27 @@ export function formatFullFileComparison(result: FullFileCompareResult): string 
           break
         case 'different':
           lines.push(`  ~ Different: ${fieldKey}`)
+          lines.push(`      expected: ${truncate(diff.expected || '', 80)}`)
+          lines.push(`      actual:   ${truncate(diff.actual || '', 80)}`)
+          break
+      }
+    }
+    lines.push('')
+  }
+
+  if (result.statementDiffs && result.statementDiffs.length > 0) {
+    lines.push('Top-level statement differences:')
+    for (const diff of result.statementDiffs) {
+      switch (diff.type) {
+        case 'missing':
+          lines.push(`  - Missing: ${diff.label}`)
+          break
+        case 'extra':
+          lines.push(`  + Extra: ${diff.label}`)
+          break
+        case 'different':
+        case 'order':
+          lines.push(`  ~ Different: ${diff.label}`)
           lines.push(`      expected: ${truncate(diff.expected || '', 80)}`)
           lines.push(`      actual:   ${truncate(diff.actual || '', 80)}`)
           break
@@ -3841,80 +2468,4 @@ function walkAst(node: unknown, visitor: (n: NormAstNode) => void): void {
       walkAst(value, visitor)
     }
   }
-}
-
-/**
- * Normalize numeric scientific notation to decimal form using oxc-parser.
- * Finds Literal nodes (ESTree format) whose source text contains scientific notation
- * (e.g. `1e3`) and replaces them with their decimal representation (`1000`).
- */
-function normalizeNumericLiterals(code: string): string {
-  let ast
-  try {
-    ast = parseSync('numeric.js', code, { sourceType: 'module' })
-  } catch {
-    return code
-  }
-
-  const replacements: Array<{ start: number; end: number; replacement: string }> = []
-
-  // oxc-parser returns character offsets (not byte offsets), so use start/end directly
-  walkAst(ast.program, (node) => {
-    if (node.type === 'Literal' && typeof node.value === 'number') {
-      if (typeof node.start !== 'number' || typeof node.end !== 'number') return
-      const originalText = code.slice(node.start as number, node.end as number)
-      // Check if the source text uses scientific notation (exclude hex/octal/binary prefixes)
-      if (/e\+?\d/i.test(originalText) && !/^0[xob]/i.test(originalText)) {
-        const num = node.value as number
-        if (Number.isFinite(num) && Number.isSafeInteger(num)) {
-          replacements.push({
-            start: node.start as number,
-            end: node.end as number,
-            replacement: String(num),
-          })
-        }
-      }
-    }
-  })
-
-  if (replacements.length === 0) return code
-
-  // Apply replacements from end to start
-  replacements.sort((a, b) => b.start - a.start)
-  let result = code
-  for (const { start, end, replacement } of replacements) {
-    result = result.slice(0, start) + replacement + result.slice(end)
-  }
-  return result
-}
-
-/**
- * Collapse multi-line simple object literals in function call arguments to single lines.
- *
- * Matches patterns like:
- *   .emit({
- *     content: $event,
- *     format: item_r3.format,
- *     type: item_r3.id,
- *   })
- *
- * And collapses to:
- *   .emit({ content: $event, format: item_r3.format, type: item_r3.id})
- *
- * Only targets objects where every property value is a simple expression
- * (identifiers, member access, $event) — no strings, nested objects, or calls.
- */
-const COLLAPSE_OBJ_RE = /\(\{\s*\n((?:\s*\w+:\s*[\w.$]+,?\s*\n)+)\s*\}\)/g
-
-function collapseInlineObjectLiterals(code: string): string {
-  return code.replace(COLLAPSE_OBJ_RE, (_match, propsBlock: string) => {
-    const lines = propsBlock.trim().split('\n')
-    const props = lines.map((l) => l.trim()).filter(Boolean)
-    // Remove trailing comma from last property
-    const last = props.length - 1
-    if (last >= 0 && props[last].endsWith(',')) {
-      props[last] = props[last].slice(0, -1)
-    }
-    return '({ ' + props.join(' ') + '})'
-  })
 }

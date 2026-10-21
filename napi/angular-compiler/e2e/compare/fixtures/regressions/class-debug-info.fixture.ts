@@ -63,6 +63,7 @@ export class InputDebugInfoComponent {
   {
     type: 'full-transform',
     name: 'class-debug-info-change-detection',
+    ngtscMode: 'full',
     category: 'regressions',
     description: 'Component with OnPush should emit setClassDebugInfo',
     className: 'OnPushDebugInfoComponent',

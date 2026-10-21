@@ -14,7 +14,7 @@ import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
 import { compileFactory, Severity } from '@oxc-angular/vite/api'
 import pLimit from 'p-limit'
 
-import { compareJsSemantically, compareFullFileSemantically } from '../src/compare.js'
+import { compareFullFileSemantically, type ImportDiff } from '../src/compare.js'
 import {
   compileWithNgtsc,
   generateComponentSource,
@@ -22,7 +22,11 @@ import {
 } from '../src/compilers/angular-ngtsc.js'
 import { compileWithOxcFullFile } from '../src/compilers/oxc.js'
 import { discoverFixtures } from './index.js'
-import { KNOWN_DIFFERENCES } from './known-differences.js'
+import {
+  GLOBAL_KNOWN_DIFFERENCES,
+  KNOWN_DIFFERENCES,
+  type KnownDifference,
+} from './known-differences.js'
 
 /**
  * Path to the tsconfig.json used for fixture compilation.
@@ -33,6 +37,16 @@ import { KNOWN_DIFFERENCES } from './known-differences.js'
  * - The NgtscProgram for incremental compilation
  */
 const FIXTURE_TSCONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'tsconfig.json')
+
+/**
+ * The path ngtsc compiles a fixture at. Fixture paths look like `/fixtures/...`, which lies
+ * outside the project root (the tsconfig directory), and ngtsc leaves `filePath` and
+ * `lineNumber` out of `ɵsetClassDebugInfo` for a file outside the project, which never happens in
+ * a real build. Placing the file under the project root makes ngtsc emit them.
+ */
+function ngtscFilePath(filePath: string): string {
+  return join(dirname(FIXTURE_TSCONFIG_PATH), filePath)
+}
 import type {
   Fixture,
   FixtureResult,
@@ -124,72 +138,88 @@ export async function runFixtures(options: FixtureRunnerOptions = {}): Promise<F
 }
 
 /**
- * Test a single fixture, applying its documented known differences: a listed fixture that
- * differs only in the fields the entry documents is reported as a known difference, one that
- * differs elsewhere still fails, and one that now matches fails so that the stale entry is
- * removed.
+ * Test a single fixture, applying its documented known differences: a fixture that differs
+ * only in what its entry and `GLOBAL_KNOWN_DIFFERENCES` document is reported as a known
+ * difference, one that differs anywhere else (another static field, class, function, export,
+ * import, metadata call or top-level statement, or a parse error) still fails, and one where a
+ * difference its entry documents no longer occurs fails so that the stale entry is removed.
  */
 async function testFixture(fixture: Fixture, verbose?: boolean): Promise<FixtureResult> {
   const result = await compareFixture(fixture, verbose)
   const known = KNOWN_DIFFERENCES[`${fixture.category}/${fixture.name}`]
-  if (!known) {
-    return result
-  }
-  const knownDifferences = known.reasons
   if (result.status === 'mismatch') {
-    const undocumented = (result.staticFieldDiffs ?? [])
-      .map((diff) => `${diff.className}.${diff.fieldName}`)
-      .filter((field) => !known.fields.includes(field))
-    const undocumentedImports = (result.importDiffs ?? [])
-      .filter(
-        (diff) =>
-          !(known.importDiffs ?? []).some(
-            (k) =>
-              k.type === diff.type &&
-              k.moduleSource === diff.moduleSource &&
-              JSON.stringify(k.expected ?? []) === JSON.stringify(diff.expected ?? []) &&
-              JSON.stringify(k.actual ?? []) === JSON.stringify(diff.actual ?? []),
-          ),
-      )
-      .map(
-        (diff) =>
-          `import ${diff.moduleSource} expected { ${(diff.expected ?? []).join(', ')} } ` +
-          `got { ${(diff.actual ?? []).join(', ')} }`,
-      )
-    const undocumentedMetadata = (result.classMetadataDiffs ?? [])
-      .map((diff) => `${diff.className}.${diff.field}`)
-      .filter((field) => !(known.metadataDiffs ?? []).includes(field))
-    const observedMetadata = new Set(
-      (result.classMetadataDiffs ?? []).map((diff) => `${diff.className}.${diff.field}`),
-    )
-    const unobservedMetadata = (known.metadataDiffs ?? []).filter(
-      (field) => !observedMetadata.has(field),
-    )
-    const allUndocumented = [...undocumented, ...undocumentedImports, ...undocumentedMetadata]
-    if (allUndocumented.length > 0) {
-      return {
-        ...result,
-        knownDifferences,
-        undocumentedFields: [...new Set(allUndocumented)],
-      }
+    const observed = observedDifferences(result)
+    const documented = known ? documentedDifferences(known) : new Set<string>()
+    const globalReasons = new Set<string>()
+    const undocumented = [...observed].filter((entry) => {
+      if (documented.has(entry)) return false
+      const global = GLOBAL_KNOWN_DIFFERENCES.find(({ label }) => label.test(entry))
+      if (global) globalReasons.add(global.reason)
+      return !global
+    })
+    if (undocumented.length > 0) {
+      return { ...result, knownDifferences: known?.reasons, undocumentedFields: undocumented }
     }
-    // A declared metadata diff that was not observed means the bug was fixed
-    // (or moved) — surface it like a stale entry so the exemption cannot
-    // silently re-allow a regression.
-    if (unobservedMetadata.length > 0) {
-      return {
-        ...result,
-        status: 'mismatch',
-        knownDifferences,
-        staleMetadataFields: unobservedMetadata,
-      }
+    const knownDifferences = [...(known?.reasons ?? []), ...globalReasons]
+    // A documented difference that was not observed means the bug was fixed (or moved) —
+    // surface it like a stale entry so the exemption cannot silently re-allow a regression.
+    const unobserved = [...documented].filter((entry) => !observed.has(entry))
+    if (unobserved.length > 0) {
+      return { ...result, status: 'mismatch', knownDifferences, staleEntries: unobserved }
     }
     return { ...result, status: 'known-difference', knownDifferences }
   }
-  if (result.status === 'match') {
-    return { ...result, status: 'mismatch', knownDifferences, staleKnownDifference: true }
+  if (result.status === 'match' && known) {
+    return {
+      ...result,
+      status: 'mismatch',
+      knownDifferences: known.reasons,
+      staleKnownDifference: true,
+    }
   }
   return result
+}
+
+function importDiffLabel(diff: ImportDiff): string {
+  return (
+    `import ${diff.type} ${diff.moduleSource} expected { ${(diff.expected ?? []).join(', ')} } ` +
+    `got { ${(diff.actual ?? []).join(', ')} }`
+  )
+}
+
+/**
+ * Every difference a mismatching fixture reports, labelled the way `known-differences.ts`
+ * names them: `Class.ɵfield`, `class Name`, `function name`, `export name`, an import label,
+ * `Class.setClassMetadata...` and `statement label`. Parse errors can never be documented.
+ */
+function observedDifferences(result: FixtureResult): Set<string> {
+  const fc = result.functionComparison
+  return new Set([
+    ...(result.staticFieldDiffs ?? []).map((diff) => `${diff.className}.${diff.fieldName}`),
+    ...(result.classDiffs ?? []).map((diff) => `class ${diff.className}`),
+    ...[
+      ...(fc?.missingFunctions ?? []),
+      ...(fc?.extraFunctions ?? []),
+      ...(fc?.functionDiffs ?? []).map((diff) => diff.name),
+    ].map((name) => `function ${name}`),
+    ...(result.exportDiffs ?? []).map((diff) => `export ${diff.exportName}`),
+    ...(result.importDiffs ?? []).map(importDiffLabel),
+    ...(result.classMetadataDiffs ?? []).map((diff) => `${diff.className}.${diff.field}`),
+    ...(result.statementDiffs ?? []).map((diff) => `statement ${diff.label}`),
+    ...(result.parseErrors ?? []).map((error) => `parse error: ${error}`),
+  ])
+}
+
+function documentedDifferences(known: KnownDifference): Set<string> {
+  return new Set([
+    ...known.fields,
+    ...(known.classes ?? []).map((name) => `class ${name}`),
+    ...(known.functions ?? []).map((name) => `function ${name}`),
+    ...(known.exports ?? []).map((name) => `export ${name}`),
+    ...(known.importDiffs ?? []).map(importDiffLabel),
+    ...(known.metadataDiffs ?? []),
+    ...(known.statements ?? []).map((label) => `statement ${label}`),
+  ])
 }
 
 /**
@@ -210,7 +240,7 @@ async function compareFixture(fixture: Fixture, verbose?: boolean): Promise<Fixt
 
   switch (fixtureType) {
     case 'factory':
-      return testFactoryFixture(fixture, verbose)
+      return testFactoryFixture(fixture)
     case 'full-transform':
       return testFullTransformFixture(fixture, verbose)
     case 'class-metadata':
@@ -284,7 +314,10 @@ async function testComponentFixture(fixture: Fixture, verbose?: boolean): Promis
   let tsOutput: FixtureCompilerOutput
   const tsStart = performance.now()
   try {
-    const result = await compileWithNgtsc(source, filePath, { tsconfigPath: FIXTURE_TSCONFIG_PATH })
+    const result = await compileWithNgtsc(source, ngtscFilePath(filePath), {
+      tsconfigPath: FIXTURE_TSCONFIG_PATH,
+      mode: fixture.ngtscMode,
+    })
     tsOutput = {
       code: result.code,
       error: result.error,
@@ -379,6 +412,7 @@ async function testComponentFixture(fixture: Fixture, verbose?: boolean): Promis
     classDiffs: comparison.classDiffs,
     staticFieldDiffs: comparison.staticFieldDiffs,
     classMetadataDiffs: comparison.classMetadataDiffs,
+    statementDiffs: comparison.statementDiffs,
     parseErrors: comparison.parseErrors,
     oxcFeatures,
     tsFeatures,
@@ -389,8 +423,11 @@ async function testComponentFixture(fixture: Fixture, verbose?: boolean): Promis
 
 /**
  * Test a factory fixture (factory function compilation).
+ *
+ * There is no ngtsc baseline for a factory compiled from bare metadata, so the fixture is only
+ * checked to compile with Oxc and is otherwise reported as skipped, never as a match.
  */
-async function testFactoryFixture(fixture: Fixture, verbose?: boolean): Promise<FixtureResult> {
+async function testFactoryFixture(fixture: Fixture): Promise<FixtureResult> {
   // Compile with Oxc NAPI
   let oxcOutput: FixtureCompilerOutput
   const oxcStart = performance.now()
@@ -429,13 +466,15 @@ async function testFactoryFixture(fixture: Fixture, verbose?: boolean): Promise<
     }
   }
 
-  // For now, use Oxc output as baseline
-  const tsOutput: FixtureCompilerOutput = {
-    code: oxcOutput.code,
-    compilationTimeMs: 0,
+  if (oxcOutput.error) {
+    return { fixture, status: 'oxc-error', oxcOutput }
   }
-
-  return await processCompilationResults(fixture, oxcOutput, tsOutput, verbose)
+  return {
+    fixture,
+    status: 'skipped',
+    skipReason: 'no ngtsc baseline for a factory compiled from bare metadata',
+    oxcOutput,
+  }
 }
 
 /**
@@ -484,7 +523,8 @@ async function testFullTransformFixture(
 
   const tsStart = performance.now()
   try {
-    const result = await compileWithNgtsc(fixture.sourceCode, filePath, {
+    const result = await compileWithNgtsc(fixture.sourceCode, ngtscFilePath(filePath), {
+      mode: fixture.ngtscMode,
       tsconfigPath: FIXTURE_TSCONFIG_PATH,
     })
     tsOutput = {
@@ -569,6 +609,7 @@ async function testFullTransformFixture(
     classDiffs: comparison.classDiffs,
     staticFieldDiffs: comparison.staticFieldDiffs,
     classMetadataDiffs: comparison.classMetadataDiffs,
+    statementDiffs: comparison.statementDiffs,
     parseErrors: comparison.parseErrors,
   }
 }
@@ -655,6 +696,7 @@ async function testClassMetadataFixture(
   const tsStart = performance.now()
   try {
     const result = await compileWithNgtsc(fixture.sourceCode, filePath, {
+      mode: fixture.ngtscMode,
       tsconfigPath: FIXTURE_TSCONFIG_PATH,
     })
     tsOutput = {
@@ -721,138 +763,13 @@ async function testClassMetadataFixture(
     oxcOutput,
     tsOutput,
     functionComparison: comparison.functionComparison,
+    importDiffs: comparison.importDiffs,
+    exportDiffs: comparison.exportDiffs,
+    classDiffs: comparison.classDiffs,
+    staticFieldDiffs: comparison.staticFieldDiffs,
     classMetadataDiffs: comparison.classMetadataDiffs,
-  }
-}
-
-/**
- * Process compilation results and generate fixture result.
- */
-async function processCompilationResults(
-  fixture: Fixture,
-  oxcOutput: FixtureCompilerOutput,
-  tsOutput: FixtureCompilerOutput,
-  verbose?: boolean,
-): Promise<FixtureResult> {
-  // Determine status
-  const oxcFailed = Boolean(oxcOutput.error)
-  const tsFailed = Boolean(tsOutput.error)
-
-  if (oxcFailed && tsFailed) {
-    return {
-      fixture,
-      status: 'both-error',
-      oxcOutput,
-      tsOutput,
-    }
-  }
-
-  if (oxcFailed) {
-    return {
-      fixture,
-      status: 'oxc-error',
-      oxcOutput,
-      tsOutput,
-    }
-  }
-
-  if (tsFailed) {
-    return {
-      fixture,
-      status: 'ts-error',
-      oxcOutput,
-      tsOutput,
-    }
-  }
-
-  // Compare outputs
-  const comparison = await compareJsSemantically(oxcOutput.code, tsOutput.code)
-
-  // Check expected features if specified - stricter check for regressions
-  let oxcFeatures: string[] | undefined
-  let tsFeatures: string[] | undefined
-  let asymmetricFeatures: string[] | undefined
-  let missingFromBoth: string[] | undefined
-
-  if (fixture.expectedFeatures && fixture.expectedFeatures.length > 0) {
-    oxcFeatures = []
-    tsFeatures = []
-    asymmetricFeatures = []
-    missingFromBoth = []
-
-    for (const feature of fixture.expectedFeatures) {
-      const inOxc = oxcOutput.code.includes(feature)
-      const inTs = tsOutput.code.includes(feature)
-
-      if (inOxc) {
-        oxcFeatures.push(feature)
-      }
-      if (inTs) {
-        tsFeatures.push(feature)
-      }
-
-      // Track asymmetric features (present in one but not both)
-      if (inOxc !== inTs) {
-        asymmetricFeatures.push(feature)
-      }
-
-      // Track features missing from both (test configuration issue)
-      if (!inOxc && !inTs) {
-        missingFromBoth.push(feature)
-      }
-    }
-  }
-
-  if (verbose && !comparison.match) {
-    console.log(`\n  MISMATCH: ${fixture.category}/${fixture.name}`)
-    if (comparison.functionComparison) {
-      const fc = comparison.functionComparison
-      if (fc.missingFunctions.length > 0) {
-        console.log(`    Missing functions: ${fc.missingFunctions.join(', ')}`)
-      }
-      if (fc.extraFunctions.length > 0) {
-        console.log(`    Extra functions: ${fc.extraFunctions.join(', ')}`)
-      }
-      if (fc.functionDiffs.length > 0) {
-        console.log(`    Differing functions: ${fc.functionDiffs.map((d) => d.name).join(', ')}`)
-      }
-    }
-  }
-
-  // Warn about feature asymmetries (potential regressions)
-  if (verbose && asymmetricFeatures && asymmetricFeatures.length > 0) {
-    console.log(`\n  FEATURE ASYMMETRY: ${fixture.category}/${fixture.name}`)
-    for (const feature of asymmetricFeatures) {
-      const inOxc = oxcFeatures?.includes(feature)
-      const inTs = tsFeatures?.includes(feature)
-      if (inOxc && !inTs) {
-        console.log(`    ${feature}: Oxc only (not in Angular)`)
-      } else if (!inOxc && inTs) {
-        console.log(`    ${feature}: Angular only (not in Oxc)`)
-      }
-    }
-  }
-
-  // Warn about features missing from both outputs (test configuration issue)
-  if (verbose && missingFromBoth && missingFromBoth.length > 0) {
-    console.log(`\n  MISSING FEATURES: ${fixture.category}/${fixture.name}`)
-    console.log(`    Not in either output: ${missingFromBoth.join(', ')}`)
-  }
-
-  // Determine final status
-  const status: FixtureResult['status'] = comparison.match ? 'match' : 'mismatch'
-
-  return {
-    fixture,
-    status,
-    oxcOutput,
-    tsOutput,
-    functionComparison: comparison.functionComparison,
-    diff: comparison.diff,
-    oxcFeatures,
-    tsFeatures,
-    asymmetricFeatures,
-    missingFromBoth,
+    statementDiffs: comparison.statementDiffs,
+    parseErrors: comparison.parseErrors,
   }
 }
 
@@ -1014,15 +931,15 @@ export function printFixtureSummary(report: FixtureReport): void {
       console.log(`  ${result.fixture.category}/${result.fixture.name}`)
     }
   }
-  const staleMetadataFixtures = report.fixtures.filter((r) => r.staleMetadataFields)
-  if (staleMetadataFixtures.length > 0) {
+  const staleEntryFixtures = report.fixtures.filter((r) => r.staleEntries)
+  if (staleEntryFixtures.length > 0) {
     console.log(
-      '\nStale Metadata Allowlist Entries (declared in known-differences.ts but no longer observed):',
+      '\nStale Known Difference Entries (declared in known-differences.ts but no longer observed):',
     )
     console.log('-'.repeat(50))
-    for (const result of staleMetadataFixtures) {
+    for (const result of staleEntryFixtures) {
       console.log(
-        `  ${result.fixture.category}/${result.fixture.name}: ${result.staleMetadataFields!.join(', ')}`,
+        `  ${result.fixture.category}/${result.fixture.name}: ${result.staleEntries!.join(', ')}`,
       )
     }
   }

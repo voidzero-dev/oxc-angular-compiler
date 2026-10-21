@@ -471,6 +471,7 @@ export class HostDirectivesEncapsulationComponent {}
   {
     type: 'full-transform',
     name: 'host-directives-with-change-detection',
+    ngtscMode: 'full',
     category: 'host-directives',
     description: 'Host directives with OnPush change detection',
     className: 'HostDirectivesOnPushComponent',
