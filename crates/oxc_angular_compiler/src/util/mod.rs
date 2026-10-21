@@ -2,6 +2,7 @@
 
 pub mod chars;
 mod deferred_time;
+pub(crate) mod lone_surrogate;
 mod parse_util;
 mod type_extract;
 

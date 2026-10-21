@@ -23,6 +23,7 @@ use crate::injectable::InjectableMetadata;
 use crate::ng_module::NgModuleMetadata;
 use crate::pipe::PipeMetadata;
 use crate::service::ServiceMetadata;
+use crate::util::lone_surrogate::{Piece, has_lone_surrogate, pieces};
 use oxc_str::Ident;
 use std::collections::HashMap;
 
@@ -637,8 +638,14 @@ fn generate_input_transform_fields(
             let name = input.class_property_name.as_str();
             let field = format!("ngAcceptInputType_{name}");
             // ngtsc quotes the name only when Angular's `isUnsafeObjectKey`
-            // (`/[-.]/`) matches; any other name is printed as written.
-            let field = if field.contains(['-', '.']) { ts_string_literal(&field) } else { field };
+            // (`/[-.]/`) matches; any other name is printed as written. A lone
+            // surrogate is quoted too: ngtsc writes it raw, as U+FFFD, which
+            // is not valid TypeScript.
+            let field = if field.contains(['-', '.']) || has_lone_surrogate(&field) {
+                ts_string_literal(&field)
+            } else {
+                field
+            };
             let ty = accept_types.get(name).map_or("unknown", String::as_str);
             members.push_str(&format!("\nstatic {field}: {ty};"));
         }
@@ -823,11 +830,22 @@ fn extract_directive_name_from_expr(expr: &crate::output::ast::OutputExpression)
 
 /// Escape a string for use in a TypeScript `.d.ts` string literal type.
 fn escape_dts_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+    let mut out = String::with_capacity(s.len());
+    for piece in pieces(s) {
+        match piece {
+            Piece::Char('\\') => out.push_str("\\\\"),
+            Piece::Char('"') => out.push_str("\\\""),
+            Piece::Char('\n') => out.push_str("\\n"),
+            Piece::Char('\r') => out.push_str("\\r"),
+            Piece::Char('\t') => out.push_str("\\t"),
+            Piece::Char(c) => out.push(c),
+            // A stored lone surrogate is printed as its `\uXXXX` escape.
+            Piece::Lone(unit) => {
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{unit:04X}"));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

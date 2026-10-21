@@ -417,13 +417,29 @@ fn synthesized_decorator_precedes_explicit_member_decorators() {
 }
 
 #[test]
-fn lone_surrogate_alias_is_rejected_like_aot() {
-    // An alias with a lone surrogate (`'\uD800'`) has no `&str` form: JIT
-    // rejects it with the AOT path's error rather than lowering a lossy alias.
-    for (field, imports) in [
-        (r"  readonly value = input(0, { alias: '\uD800' });", "input"),
-        (r"  readonly ready = output<void>({ alias: '\uDC00' });", "output"),
-        (r"  readonly m = model.required<number>({ alias: '\uDBFF' });", "model"),
+fn lone_surrogate_alias_is_lowered_exactly() {
+    // An alias with a lone surrogate (`'\uD800'`) is read like any string, in
+    // JIT as in AOT, and printed as its escape (JIT output is reprinted by
+    // oxc's codegen, which writes lowercase hex).
+    for (field, imports, jit_alias, aot_alias) in [
+        (
+            r"  readonly value = input(0, { alias: '\uD800' });",
+            "input",
+            r#"alias:"\ud800""#,
+            r#"inputs:{value:[1,"\uD800","value"]}"#,
+        ),
+        (
+            r"  readonly ready = output<void>({ alias: '\uDC00' });",
+            "output",
+            r#"args:["\udc00"]"#,
+            r#"outputs:{ready:"\uDC00"}"#,
+        ),
+        (
+            r"  readonly m = model.required<number>({ alias: '\uDBFF' });",
+            "model",
+            r#"args:["\udbffChange"]"#,
+            r#"outputs:{m:"\uDBFFChange"}"#,
+        ),
     ] {
         let source = component(field, imports);
         for jit in [true, false] {
@@ -436,13 +452,10 @@ fn lone_surrogate_alias_is_rejected_like_aot() {
                 Some(&options),
                 None,
             );
-            let messages: Vec<String> = result.diagnostics.iter().map(|d| format!("{d}")).collect();
-            assert_eq!(
-                messages,
-                ["Alias needs to be a string that is statically analyzable."],
-                "jit: {jit}, `{field}`\n{}",
-                result.code
-            );
+            assert!(result.diagnostics.is_empty(), "jit: {jit}: {:?}", result.diagnostics);
+            let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+            let expected = if jit { jit_alias } else { aot_alias };
+            assert!(compact.contains(expected), "jit: {jit}, `{field}`\n{}", result.code);
         }
     }
 }

@@ -17665,10 +17665,9 @@ fn test_component_with_lone_surrogate_key_still_compiles() {
 
 #[test]
 fn test_lone_surrogate_query_selector_kept_exact() {
-    // A string query predicate with a lone surrogate (`'\uD800'`) has no
-    // `&str` form: it still becomes a selector list (split on commas, each
-    // part trimmed), with exact escapes, not a lossy rendering or a bare
-    // string token.
+    // A string query predicate with a lone surrogate (`'\uD800'`) becomes a
+    // selector list like any other (split on commas, each part trimmed,
+    // pooled), with exact escapes, as ngtsc emits `const _c0 = ["\uD800"]`.
     let result = expect_result(
         "import { Component, ViewChild, viewChild } from '@angular/core';\n\
          @Component({ selector: 'app-c', template: '' })\n\
@@ -17678,30 +17677,24 @@ fn test_lone_surrogate_query_selector_kept_exact() {
          }",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert!(
-        result.code.contains(r#"i0.ɵɵviewQuerySignal(ctx.b,["x","\uDC00"],5);"#),
-        "{}",
-        result.code
-    );
-    assert!(result.code.contains(r#"i0.ɵɵviewQuery(["\uD800"],5);"#), "{}", result.code);
+    assert!(result.code.contains(r#"const _c0 = ["x","\uDC00"];"#), "{}", result.code);
+    assert!(result.code.contains(r#"const _c1 = ["\uD800"];"#), "{}", result.code);
+    assert!(result.code.contains("i0.ɵɵviewQuerySignal(ctx.b,_c0,5);"), "{}", result.code);
+    assert!(result.code.contains("i0.ɵɵviewQuery(_c1,5);"), "{}", result.code);
 }
 
 #[test]
-fn test_lone_surrogate_input_alias_is_diagnostic() {
-    // An `alias` with a lone surrogate (`'\uD800'`) has no `&str` form. It is
-    // present but unreadable, not absent: report it like the positional
-    // `@Input('\uD800')` instead of compiling the class property name.
-    let input_error = "@Input decorator argument must resolve to a string or an object \
-                       literal Value could not be determined statically.";
-    let inputs_error = "@Directive.inputs array can only contain strings or object literals \
-                        Value could not be determined statically.";
-    for (decorator, member, expected) in [
-        ("", r"@Input('\uD800') value: any;", input_error),
-        ("", r"@Input({ alias: '\uD800', required: true }) value: any;", input_error),
-        ("", r"@Input({ alias: `\uD800` }) value: any;", input_error),
-        ("", "@Input({ alias: C }) value: any;", input_error),
-        ("", "@Input(OPTS) value: any;", input_error),
-        (r", inputs: [{ name: 'value', alias: '\uD800' }]", "value: any;", inputs_error),
+fn test_lone_surrogate_input_alias_is_compiled() {
+    // An `alias` with a lone surrogate (`'\uD800'`) is read like any string,
+    // directly or through a `const`, and printed as its escape, as ngtsc
+    // does: `inputs: { value: [0, "\uD800", "value"] }`.
+    for (decorator, member) in [
+        ("", r"@Input('\uD800') value: any;"),
+        ("", r"@Input({ alias: '\uD800', required: true }) value: any;"),
+        ("", r"@Input({ alias: `\uD800` }) value: any;"),
+        ("", "@Input({ alias: C }) value: any;"),
+        ("", "@Input(OPTS) value: any;"),
+        (r", inputs: [{ name: 'value', alias: '\uD800' }]", "value: any;"),
     ] {
         let source = format!(
             "import {{ Directive, Input }} from '@angular/core';\n\
@@ -17710,7 +17703,14 @@ fn test_lone_surrogate_input_alias_is_diagnostic() {
              @Directive({{ selector: '[d]'{decorator} }})\n\
              export class D {{\n  {member}\n}}"
         );
-        assert_eq!(expect_diagnostics(&source), [expected], "`{decorator}` `{member}`");
+        let result = expect_result(&source);
+        assert!(result.diagnostics.is_empty(), "`{member}`: {:?}", result.diagnostics);
+        let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains(r#"inputs:{value:[0,"\uD800","value"]}"#),
+            "`{decorator}` `{member}`\n{}",
+            result.code
+        );
     }
     // A truly dynamic alias still reads as no alias, like ngtsc.
     let diagnostics = expect_diagnostics(

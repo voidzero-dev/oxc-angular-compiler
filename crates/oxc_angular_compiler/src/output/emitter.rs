@@ -23,6 +23,7 @@ use super::ast::{
     ArrowFunctionBody, BinaryOperator, DeclareVarStmt, DynamicImportUrl, FnParam, LeadingComment,
     LiteralValue, OutputExpression, OutputStatement, UnaryOperator,
 };
+use crate::util::lone_surrogate::{Piece, has_lone_surrogate, pieces};
 use crate::util::{ParseSourceFile, ParseSourceSpan};
 
 // ============================================================================
@@ -663,14 +664,19 @@ impl JsEmitter {
             }
             OutputExpression::ReadProp(e) => {
                 self.visit_expression(&e.receiver, ctx);
-                if e.optional {
-                    ctx.print("?.");
-                } else {
-                    ctx.print(".");
-                }
                 // Map the property name to its source location
                 let prop_span = e.source_span.and_then(|span| ctx.span_to_source_span(span));
-                ctx.print_with_span(&e.name, prop_span);
+                // A name with a stored lone surrogate (`'q\uD800'`) can only be
+                // written as a key (ngtsc prints it raw, as U+FFFD).
+                if has_lone_surrogate(&e.name) {
+                    ctx.print(if e.optional { "?.[" } else { "[" });
+                    let key = escape_string(&e.name, self.escape_dollar_in_strings);
+                    ctx.print_with_span(&key, prop_span);
+                    ctx.print("]");
+                } else {
+                    ctx.print(if e.optional { "?." } else { "." });
+                    ctx.print_with_span(&e.name, prop_span);
+                }
             }
             OutputExpression::ReadKey(e) => {
                 self.visit_expression(&e.receiver, ctx);
@@ -1279,7 +1285,15 @@ fn is_nullish_coalesce(expr: &OutputExpression<'_>) -> bool {
 pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
     let mut result = String::with_capacity(input.len() + 2);
     result.push('"');
-    for c in input.chars() {
+    for piece in pieces(input) {
+        let c = match piece {
+            // A stored lone surrogate is printed as its `\uXXXX` escape.
+            Piece::Lone(unit) => {
+                push_unicode_escape(&mut result, u32::from(unit));
+                continue;
+            }
+            Piece::Char(c) => c,
+        };
         match c {
             '"' => result.push_str("\\\""),
             '\\' => result.push_str("\\\\"),

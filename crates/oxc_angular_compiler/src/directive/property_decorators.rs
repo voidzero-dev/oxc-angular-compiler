@@ -25,6 +25,7 @@ use crate::output::ast::OutputExpression;
 use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
 use crate::r3::CORE;
 use crate::util::is_metadata_property;
+use crate::util::lone_surrogate::{js_str_to_ident, js_str_to_str};
 
 // ============================================================================
 // Helper Functions
@@ -296,7 +297,9 @@ pub(crate) fn member_name(element: &ClassElement<'_>) -> Option<String> {
     }
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(str::to_string),
+        // A lone surrogate (`'\uD800'`) is stored as
+        // [`crate::util::lone_surrogate`] describes.
+        PropertyKey::StringLiteral(lit) => Some(js_str_to_str(lit.value).into_owned()),
         PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
         _ => None,
     }
@@ -357,6 +360,7 @@ pub(crate) fn initializer_api_access_error(
 /// no-substitution template literal — a resolved `const` doesn't count.
 /// `Ok(None)` when there is no such argument or no `alias`.
 pub(crate) fn literal_alias_error<'a>(
+    allocator: &'a Allocator,
     call: &'a CallExpression<'a>,
     options_index: usize,
 ) -> Result<Option<Ident<'a>>, (String, Span)> {
@@ -380,7 +384,7 @@ pub(crate) fn literal_alias_error<'a>(
         {
             continue;
         }
-        return match extract_string_value(&prop.value) {
+        return match extract_name_value(allocator, &prop.value) {
             Some(alias) => Ok(Some(alias)),
             None => Err((
                 "Alias needs to be a string that is statically analyzable.".to_string(),
@@ -389,36 +393,6 @@ pub(crate) fn literal_alias_error<'a>(
         };
     }
     Ok(None)
-}
-
-/// The predicate for a string selector with a lone surrogate (`'\uD800'`),
-/// which has no `&str`: the selector list the emitter builds from a string
-/// (split on commas, each part trimmed), each part with its exact UTF-16
-/// escapes.
-fn lone_surrogate_selectors<'a>(
-    allocator: &'a Allocator,
-    lit: &oxc_ast::ast::StringLiteral<'_>,
-) -> QueryPredicate<'a> {
-    use crate::output::ast::{LiteralArrayExpr, RawSourceExpr};
-
-    let units: std::vec::Vec<u16> = lit.value.encode_utf16().collect();
-    let is_space = |unit: &u16| char::from_u32(u32::from(*unit)).is_some_and(char::is_whitespace);
-    let mut entries = Vec::new_in(&allocator);
-    for part in units.split(|&unit| unit == u16::from(b',')) {
-        let start = part.iter().position(|unit| !is_space(unit)).unwrap_or(part.len());
-        let end = part.iter().rposition(|unit| !is_space(unit)).map_or(start, |i| i + 1);
-        if start < end {
-            let source = allocator.alloc_str(&super::quote_units(part[start..end].iter().copied()));
-            entries.push(OutputExpression::RawSource(oxc_allocator::Box::new_in(
-                RawSourceExpr { source: Ident::from(&*source), source_span: None },
-                &allocator,
-            )));
-        }
-    }
-    QueryPredicate::Type(OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
-        LiteralArrayExpr { entries, source_span: None },
-        &allocator,
-    )))
 }
 
 /// Get the property key name as an Atom.
@@ -440,6 +414,19 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
         Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first().and_then(|q| q.value.cooked?.as_str()).map(Ident::from)
+        }
+        _ => None,
+    }
+}
+
+/// [`extract_string_value`] for a name ngtsc reads like any string: a lone
+/// surrogate (`'\uD800'`) is stored as [`crate::util::lone_surrogate`]
+/// describes.
+fn extract_name_value<'a>(allocator: &'a Allocator, expr: &Expression<'a>) -> Option<Ident<'a>> {
+    match expr {
+        Expression::StringLiteral(lit) => Some(js_str_to_ident(lit.value, allocator)),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().and_then(|q| q.value.cooked).map(|c| js_str_to_ident(c, allocator))
         }
         _ => None,
     }
@@ -604,7 +591,7 @@ fn parse_literal_input_config<'a>(
 
                     match key_name.as_str() {
                         "alias" => {
-                            config.alias = extract_string_value(&prop.value);
+                            config.alias = extract_name_value(allocator, &prop.value);
                         }
                         "required" => {
                             config.required = extract_boolean_value(&prop.value).unwrap_or(false);
@@ -663,7 +650,7 @@ pub(crate) fn try_parse_signal_model<'a>(
 
     // model(initialValue, options?) / model.required(options?)
     let options_arg_index = if is_required { 0 } else { 1 };
-    let alias = options_alias(call_expr.arguments.get(options_arg_index));
+    let alias = options_alias(allocator, call_expr.arguments.get(options_arg_index));
 
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
     // Output binding name is always `bindingPropertyName + "Change"`
@@ -683,7 +670,10 @@ pub(crate) fn try_parse_signal_model<'a>(
 }
 
 /// The string `alias` of an initializer API's options object literal.
-fn options_alias<'a>(options: Option<&Argument<'a>>) -> Option<Ident<'a>> {
+fn options_alias<'a>(
+    allocator: &'a Allocator,
+    options: Option<&Argument<'a>>,
+) -> Option<Ident<'a>> {
     let Some(Argument::ObjectExpression(obj)) = options else { return None };
     let mut alias = None;
     for prop in &obj.properties {
@@ -694,7 +684,7 @@ fn options_alias<'a>(options: Option<&Argument<'a>>) -> Option<Ident<'a>> {
             && !prop.computed
             && get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
         {
-            alias = extract_string_value(&prop.value);
+            alias = extract_name_value(allocator, &prop.value);
         }
     }
     alias
@@ -715,6 +705,7 @@ fn options_alias<'a>(options: Option<&Argument<'a>>) -> Option<Ident<'a>> {
 ///
 /// Based on Angular's `output_function.ts` in the compiler-cli.
 pub(crate) fn try_parse_signal_output<'a>(
+    allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
     consts: Option<&super::StringConsts<'_>>,
@@ -732,7 +723,7 @@ pub(crate) fn try_parse_signal_output<'a>(
 
     // output() → options at index 0; outputFromObservable(obs, options?) → options at index 1
     let options_idx = if api == OUTPUT_FROM_OBSERVABLE_API { 1 } else { 0 };
-    let alias = options_alias(call_expr.arguments.get(options_idx));
+    let alias = options_alias(allocator, call_expr.arguments.get(options_idx));
 
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
     Some((property_name, binding_property_name))
@@ -768,6 +759,7 @@ pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(expr: &'b Expression<'a>) -> &
 ///
 /// Based on Angular's `input_function.ts` in the compiler-cli.
 pub(crate) fn try_parse_signal_input<'a>(
+    allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
     consts: Option<&super::StringConsts<'_>>,
@@ -777,7 +769,7 @@ pub(crate) fn try_parse_signal_input<'a>(
 
     // input(initialValue, options?) / input.required(options?)
     let options_arg_index = if is_required { 0 } else { 1 };
-    let alias = options_alias(call_expr.arguments.get(options_arg_index));
+    let alias = options_alias(allocator, call_expr.arguments.get(options_arg_index));
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
 
     Some(R3InputMetadata {
@@ -862,7 +854,7 @@ pub fn extract_input_metadata_in<'a>(
                         }
                         // Then check for input()
                         else if let Some(signal_input) =
-                            try_parse_signal_input(value, property_name, consts)
+                            try_parse_signal_input(allocator, value, property_name, consts)
                         {
                             inputs.push(signal_input);
                         }
@@ -1031,7 +1023,7 @@ pub fn extract_output_metadata_in<'a>(
                     if let Some(property_name) = member_name_ident(allocator, element) {
                         // Check for output() signal first
                         if let Some(output_mapping) =
-                            try_parse_signal_output(value, property_name.clone(), consts)
+                            try_parse_signal_output(allocator, value, property_name.clone(), consts)
                         {
                             outputs.push(output_mapping);
                         }
@@ -1193,18 +1185,11 @@ fn parse_query_config<'a>(
     config.is_forward_ref = unwrapped.is_some();
     let node = unwrapped.unwrap_or(first_arg);
     config.predicate = match node {
-        Expression::StringLiteral(lit) => match lit.value.as_str() {
-            Some(selector) => {
-                let mut list = Vec::new_in(&allocator);
-                list.push(Ident::from(selector));
-                Some(QueryPredicate::Selectors(list))
-            }
-            None => {
-                // Like a selector, a string isn't wrapped in `forwardRef`.
-                config.is_forward_ref = false;
-                Some(lone_surrogate_selectors(allocator, lit))
-            }
-        },
+        Expression::StringLiteral(lit) => {
+            let mut list = Vec::new_in(&allocator);
+            list.push(js_str_to_ident(lit.value, allocator));
+            Some(QueryPredicate::Selectors(list))
+        }
         _ => convert_oxc_expression(allocator, node, source_text)
             .or_else(|| make_raw_source(allocator, source_text, node.span()))
             .map(QueryPredicate::Type),
@@ -1318,14 +1303,11 @@ fn try_parse_signal_query<'a>(
     let mut is_forward_ref = false;
     let predicate = match predicate_arg {
         // String selector: viewChild('myRef')
-        Argument::StringLiteral(lit) => match lit.value.as_str() {
-            Some(selector) => {
-                let mut selectors = oxc_allocator::Vec::new_in(&allocator);
-                selectors.push(Ident::from(selector));
-                QueryPredicate::Selectors(selectors)
-            }
-            None => lone_surrogate_selectors(allocator, lit),
-        },
+        Argument::StringLiteral(lit) => {
+            let mut selectors = oxc_allocator::Vec::new_in(&allocator);
+            selectors.push(js_str_to_ident(lit.value, allocator));
+            QueryPredicate::Selectors(selectors)
+        }
         // Type predicate: viewChild(TemplateRef) or viewChild(forwardRef(() => MyClass))
         _ => {
             // ngtsc emits a non-string locator as written (`WrappedNodeExpr`);
@@ -2452,7 +2434,7 @@ fn decorator_query<'a>(
         return Err((format!("@{name} must have arguments"), span));
     };
     let unwrapped = try_unwrap_forward_ref(first, Some(consts));
-    let mut is_forward_ref = unwrapped.is_some();
+    let is_forward_ref = unwrapped.is_some();
     let node = unwrapped.unwrap_or(first);
     let at_node = |message: String| (message, node.span());
     let predicate = match evaluator.evaluate(node) {
@@ -2460,21 +2442,12 @@ fn decorator_query<'a>(
         // evaluated is wrapped in a `WrappedNodeExpr` and emitted as written,
         // so the source text is the fallback for nodes the output AST can't
         // represent (`class Foo {}`, an import, ...).
-        Value::Reference { .. } | Value::Dynamic | Value::Function(_) => match node {
-            // A string with a lone surrogate (`'\uD800'`) has no `&str`, so
-            // the evaluator can't read it, but it is still a selector. Like
-            // one, it isn't wrapped in `forwardRef`.
-            Expression::StringLiteral(lit) if lit.value.has_lone_surrogate() => {
-                is_forward_ref = false;
-                lone_surrogate_selectors(allocator, lit)
-            }
-            _ => {
-                let expr = convert_oxc_expression(allocator, node, source_text)
-                    .or_else(|| make_raw_source(allocator, source_text, node.span()))
-                    .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
-                QueryPredicate::Type(expr)
-            }
-        },
+        Value::Reference { .. } | Value::Dynamic | Value::Function(_) => {
+            let expr = convert_oxc_expression(allocator, node, source_text)
+                .or_else(|| make_raw_source(allocator, source_text, node.span()))
+                .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
+            QueryPredicate::Type(expr)
+        }
         Value::String(s) => {
             let mut selectors = Vec::new_in(&allocator);
             selectors.push(Ident::from(allocator.alloc_str(&s)));

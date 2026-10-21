@@ -25,6 +25,7 @@ use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
 use crate::r3::CORE;
 use crate::util::is_metadata_property;
+use crate::util::lone_surrogate::has_lone_surrogate;
 
 /// Find the @Directive decorator in a list of decorators. With the file's
 /// `consts`, only Angular's (imported from `@angular/core`, see
@@ -776,14 +777,6 @@ fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) ->
     value_error(&format!("@Directive.{field}"), message, value)
 }
 
-/// Whether an object property's value is dynamic because it reads a string
-/// with a lone surrogate (`'\uD800'`), as opposed to being absent or truly
-/// dynamic.
-fn reads_lone_surrogate<'a>(prop: &super::evaluator::Prop<'a>, consts: &StringConsts<'a>) -> bool {
-    prop.value.is_dynamic()
-        && prop.expr.is_some_and(|expr| Evaluator::reads_lone_surrogate(consts, expr))
-}
-
 /// oxc's error for a transform written inside a function that the metadata
 /// calls, using that function's parameters (`transform: (v) => v + name`), so
 /// it would mean something else, or nothing, where the metadata is compiled.
@@ -1007,13 +1000,6 @@ fn parse_input_object<'a>(
             return Some((io_error("inputs", String::new, value), span));
         }
     }
-    // Nor an alias with a lone surrogate (`'\uD800'`), which evaluates as
-    // dynamic: an unreadable string item gets this error too.
-    if item.prop("alias").is_some_and(|alias| reads_lone_surrogate(alias, consts)) {
-        let message =
-            || "@Directive.inputs array can only contain strings or object literals".into();
-        return Some((io_error("inputs", message, &Value::Dynamic), span));
-    }
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
     let (transform_function, error) = match item.prop("transform") {
@@ -1212,7 +1198,7 @@ pub fn decorator_io_errors<'a>(
                 if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
                     return Some(at(error));
                 }
-                match literal_alias_error(call, usize::from(!is_required)) {
+                match literal_alias_error(allocator, call, usize::from(!is_required)) {
                     Ok(alias) => signal_alias = alias,
                     Err(error) => return Some(at(error)),
                 }
@@ -1225,7 +1211,7 @@ pub fn decorator_io_errors<'a>(
                 if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
                     return Some(at(error));
                 }
-                match literal_alias_error(call, usize::from(!is_required)) {
+                match literal_alias_error(allocator, call, usize::from(!is_required)) {
                     Ok(alias) => model_alias = alias,
                     Err(error) => return Some(at(error)),
                 }
@@ -1363,7 +1349,7 @@ pub fn decorator_io_errors<'a>(
                     return Some(at(error));
                 }
                 let options_index = usize::from(api == OUTPUT_FROM_OBSERVABLE_API);
-                match literal_alias_error(call, options_index) {
+                match literal_alias_error(allocator, call, options_index) {
                     Ok(alias) => output_alias = alias,
                     Err(error) => return Some(at(error)),
                 }
@@ -1380,7 +1366,7 @@ pub fn decorator_io_errors<'a>(
                 if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
                     return Some(at(error));
                 }
-                match literal_alias_error(call, usize::from(!is_required)) {
+                match literal_alias_error(allocator, call, usize::from(!is_required)) {
                     Ok(alias) => model_alias = alias,
                     Err(error) => return Some(at(error)),
                 }
@@ -1526,11 +1512,18 @@ fn directive_selector_error<'a>(
 ) -> Option<(String, Span, Option<Span>)> {
     let expr = config.and_then(|config| config_property(config, "selector", consts))?;
     let resolved = evaluator.evaluate(expr);
-    let Value::String(selector) = &resolved else {
+    // oxc's selector parser can't read a lone surrogate (`'[a\uD800]'`), so
+    // such a selector stays an unreadable value rather than matching nothing.
+    let readable = match &resolved {
+        Value::String(selector) if !has_lone_surrogate(selector) => Some(selector),
+        _ => None,
+    };
+    let Some(selector) = readable else {
+        let value = if matches!(resolved, Value::String(_)) { &Value::Dynamic } else { &resolved };
         let message = value_error(
             &format!("@{decorator_name}.selector"),
             || "selector must be a string".to_string(),
-            &resolved,
+            value,
         );
         return Some((message, expr.span(), None));
     };
@@ -1721,16 +1714,6 @@ fn input_decorator_error<'a>(
         let message = format!(
             "{subject} decorator argument must resolve to a string or an object literal{}",
             options.wrong_type_suffix()
-        );
-        return Some((message, decorator.span));
-    }
-    // An `alias` with a lone surrogate (`'\uD800'`) evaluates as dynamic,
-    // which would read as no alias: report it like `@Input('\uD800')` rather
-    // than compile the class property name.
-    if options.prop("alias").is_some_and(|alias| reads_lone_surrogate(alias, consts)) {
-        let message = format!(
-            "{subject} decorator argument must resolve to a string or an object literal{}",
-            Value::Dynamic.wrong_type_suffix()
         );
         return Some((message, decorator.span));
     }

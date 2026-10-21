@@ -2085,7 +2085,7 @@ fn line_break_width(text: &str) -> usize {
 /// escapes for control characters and everything outside ASCII (as UTF-16
 /// code units).
 pub(crate) fn quote(s: &str) -> String {
-    quote_units(s.encode_utf16())
+    quote_units(crate::util::lone_surrogate::encode_utf16(s))
 }
 
 /// [`quote`] for a string literal from the source, whose value can hold lone

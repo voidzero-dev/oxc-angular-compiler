@@ -25,6 +25,7 @@ use crate::output::ast::{
 use crate::output::oxc_converter::{
     convert_oxc_expression, convert_plain_properties, is_plain_property, make_raw_source,
 };
+use crate::util::lone_surrogate::js_str_to_ident;
 
 /// Build the decorators metadata array expression.
 ///
@@ -593,7 +594,7 @@ pub fn build_prop_decorators_metadata_in<'a>(
             continue;
         }
 
-        let Some((prop_name, quoted)) = member_key_name(key) else {
+        let Some((prop_name, quoted)) = member_key_name(allocator, key) else {
             continue;
         };
 
@@ -679,7 +680,7 @@ fn build_initializer_api_prop_decorators<'a>(
 ) -> Option<OutputExpression<'a>> {
     let mut decorators = AllocVec::new_in(&allocator);
 
-    if let Some(input) = try_parse_signal_input(value, property_name.clone(), consts) {
+    if let Some(input) = try_parse_signal_input(allocator, value, property_name.clone(), consts) {
         // input() / input.required() → `Input({ isSignal, alias, required })`
         decorators.push(build_signal_input_decorator(allocator, namespace_registry, &input));
     } else if let Some(model) =
@@ -693,7 +694,8 @@ fn build_initializer_api_prop_decorators<'a>(
             "Output",
             model.output.1.clone(),
         ));
-    } else if let Some((_, binding)) = try_parse_signal_output(value, property_name.clone(), consts)
+    } else if let Some((_, binding)) =
+        try_parse_signal_output(allocator, value, property_name.clone(), consts)
     {
         // output() / outputFromObservable() → `Output("<binding>")`
         decorators.push(build_core_decorator_with_string_arg(
@@ -1403,10 +1405,13 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
 /// string-literal key (`'x-y'`, `'x'`) is always quoted in the emitted object
 /// literal; a bare identifier is not. A no-substitution template literal
 /// counts too; private (`#x`), computed and numeric keys have no usable name
-/// and return `None`, as does a string key holding a lone surrogate (it has
-/// no `&str` form, so the member is left out).
-fn member_key_name<'a>(key: &PropertyKey<'a>) -> Option<(Ident<'a>, bool)> {
-    let quoted = |value: oxc_str::JSStr<'a>| value.as_str().map(|name| (Ident::from(name), true));
+/// and return `None`. A lone surrogate (`'\uD800'`) is stored as
+/// [`crate::util::lone_surrogate`] describes.
+fn member_key_name<'a>(
+    allocator: &'a Allocator,
+    key: &PropertyKey<'a>,
+) -> Option<(Ident<'a>, bool)> {
+    let quoted = |value: oxc_str::JSStr<'a>| Some((js_str_to_ident(value, allocator), true));
     match key {
         PropertyKey::StaticIdentifier(id) => Some((id.name.into(), false)),
         PropertyKey::StringLiteral(lit) => quoted(lit.value),
