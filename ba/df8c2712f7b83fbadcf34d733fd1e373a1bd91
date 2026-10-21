@@ -1,0 +1,39 @@
+crates/oxc_angular_compiler/src/injectable/decorator.rs
+  s_1744ea5aef3057::t_43bbf609e3ed69 543-545,573,580-585,895,905-920
+crates/oxc_angular_compiler/src/injectable/definition.rs
+  s_9c88456569a213::t_8013798f8a84eb 435-436,443-456,462-465,467-481,483-491,493
+crates/oxc_angular_compiler/src/ng_module/decorator.rs
+  s_9c88456569a213::t_471f22fdc34b02 428-430,450,457-462
+crates/oxc_angular_compiler/src/pipe/decorator.rs
+  s_9c88456569a213::t_129cd7d4a9fc11 262-264,272,279-284,632-655
+napi/angular-compiler/e2e/compare/fixtures/pipe-compilation/basic.fixture.ts
+  s_9c88456569a213::t_f035f26c083435 92-111
+napi/angular-compiler/e2e/compare/fixtures/providers/basic.fixture.ts
+  s_9c88456569a213::t_0cceb16802b5cc 544-564
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_9c88456569a213::t_9c4215b9d2b208 54-57,140-141,144-145,148-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "badf8c2712f7b83fbadcf34d733fd1e373a1bd91",
+  "prompts": {},
+  "sessions": {
+    "s_1744ea5aef3057": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0e95dc494d96c134",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_9c88456569a213": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8b685fdcf654048e",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
