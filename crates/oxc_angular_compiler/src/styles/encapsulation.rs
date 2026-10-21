@@ -1515,6 +1515,15 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str, css_nesting: 
         }
     }
 
+    // An unterminated unscoped at-rule keeps its body as written (like ngtsc)
+    if in_unscoped_at_rule {
+        if strip_unscoped_body {
+            result.push_str(&strip_scoping_selectors(&unscoped_content));
+        } else {
+            result.push_str(&unscoped_content);
+        }
+    }
+
     // Handle any remaining content
     if !current_selector.trim().is_empty() {
         result.push_str(&current_selector);
@@ -3078,5 +3087,15 @@ mod tests {
             "Should handle combinators with multibyte UTF-8 selectors. Got: {}",
             result
         );
+    }
+
+    #[test]
+    fn test_unterminated_unscoped_at_rule_keeps_body() {
+        let result = shim_css_text("@keyframes k{from{a:b}to{a:c}", "c1", "");
+        assert!(result.contains("from{a:b}to{a:c}"), "Got: {}", result);
+        let result = shim_css_text("@property --x{syntax:\"*\"", "c1", "");
+        assert!(result.contains("syntax:\"*\""), "Got: {}", result);
+        let result = shim_css_text("@font-face{font-family:x;src:url(a.woff)", "c1", "");
+        assert!(result.contains("font-family:x"), "Got: {}", result);
     }
 }
