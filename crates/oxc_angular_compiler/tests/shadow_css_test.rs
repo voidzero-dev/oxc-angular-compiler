@@ -1740,3 +1740,31 @@ fn test_newline_combinator_scopes_both_sides() {
         "[_nghost-%COMP%]:hover   .child[_ngcontent-%COMP%] {}"
     );
 }
+
+#[test]
+fn test_newline_does_not_split_host_markers_angular_scopes_together() {
+    // A later `:host` is folded into the first `:host(...)` match as a bare
+    // marker, which Angular only turns into the host attribute while it is in
+    // the same part. A marker inside `:where()` alone would get the content
+    // attribute in front. So the newline split is skipped there, matching
+    // @angular/compiler 22.2.2 exactly.
+    assert_eq!(ng_shim(":host(.h)\n:host {}"), ".h[_nghost-%COMP%]\n[_nghost-%COMP%] {}");
+    assert_eq!(
+        ng_shim(":host(.a)\n:not(:host) {}"),
+        ".a[_nghost-%COMP%]\n:not([_nghost-%COMP%]) {}"
+    );
+    assert_eq!(
+        ng_shim(":host(.h)\n:where(:host) {}"),
+        ".h[_nghost-%COMP%]\n:where([_nghost-%COMP%]) {}"
+    );
+    assert_eq!(
+        ng_shim(".x, :where(:host)\t:host-context(.k) {}"),
+        ".x[_ngcontent-%COMP%], :where([_nghost-%COMP%])\t.k[_nghost-%COMP%], .k   [_nghost-%COMP%] {}"
+    );
+    // Other parts of the same selector still split on a newline, as if it
+    // were a space (`.p .q :host(.h)` leaves `.p` and `.q` unscoped too).
+    assert_eq!(
+        ng_shim(".p\n.q :host(.h)\n:host {}"),
+        ".p   .q   .h[_nghost-%COMP%]\n[_nghost-%COMP%] {}"
+    );
+}

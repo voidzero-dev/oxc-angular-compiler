@@ -1621,25 +1621,44 @@ impl<'a> SelectorScoper<'a> {
         // `:host:hover\n.child` leaves `.child` unscoped and `.foo\n.bar` keeps
         // `.foo` unscoped. Whitespace that starts the selector (`.a,\n.b`) is
         // not a combinator, so it is kept exactly as Angular keeps it.
+        // The extra split is skipped inside a part Angular would scope as one
+        // when that part has host markers that only work together (see
+        // `can_split_on_other_whitespace`); such a part is left as Angular has it.
         let leading = selector.len() - selector.trim_start_matches(is_js_space).len();
         let mut start = 0;
         let mut from = 0;
+        // Start of the part Angular's own split is in, and whether the Oxc-only
+        // split is allowed in it (worked out on the first newline or tab).
+        let mut angular_part_start = 0;
+        let mut other_whitespace_split: Option<bool> = None;
         while let Some((at, separator, end)) = find_combinator_separator(selector, from, leading) {
             from = end;
-            let part = &selector[start..at];
-            // A space between a hex escape and a following hex digit (`.\fc ber`
-            // for `.über`) terminates the escape; it is not a combinator.
-            if has_escape_placeholder(part)
-                && selector.as_bytes().get(at + 1).is_some_and(u8::is_ascii_hexdigit)
+            let is_other_whitespace =
+                matches!(selector.as_bytes()[at], b'\n' | b'\t' | b'\r' | b'\x0C');
+            if is_other_whitespace
+                && !*other_whitespace_split.get_or_insert_with(|| {
+                    let angular_part_end = find_angular_part_end(selector, angular_part_start, at);
+                    can_split_on_other_whitespace(&selector[angular_part_start..angular_part_end])
+                })
             {
                 continue;
             }
+            // A space between a hex escape and a following hex digit (`.\fc ber`
+            // for `.über`) terminates the escape; it is not a combinator.
+            if is_escaped_hex_space(selector, start, at) {
+                continue;
+            }
+            let part = &selector[start..at];
             let scoped_part = self.scope_pseudo_function_aware_part(part);
             scoped.push_str(&scoped_part);
             scoped.push(' ');
             scoped.push(separator);
             scoped.push(' ');
             start = end;
+            if !is_other_whitespace {
+                angular_part_start = end;
+                other_whitespace_split = None;
+            }
         }
         let scoped_part = self.scope_pseudo_function_aware_part(&selector[start..]);
         scoped.push_str(&scoped_part);
@@ -1856,6 +1875,52 @@ fn find_combinator_separator(
         let end = selector.len() - rest.trim_start_matches(is_js_space).len();
         Some((at, char::from(separator), end))
     })
+}
+
+/// Whether the separator at byte `at` is a space ending a hex escape in the part
+/// that starts at byte `start` (`.\fc ber` for `.über`), so not a combinator.
+fn is_escaped_hex_space(selector: &str, start: usize, at: usize) -> bool {
+    has_escape_placeholder(&selector[start..at])
+        && selector.as_bytes().get(at + 1).is_some_and(u8::is_ascii_hexdigit)
+}
+
+/// End of the part Angular's own split (`/( |>|\+|~(?!=))…\s*/`, no newline or
+/// tab) would produce for the part starting at byte `start`, given that byte
+/// `at` is inside it.
+fn find_angular_part_end(selector: &str, start: usize, at: usize) -> usize {
+    let mut from = at;
+    while let Some((end_at, _, end)) = find_combinator_separator(selector, from, usize::MAX) {
+        if !is_escaped_hex_space(selector, start, end_at) {
+            return end_at;
+        }
+        from = end;
+    }
+    selector.len()
+}
+
+/// Whether the Oxc-only newline/tab split may cut `part`, a part Angular scopes
+/// as one.
+///
+/// Angular only turns a bare `-shadowcsshost` (the rest of a selector after a
+/// first `:host(...)`, as in `:host(.a)\n:not(:host)`) into the host attribute
+/// while it sits in a part with a `-shadowcsshost-no-combinator` marker. And a
+/// part whose only host marker is inside a pseudo-function (`:where(:host)`)
+/// gets the content attribute in front. Cutting such a part would leak the
+/// marker or scope the host as content, so it is kept whole.
+fn can_split_on_other_whitespace(part: &str) -> bool {
+    let mut from = 0;
+    while let Some(at) = find_ignore_ascii_case(part, from, POLYFILL_HOST) {
+        from = at + POLYFILL_HOST.len();
+        if !starts_with_ignore_ascii_case(part, at, POLYFILL_HOST_NO_COMBINATOR) {
+            return false;
+        }
+        // `_polyfillHostNoCombinatorOutsidePseudoFunction`: `(?![^(]*\))`.
+        let after = &part[at + POLYFILL_HOST_NO_COMBINATOR.len()..];
+        if after.bytes().find(|&b| b == b'(' || b == b')') == Some(b')') {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether `s` contains a `SafeSelector` escape placeholder (`/__esc-ph-(\d+)__/`).
