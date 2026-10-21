@@ -4850,8 +4850,8 @@ fn compile_component_partial<'a>(
         ng_content_selectors: Vec::new(),
         has_defer_block,
         implicitly_deferred_imports: Vec::new(),
-        // Partial mode never parses the template; the linker collects link
-        // URLs at consumer build time.
+        // Partial mode only parses the template to report its errors; the
+        // linker collects link URLs at consumer build time.
         template_style_urls: Vec::new(),
         missing_link_urls: Vec::new(),
     }
@@ -4959,24 +4959,6 @@ fn compile_component_full<'a>(
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
 
-    // Partial-mode early branch: skip the entire template pipeline.
-    // Partial declarations carry the template as a verbatim string and
-    // let the linker re-parse at consumer build time. Known gap: this also
-    // means template parse errors (incl. `IncompleteBlockOpen`) go unreported
-    // for library builds — upstream ngtsc still parses the template in
-    // declaration mode and surfaces those diagnostics.
-    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
-        return Ok(compile_component_partial(
-            allocator,
-            namespace_registry.angular_core_ns().as_str(),
-            template,
-            metadata,
-            &view_queries,
-            &content_queries,
-            pool_starting_index,
-        ));
-    }
-
     let mut diagnostics = Vec::new();
 
     // Stage 1: Parse HTML
@@ -5029,6 +5011,22 @@ fn compile_component_full<'a>(
             diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
         }
         return Err(diagnostics);
+    }
+
+    // Partial mode stops here. Its declaration carries the template as a
+    // verbatim string for the linker to compile at consumer build time, but
+    // ngtsc still parses it first: its template errors are reported and
+    // `compilePartial` emits nothing for the class (handler.ts).
+    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
+        return Ok(compile_component_partial(
+            allocator,
+            namespace_registry.angular_core_ns().as_str(),
+            template,
+            metadata,
+            &view_queries,
+            &content_queries,
+            pool_starting_index,
+        ));
     }
 
     // Capture ng-content selectors from the R3 AST for .d.ts generation
