@@ -134,7 +134,8 @@ async function transform(plugin: Plugin, source: string, path: string) {
       addWatchFile() {},
     } as any,
     source,
-    path,
+    // Vite hands the plugin forward-slash module ids, also on Windows.
+    normalizePath(path),
   )) as { code: string } | undefined
   return { code: result?.code ?? '', errors, warnings }
 }
@@ -153,7 +154,9 @@ function hotUpdate(plugin: Plugin, file: string, server: any) {
 async function requestUpdateModule(server: any, componentId: string): Promise<string> {
   const middleware = (server.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
   expect(middleware, 'expected the @ng/component middleware').toBeDefined()
-  const req = { url: `/@ng/component?c=${encodeURIComponent(componentId)}&t=${Date.now()}` }
+  const req = {
+    url: `/@ng/component?c=${encodeURIComponent(normalizePath(componentId))}&t=${Date.now()}`,
+  }
   return new Promise<string>((resolve) => {
     middleware(
       req,
