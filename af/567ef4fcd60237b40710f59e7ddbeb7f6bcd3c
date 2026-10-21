@@ -1,0 +1,51 @@
+crates/oxc_angular_compiler/src/pipeline/ingest.rs
+  s_e83d09f3aacd9d::t_88fe99e05129fd 1291-1300,1420,1431-1436,1453,1515,1547,1555-1557,1577,1599,2105-2113,2124-2132,2416-2422,2432
+crates/oxc_angular_compiler/src/pipeline/phases/const_collection.rs
+  s_91a9eec7496df1::t_2160f79a5202fd 21-24,28,35,42-45,75-78,103-107,109-110,174,191,235,252,282-295,307,314-319,326,338-386,431-433,553-555,716,734-736,994
+crates/oxc_angular_compiler/src/pipeline/phases/mod.rs
+  s_3fc362be4abda1::t_70087eac36e306 67,504-510
+crates/oxc_angular_compiler/src/pipeline/phases/resolve_i18n_attr_sanitizers.rs
+  s_91a9eec7496df1::t_77f1540b9cbb52 1-131
+crates/oxc_angular_compiler/src/pipeline/phases/resolve_sanitizers.rs
+  s_e83d09f3aacd9d::t_7db8cb484ffa95 189-192
+crates/oxc_angular_compiler/src/schema/dom_security_schema.rs
+  s_e83d09f3aacd9d::t_680ea5f00d7012 182-192
+crates/oxc_angular_compiler/src/schema/mod.rs
+  s_e83d09f3aacd9d::t_a70971c8530bc5 13-14
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_e83d09f3aacd9d::t_1cc8090f9915a7 17854-18002
+napi/angular-compiler/e2e/compare/fixtures/regressions/security-sensitive-constants.fixture.ts
+  s_e83d09f3aacd9d::t_b7c20a156ddc44 1-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "af567ef4fcd60237b40710f59e7ddbeb7f6bcd3c",
+  "prompts": {},
+  "sessions": {
+    "s_3fc362be4abda1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a237fd75f168825f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_91a9eec7496df1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7db0fd5a3cbcecb9",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_e83d09f3aacd9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab20be3c84c4262f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
