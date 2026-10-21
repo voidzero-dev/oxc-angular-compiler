@@ -268,6 +268,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       typeof options.sourceMap === 'boolean'
         ? options.sourceMap
         : (options.sourceMap?.scripts ?? true),
+    // Like Angular CLI's `normalizeSourceMaps`, vendor maps are off unless the
+    // object form turns them on; `sourceMap: true` only covers scripts.
+    vendorSourceMap: typeof options.sourceMap === 'object' && (options.sourceMap.vendor ?? false),
     zoneless: options.zoneless ?? false,
     fileReplacements,
     angularVersion: options.angularVersion,
@@ -1605,7 +1608,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   return [
     angularPlugin(),
     dtsPlugin(),
-    angularLinkerPlugin({ angularVersion: pluginOptions.angularVersion }),
+    angularLinkerPlugin({
+      angularVersion: pluginOptions.angularVersion,
+      // The linker only sees node_modules files, so it follows the vendor setting
+      // (Angular CLI only maps third-party code when both scripts and vendor are on).
+      sourcemap: pluginOptions.sourceMap && pluginOptions.vendorSourceMap,
+    }),
     pluginOptions.jit &&
       jitPlugin({
         inlineStylesExtension: pluginOptions.inlineStylesExtension,

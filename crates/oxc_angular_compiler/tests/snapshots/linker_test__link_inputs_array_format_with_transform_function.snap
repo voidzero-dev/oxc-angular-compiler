@@ -4,4 +4,4 @@ expression: result.code
 ---
 import * as i0 from "@angular/core";
 export class MyDir {}
-MyDir.ɵdir = i0.ɵɵdefineDirective({ type: MyDir, selectors: [["", "myDir", ""]], inputs: { push: [2, "cdkConnectedOverlayPush", "push", i0.booleanAttribute] }, standalone: false });
+MyDir.ɵdir = /*@__PURE__*/ i0.ɵɵdefineDirective({ type: MyDir, selectors: [["", "myDir", ""]], inputs: { push: [2, "cdkConnectedOverlayPush", "push", i0.booleanAttribute] }, standalone: false });

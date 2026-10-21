@@ -288,7 +288,7 @@ Shape.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0
 
 fn link_for_version(code: &str, version: Option<AngularVersion>) -> String {
     let allocator = Allocator::default();
-    let options = LinkOptions { angular_version: version };
+    let options = LinkOptions { angular_version: version, ..LinkOptions::default() };
     let result = link_with_options(&allocator, code, "test.mjs", &options);
     assert!(result.linked);
     result.code
@@ -405,6 +405,149 @@ MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "17.0.0
     assert!(
         result.code.contains(r#"hostAttrs: ['\uD800', "v", "title", '\uDBFF']"#),
         "hostAttrs not kept as written:\n{}",
+        result.code
+    );
+}
+
+/// Every `ɵɵdefine*` call carries `/*@__PURE__*/`, like the output of Angular's
+/// babel linker (`@angular/compiler-cli/linker/babel` 22.2.3) on these declarations.
+/// Factories (function expressions) and `ɵsetClassMetadata` get no annotation.
+#[test]
+fn test_link_define_calls_are_pure() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class Svc {
+  static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: Svc, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
+  static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: Svc, providedIn: "root" });
+}
+class Auto {
+  static ɵprov = i0.ɵɵngDeclareService({ minVersion: "21.0.0", version: "21.0.0", ngImport: i0, type: Auto });
+}
+class Mod {
+  static ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: Mod, id: "foo" });
+  static ɵinj = i0.ɵɵngDeclareInjector({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: Mod });
+}
+class P {
+  static ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: P, isStandalone: true, name: "p" });
+}
+class D {
+  static ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", type: D, isStandalone: true, selector: "[d]", ngImport: i0 });
+}
+class C {
+  static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0", type: C, isStandalone: true, selector: "c", ngImport: i0, template: "<b>{{x}}</b>" });
+}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: C, decorators: [{ type: i0.Component, args: [{ selector: "c" }] }] });
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    for define in [
+        "defineInjectable",
+        "defineService",
+        "defineNgModule",
+        "defineInjector",
+        "definePipe",
+        "defineDirective",
+        "defineComponent",
+    ] {
+        let pure = format!("/*@__PURE__*/ i0.ɵɵ{define}(");
+        assert!(result.code.contains(&pure), "missing `{pure}`:\n{}", result.code);
+        assert_eq!(
+            result.code.matches(&format!("ɵɵ{define}(")).count(),
+            1,
+            "unexpected `{define}` calls:\n{}",
+            result.code
+        );
+    }
+    // `registerNgModuleType` is a side effect: only the define call inside the IIFE is pure.
+    assert!(
+        result.code.contains(
+            r#"(() => { i0.ɵɵregisterNgModuleType(Mod, "foo"); return /*@__PURE__*/ i0.ɵɵdefineNgModule("#
+        ),
+        "{}",
+        result.code
+    );
+    assert!(result.code.contains("static ɵfac = function Svc_Factory("), "{}", result.code);
+    assert!(result.code.contains("ngDevMode) && i0.ɵsetClassMetadata(C,"), "{}", result.code);
+}
+
+/// When the linker wraps a define call in an IIFE to declare template or host
+/// binding functions and pooled constants, the IIFE itself is annotated. Angular's
+/// linker hoists those declarations and leaves `/* @__PURE__ */ i0.ɵɵdefine*(...)`
+/// as the static field value, so an unannotated IIFE would keep unused classes alive.
+#[test]
+fn test_link_declaration_iife_is_pure() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class C {
+  static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0", type: C, isStandalone: true, selector: "c", ngImport: i0, template: "<b>{{x}}</b><ng-template><i>{{y}}</i></ng-template>" });
+}
+class D {
+  static ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", type: D, isStandalone: true, selector: "[d]", ngImport: i0, host: { properties: { "style": "{ width: w }" } } });
+}
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.code.contains("static ɵcmp = /*@__PURE__*/ (() => {"), "{}", result.code);
+    assert!(result.code.contains("static ɵdir = /*@__PURE__*/ (() => {"), "{}", result.code);
+    assert!(result.code.contains("return /*@__PURE__*/ i0.ɵɵdefineComponent("), "{}", result.code);
+    assert!(result.code.contains("return /*@__PURE__*/ i0.ɵɵdefineDirective("), "{}", result.code);
+}
+
+/// `styleAttribute` is parsed like Angular's `parse_extracted_styles` phase: `;` and `:`
+/// inside quotes or parentheses do not split, and property names are hyphenated. The
+/// expected `hostAttrs` are Angular 22.2.3's babel linker output for the same declaration.
+#[test]
+fn test_link_host_style_attribute_respects_quotes_and_parens() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class D {
+  static ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", type: D, isStandalone: true, selector: "[d]", host: { styleAttribute: "background: url('a;b'); font-family: \"Foo;Bar\", serif; backgroundColor: blue" }, ngImport: i0 });
+}
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(
+        result.code.contains(
+            r#"hostAttrs: [2, "background", "url('a;b')", "font-family", "\"Foo;Bar\", serif", "background-color", "blue"]"#
+        ),
+        "{}",
+        result.code
+    );
+}
+
+/// Zero-based line of the first line starting with `prefix`.
+fn line_starting_with(text: &str, prefix: &str) -> u32 {
+    text.lines().position(|line| line.starts_with(prefix)).unwrap() as u32
+}
+
+/// With `sourcemap`, the linker returns a map from the linked code back to the
+/// input; code after a replaced declaration maps to its original line even when
+/// the replacement spans more lines than the declaration.
+#[test]
+fn test_link_sourcemap() {
+    let code = r#"import * as i0 from "@angular/core";
+class P {
+  static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "21.0.0", ngImport: i0, type: P, deps: [], target: i0.ɵɵFactoryTarget.Pipe });
+  static ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: P, isStandalone: true, name: "p" });
+}
+export { P };
+"#;
+    let allocator = Allocator::default();
+    assert!(link(&allocator, code, "p.mjs").map.is_none(), "no map unless requested");
+
+    let options = LinkOptions { sourcemap: true, ..LinkOptions::default() };
+    let result = link_with_options(&allocator, code, "p.mjs", &options);
+    assert!(result.linked);
+    let map = result.map.expect("sourcemap requested");
+    let map = oxc_sourcemap::SourceMap::from_json_string(&map).unwrap();
+    assert_eq!(map.get_sources().collect::<Vec<_>>(), ["p.mjs"]);
+
+    let src_line = line_starting_with(code, "export");
+    let out_line = line_starting_with(&result.code, "export");
+    assert_ne!(src_line, out_line, "the factory should add lines:\n{}", result.code);
+    assert!(
+        map.get_tokens().any(|t| t.get_dst_line() == out_line
+            && t.get_dst_col() == 0
+            && t.get_src_line() == src_line
+            && t.get_src_col() == 0),
+        "`export` line {out_line} should map to source line {src_line}:\n{}",
         result.code
     );
 }

@@ -89,8 +89,9 @@ async function linkCode(
   code: string,
   id: string,
   angularVersion: AngularVersion | undefined,
+  sourcemap: boolean,
 ): Promise<{ code: string; map: string | null; linked: boolean }> {
-  const result = await linkAngularPackage(code, id, { angularVersion })
+  const result = await linkAngularPackage(code, id, { angularVersion, sourcemap })
   return {
     code: result.linked ? result.code : code,
     map: result.map ?? null,
@@ -101,6 +102,8 @@ async function linkCode(
 export interface AngularLinkerPluginOptions {
   /** Angular version of the application, forwarded to the linker. Assumes latest when unset. */
   angularVersion?: AngularVersion
+  /** Return source maps from linked code back to the package file. Default: false */
+  sourcemap?: boolean
 }
 
 /**
@@ -108,14 +111,22 @@ export interface AngularLinkerPluginOptions {
  * `optimizeDeps.rolldownOptions.plugins`, not their options, into the optimizer
  * cache key, so the version is part of the name: changing `angularVersion`
  * re-links prebundled deps instead of reusing ones linked for another version.
+ * `sourcemap` changes what the load hook returns, so it adds a `+map` suffix.
  */
-function optimizerPluginName(angularVersion: AngularVersion | undefined): string {
-  if (!angularVersion) return 'angular-linker'
+function optimizerPluginName(
+  angularVersion: AngularVersion | undefined,
+  sourcemap: boolean,
+): string {
+  const map = sourcemap ? '+map' : ''
+  if (!angularVersion) return `angular-linker${map}`
   const { major, minor, patch, prerelease } = angularVersion
-  return `angular-linker@${major}.${minor}.${patch}${prerelease != null ? `-${prerelease}` : ''}`
+  return `angular-linker@${major}.${minor}.${patch}${prerelease != null ? `-${prerelease}` : ''}${map}`
 }
 
-export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptions = {}): Plugin {
+export function angularLinkerPlugin({
+  angularVersion,
+  sourcemap = false,
+}: AngularLinkerPluginOptions = {}): Plugin {
   let optimizeDepsExclude: readonly string[] = []
 
   return {
@@ -139,7 +150,7 @@ export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptio
             },
             plugins: [
               {
-                name: optimizerPluginName(angularVersion),
+                name: optimizerPluginName(angularVersion, sourcemap),
                 load: {
                   filter: {
                     id: /\.[cm]?js$/,
@@ -162,13 +173,13 @@ export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptio
                       return
                     }
 
-                    const result = await linkCode(code, id, angularVersion)
+                    const result = await linkCode(code, id, angularVersion, sourcemap)
 
                     if (!result.linked) {
                       return
                     }
 
-                    return result.code
+                    return result.map ? { code: result.code, map: result.map } : result.code
                   },
                 },
               },
@@ -201,7 +212,7 @@ export function angularLinkerPlugin({ angularVersion }: AngularLinkerPluginOptio
           return
         }
 
-        const result = await linkCode(code, id, angularVersion)
+        const result = await linkCode(code, id, angularVersion, sourcemap)
 
         if (!result.linked) {
           return

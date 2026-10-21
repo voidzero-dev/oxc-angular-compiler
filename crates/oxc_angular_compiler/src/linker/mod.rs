@@ -43,6 +43,7 @@ use oxc_span::{GetSpan, SourceType};
 
 use crate::AngularVersion;
 use crate::optimizer::Edit;
+use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
 /// Check if an object property key needs quoting because it contains unsafe characters.
@@ -90,6 +91,9 @@ pub struct LinkOptions {
     /// such as the DOM security schema (`img|src` is sanitized before 22.2.2).
     /// `None` assumes the latest Angular version.
     pub angular_version: Option<AngularVersion>,
+
+    /// Generate a source map from the linked code back to `code`.
+    pub sourcemap: bool,
 }
 
 /// Link Angular partial declarations in a JavaScript file.
@@ -130,9 +134,13 @@ pub fn link_with_options(
         return LinkResult { code: code.to_string(), map: None, linked: false };
     }
 
-    let linked_code = crate::optimizer::apply_edits(code, edits);
+    let (linked_code, map) = if options.sourcemap {
+        crate::optimizer::apply_edits_with_sourcemap(code, edits, filename)
+    } else {
+        (crate::optimizer::apply_edits(code, edits), None)
+    };
 
-    LinkResult { code: linked_code, map: None, linked: true }
+    LinkResult { code: linked_code, map, linked: true }
 }
 
 /// Recursively walk the AST to find all ɵɵngDeclare* calls and generate edits.
@@ -889,7 +897,7 @@ fn parse_selector(selector: &str) -> String {
 /// The `host` object in partial declarations has sub-properties:
 /// - `attributes`: `{ "role": "tree", "tabindex": "-1" }` → `["role", "tree", "tabindex", "-1"]`
 /// - `classAttribute`: `"cdk-tree"` → `[1, "cdk-tree"]` (1 = AttributeMarker.Classes)
-/// - `styleAttribute`: `"display: block"` → `[2, "display: block"]` (2 = AttributeMarker.Styles)
+/// - `styleAttribute`: `"display: block"` → `[2, "display", "block"]` (2 = AttributeMarker.Styles)
 ///
 /// Properties and listeners go into `hostBindings`, not `hostAttrs`.
 fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
@@ -940,18 +948,11 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
     // AttributeMarker.Styles = 2
     if let Some(style_attr) = get_string_property(host_obj, "styleAttribute") {
         attrs.push("2".to_string()); // AttributeMarker.Styles
-        // Parse style string into key-value pairs
-        for declaration in style_attr.split(';') {
-            let declaration = declaration.trim();
-            if declaration.is_empty() {
-                continue;
-            }
-            if let Some(colon_pos) = declaration.find(':') {
-                let prop = declaration[..colon_pos].trim();
-                let val = declaration[colon_pos + 1..].trim();
-                attrs.push(format!("\"{prop}\""));
-                attrs.push(format!("\"{val}\""));
-            }
+        // Parse like the template pipeline's `parse_extracted_styles` phase, which
+        // skips `;` and `:` inside quotes and parentheses (`url('a;b')`).
+        for (prop, val) in parse_style_string(style_attr) {
+            attrs.push(crate::output::emitter::escape_string(&prop, false));
+            attrs.push(crate::output::emitter::escape_string(&val, false));
         }
     }
 
@@ -1091,19 +1092,19 @@ fn link_injectable(
             let factory =
                 format_conditional_factory(type_name, "__ngFactoryType__", &non_ctor_expr);
             return Some(format!(
-                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
+                "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
             ));
         }
         // useClass without deps: delegate to useClass's own factory
         if use_class != type_name {
             // Case 7: useClass !== type without deps — already correct
             return Some(format!(
-                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return {use_class}.\u{0275}fac(__ngFactoryType__); }}{provided_in_suffix} }})"
+                "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return {use_class}.\u{0275}fac(__ngFactoryType__); }}{provided_in_suffix} }})"
             ));
         }
         // Case 6: useClass === type without deps — simple factory with __ngFactoryType__ fallback
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return new (__ngFactoryType__ || {type_name})(); }}{provided_in_suffix} }})"
+            "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return new (__ngFactoryType__ || {type_name})(); }}{provided_in_suffix} }})"
         ));
     }
 
@@ -1116,12 +1117,12 @@ fn link_injectable(
             let factory =
                 format_conditional_factory(type_name, "__ngFactoryType__", &non_ctor_expr);
             return Some(format!(
-                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
+                "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
             ));
         }
         // Case 3: useFactory without deps — wrap in arrow function
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: () => ({use_factory})(){provided_in_suffix} }})"
+            "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: () => ({use_factory})(){provided_in_suffix} }})"
         ));
     }
 
@@ -1134,7 +1135,7 @@ fn link_injectable(
         let ctor_type = format!("__ngFactoryType__ || {type_name}");
         let factory = format_conditional_factory(type_name, &ctor_type, &non_ctor_expr);
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
+            "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
         ));
     }
 
@@ -1146,13 +1147,13 @@ fn link_injectable(
         let ctor_type = format!("__ngFactoryType__ || {type_name}");
         let factory = format_conditional_factory(type_name, &ctor_type, use_value);
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
+            "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
         ));
     }
 
     // Default: use the class factory
     Some(format!(
-        "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {type_name}.\u{0275}fac{provided_in_suffix} }})"
+        "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {type_name}.\u{0275}fac{provided_in_suffix} }})"
     ))
 }
 
@@ -1184,7 +1185,7 @@ fn link_service(
         if is_property_false(meta, "autoProvided") { ", autoProvided: false" } else { "" };
 
     Some(format!(
-        "{ns}.\u{0275}\u{0275}defineService({{ token: {type_name}, factory: {factory}{auto_provided_suffix} }})"
+        "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineService({{ token: {type_name}, factory: {factory}{auto_provided_suffix} }})"
     ))
 }
 
@@ -1204,7 +1205,7 @@ fn link_injector(
         parts.push(format!("imports: {imports}"));
     }
 
-    Some(format!("{ns}.\u{0275}\u{0275}defineInjector({{ {} }})", parts.join(", ")))
+    Some(format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjector({{ {} }})", parts.join(", ")))
 }
 
 /// Link ɵɵngDeclareNgModule → ɵɵdefineNgModule.
@@ -1268,7 +1269,8 @@ fn link_ng_module(
         parts.push(format!("id: {id}"));
     }
 
-    let define_call = format!("{ns}.\u{0275}\u{0275}defineNgModule({{ {} }})", parts.join(", "));
+    let define_call =
+        format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineNgModule({{ {} }})", parts.join(", "));
     if let Some(id) = id_source {
         Some(format!(
             "(() => {{ {ns}.\u{0275}\u{0275}registerNgModuleType({type_name}, {id}); return {define_call}; }})()"
@@ -1294,7 +1296,7 @@ fn link_pipe(
         if standalone { String::new() } else { ", standalone: false".to_string() };
 
     Some(format!(
-        "{ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}{standalone_part} }})"
+        "/*@__PURE__*/ {ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}{standalone_part} }})"
     ))
 }
 
@@ -1601,11 +1603,18 @@ fn link_directive(
         }
     }
 
-    let define_call = format!("{ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", "));
+    let define_call =
+        format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", "));
     if host_binding_declarations_js.is_empty() {
         Some(define_call)
     } else {
-        Some(format!("(() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"))
+        // The IIFE only declares the host binding functions and constants before
+        // returning the pure define call, so it is pure too. Without the annotation
+        // bundlers keep unused directives (Angular's linker hoists the
+        // declarations and leaves the define call itself at the top level).
+        Some(format!(
+            "/*@__PURE__*/ (() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"
+        ))
     }
 }
 
@@ -2210,7 +2219,7 @@ fn link_component(
     }
 
     let define_component =
-        format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
+        format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
     // Wrap in IIFE with template and host binding declarations
     let mut declarations = template_output.declarations_js;
@@ -2220,7 +2229,9 @@ fn link_component(
     if declarations.trim().is_empty() {
         Some(define_component)
     } else {
-        Some(format!("(() => {{\n{declarations}\nreturn {define_component};\n}})()"))
+        // Pure for the same reason as in `link_directive`: it only declares the
+        // template functions and pooled constants used by the define call.
+        Some(format!("/*@__PURE__*/ (() => {{\n{declarations}\nreturn {define_component};\n}})()"))
     }
 }
 

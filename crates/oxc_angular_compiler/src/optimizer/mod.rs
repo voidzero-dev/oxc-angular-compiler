@@ -155,9 +155,13 @@ pub fn optimize(
     }
 
     // Apply edits
-    let optimized_code = apply_edits(code, edits);
+    let (optimized_code, map) = if options.sourcemap {
+        apply_edits_with_sourcemap(code, edits, filename)
+    } else {
+        (apply_edits(code, edits), None)
+    };
 
-    OptimizeResult { code: optimized_code, map: None }
+    OptimizeResult { code: optimized_code, map }
 }
 
 /// A source code edit operation.
@@ -343,17 +347,27 @@ fn generate_sourcemap_from_edits(
         .collect();
     edit_shifts.sort_by_key(|(end, _)| *end);
 
+    // `unchanged` is in ascending source order, so the edit-shift prefix sum and
+    // both line/column cursors only move forward: linear in the input size
+    // instead of rescanning from the start for every segment.
+    let mut shift_idx = 0;
+    let mut net_shift: i64 = 0;
+    let mut src_cursor = LineColCursor::new(source);
+    let mut out_cursor = LineColCursor::new(output);
+
     for (src_start, src_end) in &unchanged {
         let segment = &source[*src_start as usize..*src_end as usize];
         if segment.is_empty() {
             continue;
         }
         // Compute output byte offset: src_start + net shift from all edits ending at or before src_start
-        let net_shift: i64 = edit_shifts
-            .iter()
-            .take_while(|(end, _)| *end <= *src_start)
-            .map(|(_, shift)| shift)
-            .sum();
+        while let Some((end, shift)) = edit_shifts.get(shift_idx) {
+            if *end > *src_start {
+                break;
+            }
+            net_shift += shift;
+            shift_idx += 1;
+        }
         let output_byte_pos = (*src_start as i64 + net_shift) as usize;
 
         debug_assert!(
@@ -366,34 +380,55 @@ fn generate_sourcemap_from_edits(
             src_end,
         );
 
-        let (src_line, src_col) = byte_offset_to_line_col_utf16(source, *src_start as usize);
-        let (out_line, out_col) = byte_offset_to_line_col_utf16(output, output_byte_pos);
+        let (src_line, src_col) = src_cursor.line_col(*src_start as usize);
+        let (out_line, out_col) = out_cursor.line_col(output_byte_pos);
         add_line_mappings_for_segment(&mut builder, segment, out_line, out_col, src_line, src_col);
     }
 
     builder.into_sourcemap().to_json_string()
 }
 
-/// Compute line and column (UTF-16 code units) for a byte offset in a string.
+/// Computes line and column (UTF-16 code units) for byte offsets in a string.
 ///
 /// Source map columns must be in UTF-16 code units per the spec and `oxc_sourcemap`
 /// convention. For ASCII this equals byte offset; for multi-byte characters
 /// (e.g., `ɵ` U+0275 = 2 UTF-8 bytes but 1 UTF-16 code unit) the values differ.
-fn byte_offset_to_line_col_utf16(source: &str, offset: usize) -> (u32, u32) {
-    let mut line: u32 = 0;
-    let mut col: u32 = 0;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
+///
+/// The cursor remembers where the previous lookup stopped, so ascending lookups
+/// scan the string once in total. A lookup behind the cursor restarts from the
+/// beginning.
+struct LineColCursor<'a> {
+    text: &'a str,
+    /// Byte offset of the next unscanned character (always a char boundary).
+    offset: usize,
+    line: u32,
+    col: u32,
+}
+
+impl<'a> LineColCursor<'a> {
+    fn new(text: &'a str) -> Self {
+        Self { text, offset: 0, line: 0, col: 0 }
     }
-    (line, col)
+
+    /// Line and column after every character that starts before `offset`.
+    fn line_col(&mut self, offset: usize) -> (u32, u32) {
+        if offset < self.offset {
+            *self = Self::new(self.text);
+        }
+        for ch in self.text[self.offset..].chars() {
+            if self.offset >= offset {
+                break;
+            }
+            if ch == '\n' {
+                self.line += 1;
+                self.col = 0;
+            } else {
+                self.col += ch.len_utf16() as u32;
+            }
+            self.offset += ch.len_utf8();
+        }
+        (self.line, self.col)
+    }
 }
 
 /// Add source map mappings for an unchanged segment of source code.

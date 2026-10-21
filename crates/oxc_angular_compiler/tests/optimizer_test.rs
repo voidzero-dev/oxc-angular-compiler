@@ -182,3 +182,42 @@ const x = createInjector();
         "Expected no pure annotations when mark_pure is false"
     );
 }
+
+/// With `sourcemap`, the optimizer returns a map from the optimized code back
+/// to the input; code after an elided metadata block maps to its original line.
+#[test]
+fn test_optimize_sourcemap() {
+    let code = r#"import * as i0 from "@angular/core";
+class Foo {}
+(function () {
+    (typeof ngDevMode === "undefined" || ngDevMode) && i0.ɵsetClassMetadata(Foo, [{
+        type: i0.Injectable
+    }], null, null);
+})();
+export { Foo };
+"#;
+    let allocator = Allocator::default();
+    assert!(
+        optimize(&allocator, code, "foo.mjs", OptimizeOptions::all()).map.is_none(),
+        "no map unless requested"
+    );
+
+    let options = OptimizeOptions { sourcemap: true, ..OptimizeOptions::all() };
+    let result = optimize(&allocator, code, "foo.mjs", options);
+    assert!(!result.code.contains("ɵsetClassMetadata"), "{}", result.code);
+    let map = result.map.expect("sourcemap requested");
+    let map = oxc_sourcemap::SourceMap::from_json_string(&map).unwrap();
+    assert_eq!(map.get_sources().collect::<Vec<_>>(), ["foo.mjs"]);
+
+    let line_of = |text: &str| text.lines().position(|l| l.starts_with("export")).unwrap() as u32;
+    let (src_line, out_line) = (line_of(code), line_of(&result.code));
+    assert_ne!(src_line, out_line, "elision should remove lines:\n{}", result.code);
+    assert!(
+        map.get_tokens().any(|t| t.get_dst_line() == out_line
+            && t.get_dst_col() == 0
+            && t.get_src_line() == src_line
+            && t.get_src_col() == 0),
+        "`export` line {out_line} should map to source line {src_line}:\n{}",
+        result.code
+    );
+}

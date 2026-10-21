@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import { linkAngularPackageSync, type AngularVersion } from '../index.js'
 import { angularLinkerPlugin } from '../vite-plugin/angular-linker-plugin.js'
-import { angular } from '../vite-plugin/index.js'
+import { angular, type PluginOptions } from '../vite-plugin/index.js'
 
 /**
  * Minimal Angular partial declaration fixtures that simulate the structure
@@ -359,5 +359,73 @@ describe('linker: angularVersion', () => {
       'ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)',
     )
     expect(await link({ major: 22, minor: 2, patch: 2 })).toContain('ɵɵproperty("src",ctx.url)')
+  })
+})
+
+describe('linker: sourcemap', () => {
+  const id = 'node_modules/@angular/common/fesm2022/_pipes-chunk.mjs'
+
+  it('returns a source map only when requested', () => {
+    expect(linkAngularPackageSync(PIPE_CHUNK, id).map ?? null).toBeNull()
+
+    const result = linkAngularPackageSync(PIPE_CHUNK, id, { sourcemap: true })
+    expect(result.linked).toBe(true)
+    const map = JSON.parse(result.map!)
+    expect(map.sources).toEqual([id])
+    expect(map.mappings).not.toBe('')
+  })
+
+  it('forwards the plugin sourcemap option through the Vite transform hook', async () => {
+    const transform = async (sourcemap?: boolean) =>
+      (angularLinkerPlugin({ sourcemap }) as any).transform.handler.call({}, PIPE_CHUNK, id)
+
+    expect((await transform()).map).toBeNull()
+    expect(JSON.parse((await transform(true)).map).sources).toEqual([id])
+  })
+
+  it('returns the map from the dependency optimizer load hook', async () => {
+    const plugin = angularLinkerPlugin({ sourcemap: true }) as any
+    plugin.configResolved({ optimizeDeps: {} })
+    const [optimizerPlugin] = plugin.config({}, { command: 'serve' }).optimizeDeps.rolldownOptions
+      .plugins
+    const result = await optimizerPlugin.load.handler.call(
+      { fs: { readFile: async () => PIPE_CHUNK } },
+      id,
+    )
+
+    expect(result.code).toContain('definePipe')
+    expect(JSON.parse(result.map).sources).toEqual([id])
+  })
+
+  it('keys the dependency optimizer cache on sourcemap', () => {
+    // The load hook returns `{ code, map }` instead of a string, so prebundled deps
+    // must be rebuilt when the option changes.
+    const nameFor = (options: Parameters<typeof angularLinkerPlugin>[0]) =>
+      (angularLinkerPlugin(options) as any).config({}, { command: 'serve' }).optimizeDeps
+        .rolldownOptions.plugins[0].name
+
+    expect(nameFor({ sourcemap: false })).toBe('angular-linker')
+    expect(nameFor({ sourcemap: true })).toBe('angular-linker+map')
+    expect(nameFor({ angularVersion: { major: 22, minor: 2, patch: 2 }, sourcemap: true })).toBe(
+      'angular-linker@22.2.2+map',
+    )
+  })
+
+  it('follows angular() sourceMap.vendor, like Angular CLI', async () => {
+    const link = async (sourceMap: PluginOptions['sourceMap']) => {
+      const plugin = angular({ sourceMap }).find(
+        (candidate) => candidate.name === '@oxc-angular/vite-linker',
+      ) as any
+      return plugin.transform.handler.call({}, PIPE_CHUNK, id)
+    }
+
+    // Vendor maps are off by default and `sourceMap: true` only covers scripts.
+    expect((await link(undefined)).map).toBeNull()
+    expect((await link(true)).map).toBeNull()
+    expect((await link({ scripts: true })).map).toBeNull()
+    expect((await link({ scripts: true, vendor: false })).map).toBeNull()
+    expect((await link({ scripts: false, vendor: true })).map).toBeNull()
+    expect(JSON.parse((await link({ scripts: true, vendor: true })).map).sources).toEqual([id])
+    expect(JSON.parse((await link({ vendor: true })).map).sources).toEqual([id])
   })
 })
