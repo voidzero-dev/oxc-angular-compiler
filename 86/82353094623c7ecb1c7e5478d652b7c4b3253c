@@ -1,0 +1,37 @@
+crates/oxc_angular_compiler/src/component/mod.rs
+  s_c1b123661b0737::t_4ab12423936714 42-48
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_c1b123661b0737::t_b1e9511bde90c2 3614-3615,4772-4773,4823-4840,4957-5212,5281,5383-5384,5528,5596-5600,5614-5616,5763-5784,5795,5912,5916-5951
+crates/oxc_angular_compiler/src/lib.rs
+  s_c1b123661b0737::t_0b19aab6f12793 67-70
+crates/oxc_angular_compiler/tests/hmr_component_update_test.rs
+  s_c1b123661b0737::t_1e43428eaad12f 1-296
+napi/angular-compiler/index.d.ts
+  s_c1b123661b0737::t_2c6763860a14d6 52-94,118-119,149-154,219-278
+napi/angular-compiler/index.js
+  s_c1b123661b0737::t_1c8ab84ec9f247 910-911,935-936
+napi/angular-compiler/src/lib.rs
+  s_c1b123661b0737::t_4b007cbe133233 644-649,810-811,829-1016
+napi/angular-compiler/test/hmr-component-update.test.ts
+  s_c1b123661b0737::t_1d80d6f690a2b5 1-228
+napi/angular-compiler/test/hmr-hot-update.test.ts
+  s_c1b123661b0737::t_5b306a48bcfc9f 860-885,3530,3542-3544,3576,3579,3592-3594,3628-3631
+napi/angular-compiler/vite-plugin/index.ts
+  s_c1b123661b0737::t_5c27d4e5f1dc13 27,483-489,521-552,821-827,829-836,838-845,852-864,866-871,874-899,901-903,905-917,919-927,1038,1228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8682353094623c7ecb1c7e5478d652b7c4b3253c",
+  "prompts": {},
+  "sessions": {
+    "s_c1b123661b0737": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aef996cc96bcabef4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
