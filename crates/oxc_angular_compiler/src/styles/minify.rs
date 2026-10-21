@@ -1,18 +1,24 @@
 use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
+use crate::component::AngularVersion;
+
 const COMPONENT_PLACEHOLDER: &str = "%COMP%";
 const MINIFY_PLACEHOLDER: &str = "OXCANGULARCOMPONENT";
 
 /// Apply Angular style encapsulation and optionally minify the final CSS.
+///
+/// `angular_version` selects which Angular release's `ShadowCss` to match
+/// (`None` = latest).
 pub fn finalize_component_style(
     style: &str,
     encapsulate: bool,
     content_attr: &str,
     host_attr: &str,
     minify: bool,
+    angular_version: Option<AngularVersion>,
 ) -> String {
     let style = if encapsulate {
-        super::shim_css_text(style, content_attr, host_attr)
+        super::shim_css_text_for_version(style, content_attr, host_attr, angular_version)
     } else {
         style.to_string()
     };
@@ -58,6 +64,7 @@ mod tests {
             "_ngcontent-%COMP%",
             "_nghost-%COMP%",
             true,
+            None,
         );
 
         assert_eq!(

@@ -2146,8 +2146,12 @@ fn link_component(
             let Some(expr) = el.as_expression() else { continue };
             if let Some(style) = as_static_string(expr) {
                 if is_emulated {
-                    let scoped =
-                        crate::styles::shim_css_text(style, "_ngcontent-%COMP%", "_nghost-%COMP%");
+                    let scoped = crate::styles::shim_css_text_for_version(
+                        style,
+                        "_ngcontent-%COMP%",
+                        "_nghost-%COMP%",
+                        options.angular_version,
+                    );
                     if !scoped.trim().is_empty() {
                         scoped_styles.push(crate::output::emitter::escape_string(&scoped, false));
                     }

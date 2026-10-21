@@ -252,6 +252,9 @@ export interface DtsInjectDeclaration {
  *
  * * `css` - The CSS source code to encapsulate
  * * `component_id` - The component's unique identifier (typically a hash)
+ * * `angular_version` - The Angular version to match. Versions before
+ *   v22.0.0-rc.0 keep the legacy `polyfill-*` / `::shadow` / `::content`
+ *   handling. When not set, assumes the latest Angular version.
  *
  * # Returns
  *
@@ -269,7 +272,11 @@ export interface DtsInjectDeclaration {
  * .button[ng-cabc123] { color: red; }
  * ```
  */
-export declare function encapsulateStyle(css: string, componentId: string): string
+export declare function encapsulateStyle(
+  css: string,
+  componentId: string,
+  angularVersion?: AngularVersion | undefined | null,
+): string
 
 /**
  * URL-encode a component ID for use in import URLs.

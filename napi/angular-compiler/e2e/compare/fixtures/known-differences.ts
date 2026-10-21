@@ -282,17 +282,11 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['NgDeepBasicComponent.ɵcmp'],
     reasons: ['a leading space is kept before a ::ng-deep selector'],
   },
-  'styles/shadow-css-polyfill-next-selector': {
-    fields: ['PolyfillNextSelectorComponent.ɵcmp'],
-    reasons: ['a space is added before an empty rule body'],
-  },
   'styles/shadow-css-polyfill-rule': {
     fields: ['PolyfillRuleComponent.ɵcmp'],
-    reasons: ['polyfill-rule output drops a leading ";" from the rule body'],
-  },
-  'styles/shadow-css-polyfill-unscoped-rule': {
-    fields: ['PolyfillUnscopedComponent.ɵcmp'],
-    reasons: ['polyfill-unscoped-rule is not scoped and rewritten as Angular does'],
+    reasons: [
+      'Angular 22.2 strips the -shadowcsshost-no-combinator marker left in a rule body (part of its CSS nesting support); Oxc keeps it, as Angular 22.0 does',
+    ],
   },
   'styles/shadow-css-where-with-host': {
     fields: ['WhereWithHostComponent.ɵcmp'],

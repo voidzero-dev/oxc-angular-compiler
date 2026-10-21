@@ -1529,7 +1529,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Only encapsulate for emulated encapsulation (e=0)
           if (encapsulation === '0' && componentId) {
-            const encapsulated = encapsulateStyle(code, componentId)
+            const encapsulated = encapsulateStyle(code, componentId, pluginOptions.angularVersion)
             return {
               code: encapsulated,
               map: null,

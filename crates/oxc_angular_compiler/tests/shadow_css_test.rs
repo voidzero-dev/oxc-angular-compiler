@@ -9,7 +9,10 @@
 //!
 //! The goal is to have 1:1 compatibility with Angular's ShadowCss implementation.
 
-use oxc_angular_compiler::styles::{finalize_component_style, shim_css_text};
+use oxc_angular_compiler::AngularVersion;
+use oxc_angular_compiler::styles::{
+    finalize_component_style, shim_css_text, shim_css_text_for_version,
+};
 
 /// Normalize CSS for comparison (matches Angular's toEqualCss behavior).
 /// - Removes leading/trailing whitespace
@@ -37,6 +40,12 @@ fn shim(css: &str, content_attr: &str) -> String {
 fn shim_with_host(css: &str, content_attr: &str, host_attr: &str) -> String {
     shim_css_text(css, content_attr, host_attr)
 }
+
+/// The last Angular line that still runs the legacy polyfill passes.
+const V21: Option<AngularVersion> = Some(AngularVersion::new(21, 2, 0));
+
+/// The versions whose `ShadowCss` passes differ: latest and pre-v22.
+const SHIM_VERSIONS: [Option<AngularVersion>; 2] = [None, V21];
 
 /// Assert CSS equality with normalization.
 macro_rules! assert_css_eq {
@@ -330,12 +339,14 @@ fn test_multibyte_utf8_preserved_in_css_values() {
 fn test_finalize_preserves_unicode() {
     // Full pipeline with Sass-compiled CSS containing actual bullet character
     let css = ".test:after { content: \"\u{2022}\"; }";
-    let result = finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true);
+    let result =
+        finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true, None);
     assert!(result.contains('\u{2022}'), "Bullet lost in full pipeline: {result}");
 
     // With @charset prefix from Sass
     let css = "@charset \"UTF-8\";\n.test:after { content: \"\u{2022}\"; }";
-    let result = finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true);
+    let result =
+        finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true, None);
     assert!(result.contains('\u{2022}'), "Bullet lost with @charset: {result}");
 }
 
@@ -1147,8 +1158,14 @@ fn test_comment_glued_stylesheet_stays_scoped_through_finalize() {
 ";
 
     for minify in [false, true] {
-        let result =
-            finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", minify);
+        let result = finalize_component_style(
+            css,
+            true,
+            "_ngcontent-%COMP%",
+            "_nghost-%COMP%",
+            minify,
+            None,
+        );
         assert!(!result.contains("%COMMENT"), "placeholder leaked (minify={minify}):\n{result}");
         for selector in [".probe", ".widget", ".container.sticky-header"] {
             assert!(
@@ -1195,8 +1212,10 @@ fn test_comment_placeholder_never_leaks_into_output() {
     // placeholders carried their comment index, every `:host-context()` case
     // below leaked one: each duplicated placeholder consumed the *next*
     // comment, so the last one ran out and was left in the output verbatim.
-    for css in PLACEHOLDER_STRESS_CASES {
-        let result = shim_with_host(css, "contenta", "hosta");
+    for (css, version) in
+        PLACEHOLDER_STRESS_CASES.iter().flat_map(|c| SHIM_VERSIONS.map(|v| (c, v)))
+    {
+        let result = shim_css_text_for_version(css, "contenta", "hosta", version);
         assert!(!result.contains("%COMMENT"), "placeholder leaked for {css:?}:\n{result}");
     }
 }
@@ -1207,9 +1226,11 @@ fn test_sourcemap_comment_survives_placeholder_duplication() {
     // placeholder is directly visible: before the fix the duplicated
     // `:host-context()` placeholder consumed this comment and teleported it
     // into the middle of a selector, leaving `%COMMENT%` at the real position.
-    for css in PLACEHOLDER_STRESS_CASES {
+    for (css, version) in
+        PLACEHOLDER_STRESS_CASES.iter().flat_map(|c| SHIM_VERSIONS.map(|v| (c, v)))
+    {
         let with_map = format!("{css}\n/*# sourceMappingURL=x.map */");
-        let result = shim_with_host(&with_map, "contenta", "hosta");
+        let result = shim_css_text_for_version(&with_map, "contenta", "hosta", version);
         // It must still occupy its own line - the teleport spliced it into the
         // middle of a selector. (`polyfill-unscoped-rule` legitimately appends
         // its rule after this line, so don't require it to be last.)
@@ -1286,7 +1307,7 @@ fn test_comment_placeholder_indices_are_independent_of_position() {
     // must not shift the comments that follow it onto the wrong placeholders.
     let css = "polyfill-next-selector { content: ':host .a'; }/* dropped */::content .b { color: red; }\n\
                /*# sourceMappingURL=x.map */";
-    let result = shim_with_host(css, "contenta", "hosta");
+    let result = shim_css_text_for_version(css, "contenta", "hosta", V21);
     assert!(result.contains("/*# sourceMappingURL=x.map */"), "{result}");
     assert!(!result.contains("%COMMENT"), "{result}");
 }
@@ -1305,4 +1326,71 @@ fn test_host_pseudo_with_newline_combinator() {
     let css = ":host(:hover)\n.child { color: red; }";
     let expected = "[hosta]:hover .child[contenta] { color: red; }";
     assert_css_eq!(shim_with_host(css, "contenta", "hosta"), expected);
+}
+
+// ============================================================================
+// Version-dependent passes. Expected strings are the exact output of
+// `@angular/compiler`'s `encapsulateStyle` (22.2.2), not normalized.
+// ============================================================================
+
+const NG_CONTENT: &str = "_ngcontent-%COMP%";
+const NG_HOST: &str = "_nghost-%COMP%";
+
+fn ng_shim(css: &str) -> String {
+    shim_css_text(css, NG_CONTENT, NG_HOST)
+}
+
+#[test]
+fn test_legacy_polyfills_follow_angular_version() {
+    // Angular v22.0.0-rc.0 removed the polyfill passes.
+    let css = "polyfill-next-selector {content: 'x > y'} z {}";
+    assert_eq!(
+        ng_shim(css),
+        "polyfill-next-selector[_ngcontent-%COMP%] {content: 'x > y'} z[_ngcontent-%COMP%] {}"
+    );
+    assert_css_eq!(
+        shim_css_text_for_version(css, NG_CONTENT, NG_HOST, V21),
+        "x[_ngcontent-%COMP%] > y[_ngcontent-%COMP%] {}"
+    );
+
+    let css = "polyfill-unscoped-rule {content: '#menu > .bar';color: blue;}";
+    assert_eq!(
+        ng_shim(css),
+        "polyfill-unscoped-rule[_ngcontent-%COMP%] {content: '#menu > .bar';color: blue;}"
+    );
+    assert_css_eq!(
+        shim_css_text_for_version(css, NG_CONTENT, NG_HOST, V21),
+        "#menu > .bar { color: blue; }"
+    );
+
+    assert_eq!(ng_shim("x::content y {}"), "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}");
+    assert_css_eq!(
+        shim_css_text_for_version("x::shadow > y {}", NG_CONTENT, NG_HOST, V21),
+        "x[_ngcontent-%COMP%] > y[_ngcontent-%COMP%] {}"
+    );
+
+    // v22 prereleases before rc.0 still had them.
+    let next_12 = AngularVersion::parse("22.0.0-next.12");
+    assert_css_eq!(
+        shim_css_text_for_version("x::content y {}", NG_CONTENT, NG_HOST, next_12),
+        "x[_ngcontent-%COMP%] y[_ngcontent-%COMP%] {}"
+    );
+    let rc_0 = AngularVersion::parse("22.0.0-rc.0");
+    assert_eq!(
+        shim_css_text_for_version("x::content y {}", NG_CONTENT, NG_HOST, rc_0),
+        "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}"
+    );
+}
+
+#[test]
+fn test_finalize_component_style_threads_angular_version() {
+    let css = "x::content y {}";
+    assert_eq!(
+        finalize_component_style(css, true, NG_CONTENT, NG_HOST, false, None),
+        "x[_ngcontent-%COMP%]::content y[_ngcontent-%COMP%] {}"
+    );
+    assert_css_eq!(
+        finalize_component_style(css, true, NG_CONTENT, NG_HOST, false, V21),
+        "x[_ngcontent-%COMP%] y[_ngcontent-%COMP%] {}"
+    );
 }

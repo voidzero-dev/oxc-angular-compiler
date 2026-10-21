@@ -84,7 +84,9 @@ pub use hmr::{
 };
 
 // Re-export styles
-pub use styles::{encapsulate_style, shim_css_text};
+pub use styles::{
+    encapsulate_style, encapsulate_style_for_version, shim_css_text, shim_css_text_for_version,
+};
 
 // Re-export pipe types
 pub use pipe::{

@@ -28,6 +28,8 @@
 
 use std::ops::Range;
 
+use crate::component::AngularVersion;
+
 /// Comments are replaced by `%COMMENT<n>%` placeholders during processing,
 /// where `<n>` is the comment's index in the extracted list.
 ///
@@ -303,6 +305,8 @@ impl SafeSelector {
 /// Shim CSS text with the given selectors.
 ///
 /// This is the main entry point matching Angular's `ShadowCss.shimCssText()`.
+/// It follows the latest Angular release; use [`shim_css_text_for_version`]
+/// to match an older one.
 ///
 /// # Arguments
 ///
@@ -324,25 +328,42 @@ impl SafeSelector {
 /// assert!(result.contains("[contenta]"));
 /// ```
 pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
+    shim_css_text_for_version(css, content_attr, host_attr, None)
+}
+
+/// Shim CSS text the way the given Angular version's `ShadowCss` does.
+///
+/// `None` means the latest Angular release. Versions before v22.0.0-rc.0 also
+/// run the legacy Shadow DOM polyfill passes (`polyfill-next-selector`,
+/// `polyfill-rule`, `polyfill-unscoped-rule`, `::shadow`, `::content`); see
+/// [`AngularVersion::uses_shadow_css_polyfills`].
+pub fn shim_css_text_for_version(
+    css: &str,
+    content_attr: &str,
+    host_attr: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
     if css.is_empty() {
         return String::new();
     }
 
+    let legacy_polyfills = angular_version.is_some_and(|v| v.uses_shadow_css_polyfills());
+
     // Step 0: Extract comments and replace with placeholders
     // This prevents comment contents from interfering with CSS parsing
-    let (result, comments) = extract_comments(css);
-
-    let mut result = result;
+    let (mut result, comments) = extract_comments(css);
 
     // Step 1: Process polyfill directives (polyfill-next-selector, polyfill-rule)
     // These convert ShadowDOM rules to work with the CSS shim
-    result = insert_polyfill_directives(&result);
-    result = insert_polyfill_rules(&result);
-
     // Step 2: Extract unscoped rules (polyfill-unscoped-rule)
     // These rules are added at the end WITHOUT scoping
-    let unscoped_rules = extract_unscoped_rules(&result);
-    result = remove_unscoped_rules(&result);
+    let mut unscoped_rules = String::new();
+    if legacy_polyfills {
+        result = insert_polyfill_directives(&result);
+        result = insert_polyfill_rules(&result);
+        unscoped_rules = extract_unscoped_rules(&result);
+        result = remove_unscoped_rules(&result);
+    }
 
     // Step 3: Handle :host-context() - must be done before :host
     result = convert_colon_host_context(&result, content_attr, host_attr);
@@ -350,8 +371,10 @@ pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
     // Step 4: Handle :host selectors
     result = convert_colon_host(&result, host_attr);
 
-    // Step 5: Handle ::ng-deep and other shadow DOM selectors
-    result = convert_shadow_dom_selectors(&result);
+    // Step 5: Handle ::shadow and ::content (removed in v22)
+    if legacy_polyfills {
+        result = convert_shadow_dom_selectors(&result);
+    }
 
     // Step 6: Scope keyframes and animation properties
     if !content_attr.is_empty() {
@@ -926,9 +949,18 @@ fn scope_animation_keyframe(
 /// This is the original API that generates `[ng-c{id}]` format.
 /// Consider using `shim_css_text` directly for more control.
 pub fn encapsulate_style(css: &str, component_id: &str) -> String {
-    let content_attr = format!("ng-c{}", component_id);
-    let host_attr = format!("ng-c{}", component_id);
-    shim_css_text(css, &content_attr, &host_attr)
+    encapsulate_style_for_version(css, component_id, None)
+}
+
+/// [`encapsulate_style`] for a specific Angular version (`None` = latest).
+pub fn encapsulate_style_for_version(
+    css: &str,
+    component_id: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
+    let content_attr = format!("ng-c{component_id}");
+    let host_attr = format!("ng-c{component_id}");
+    shim_css_text_for_version(css, &content_attr, &host_attr, angular_version)
 }
 
 // =============================================================================
@@ -3396,10 +3428,14 @@ mod tests {
     // Polyfill Directive Tests
     // ============================================================================
 
+    /// The polyfill passes only run for Angular < v22.0.0-rc.0.
+    fn shim_v21(css: &str, content_attr: &str, host_attr: &str) -> String {
+        shim_css_text_for_version(css, content_attr, host_attr, Some(AngularVersion::new(21, 2, 0)))
+    }
+
     #[test]
     fn test_polyfill_next_selector_single_quotes() {
-        let result =
-            shim_css_text("polyfill-next-selector {content: 'x > y'} z {}", "contenta", "");
+        let result = shim_v21("polyfill-next-selector {content: 'x > y'} z {}", "contenta", "");
         assert!(result.contains("x[contenta]"), "Got: {}", result);
         assert!(result.contains("y[contenta]"), "Got: {}", result);
         assert!(!result.contains("polyfill-next-selector"), "Got: {}", result);
@@ -3408,15 +3444,14 @@ mod tests {
 
     #[test]
     fn test_polyfill_next_selector_double_quotes() {
-        let result =
-            shim_css_text("polyfill-next-selector {content: \"x > y\"} z {}", "contenta", "");
+        let result = shim_v21("polyfill-next-selector {content: \"x > y\"} z {}", "contenta", "");
         assert!(result.contains("x[contenta]"), "Got: {}", result);
         assert!(result.contains("y[contenta]"), "Got: {}", result);
     }
 
     #[test]
     fn test_polyfill_next_selector_with_attribute() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-next-selector {content: 'button[priority=\"1\"]'} z {}",
             "contenta",
             "",
@@ -3426,7 +3461,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_single_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: '#menu > .bar';color: blue;}",
             "contenta",
             "",
@@ -3443,7 +3478,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_double_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: \"#menu > .bar\";color: blue;}",
             "contenta",
             "",
@@ -3454,7 +3489,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_multiple() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: 'foo';color: blue;}polyfill-unscoped-rule {content: 'bar';color: red;}",
             "contenta",
             "",
@@ -3467,7 +3502,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_single_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-rule {content: ':host.foo .bar';color: blue;}",
             "contenta",
             "a-host",
@@ -3480,7 +3515,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_double_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-rule {content: \":host.foo .bar\";color: blue;}",
             "contenta",
             "a-host",
@@ -3491,12 +3526,34 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_with_attribute() {
-        let result = shim_css_text(
-            "polyfill-rule {content: 'button[priority=\"1\"]'}",
-            "contenta",
-            "a-host",
-        );
+        let result =
+            shim_v21("polyfill-rule {content: 'button[priority=\"1\"]'}", "contenta", "a-host");
         assert!(result.contains("button[priority=\"1\"][contenta]"), "Got: {}", result);
+    }
+
+    // ============================================================================
+
+    #[test]
+    fn test_polyfills_are_plain_selectors_in_v22() {
+        // Angular v22 dropped the polyfill passes: the blocks are scoped like
+        // any other rule and `::shadow` / `::content` are kept.
+        assert_eq!(
+            shim_css_text("polyfill-next-selector {content: 'x > y'} z {}", "contenta", ""),
+            "polyfill-next-selector[contenta] {content: 'x > y'} z[contenta] {}"
+        );
+        assert_eq!(
+            shim_css_text(
+                "polyfill-unscoped-rule {content: '#menu > .bar';color: blue;}",
+                "contenta",
+                ""
+            ),
+            "polyfill-unscoped-rule[contenta] {content: '#menu > .bar';color: blue;}"
+        );
+        assert_eq!(
+            shim_css_text("x::content y {}", "contenta", ""),
+            "x[contenta]::content y[contenta] {}"
+        );
+        assert_eq!(shim_v21("x::content y {}", "contenta", ""), "x[contenta] y[contenta] {}");
     }
 
     // ============================================================================
