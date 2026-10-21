@@ -1,0 +1,35 @@
+crates/oxc_angular_compiler/src/ng_module/compiler.rs
+  s_66aba917eb370b::t_351b585a0c4616 235-239,242-251,318-319,323
+crates/oxc_angular_compiler/src/ng_module/definition.rs
+  s_66aba917eb370b::t_8e5b06c3b4f60c 13,19-23,108,111,789,791-795,812-813,843-844,862,888
+crates/oxc_angular_compiler/src/ng_module/metadata.rs
+  s_66aba917eb370b::t_e94315b36af330 41-42
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_66aba917eb370b::t_6fe3e2359de24e 16187,16189-16191,16212,16214
+napi/angular-compiler/test/ng-module-scope-runtime.test.ts
+  s_8d46e6545fb344::t_22eeb7b71fe01c 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c3d1ae0fabf63923cffbdb9341e949d4f69fd943",
+  "prompts": {},
+  "sessions": {
+    "s_66aba917eb370b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4fe4327b08571a44",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_8d46e6545fb344": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7e6e813b1ff832b4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
