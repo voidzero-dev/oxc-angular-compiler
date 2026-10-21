@@ -1,0 +1,59 @@
+crates/oxc_angular_compiler/src/linker/mod.rs
+  s_551a7dbfd1ad45::t_aab0c28d8607ab 94-96,137-141,143
+crates/oxc_angular_compiler/src/optimizer/mod.rs
+  s_551a7dbfd1ad45::t_3a155bde1e94d4 158-162,164
+crates/oxc_angular_compiler/tests/linker_test.rs
+  s_ea1c9a7665ba92::t_e8dd5ce8afa7f7 291,492-531
+crates/oxc_angular_compiler/tests/optimizer_test.rs
+  s_f61d5886f59e8c::t_7d2ec124480807 185-223
+napi/angular-compiler/index.d.ts
+  s_f61d5886f59e8c::t_703f2f14096985 694-698
+napi/angular-compiler/src/lib.rs
+  s_551a7dbfd1ad45::t_45fd7b54694dba 2954,2956-2957,2974-2977
+napi/angular-compiler/test/linker.test.ts
+  s_f61d5886f59e8c::t_627bf11add87e7 364-411
+napi/angular-compiler/vite-plugin/angular-linker-plugin.ts
+  s_f61d5886f59e8c::t_4cac56d8a4787a 92,94,105-106,121-124,171,177,210
+napi/angular-compiler/vite-plugin/index.ts
+  s_3fc362be4abda1::t_7b54a6eebe88a5 1549-1552
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "891515016fb4f923a01eea80e01d2777c28fcc62",
+  "prompts": {},
+  "sessions": {
+    "s_3fc362be4abda1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a237fd75f168825f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_551a7dbfd1ad45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4f5d6ba425543afc",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_ea1c9a7665ba92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad3c64857533bfe60",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_f61d5886f59e8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad56baa2a25992c8d",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
