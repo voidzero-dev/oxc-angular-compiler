@@ -1407,6 +1407,121 @@ fn test_escaped_quote_does_not_end_string() {
 }
 
 #[test]
+fn test_escaped_quote_outside_string_opens_no_string() {
+    // Like Angular's `escapeInStrings`/`escapeBlocks`, a backslash outside a
+    // string escapes the next character. An escaped quote in a selector used
+    // to open a string that the in-string escape handling then never closed,
+    // so the rule and every later one were left unscoped. Expected values are
+    // @angular/compiler 22.2.2's `encapsulateStyle` output.
+    assert_eq!(
+        ng_shim(".x\\'y\\'{ color: red; }.b{ color: blue; }"),
+        ".x\\'y\\'[_ngcontent-%COMP%]{ color: red; }.b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(":host .x\\'y{ color: red; } :host .b{ color: blue; }"),
+        "[_nghost-%COMP%]   .x\\'y[_ngcontent-%COMP%]{ color: red; } \
+         [_nghost-%COMP%]   .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim("@media screen{.x\\'y{ color: red; }} .b{ color: blue; }"),
+        "@media screen{.x\\'y[_ngcontent-%COMP%]{ color: red; }} .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim("@font-face{ font-family: \\'x; } .b{ color: blue; }"),
+        "@font-face{ font-family: \\'x; } .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim("@keyframes k{from\\'{ a: b; }} .b{ color: blue; }"),
+        "@keyframes _ngcontent-%COMP%_k{from\\'{ a: b; }} .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(".a\\\\{ color: red; } .b{ color: blue; }"),
+        ".a\\\\[_ngcontent-%COMP%]{ color: red; } .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(ng_shim(".a{} .b\\"), ".a[_ngcontent-%COMP%]{} .b\\");
+}
+
+#[test]
+fn test_tailwind_escaped_quotes_in_class_names() {
+    // Tailwind arbitrary values escape their quotes and brackets. Angular's
+    // `SafeSelector` turns the `[...]` into a placeholder before the `\_`
+    // escape is taken, so `__ph-0__` is never restored; Oxc matches that.
+    assert_eq!(
+        ng_shim(".font-\\[\\'Inter\\'\\]{ font-family: Inter; } .b{ color: blue; }"),
+        ".font-\\__ph-0__[_ngcontent-%COMP%]{ font-family: Inter; } .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(".font-\\[\\\"Inter\\\"\\]{ font-family: Inter; } .b{ color: blue; }"),
+        ".font-\\__ph-0__[_ngcontent-%COMP%]{ font-family: Inter; } .b[_ngcontent-%COMP%]{ color: blue; }"
+    );
+}
+
+#[test]
+fn test_escaped_brace_and_at_outside_string() {
+    // `\{`, `\}` and `\@` open or close no block and start no at-rule.
+    assert_eq!(
+        ng_shim(".a\\{b{ color: red; } .c{ color: blue; }"),
+        ".a\\{b[_ngcontent-%COMP%]{ color: red; } .c[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(".a\\}b{ color: red; } .c{ color: blue; }"),
+        ".a\\}b[_ngcontent-%COMP%]{ color: red; } .c[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(".a{ content: \\}; } .c{ color: blue; }"),
+        ".a[_ngcontent-%COMP%]{ content: \\}; } .c[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    assert_eq!(
+        ng_shim(".a\\@media{ color: red; } .c{ color: blue; }"),
+        ".a\\@media[_ngcontent-%COMP%]{ color: red; } .c[_ngcontent-%COMP%]{ color: blue; }"
+    );
+    // `_ruleRe` still reads no brace into a selector, so the text up to an
+    // escaped one is left unscoped, as Angular leaves it.
+    assert_eq!(ng_shim(".a\\{ .b{}"), ".a\\{ .b[_ngcontent-%COMP%]{}");
+    assert_eq!(ng_shim(".a\\} .b{}"), ".a\\} .b[_ngcontent-%COMP%]{}");
+    assert_eq!(
+        ng_shim(".a, .b\\{ .c, .d{ color: red; } .e{}"),
+        ".a, .b\\{ .c[_ngcontent-%COMP%], .d[_ngcontent-%COMP%]{ color: red; } .e[_ngcontent-%COMP%]{}"
+    );
+    assert_eq!(
+        ng_shim("@media x{.a\\{ .b{}} .c{}"),
+        "@media x{.a\\{ .b[_ngcontent-%COMP%]{}} .c[_ngcontent-%COMP%]{}"
+    );
+    // An escaped brace ends an at-rule header the same way, so the next rule
+    // is scoped on its own.
+    assert_eq!(
+        ng_shim("@media x\\{ .a{} } .b{}"),
+        "@media x\\{ .a[_ngcontent-%COMP%]{} } .b[_ngcontent-%COMP%]{}"
+    );
+    assert_eq!(ng_shim("@media x\\{ .a{}"), "@media x\\{ .a[_ngcontent-%COMP%]{}");
+    // Angular leaves the host marker in that unscoped text too.
+    assert_eq!(
+        ng_shim(":host .a\\{b{}"),
+        "-shadowcsshost-no-combinator .a\\{b[_ngcontent-%COMP%]{}"
+    );
+}
+
+#[test]
+fn test_long_selector_list_scopes_in_linear_time() {
+    // Finding whether a comma or combinator sits inside parentheses used to
+    // scan to the end of the selector each time, quadratic in its length: this
+    // ~250k-char list took 3.6s in a debug build, and takes about 0.1s now.
+    let items: Vec<String> = (0..10_000).map(|i| format!(".a{i} > .b:not(.x, .y)")).collect();
+    let selector = items.join(", ");
+    assert!(selector.len() > 200_000);
+    let expected = (0..10_000)
+        .map(|i| format!(".a{i}[_ngcontent-%COMP%]    > .b[_ngcontent-%COMP%]:not(.x, .y)"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let start = std::time::Instant::now();
+    let scoped = ng_shim(&format!("{selector} {{}}"));
+    let elapsed = start.elapsed();
+    assert_eq!(scoped, format!("{expected} {{}}"));
+    assert!(elapsed.as_secs() < 2, "scoping a 250k-char selector list took {elapsed:?}");
+}
+
+#[test]
 fn test_host_context_inside_conditional_at_rules() {
     // `:host-context()` was only rewritten at the top level, leaving a
     // literal `[_ngcontent-%COMP%]:host-context(.dark)` inside `@media`.

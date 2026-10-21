@@ -966,32 +966,32 @@ fn replace_ignore_ascii_case(
     result
 }
 
-/// Whether the text at byte `from` closes an enclosing parenthesis, i.e. matches
+/// For every byte offset `i` of `s` (and `s.len()`), whether the text at `i`
+/// closes an enclosing parenthesis, i.e. matches
 /// `[^)(]*(?:\([^)(]*(?:\([^)(]*(?:\([^)(]*\)[^)(]*)*\)[^)(]*)*\)[^)(]*)*\)`.
 ///
 /// `_selectorSplitRe` and the combinator separator of `_applySelectorScope`
 /// use it as a negative lookahead to skip commas and combinators inside
 /// parentheses. Groups before the closing parenthesis may nest three deep.
-fn closes_enclosing_paren(s: &str, from: usize) -> bool {
-    let mut depth = 0u32;
-    for &b in &s.as_bytes()[from..] {
-        match b {
-            b'(' => {
-                depth += 1;
-                if depth > 3 {
-                    return false;
-                }
-            }
-            b')' => {
-                if depth == 0 {
-                    return true;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
+///
+/// Scanning forward from each offset would be quadratic, so the table is built
+/// in one pass from the end: `outcome[d]` is whether the scan from the current
+/// offset, already `d` groups deep, reaches the closing parenthesis.
+fn closes_enclosing_paren_table(s: &str) -> Vec<bool> {
+    let bytes = s.as_bytes();
+    let mut table = vec![false; bytes.len() + 1];
+    let mut outcome = [false; 4];
+    for (i, &b) in bytes.iter().enumerate().rev() {
+        outcome = match b {
+            // One group deeper; a fourth level fails the match.
+            b'(' => [outcome[1], outcome[2], outcome[3], false],
+            // At depth 0 this is the closing parenthesis; otherwise one group up.
+            b')' => [true, outcome[0], outcome[1], outcome[2]],
+            _ => outcome,
+        };
+        table[i] = outcome[0];
     }
-    false
+    table
 }
 
 /// Match Angular's `_parenSuffix`, `\(((?:\((?:\([^)(]*\)|[^)(]*)+?\)|[^)(]*)+?)\)`,
@@ -1337,6 +1337,41 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str, css_nesting: 
             continue;
         }
 
+        // A backslash outside a string escapes the next character, as in
+        // Angular's `escapeInStrings` and `escapeBlocks`: `\'`, `\{`, `\}` and
+        // `\@` (Tailwind's `.font-\[\'Inter\'\]`) open no string, block or
+        // at-rule. Both characters are copied as they are.
+        if !in_string && c == '\\' {
+            let next_c = chars.next();
+            if in_at_rule_header {
+                at_rule_header.push(c);
+                at_rule_header.extend(next_c);
+            }
+            let sink = sink!();
+            sink.push(c);
+            sink.extend(next_c);
+            // An escaped brace also ends an at-rule header: `_ruleRe` reads no
+            // brace into one, so `@media x\{` stays plain text and the next
+            // rule is scoped on its own.
+            if in_at_rule_header && matches!(next_c, Some('{' | '}')) {
+                in_at_rule_header = false;
+                at_rule_header.clear();
+                continue;
+            }
+            // A selector still ends there: `_ruleRe` reads no `{` or `}` into
+            // one, so the text up to an escaped brace is left unscoped
+            // (`.a\{ .b {}` only scopes ` .b`).
+            if matches!(next_c, Some('{' | '}'))
+                && !in_unscoped_at_rule
+                && !in_at_rule_header
+                && !in_declaration
+            {
+                result.push_str(&current_selector);
+                current_selector.clear();
+            }
+            continue;
+        }
+
         // Handle strings
         if in_string || c == '"' || c == '\'' {
             let sink = sink!();
@@ -1631,13 +1666,17 @@ impl<'a> SelectorScoper<'a> {
         // split is allowed in it (worked out on the first newline or tab).
         let mut angular_part_start = 0;
         let mut other_whitespace_split: Option<bool> = None;
-        while let Some((at, separator, end)) = find_combinator_separator(selector, from, leading) {
+        let closes_paren = closes_enclosing_paren_table(selector);
+        while let Some((at, separator, end)) =
+            find_combinator_separator(selector, &closes_paren, from, leading)
+        {
             from = end;
             let is_other_whitespace =
                 matches!(selector.as_bytes()[at], b'\n' | b'\t' | b'\r' | b'\x0C');
             if is_other_whitespace
                 && !*other_whitespace_split.get_or_insert_with(|| {
-                    let angular_part_end = find_angular_part_end(selector, angular_part_start, at);
+                    let angular_part_end =
+                        find_angular_part_end(selector, &closes_paren, angular_part_start, at);
                     can_split_on_other_whitespace(&selector[angular_part_start..angular_part_end])
                 })
             {
@@ -1784,6 +1823,7 @@ fn unwrap_is_attribute(scope_selector: &str) -> String {
 /// the comma (a newline, say) stays in the selectors.
 fn split_selector_list(selector: &str) -> Vec<&str> {
     let bytes = selector.as_bytes();
+    let closes_paren = closes_enclosing_paren_table(selector);
     let mut parts = Vec::new();
     let mut start = 0;
     let mut at = 0;
@@ -1796,7 +1836,7 @@ fn split_selector_list(selector: &str) -> Vec<&str> {
             at += 1;
             continue;
         };
-        if closes_enclosing_paren(selector, comma + 1) {
+        if closes_paren[comma + 1] {
             at += 1;
             continue;
         }
@@ -1852,10 +1892,12 @@ fn contains_deep_combinator(selector: &str) -> bool {
 /// `/( |>|\+|~(?!=))(?!<closes an enclosing paren>)\s*/g`, plus (from byte
 /// `other_whitespace_from` on) a newline, tab, carriage return or form feed,
 /// which is reported as a space.
+/// `closes_paren` is [`closes_enclosing_paren_table`] of `selector`.
 /// Returns its start, the separator character and the end of the trailing
 /// whitespace.
 fn find_combinator_separator(
     selector: &str,
+    closes_paren: &[bool],
     from: usize,
     other_whitespace_from: usize,
 ) -> Option<(usize, char, usize)> {
@@ -1868,7 +1910,7 @@ fn find_combinator_separator(
             b'\n' | b'\t' | b'\r' | b'\x0C' if at >= other_whitespace_from => b' ',
             _ => return None,
         };
-        if closes_enclosing_paren(selector, at + 1) {
+        if closes_paren[at + 1] {
             return None;
         }
         let rest = &selector[at + 1..];
@@ -1886,10 +1928,12 @@ fn is_escaped_hex_space(selector: &str, start: usize, at: usize) -> bool {
 
 /// End of the part Angular's own split (`/( |>|\+|~(?!=))…\s*/`, no newline or
 /// tab) would produce for the part starting at byte `start`, given that byte
-/// `at` is inside it.
-fn find_angular_part_end(selector: &str, start: usize, at: usize) -> usize {
+/// `at` is inside it. `closes_paren` is [`closes_enclosing_paren_table`] of `selector`.
+fn find_angular_part_end(selector: &str, closes_paren: &[bool], start: usize, at: usize) -> usize {
     let mut from = at;
-    while let Some((end_at, _, end)) = find_combinator_separator(selector, from, usize::MAX) {
+    while let Some((end_at, _, end)) =
+        find_combinator_separator(selector, closes_paren, from, usize::MAX)
+    {
         if !is_escaped_hex_space(selector, start, end_at) {
             return end_at;
         }
@@ -2661,6 +2705,50 @@ fn skip_polyfill_unscoped_rule(s: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The forward scan [`closes_enclosing_paren_table`] replaces.
+    fn closes_enclosing_paren_scan(s: &str, from: usize) -> bool {
+        let mut depth = 0u32;
+        for &b in &s.as_bytes()[from..] {
+            match b {
+                b'(' => {
+                    depth += 1;
+                    if depth > 3 {
+                        return false;
+                    }
+                }
+                b')' => {
+                    if depth == 0 {
+                        return true;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn test_closes_enclosing_paren_table_matches_forward_scan() {
+        // Every string of up to 8 bytes over `(`, `)`, `a`.
+        let alphabet = *b"()a";
+        for len in 0..=8u32 {
+            for mut code in 0..3usize.pow(len) {
+                let mut bytes = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    bytes.push(alphabet[code % 3]);
+                    code /= 3;
+                }
+                let s = String::from_utf8(bytes).unwrap();
+                let table = closes_enclosing_paren_table(&s);
+                assert_eq!(table.len(), s.len() + 1);
+                for (from, &closes) in table.iter().enumerate() {
+                    assert_eq!(closes, closes_enclosing_paren_scan(&s, from), "{s:?} at {from}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_basic_encapsulation() {
