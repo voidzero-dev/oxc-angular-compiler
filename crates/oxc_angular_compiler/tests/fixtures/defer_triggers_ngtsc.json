@@ -1,0 +1,718 @@
+{
+  "compiler": "22.2.2",
+  "cases": [
+    {
+      "template": "@defer (on timer(1s) idle) {x}",
+      "summary": ["error 21..25 Unexpected token \"idle\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover(a) foo) {x}",
+      "summary": ["error 20..23 Unexpected token \"foo\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on idle, idle) {x}",
+      "summary": [
+        "error 17..21 Duplicate \"idle\" trigger is not allowed",
+        "on: idle(timeout=- span=8..15 name=11..15)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({trigger: x, rootMargin: '1px'})) {x}",
+      "summary": [
+        "on: viewport(ref=x options={rootMargin} span=8..52 name=11..19)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({rootMargin: '1px, 2px', threshold: [1, 2]})) {x}",
+      "summary": [
+        "on: viewport(ref=- options={rootMargin,threshold} span=8..64 name=11..19)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on hover(a, b)) {x}",
+      "summary": [
+        "error 11..16 \"hover\" trigger can only have zero or one parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on hover(a), interaction(b)) {x}",
+      "summary": [
+        "on: hover(ref=a span=8..19 name=11..16) interaction(ref=b span=21..35 name=21..32)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle,) {x}",
+      "summary": ["on: idle(timeout=- span=8..15 name=11..15)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on ,idle) {x}",
+      "summary": ["error 11..12 Unexpected token \",\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on idle()) {x}",
+      "summary": ["on: idle(timeout=- span=8..17 name=11..15)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on timer) {x}",
+      "summary": [
+        "error 11..16 \"timer\" trigger must have exactly one parameter",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on timer(abc)) {x}",
+      "summary": [
+        "error 11..16 Could not parse time value of trigger \"timer\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on timer(1s, 2s)) {x}",
+      "summary": [
+        "error 11..16 \"timer\" trigger must have exactly one parameter",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on immediate(1)) {x}",
+      "summary": [
+        "error 11..20 \"immediate\" trigger cannot have parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on foo) {x}",
+      "summary": [
+        "error 11..14 Unrecognized trigger type \"foo\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on never) {x}",
+      "summary": [
+        "error 11..16 Unrecognized trigger type \"never\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (when) {x}",
+      "summary": ["error 8..12 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on) {x}",
+      "summary": ["error 8..10 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on ) {x}",
+      "summary": ["on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (when ) {x}",
+      "skip": "Angular parses an empty `when` trigger that ngtsc then fails to compile (EmptyExpr reification); oxc adds no trigger",
+      "summary": ["on: when(value=EmptyExpr span=8..13)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (prefetch on ) {x}",
+      "summary": ["on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (prefetch on) {x}",
+      "summary": ["error 8..19 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (when a; when b) {x}",
+      "summary": [
+        "error 16..22 Duplicate \"when\" trigger is not allowed",
+        "on: when(value=PropertyRead span=8..14)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (when a +) {x}",
+      "skip": "the expression parser reports \"a +\" twice; it does so for any binding (`[a]=\"a +\"`)",
+      "summary": [
+        "error Parser Error",
+        "on: when(value=Binary span=8..16)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (prefetch when a; hydrate when b) {x}",
+      "summary": [
+        "on: ",
+        "prefetch: when(value=PropertyRead span=8..23)",
+        "hydrate: when(value=PropertyRead span=25..39)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate on hover(a)) {x}",
+      "summary": [
+        "error 19..24 Hydration trigger \"hover\" cannot have parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate on interaction(a)) {x}",
+      "summary": [
+        "error 19..30 Hydration trigger \"interaction\" cannot have parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate on viewport(a)) {x}",
+      "summary": [
+        "error 19..27 \"viewport\" hydration trigger cannot have a \"trigger\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate on viewport(a, b)) {x}",
+      "summary": [
+        "error 19..27 Hydration trigger \"viewport\" cannot have more than one parameter",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate on viewport({rootMargin: '1px'})) {x}",
+      "summary": [
+        "on: ",
+        "prefetch: ",
+        "hydrate: viewport(ref=- options={rootMargin} span=8..48 name=19..27)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate on viewport({trigger: a})) {x}",
+      "summary": [
+        "error 19..27 \"viewport\" hydration trigger cannot have a \"trigger\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate never; hydrate on idle) {x}",
+      "summary": [
+        "error 0..41 Cannot specify additional `hydrate` triggers if `hydrate never` is present",
+        "on: ",
+        "prefetch: ",
+        "hydrate: idle(timeout=- span=23..38 name=34..38) never(span=8..21 name=16..21)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate never; hydrate never) {x}",
+      "summary": [
+        "error 23..36 Duplicate \"never\" trigger is not allowed",
+        "on: ",
+        "prefetch: ",
+        "hydrate: never(span=8..21 name=16..21)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate never ) {x}",
+      "summary": ["on: ", "prefetch: ", "hydrate: never(span=8..22 name=16..21)"]
+    },
+    {
+      "template": "@defer (prefetch on idle; on timer(100ms)) {x}",
+      "summary": [
+        "on: timer(delay=100 span=26..41 name=29..34)",
+        "prefetch: idle(timeout=- span=8..24 name=20..24)",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport(1)) {x}",
+      "summary": ["on: viewport(ref=1 options=- span=8..22 name=11..19)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on viewport({root: a})) {x}",
+      "summary": [
+        "error 11..19 The \"root\" option is not supported in the options parameter of the \"viewport\" trigger",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({trigger: a.b})) {x}",
+      "summary": [
+        "error 11..19 \"trigger\" option of the \"viewport\" trigger must be an identifier",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({trigger: this.a})) {x}",
+      "summary": [
+        "error 11..19 \"trigger\" option of the \"viewport\" trigger must be an identifier",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({threshold: a})) {x}",
+      "summary": [
+        "error 11..19 Options of the \"viewport\" trigger must be an object literal containing only literal values, but \"PropertyRead\" was found",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({threshold: [1, a], rootMargin: b()})) {x}",
+      "summary": [
+        "error 11..19 Options of the \"viewport\" trigger must be an object literal containing only literal values, but \"Call\" was found",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({...a})) {x}",
+      "summary": [
+        "error 11..19 Spread operator are not allowed in this context",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport([a])) {x}",
+      "summary": [
+        "on: viewport(ref=[a] options=- span=8..24 name=11..19)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({a: })) {x}",
+      "skip": "the expression parser accepts `{a: }` without error; it does so for any binding",
+      "summary": [
+        "error Parser Error",
+        "error 11..19 Options of the \"viewport\" trigger must be an object literal containing only literal values, but \"EmptyExpr\" was found",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({trigger: a})) {x}",
+      "summary": [
+        "on: viewport(ref=a options={} span=8..33 name=11..19)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle, viewport({trigger: a, threshold: 0.5})) {x}",
+      "summary": [
+        "on: idle(timeout=- span=8..15 name=11..15) viewport(ref=a options={threshold} span=17..55 name=17..25)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle(100ms)) {x}",
+      "summary": ["on: idle(timeout=100 span=8..22 name=11..15)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on idle(1, 2)) {x}",
+      "summary": [
+        "error 11..15 \"idle\" trigger can only have zero or one parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle(abc)) {x}",
+      "summary": [
+        "error 11..15 Could not parse time value of trigger \"idle\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on hover('a,b')) {x}",
+      "summary": ["on: hover(ref='a,b' span=8..23 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on interaction(fn(a, b))) {x}",
+      "summary": ["on: interaction(ref=fn(a, b) span=8..32 name=11..22)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (bogus) {x}",
+      "summary": ["error 8..13 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on 1) {x}",
+      "summary": ["error 11..12 Unexpected token \"1\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on true) {x}",
+      "summary": ["error 11..15 Unexpected token \"true\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on 'idle') {x}",
+      "summary": ["error 11..17 Unexpected token \"idle\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on idle timer) {x}",
+      "summary": [
+        "error 16..21 Unexpected token \"timer\"",
+        "error 16..21 \"timer\" trigger must have exactly one parameter",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on  idle ,  timer(500ms) ) {x}",
+      "summary": [
+        "on: idle(timeout=- span=8..16 name=12..16) timer(delay=500 span=20..32 name=20..25)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle\n,\ntimer(5)) {x}",
+      "summary": [
+        "on: idle(timeout=- span=8..15 name=11..15) timer(delay=5 span=18..26 name=18..23)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on hover([a, b])) {x}",
+      "summary": ["on: hover(ref=[a, b] span=8..24 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover(a.b)) {x}",
+      "summary": ["on: hover(ref=a.b span=8..21 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover(a)b) {x}",
+      "summary": ["error 19..20 Unexpected token \"b\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover({a)) {x}",
+      "summary": ["error 19..20 Unexpected end of expression", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover(,a)) {x}",
+      "summary": ["on: hover(ref=,a span=8..20 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on timer(1s), idle, immediate, hover(a), interaction(b), viewport(c)) {x}",
+      "summary": [
+        "on: idle(timeout=- span=22..26 name=22..26) immediate(span=28..37 name=28..37) hover(ref=a span=39..47 name=39..44) timer(delay=1000 span=8..20 name=11..16) interaction(ref=b span=49..63 name=49..60) viewport(ref=c options=- span=65..76 name=65..73)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on timer(1 s)) {x}",
+      "summary": [
+        "error 11..16 Could not parse time value of trigger \"timer\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on timer(1.5s)) {x}",
+      "summary": ["on: timer(delay=1500 span=8..22 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover, hover) {x}",
+      "summary": [
+        "error 18..23 Duplicate \"hover\" trigger is not allowed",
+        "on: hover(ref=- span=8..16 name=11..16)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on immediate; on immediate) {x}",
+      "summary": [
+        "error 22..34 Duplicate \"immediate\" trigger is not allowed",
+        "on: immediate(span=8..20 name=11..20)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on interaction(a); prefetch on interaction(b); hydrate on interaction) {x}",
+      "summary": [
+        "on: interaction(ref=a span=8..25 name=11..22)",
+        "prefetch: interaction(ref=b span=27..53 name=39..50)",
+        "hydrate: interaction(ref=- span=55..77 name=66..77)"
+      ]
+    },
+    {
+      "template": "@defer (on immediate; never) {x}",
+      "summary": [
+        "error 22..27 Unrecognized trigger",
+        "on: immediate(span=8..20 name=11..20)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate never, and thank you) {x}",
+      "summary": ["error 8..36 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (when isVisible#){hello}",
+      "summary": [
+        "error Parser Error",
+        "error Parser Error",
+        "on: when(value=PropertyRead span=8..23)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (unknown visible()){hello}",
+      "summary": ["error 8..25 Unrecognized trigger", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover idle) {hello}",
+      "summary": [
+        "error 17..21 Unexpected token \"idle\"",
+        "on: idle(timeout=- span=17..21 name=17..21)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport(button) idle) {hello}",
+      "summary": ["error 28..32 Unexpected token \"idle\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on viewport(button), , idle) {hello}",
+      "summary": [
+        "error 29..30 Unexpected token \",\"",
+        "on: viewport(ref=button options=- span=8..27 name=11..19)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport(but)ton) {hello}",
+      "summary": ["error 24..27 Unexpected token \"ton\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on 123) {hello}",
+      "summary": ["error 11..14 Unexpected token \"123\"", "on: ", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on viewport[]) {hello}",
+      "summary": [
+        "error 19..20 Unexpected token \"[\"",
+        "error 19..20 Unexpected token \"[\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle(123abc)) {hello}",
+      "summary": [
+        "error 11..15 Could not parse time value of trigger \"idle\"",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on interaction(a, b)) {hello}",
+      "summary": [
+        "error 11..22 \"interaction\" trigger can only have zero or one parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport(a, b)) {hello}",
+      "summary": [
+        "error 11..19 \"viewport\" trigger can only have zero or one parameters",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({trigger: \"str\"})) {hello}",
+      "summary": [
+        "error 11..19 \"trigger\" option of the \"viewport\" trigger must be an identifier",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on viewport({threshold: [1, someVar, 3]})) {hello}",
+      "summary": [
+        "error 11..19 Options of the \"viewport\" trigger must be an object literal containing only literal values, but \"PropertyRead\" was found",
+        "on: ",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on idle; when isVisible(); on timer(10), idle) {hello}",
+      "summary": [
+        "error 49..53 Duplicate \"idle\" trigger is not allowed",
+        "on: when(value=Call span=17..33) idle(timeout=- span=8..15 name=11..15) timer(delay=10 span=35..47 name=38..43)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (prefetch when isVisible(); prefetch when somethingElse()) {hello}",
+      "summary": [
+        "error 35..64 Duplicate \"when\" trigger is not allowed",
+        "on: ",
+        "prefetch: when(value=Call span=8..33)",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (prefetch on idle; prefetch when isVisible(); prefetch on timer(10), idle) {hello}",
+      "summary": [
+        "error 76..80 Duplicate \"idle\" trigger is not allowed",
+        "on: ",
+        "prefetch: when(value=Call span=26..51) idle(timeout=- span=8..24 name=20..24) timer(delay=10 span=53..74 name=65..70)",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (on immediate; hydrate on viewport) {hello}",
+      "summary": [
+        "on: immediate(span=8..20 name=11..20)",
+        "prefetch: ",
+        "hydrate: viewport(ref=- options=- span=22..41 name=33..41)"
+      ]
+    },
+    {
+      "template": "@defer (on immediate; prefetch never) {hello}",
+      "summary": [
+        "error 22..36 Unrecognized trigger",
+        "on: immediate(span=8..20 name=11..20)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate never; on idle;) {hello}",
+      "summary": [
+        "on: idle(timeout=- span=23..30 name=26..30)",
+        "prefetch: ",
+        "hydrate: never(span=8..21 name=16..21)"
+      ]
+    },
+    {
+      "template": "@defer(hydrate never ; on idle ;) {hello}",
+      "summary": [
+        "on: idle(timeout=- span=23..30 name=26..30)",
+        "prefetch: ",
+        "hydrate: never(span=7..21 name=15..20)"
+      ]
+    },
+    {
+      "template": "@defer(\n        on idle;\n        hydrate never) {hello}",
+      "summary": [
+        "on: idle(timeout=- span=16..23 name=19..23)",
+        "prefetch: ",
+        "hydrate: never(span=33..46 name=41..46)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate never; hydrate when shouldHydrate()) {hello}",
+      "summary": [
+        "error 0..54 Cannot specify additional `hydrate` triggers if `hydrate never` is present",
+        "on: ",
+        "prefetch: ",
+        "hydrate: when(value=Call span=23..51) never(span=8..21 name=16..21)"
+      ]
+    },
+    {
+      "template": "@defer (hydrate when shouldHydrate(); hydrate never) {hello}",
+      "summary": [
+        "error 0..54 Cannot specify additional `hydrate` triggers if `hydrate never` is present",
+        "on: ",
+        "prefetch: ",
+        "hydrate: when(value=Call span=8..36) never(span=38..51 name=46..51)"
+      ]
+    },
+    {
+      "template": "@defer (on\n  timer(1s),\n  hover(a)) {x}",
+      "summary": [
+        "on: hover(ref=a span=26..34 name=26..31) timer(delay=1000 span=8..22 name=13..18)",
+        "prefetch: ",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (prefetch on hover(a), viewport({rootMargin: '1px'})) {x}",
+      "summary": [
+        "on: ",
+        "prefetch: hover(ref=a span=8..28 name=20..25) viewport(ref=- options={rootMargin} span=30..59 name=30..38)",
+        "hydrate: "
+      ]
+    },
+    {
+      "template": "@defer (hydrate on idle, timer(1s), immediate) {x}",
+      "summary": [
+        "on: ",
+        "prefetch: ",
+        "hydrate: idle(timeout=- span=8..23 name=19..23) immediate(span=36..45 name=36..45) timer(delay=1000 span=25..34 name=25..30)"
+      ]
+    },
+    {
+      "template": "@defer (on hover(`a,b`)) {x}",
+      "summary": ["on: hover(ref=`a,b` span=8..23 name=11..16)", "prefetch: ", "hydrate: "]
+    },
+    {
+      "template": "@defer (on hover(a ?? b)) {x}",
+      "summary": ["on: hover(ref=a ?? b span=8..24 name=11..16)", "prefetch: ", "hydrate: "]
+    }
+  ]
+}

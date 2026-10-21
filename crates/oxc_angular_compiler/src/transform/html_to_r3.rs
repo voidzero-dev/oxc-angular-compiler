@@ -34,7 +34,9 @@ use crate::schema::{
     element_security_context_for, is_known_element, is_trusted_types_sink_at,
     strips_namespaced_svg_script, strips_namespaced_svg_style, uses_namespaced_schema,
 };
-use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
+use crate::transform::control_flow::{
+    DeferTriggerError, parse_conditional_params, parse_defer_triggers,
+};
 use crate::util::ParseError;
 
 /// Regex pattern for binding prefixes.
@@ -2864,35 +2866,19 @@ impl<'a> HtmlToR3Transform<'a> {
         let children = self.visit_children(&block.children);
 
         // Parse defer triggers from block parameters
-        let trigger_result =
-            parse_defer_triggers(self.allocator, &block.parameters, &self.binding_parser);
+        let trigger_result = parse_defer_triggers(
+            self.allocator,
+            &block.parameters,
+            &self.binding_parser,
+            block.start_span,
+        );
 
         // Report trigger parsing errors via diagnostics
         for error in trigger_result.errors {
-            self.errors.push(crate::util::ParseError {
-                span: crate::util::ParseSourceSpan::new(
-                    crate::util::ParseLocation::new(
-                        std::sync::Arc::new(crate::util::ParseSourceFile::new(
-                            self.source_text,
-                            "template",
-                        )),
-                        block.span.start,
-                        0,
-                        0,
-                    ),
-                    crate::util::ParseLocation::new(
-                        std::sync::Arc::new(crate::util::ParseSourceFile::new(
-                            self.source_text,
-                            "template",
-                        )),
-                        block.span.end,
-                        0,
-                        0,
-                    ),
-                ),
-                msg: error,
-                level: crate::util::ParseErrorLevel::Error,
-            });
+            match error {
+                DeferTriggerError::Trigger { span, msg } => self.report_error(&msg, span),
+                DeferTriggerError::Expression(error) => self.errors.push(error),
+            }
         }
 
         // Process connected blocks with validation
