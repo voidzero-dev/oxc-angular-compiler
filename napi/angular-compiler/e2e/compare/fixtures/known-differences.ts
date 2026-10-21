@@ -145,10 +145,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['MyComponent.ɵcmp'],
     reasons: [DOM_ONLY],
   },
-  'full-file/component-with-pipes': {
-    fields: ['ComponentWithPipes.ɵcmp'],
-    reasons: ['component styles keep a leading newline'],
-  },
   'full-transform/full-transform-complex': {
     fields: [],
     functions: [
@@ -424,11 +420,9 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   },
   'styles/shadow-css-polyfill-rule': {
     fields: ['PolyfillRuleComponent.ɵcmp'],
-    reasons: ['polyfill-rule output drops a leading ";" from the rule body'],
-  },
-  'styles/shadow-css-polyfill-unscoped-rule': {
-    fields: ['PolyfillUnscopedComponent.ɵcmp'],
-    reasons: ['polyfill-unscoped-rule is not scoped and rewritten as Angular does'],
+    reasons: [
+      'Angular 22.2 strips the -shadowcsshost-no-combinator marker left in a rule body (part of its CSS nesting support); Oxc keeps it, as Angular 22.0 does',
+    ],
   },
   'styles/shadow-css-shadow-piercing': {
     fields: ['ShadowPiercingComponent.ɵcmp'],

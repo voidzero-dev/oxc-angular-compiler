@@ -28,6 +28,8 @@
 
 use std::ops::Range;
 
+use crate::component::AngularVersion;
+
 /// Comments are replaced by `%COMMENT<n>%` placeholders during processing,
 /// where `<n>` is the comment's index in the extracted list.
 ///
@@ -303,6 +305,8 @@ impl SafeSelector {
 /// Shim CSS text with the given selectors.
 ///
 /// This is the main entry point matching Angular's `ShadowCss.shimCssText()`.
+/// It follows the latest Angular release; use [`shim_css_text_for_version`]
+/// to match an older one.
 ///
 /// # Arguments
 ///
@@ -324,25 +328,42 @@ impl SafeSelector {
 /// assert!(result.contains("[contenta]"));
 /// ```
 pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
+    shim_css_text_for_version(css, content_attr, host_attr, None)
+}
+
+/// Shim CSS text the way the given Angular version's `ShadowCss` does.
+///
+/// `None` means the latest Angular release. Versions before v22.0.0-rc.0 also
+/// run the legacy Shadow DOM polyfill passes (`polyfill-next-selector`,
+/// `polyfill-rule`, `polyfill-unscoped-rule`, `::shadow`, `::content`); see
+/// [`AngularVersion::uses_shadow_css_polyfills`].
+pub fn shim_css_text_for_version(
+    css: &str,
+    content_attr: &str,
+    host_attr: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
     if css.is_empty() {
         return String::new();
     }
 
+    let legacy_polyfills = angular_version.is_some_and(|v| v.uses_shadow_css_polyfills());
+
     // Step 0: Extract comments and replace with placeholders
     // This prevents comment contents from interfering with CSS parsing
-    let (result, comments) = extract_comments(css);
-
-    let mut result = result;
+    let (mut result, comments) = extract_comments(css);
 
     // Step 1: Process polyfill directives (polyfill-next-selector, polyfill-rule)
     // These convert ShadowDOM rules to work with the CSS shim
-    result = insert_polyfill_directives(&result);
-    result = insert_polyfill_rules(&result);
-
     // Step 2: Extract unscoped rules (polyfill-unscoped-rule)
     // These rules are added at the end WITHOUT scoping
-    let unscoped_rules = extract_unscoped_rules(&result);
-    result = remove_unscoped_rules(&result);
+    let mut unscoped_rules = String::new();
+    if legacy_polyfills {
+        result = insert_polyfill_directives(&result);
+        result = insert_polyfill_rules(&result);
+        unscoped_rules = extract_unscoped_rules(&result);
+        result = remove_unscoped_rules(&result);
+    }
 
     // Step 3: Handle :host-context() - must be done before :host
     result = convert_colon_host_context(&result, content_attr, host_attr);
@@ -350,8 +371,10 @@ pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
     // Step 4: Handle :host selectors
     result = convert_colon_host(&result, host_attr);
 
-    // Step 5: Handle ::ng-deep and other shadow DOM selectors
-    result = convert_shadow_dom_selectors(&result);
+    // Step 5: Handle ::shadow and ::content (removed in v22)
+    if legacy_polyfills {
+        result = convert_shadow_dom_selectors(&result);
+    }
 
     // Step 6: Scope keyframes and animation properties
     if !content_attr.is_empty() {
@@ -368,8 +391,10 @@ pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
         result = result + "\n" + unscoped_rules.trim();
     }
 
-    // Step 9: Restore comments
-    restore_comments(&result, &comments)
+    // Step 9: Trim, then restore comments. Angular's `_scopeCssText` trims
+    // before the comments come back, so newlines kept from a leading or
+    // trailing comment survive.
+    restore_comments(result.trim(), &comments)
 }
 
 /// Extract comments and replace them with placeholders.
@@ -926,9 +951,18 @@ fn scope_animation_keyframe(
 /// This is the original API that generates `[ng-c{id}]` format.
 /// Consider using `shim_css_text` directly for more control.
 pub fn encapsulate_style(css: &str, component_id: &str) -> String {
-    let content_attr = format!("ng-c{}", component_id);
-    let host_attr = format!("ng-c{}", component_id);
-    shim_css_text(css, &content_attr, &host_attr)
+    encapsulate_style_for_version(css, component_id, None)
+}
+
+/// [`encapsulate_style`] for a specific Angular version (`None` = latest).
+pub fn encapsulate_style_for_version(
+    css: &str,
+    component_id: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
+    let content_attr = format!("ng-c{component_id}");
+    let host_attr = format!("ng-c{component_id}");
+    shim_css_text_for_version(css, &content_attr, &host_attr, angular_version)
 }
 
 // =============================================================================
@@ -955,35 +989,31 @@ fn convert_colon_host_context(css: &str, content_attr: &str, host_attr: &str) ->
     // not across the entire CSS. Otherwise, multiple :host-context rules will be
     // combined exponentially, causing massive output explosion.
     //
-    // Strategy: Scan through CSS, identify each selector (text before {), process
-    // :host-context only within that selector, then continue to the next rule.
+    // Strategy: Scan through CSS, identify each selector (text before `{`, back to
+    // the previous `{` or `}`), process :host-context only within that selector,
+    // then continue to the next rule. Angular's pattern ends at the next `{` and
+    // applies at any depth, so selectors nested in `@media`/`@supports` count too.
+    // Text that ends at a `}` is a declaration list and is copied as is.
 
     let mut result = String::with_capacity(css.len() * 2);
-    let mut chars = css.chars().peekable();
+    let mut chars = css.chars();
     let mut current_selector = String::new();
-    let mut brace_depth: u32 = 0;
     let mut in_string = false;
     let mut string_char = '"';
 
     while let Some(c) = chars.next() {
         // Handle string literals
-        if !in_string && (c == '"' || c == '\'') {
-            in_string = true;
-            string_char = c;
-            if brace_depth == 0 {
-                current_selector.push(c);
-            } else {
-                result.push(c);
-            }
-            continue;
-        }
-        if in_string {
-            if brace_depth == 0 {
-                current_selector.push(c);
-            } else {
-                result.push(c);
-            }
-            if c == string_char {
+        if in_string || c == '"' || c == '\'' {
+            current_selector.push(c);
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == '\\' {
+                // An escaped character (`\"`, `\'`, `\\`) never ends the string.
+                if let Some(next_c) = chars.next() {
+                    current_selector.push(next_c);
+                }
+            } else if c == string_char {
                 in_string = false;
             }
             continue;
@@ -991,30 +1021,22 @@ fn convert_colon_host_context(css: &str, content_attr: &str, host_attr: &str) ->
 
         match c {
             '{' => {
-                if brace_depth == 0 {
-                    // End of selector - process :host-context in this selector only
-                    let processed_selector = convert_colon_host_context_in_selector(
-                        &current_selector,
-                        content_attr,
-                        host_attr,
-                    );
-                    result.push_str(&processed_selector);
-                    current_selector.clear();
-                }
+                // End of selector - process :host-context in this selector only
+                let processed_selector = convert_colon_host_context_in_selector(
+                    &current_selector,
+                    content_attr,
+                    host_attr,
+                );
+                result.push_str(&processed_selector);
+                current_selector.clear();
                 result.push('{');
-                brace_depth += 1;
             }
             '}' => {
+                result.push_str(&current_selector);
+                current_selector.clear();
                 result.push('}');
-                brace_depth = brace_depth.saturating_sub(1);
             }
-            _ => {
-                if brace_depth == 0 {
-                    current_selector.push(c);
-                } else {
-                    result.push(c);
-                }
-            }
+            _ => current_selector.push(c),
         }
     }
 
@@ -1599,10 +1621,16 @@ fn convert_shadow_dom_selectors(css: &str) -> String {
 // Selector scoping
 // =============================================================================
 
-/// At-rules that should NOT have scoping selectors applied (e.g., @font-face, @page).
-/// These rules define global resources that shouldn't be component-scoped.
-/// All other at-rules (@media, @supports, @layer, @container, etc.) have their contents scoped.
-const NO_SCOPE_AT_RULES: &[&str] = &["@font-face", "@page"];
+/// At-rules whose bodies hold rules that are scoped like top-level ones.
+/// Matches Angular's `scopedAtRuleIdentifiers`.
+const SCOPED_AT_RULES: &[&str] =
+    &["@media", "@supports", "@document", "@layer", "@container", "@scope", "@starting-style"];
+
+/// At-rules whose bodies are kept unscoped but have `::ng-deep`, `>>>`,
+/// `/deep/` and `:host` stripped (e.g. `@page { ::ng-deep @top-left {} }`).
+/// Every other block at-rule (`@keyframes`, `@property`, `@counter-style`,
+/// `@font-feature-values`, unknown ones...) keeps its body exactly as written.
+const STRIP_SCOPING_AT_RULES: &[&str] = &["@font-face", "@page"];
 
 /// Scope all CSS selectors with the content attribute.
 fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
@@ -1617,34 +1645,35 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
     let mut in_declaration = false;
     let mut declaration_depth: u32 = 0;
     let mut at_rule_header = String::new(); // Collect the at-rule header text
-    let mut in_no_scope_at_rule = false; // Track if we're inside @font-face/@page
-    let mut no_scope_depth: u32 = 0; // Track nesting depth for no-scope at-rules
-    let mut no_scope_content = String::new(); // Collect content for no-scope at-rules
+    let mut in_unscoped_at_rule = false; // Inside an at-rule whose body is not scoped
+    let mut strip_unscoped_body = false; // Strip ::ng-deep/:host from that body (@font-face/@page)
+    let mut unscoped_depth: u32 = 0; // Brace depth inside the unscoped at-rule
+    let mut unscoped_content = String::new(); // Collected body of the unscoped at-rule
+
+    // Where comment and string text goes in the current state.
+    macro_rules! sink {
+        () => {
+            if in_unscoped_at_rule {
+                &mut unscoped_content
+            } else if in_at_rule_header || in_declaration {
+                &mut result
+            } else {
+                &mut current_selector
+            }
+        };
+    }
 
     while let Some(c) = chars.next() {
         // Handle comments
         if !in_string && c == '/' && chars.peek() == Some(&'*') {
             in_comment = true;
-            if in_at_rule_header || in_declaration {
-                result.push(c);
-            } else {
-                current_selector.push(c);
-            }
-            continue;
         }
         if in_comment {
-            if in_at_rule_header || in_declaration {
-                result.push(c);
-            } else {
-                current_selector.push(c);
-            }
+            let sink = sink!();
+            sink.push(c);
             if c == '*' && chars.peek() == Some(&'/') {
                 if let Some(next_c) = chars.next() {
-                    if in_at_rule_header || in_declaration {
-                        result.push(next_c);
-                    } else {
-                        current_selector.push(next_c);
-                    }
+                    sink.push(next_c);
                 }
                 in_comment = false;
             }
@@ -1652,60 +1681,56 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
         }
 
         // Handle strings
-        if !in_string && (c == '"' || c == '\'') {
-            in_string = true;
-            string_char = c;
-            if in_no_scope_at_rule {
-                no_scope_content.push(c);
-            } else if in_at_rule_header || in_declaration {
-                result.push(c);
-            } else {
-                current_selector.push(c);
-            }
-            continue;
-        }
-        if in_string {
-            if in_no_scope_at_rule {
-                no_scope_content.push(c);
-            } else if in_at_rule_header || in_declaration {
-                result.push(c);
-            } else {
-                current_selector.push(c);
-            }
-            if c == string_char {
+        if in_string || c == '"' || c == '\'' {
+            let sink = sink!();
+            sink.push(c);
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == '\\' {
+                // An escaped character (`\"`, `\'`, `\\`) never ends the string.
+                if let Some(next_c) = chars.next() {
+                    sink.push(next_c);
+                }
+            } else if c == string_char {
                 in_string = false;
             }
             continue;
         }
 
-        // Handle content inside @font-face/@page (no scoping, but strip selectors)
-        // This must be checked BEFORE the @ rule handling so nested @-rules
-        // (like @top-left inside @page) are collected properly
-        if in_no_scope_at_rule {
+        // Handle the body of an at-rule that is not scoped. This must be
+        // checked BEFORE the @ rule handling so nested @-rules (like @top-left
+        // inside @page) are collected properly
+        if in_unscoped_at_rule {
             if c == '{' {
-                no_scope_depth += 1;
-                no_scope_content.push(c);
+                unscoped_depth += 1;
+                unscoped_content.push(c);
             } else if c == '}' {
-                no_scope_depth -= 1;
-                if no_scope_depth == 0 {
-                    // Strip ::ng-deep, >>>, /deep/, and :host from the collected content
-                    let stripped = strip_scoping_selectors(&no_scope_content, host_attr);
-                    result.push_str(&stripped);
+                unscoped_depth -= 1;
+                if unscoped_depth == 0 {
+                    if strip_unscoped_body {
+                        // Strip ::ng-deep, >>>, /deep/, and :host from the collected content
+                        result.push_str(&strip_scoping_selectors(&unscoped_content, host_attr));
+                    } else {
+                        result.push_str(&unscoped_content);
+                    }
                     result.push('}');
-                    no_scope_content.clear();
-                    in_no_scope_at_rule = false;
+                    unscoped_content.clear();
+                    in_unscoped_at_rule = false;
                     at_rule_depth = at_rule_depth.saturating_sub(1);
                 } else {
-                    no_scope_content.push(c);
+                    unscoped_content.push(c);
                 }
             } else {
-                no_scope_content.push(c);
+                unscoped_content.push(c);
             }
             continue;
         }
 
-        // Handle @ rules (media queries, keyframes, etc.)
-        if c == '@' {
+        // Handle @ rules (media queries, keyframes, etc.). An `@` inside a
+        // declaration block or an at-rule header (`url(a@2x.png)`) does not
+        // start an at-rule; it is copied by the branches below.
+        if c == '@' && !in_declaration && !in_at_rule_header {
             // Flush any pending selector
             if !current_selector.is_empty() {
                 result.push_str(&current_selector);
@@ -1725,11 +1750,13 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
                 at_rule_depth += 1;
                 in_at_rule_header = false;
 
-                // Check if this is a no-scope at-rule (@font-face, @page)
-                let header_lower = at_rule_header.to_lowercase();
-                if NO_SCOPE_AT_RULES.iter().any(|r| header_lower.starts_with(&r.to_lowercase())) {
-                    in_no_scope_at_rule = true;
-                    no_scope_depth = 1;
+                // Like Angular, only the listed at-rules get their body
+                // scoped, matched case-sensitively on the header's start.
+                if !SCOPED_AT_RULES.iter().any(|r| at_rule_header.starts_with(r)) {
+                    in_unscoped_at_rule = true;
+                    strip_unscoped_body =
+                        STRIP_SCOPING_AT_RULES.iter().any(|r| at_rule_header.starts_with(r));
+                    unscoped_depth = 1;
                 }
                 at_rule_header.clear();
             } else if c == ';' {
@@ -1742,6 +1769,10 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
 
         // Track at-rule nesting for closing braces
         if at_rule_depth > 0 && c == '}' && !in_declaration {
+            // Text with no `{` before the `}` (`@media x { .a {} b }`) is not
+            // a rule; Angular leaves it unscoped, in place.
+            result.push_str(&current_selector);
+            current_selector.clear();
             at_rule_depth = at_rule_depth.saturating_sub(1);
             result.push(c);
             continue;
@@ -1771,6 +1802,9 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
             in_declaration = true;
             declaration_depth = 1;
         } else if c == '}' {
+            // A stray `}`: keep the text before it unscoped, in place.
+            result.push_str(&current_selector);
+            current_selector.clear();
             result.push(c);
         } else {
             current_selector.push(c);
@@ -3396,10 +3430,14 @@ mod tests {
     // Polyfill Directive Tests
     // ============================================================================
 
+    /// The polyfill passes only run for Angular < v22.0.0-rc.0.
+    fn shim_v21(css: &str, content_attr: &str, host_attr: &str) -> String {
+        shim_css_text_for_version(css, content_attr, host_attr, Some(AngularVersion::new(21, 2, 0)))
+    }
+
     #[test]
     fn test_polyfill_next_selector_single_quotes() {
-        let result =
-            shim_css_text("polyfill-next-selector {content: 'x > y'} z {}", "contenta", "");
+        let result = shim_v21("polyfill-next-selector {content: 'x > y'} z {}", "contenta", "");
         assert!(result.contains("x[contenta]"), "Got: {}", result);
         assert!(result.contains("y[contenta]"), "Got: {}", result);
         assert!(!result.contains("polyfill-next-selector"), "Got: {}", result);
@@ -3408,15 +3446,14 @@ mod tests {
 
     #[test]
     fn test_polyfill_next_selector_double_quotes() {
-        let result =
-            shim_css_text("polyfill-next-selector {content: \"x > y\"} z {}", "contenta", "");
+        let result = shim_v21("polyfill-next-selector {content: \"x > y\"} z {}", "contenta", "");
         assert!(result.contains("x[contenta]"), "Got: {}", result);
         assert!(result.contains("y[contenta]"), "Got: {}", result);
     }
 
     #[test]
     fn test_polyfill_next_selector_with_attribute() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-next-selector {content: 'button[priority=\"1\"]'} z {}",
             "contenta",
             "",
@@ -3426,7 +3463,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_single_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: '#menu > .bar';color: blue;}",
             "contenta",
             "",
@@ -3443,7 +3480,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_double_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: \"#menu > .bar\";color: blue;}",
             "contenta",
             "",
@@ -3454,7 +3491,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_unscoped_rule_multiple() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-unscoped-rule {content: 'foo';color: blue;}polyfill-unscoped-rule {content: 'bar';color: red;}",
             "contenta",
             "",
@@ -3467,7 +3504,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_single_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-rule {content: ':host.foo .bar';color: blue;}",
             "contenta",
             "a-host",
@@ -3480,7 +3517,7 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_double_quotes() {
-        let result = shim_css_text(
+        let result = shim_v21(
             "polyfill-rule {content: \":host.foo .bar\";color: blue;}",
             "contenta",
             "a-host",
@@ -3491,12 +3528,34 @@ mod tests {
 
     #[test]
     fn test_polyfill_rule_with_attribute() {
-        let result = shim_css_text(
-            "polyfill-rule {content: 'button[priority=\"1\"]'}",
-            "contenta",
-            "a-host",
-        );
+        let result =
+            shim_v21("polyfill-rule {content: 'button[priority=\"1\"]'}", "contenta", "a-host");
         assert!(result.contains("button[priority=\"1\"][contenta]"), "Got: {}", result);
+    }
+
+    // ============================================================================
+
+    #[test]
+    fn test_polyfills_are_plain_selectors_in_v22() {
+        // Angular v22 dropped the polyfill passes: the blocks are scoped like
+        // any other rule and `::shadow` / `::content` are kept.
+        assert_eq!(
+            shim_css_text("polyfill-next-selector {content: 'x > y'} z {}", "contenta", ""),
+            "polyfill-next-selector[contenta] {content: 'x > y'} z[contenta] {}"
+        );
+        assert_eq!(
+            shim_css_text(
+                "polyfill-unscoped-rule {content: '#menu > .bar';color: blue;}",
+                "contenta",
+                ""
+            ),
+            "polyfill-unscoped-rule[contenta] {content: '#menu > .bar';color: blue;}"
+        );
+        assert_eq!(
+            shim_css_text("x::content y {}", "contenta", ""),
+            "x[contenta]::content y[contenta] {}"
+        );
+        assert_eq!(shim_v21("x::content y {}", "contenta", ""), "x[contenta] y[contenta] {}");
     }
 
     // ============================================================================

@@ -27,8 +27,8 @@ use oxc_angular_compiler::{
     build_decorator_metadata_array as core_build_decorator_metadata_array,
     build_prop_decorators_metadata_in as core_build_prop_decorators_metadata,
     compile_template_for_hmr, compile_template_to_js_with_options,
-    encapsulate_style as rust_encapsulate_style, generate_hmr_update_module,
-    generate_hmr_update_module_from_js, generate_style_update_module,
+    encapsulate_style_for_version as rust_encapsulate_style_for_version,
+    generate_hmr_update_module, generate_hmr_update_module_from_js, generate_style_update_module,
 };
 use oxc_napi::OxcError;
 
@@ -672,6 +672,7 @@ pub fn compile_for_hmr_sync(
                         "_ngcontent-%COMP%",
                         "_nghost-%COMP%",
                         opts.minify_component_styles,
+                        opts.angular_version,
                     )
                 })
                 .filter(|style| !style.trim().is_empty())
@@ -854,6 +855,9 @@ pub struct ComponentIdParts {
 ///
 /// * `css` - The CSS source code to encapsulate
 /// * `component_id` - The component's unique identifier (typically a hash)
+/// * `angular_version` - The Angular version to match. Versions before
+///   v22.0.0-rc.0 keep the legacy `polyfill-*` / `::shadow` / `::content`
+///   handling. When not set, assumes the latest Angular version.
 ///
 /// # Returns
 ///
@@ -871,8 +875,12 @@ pub struct ComponentIdParts {
 /// .button[ng-cabc123] { color: red; }
 /// ```
 #[napi]
-pub fn encapsulate_style(css: String, component_id: String) -> String {
-    rust_encapsulate_style(&css, &component_id)
+pub fn encapsulate_style(
+    css: String,
+    component_id: String,
+    angular_version: Option<AngularVersion>,
+) -> String {
+    rust_encapsulate_style_for_version(&css, &component_id, angular_version.map(Into::into))
 }
 
 /// URLs extracted from @Component decorators in a file.

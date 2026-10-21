@@ -415,6 +415,7 @@ fn generate_cmp_definition<'a>(
                 content_attr,
                 host_attr,
                 options.minify_component_styles,
+                options.angular_version,
             );
             if style.trim().is_empty() {
                 continue;

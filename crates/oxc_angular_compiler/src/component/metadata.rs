@@ -219,6 +219,21 @@ impl AngularVersion {
         self.is_at_least(22, 0, 0)
     }
 
+    /// Check if this version's `ShadowCss` still runs the legacy Shadow DOM
+    /// polyfill passes (before v22.0.0-rc.0).
+    ///
+    /// Until then `shimCssText` rewrote `polyfill-next-selector`,
+    /// `polyfill-rule` and `polyfill-unscoped-rule` blocks and replaced the
+    /// `::shadow` / `::content` combinators with a space. v22.0.0-rc.0 dropped
+    /// all four passes (`22.0.0-next.12` still has them), so a v22 stylesheet
+    /// scopes those tokens like any other selector text.
+    pub fn uses_shadow_css_polyfills(&self) -> bool {
+        if self.major == 22 && self.minor == 0 && self.patch == 0 {
+            return matches!(self.prerelease, Some(prerelease) if prerelease < Prerelease::Rc(0));
+        }
+        self.major < 22
+    }
+
     /// Check if this version is `major.minor.patch` or newer.
     ///
     /// Compares the release triple only: a prerelease of `22.3.0` counts as
@@ -934,6 +949,32 @@ mod tests {
             parse("22.0.0-beta.1"),
         ] {
             assert!(!version.supports_incremental_hydration_runtime(), "{version:?}");
+        }
+    }
+
+    #[test]
+    fn shadow_css_polyfills_end_at_22_0_0_rc_0() {
+        let parse = |s| AngularVersion::parse(s).unwrap();
+
+        for version in [
+            parse("19.2.25"),
+            parse("20.3.18"),
+            parse("21.2.25"),
+            parse("22.0.0-next.12"),
+            // Unknown tags parse to `Other`, below `next`.
+            parse("22.0.0-beta.1"),
+        ] {
+            assert!(version.uses_shadow_css_polyfills(), "{version:?}");
+        }
+
+        for version in [
+            parse("22.0.0-rc.0"),
+            parse("22.0.0"),
+            parse("22.2.2"),
+            parse("23.0.0"),
+            AngularVersion::new(u32::MAX, 0, 0),
+        ] {
+            assert!(!version.uses_shadow_css_polyfills(), "{version:?}");
         }
     }
 }
