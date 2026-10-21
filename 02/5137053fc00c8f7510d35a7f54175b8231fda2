@@ -1,0 +1,21 @@
+crates/oxc_angular_compiler/src/pipeline/phases/parse_extracted_styles.rs
+  s_511f48475a7f5f::t_0f96e35c4abad6 203-210,213-224,226-236,239-241,243-251,253,257-259,265-270,274-276,281-283,286-287,289,442-487
+napi/angular-compiler/e2e/compare/fixtures/bindings/static-style-attribute.fixture.ts
+  s_511f48475a7f5f::t_4a91af2f715b40 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "025137053fc00c8f7510d35a7f54175b8231fda2",
+  "prompts": {},
+  "sessions": {
+    "s_511f48475a7f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aea991d22bf108d27",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
