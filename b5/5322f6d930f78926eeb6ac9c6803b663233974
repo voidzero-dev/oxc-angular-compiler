@@ -1,0 +1,23 @@
+napi/angular-compiler/test/linker.test.ts
+  s_10ef4cb6b3a8e5::t_584383001c5147 5,400-415,422-429
+napi/angular-compiler/vite-plugin/angular-linker-plugin.ts
+  s_10ef4cb6b3a8e5::t_9610034798c09e 114,116-121,123,153
+napi/angular-compiler/vite-plugin/index.ts
+  s_10ef4cb6b3a8e5::t_ea4cc4c3774d29 265-267,1554-1556
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b55322f6d930f78926eeb6ac9c6803b663233974",
+  "prompts": {},
+  "sessions": {
+    "s_10ef4cb6b3a8e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aa9ff03f551b7b39b",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
