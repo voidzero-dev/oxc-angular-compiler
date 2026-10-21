@@ -47,7 +47,7 @@ mod next_context_merging;
 mod ng_container;
 mod nonbindable;
 mod ordering;
-mod parse_extracted_styles;
+pub(crate) mod parse_extracted_styles;
 mod phase_remove_content_selectors;
 mod pipe_creation;
 mod pipe_variadic;

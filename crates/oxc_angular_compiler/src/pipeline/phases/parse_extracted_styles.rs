@@ -204,7 +204,7 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
 /// - Basic syntax: "color: red; height: auto"
 /// - Parentheses: "background: url(foo.png)"
 /// - Quoted values: "content: 'hello'"
-fn parse_style_string(value: &str) -> std::vec::Vec<(String, String)> {
+pub fn parse_style_string(value: &str) -> std::vec::Vec<(String, String)> {
     let mut styles = std::vec::Vec::new();
     let mut chars = value.chars().peekable();
 

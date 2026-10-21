@@ -43,6 +43,7 @@ use oxc_span::{GetSpan, SourceType};
 
 use crate::AngularVersion;
 use crate::optimizer::Edit;
+use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
 /// Check if an object property key needs quoting because it contains unsafe characters.
@@ -889,7 +890,7 @@ fn parse_selector(selector: &str) -> String {
 /// The `host` object in partial declarations has sub-properties:
 /// - `attributes`: `{ "role": "tree", "tabindex": "-1" }` → `["role", "tree", "tabindex", "-1"]`
 /// - `classAttribute`: `"cdk-tree"` → `[1, "cdk-tree"]` (1 = AttributeMarker.Classes)
-/// - `styleAttribute`: `"display: block"` → `[2, "display: block"]` (2 = AttributeMarker.Styles)
+/// - `styleAttribute`: `"display: block"` → `[2, "display", "block"]` (2 = AttributeMarker.Styles)
 ///
 /// Properties and listeners go into `hostBindings`, not `hostAttrs`.
 fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
@@ -940,18 +941,11 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
     // AttributeMarker.Styles = 2
     if let Some(style_attr) = get_string_property(host_obj, "styleAttribute") {
         attrs.push("2".to_string()); // AttributeMarker.Styles
-        // Parse style string into key-value pairs
-        for declaration in style_attr.split(';') {
-            let declaration = declaration.trim();
-            if declaration.is_empty() {
-                continue;
-            }
-            if let Some(colon_pos) = declaration.find(':') {
-                let prop = declaration[..colon_pos].trim();
-                let val = declaration[colon_pos + 1..].trim();
-                attrs.push(format!("\"{prop}\""));
-                attrs.push(format!("\"{val}\""));
-            }
+        // Parse like the template pipeline's `parse_extracted_styles` phase, which
+        // skips `;` and `:` inside quotes and parentheses (`url('a;b')`).
+        for (prop, val) in parse_style_string(style_attr) {
+            attrs.push(crate::output::emitter::escape_string(&prop, false));
+            attrs.push(crate::output::emitter::escape_string(&val, false));
         }
     }
 

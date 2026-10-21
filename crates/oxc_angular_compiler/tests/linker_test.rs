@@ -468,3 +468,24 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "21.0.0", ngImpor
     assert!(result.code.contains("static ɵfac = function Svc_Factory("), "{}", result.code);
     assert!(result.code.contains("ngDevMode) && i0.ɵsetClassMetadata(C,"), "{}", result.code);
 }
+
+/// `styleAttribute` is parsed like Angular's `parse_extracted_styles` phase: `;` and `:`
+/// inside quotes or parentheses do not split, and property names are hyphenated. The
+/// expected `hostAttrs` are Angular 22.2.3's babel linker output for the same declaration.
+#[test]
+fn test_link_host_style_attribute_respects_quotes_and_parens() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class D {
+  static ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", type: D, isStandalone: true, selector: "[d]", host: { styleAttribute: "background: url('a;b'); font-family: \"Foo;Bar\", serif; backgroundColor: blue" }, ngImport: i0 });
+}
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(
+        result.code.contains(
+            r#"hostAttrs: [2, "background", "url('a;b')", "font-family", "\"Foo;Bar\", serif", "background-color", "blue"]"#
+        ),
+        "{}",
+        result.code
+    );
+}
