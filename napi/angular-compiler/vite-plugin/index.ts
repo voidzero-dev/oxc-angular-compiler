@@ -862,9 +862,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     ? merged
                     : null
 
+                // Same template options as the full transform, which reads
+                // `preserveWhitespaces` from the decorator: without it the
+                // update module strips whitespace the compiled component
+                // keeps, and text nodes shift after every HMR.
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
                   angularVersion: pluginOptions.angularVersion,
                   encapsulation: classMetadata.encapsulation,
+                  preserveWhitespaces: classMetadata.preserveWhitespaces,
                   minifyComponentStyles: getMinifyComponentStyles(),
                 })
 

@@ -267,3 +267,53 @@ describe('JIT transform', () => {
     }
   })
 })
+
+describe('@ng/component endpoint template options', () => {
+  const TEMPLATE = '<p>  a  </p>   <span>b</span>'
+
+  async function hmrModuleFor(preserveWhitespaces: boolean) {
+    const name = preserveWhitespaces ? 'ws-keep' : 'ws-strip'
+    const templatePath = join(appDir, `${name}.component.html`)
+    const componentPath = join(appDir, `${name}.component.ts`)
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-${name}',
+        templateUrl: './${name}.component.html',
+        preserveWhitespaces: ${preserveWhitespaces},
+      })
+      export class WsComponent {}
+    `
+    writeFileSync(templatePath, TEMPLATE)
+    writeFileSync(componentPath, source)
+
+    const plugin = getAngularPlugin()
+    const server = await setupPlugin(plugin)
+    const { code } = await transform(plugin, source, componentPath)
+
+    await hotUpdate(plugin, templatePath, server)
+    const body = await requestUpdateModule(server, `${componentPath}@WsComponent`)
+    return { code, body }
+  }
+
+  it('keeps whitespace when the decorator sets preserveWhitespaces', async () => {
+    const { code, body } = await hmrModuleFor(true)
+
+    // The full transform keeps the padding and the text node between the
+    // elements; the update module must build the same view.
+    expect(code).toMatch(/ɵɵtext\(\d+,\s*["'] {2}a {2}["']\)/)
+    expect(code).toMatch(/ɵɵtext\(\d+,\s*["'] {3}["']\)/)
+    expect(body).not.toBe('')
+    expect(body).toMatch(/ɵɵtext\(\d+,\s*["'] {2}a {2}["']\)/)
+    expect(body).toMatch(/ɵɵtext\(\d+,\s*["'] {3}["']\)/)
+  })
+
+  it('strips whitespace when the decorator does not preserve it', async () => {
+    const { code, body } = await hmrModuleFor(false)
+
+    expect(code).not.toMatch(/ɵɵtext\(\d+,\s*["'] {3}["']\)/)
+    expect(body).not.toBe('')
+    expect(body).toMatch(/ɵɵtext\(\d+,\s*["'] a ["']\)/)
+    expect(body).not.toMatch(/ɵɵtext\(\d+,\s*["'] {3}["']\)/)
+  })
+})
