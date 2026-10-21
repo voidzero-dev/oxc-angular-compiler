@@ -1,0 +1,19 @@
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_798ff80b12fbda::t_5ab47147524ab5 3608,4718-4720,4825,5319-5333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "09cf3ef26a6ff78c4a5de53cfa1ba765bce72714",
+  "prompts": {},
+  "sessions": {
+    "s_798ff80b12fbda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac5aaa680b1dec307",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
