@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/output/emitter.rs
+  s_9152231982e5cc::t_fb7fd5d3f25d70 16,1051-1055,1057-1061,1063,1065,1303-1320,2503,2535-2536,2579-2614
+napi/angular-compiler/e2e/compare/fixtures/i18n/i18n-localize-raw-text.fixture.ts
+  s_9152231982e5cc::t_a09d508acaa12a 1-51
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_9152231982e5cc::t_98df780325a801 5623-5624,5634,5657,5671,5683,5685,5706,5730,5798,5810,5839,5857,5877,5893,5923,5936-5937,6046,6086,6097,6127,6159,6167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0ea670e92eec55c9d434c08c10acdec1169cf9ab",
+  "prompts": {},
+  "sessions": {
+    "s_9152231982e5cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a44b1ceddf2c7f224",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
