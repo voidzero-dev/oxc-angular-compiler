@@ -1,0 +1,81 @@
+crates/oxc_angular_compiler/src/component/decorator.rs
+  s_2e795a639ec060::t_999641439532a9 84-87,194,203,267-268,271,435-439
+crates/oxc_angular_compiler/src/component/defer_resolver.rs
+  s_511f48475a7f5f::t_a719346c732547 278-328
+crates/oxc_angular_compiler/src/component/metadata.rs
+  s_f9a1acc2593ab8::t_e37a1f479e8972 222-239,550-560,866,985-1010
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_f9a1acc2593ab8::t_d9a51c7e3b2498 5063-5073,5075-5089
+crates/oxc_angular_compiler/tests/element_name_case_test.rs
+  s_2e795a639ec060::t_08979bddc3ccc6 10-13,35
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_f9a1acc2593ab8::t_9441337d9d0f29 1672-1677,1696-1697,1699,4930,4946-4948,4950-4961,4976,5176-5178,5180,5198,5201-5202,5204,5220,5223,5225,5233,5239-5240,5242-5264,5267-5338,5340-5342,5363,5376-5377,5396,17962-17964,17969
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_with_inline_styles.snap
+  s_f9a1acc2593ab8::t_306a49003ea0e0 17,19
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_with_multiple_styles.snap
+  s_f9a1acc2593ab8::t_fa0dd191c4a87a 16,18
+crates/oxc_angular_compiler/tests/snapshots/integration_test__component_without_styles.snap
+  s_f9a1acc2593ab8::t_d6d9b149a041f9 16,18
+crates/oxc_angular_compiler/tests/snapshots/integration_test__event_before_property_in_bindings.snap
+  s_f9a1acc2593ab8::t_4911104ed47f38 20-21,25,27
+crates/oxc_angular_compiler/tests/snapshots/integration_test__ngfor_attribute_ordering.snap
+  s_f9a1acc2593ab8::t_a300fa4d144f6d 11,13,31-32
+crates/oxc_angular_compiler/tests/snapshots/integration_test__standalone_component_without_imports_uses_dom_only_mode.snap
+  s_f9a1acc2593ab8::t_863b2972206a9c 11,13,33,35-36,38
+napi/angular-compiler/e2e/compare/fixtures/edge-cases/forwardref-import.fixture.ts
+  s_b9101fa11cce19::t_44d29c15f9b254 13-14,41-42,79-80,147-148
+napi/angular-compiler/e2e/compare/fixtures/full-transform/basic.fixture.ts
+  s_511f48475a7f5f::t_572f3641b03330 47,68,95,121,148,171,197,233,265,298,533,718,850
+napi/angular-compiler/e2e/compare/fixtures/hmr/basic.fixture.ts
+  s_511f48475a7f5f::t_a87a2b4dd04e55 33,42
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_511f48475a7f5f::t_4db20da58425ae 43-44,52-53,137-139,141-143,145-147,149-153,155-156,509-520
+napi/angular-compiler/e2e/compare/fixtures/runner.ts
+  s_f9a1acc2593ab8::t_e0b5370a97b2db 16,23,52-121,391,599,771
+napi/angular-compiler/e2e/compare/fixtures/templates/dom-only.fixture.ts
+  s_f9a1acc2593ab8::t_3ea739e32869b7 1-272
+napi/angular-compiler/e2e/compare/fixtures/types.ts
+  s_f9a1acc2593ab8::t_efae558056aa0d 205-207
+napi/angular-compiler/test/transform.test.ts
+  s_f9a1acc2593ab8::t_8f1def2b49b78a 617,627,640
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ca5972db1772a7afffd9b37f67a55f96b254deef",
+  "prompts": {},
+  "sessions": {
+    "s_2e795a639ec060": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a9732ebf5b7e4b4dd",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_511f48475a7f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aea991d22bf108d27",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_b9101fa11cce19": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a90ff5896cede8607",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_f9a1acc2593ab8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a284e69fb58998e02",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
