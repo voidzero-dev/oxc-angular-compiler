@@ -1,0 +1,53 @@
+crates/oxc_angular_compiler/src/pipeline/compilation.rs
+  s_e83d09f3aacd9d::t_1ecfc7095e0c38 231-235,288,700-701,750
+crates/oxc_angular_compiler/src/pipeline/emit.rs
+  s_3fc362be4abda1::t_3c18f599deaf4c 52,93,96,100-101,116-118,121-123,147-148,150,152,208-209,213,216,218-220,295-296,1637
+crates/oxc_angular_compiler/src/pipeline/phases/any_cast.rs
+  s_798ff80b12fbda::t_1305a0294e980c 23-31,33-39,56,61-68,70-72,87,96
+crates/oxc_angular_compiler/src/pipeline/phases/generate_arrow_functions.rs
+  s_e83d09f3aacd9d::t_1d227dea0d27fd 9-10,26-27,39,49,56,65-66,68-70,95,99,105,115-116,122,132,139,147-149
+crates/oxc_angular_compiler/src/pipeline/phases/i18n_const_collection.rs
+  s_91a9eec7496df1::t_8acda0ec3e4917 156-157,230,232-235,237-256
+crates/oxc_angular_compiler/src/pipeline/phases/resolve_dollar_event.rs
+  s_e83d09f3aacd9d::t_dcdfa620646f40 47-50,57-60,66,73,77-78,81,86,95,99-100,109-122,134-135,137-140,142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e09bfc7e1176fac4c1146810f50bd8553113440d",
+  "prompts": {},
+  "sessions": {
+    "s_3fc362be4abda1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a237fd75f168825f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_798ff80b12fbda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac5aaa680b1dec307",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_91a9eec7496df1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7db0fd5a3cbcecb9",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_e83d09f3aacd9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab20be3c84c4262f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
