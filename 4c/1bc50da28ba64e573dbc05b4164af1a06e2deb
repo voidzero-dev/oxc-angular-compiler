@@ -1,0 +1,21 @@
+napi/angular-compiler/vite-plugin/index.ts
+  s_9c88456569a213::t_21ecaceceec6e5 528-538,973-987,1013-1027
+napi/angular-compiler/test/plugin-fast-paths.test.ts
+  s_9c88456569a213::t_22f6c7f51055d9 1-269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4c1bc50da28ba64e573dbc05b4164af1a06e2deb",
+  "prompts": {},
+  "sessions": {
+    "s_9c88456569a213": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8b685fdcf654048e",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
