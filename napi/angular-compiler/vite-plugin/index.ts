@@ -26,6 +26,7 @@ import {
   extractComponentMetadataSync,
   extractComponentUrls,
   compileForHmrSync,
+  componentHmrFingerprint,
   type TransformOptions,
   type ResolvedResources,
   type AngularVersion,
@@ -35,12 +36,6 @@ import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
 import { jitPlugin } from './angular-jit-plugin.js'
 import { angularLinkerPlugin } from './angular-linker-plugin.js'
 import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
-import {
-  emptyDelimitedRange,
-  locateComponentDecorators,
-  locateStylesInArgs,
-  locateTemplateInArgs,
-} from './utils/decorator-fields.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
 /**
@@ -303,12 +298,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // emits per-component HMR updates and we mirror that here.
   const componentsByFile = new Map<string, Set<string>>()
 
-  // For each component .ts file, each compiled component's `@Component`
-  // decorator as the compiler reports it (class name → `Component`, `Cmp`,
-  // `ng.Component`, ...), so the template/styles strip below finds exactly the
-  // decorators the compiler took, under whatever name they're imported.
-  const componentDecoratorsByFile = new Map<string, Map<string, string>>()
-
   // Reverse mapping: resource file path → component file path. Single-valued:
   // the last transform to reference a resource owns the slot. Multiple
   // components in the SAME file are covered by `dispatchAllComponentsInFile`;
@@ -485,11 +474,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // it to decide whether to serve the update module or an empty response.
   const pendingHmrUpdates = new Set<string>()
 
-  // Cache the source of each component .ts file with its `template:` and
-  // `styles:` decorator fields stripped. If the stripped form is byte-identical
-  // before and after a save, we know only the template / styles changed and
-  // can dispatch an HMR update instead of a full reload.
-  const componentMetadataCache = new Map<string, string>()
+  // The HMR fingerprint of each component .ts file: a hash of its source with
+  // the compiled components' inline `template:` / `styles:` values left out
+  // (`TransformResult.hmrFingerprint`). If the fingerprint is the same before
+  // and after a save, only the template / styles changed and we can dispatch
+  // an HMR update instead of a full reload.
+  const componentFingerprintCache = new Map<string, string>()
 
   // Angular Ivy `.d.ts` static member declarations collected across the build,
   // keyed by module id. Populated during `transform` in `compilationMode:
@@ -922,27 +912,27 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   // running component genuinely has, from a template edit that
                   // never touched the styles at all.
                   //
-                  // `componentMetadataCache` already holds the transform-time
-                  // source with the `template:` / `styles:` field VALUES
-                  // blanked, and blanking only ever empties a DELIMITED range —
-                  // so an expression the strip cannot open survives verbatim
-                  // and the two stripped forms disagree exactly when the two
-                  // sources disagree outside those fields. Matching strips is
-                  // the evidence that the styles read here are the styles the
-                  // component compiled with.
+                  // `componentFingerprintCache` already holds the fingerprint
+                  // of the transform-time source with the `template:` /
+                  // `styles:` VALUES left out, and only a single literal value
+                  // is ever left out — so an expression the compiler has to
+                  // evaluate stays in, and the two fingerprints disagree
+                  // exactly when the two sources disagree outside those
+                  // fields. Matching fingerprints are the evidence that the
+                  // styles read here are the styles the component compiled
+                  // with.
                   //
                   // This gates the destructive answer ONLY. Content that WAS
                   // read is still served on a mismatch — no worse than main,
                   // which scanned the same disk source.
                   const compiledFromThisSource = () => {
-                    const cachedStripped = componentMetadataCache.get(fileId)
-                    // `componentDecoratorsByFile` is keyed by the transform id
-                    // like the other per-file maps — `resolvedId` would miss on
-                    // Windows and strip nothing, failing the comparison forever.
+                    // Both maps are keyed by the transform id like the other
+                    // per-file maps — `resolvedId` would miss on Windows and
+                    // read no class, failing the comparison forever.
+                    const cached = componentFingerprintCache.get(fileId)
                     return (
-                      cachedStripped !== undefined &&
-                      cachedStripped ===
-                        stripComponentMetadata(source, componentDecoratorsByFile.get(fileId))
+                      cached !== undefined &&
+                      cached === fingerprintOf(source, fileId, componentsByFile.get(fileId))
                     )
                   }
                   // `stylesResolved` comes first, ahead of "serve what was
@@ -1302,14 +1292,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               dependencies,
             )
             const classNamesInFile = new Set<string>()
-            const decoratorsInFile = new Map<string, string>()
             for (const componentId of templateUpdateKeys) {
               const atIdx = componentId.lastIndexOf('@')
               if (atIdx === -1) continue
-              const className = componentId.slice(atIdx + 1)
-              classNamesInFile.add(className)
-              const decorator = result.componentDecorators[componentId]
-              if (decorator !== undefined) decoratorsInFile.set(className, decorator)
+              classNamesInFile.add(componentId.slice(atIdx + 1))
             }
             // Prune pending updates for components that USED to be in this
             // file but no longer are (e.g. a class was renamed or removed).
@@ -1327,14 +1313,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             }
 
             componentsByFile.set(actualId, classNamesInFile)
-            componentDecoratorsByFile.set(actualId, decoratorsInFile)
             for (const className of classNamesInFile) {
               debugHmr('registered: %s -> %s', actualId, className)
             }
 
-            // Cache the metadata-stripped (whole-file) source for cheaply
-            // diffing whether anything besides template/styles changed.
-            componentMetadataCache.set(actualId, stripComponentMetadata(code, decoratorsInFile))
+            // Cache the whole-file fingerprint for cheaply checking whether
+            // anything besides template/styles changed. The transform takes
+            // it from its own parse when `hmr` is on; otherwise (SSR, build)
+            // no class was compiled for HMR and nothing is left out.
+            componentFingerprintCache.set(
+              actualId,
+              result.hmrFingerprint ?? fingerprintOf(code, actualId, classNamesInFile),
+            )
           }
 
           return {
@@ -1556,7 +1546,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // file (e.g. an external template change just invalidated the .ts
           // module via the graph), the resource branch has it covered.
           const fileClassNames = componentsByFile.get(ctx.file)!
-          const fileDecorators = componentDecoratorsByFile.get(ctx.file)
           let alreadyPending = false
           for (const className of fileClassNames) {
             if (pendingHmrUpdates.has(`${ctx.file}@${className}`)) {
@@ -1569,27 +1558,26 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             return []
           }
 
-          // Strip-based check: if the source with EVERY @Component's
-          // `template:` and `styles:` fields stripped is byte-identical to
-          // the cached stripped form, the diff is contained entirely in
-          // those fields (for one or more components in the file) and we
-          // can HMR. This covers inline-template-only, inline-style-only,
-          // and both-at-once changes uniformly, including the multi-component
-          // case (a single edit to one component's template still satisfies
-          // the equality because the other components' stripped fields are
-          // identical before/after).
-          const cachedStripped = componentMetadataCache.get(ctx.file)
-          if (cachedStripped !== undefined) {
+          // Fingerprint check: if the source with EVERY compiled component's
+          // `template:` and `styles:` values left out hashes the same as the
+          // cached fingerprint, the diff is contained entirely in those
+          // values (for one or more components in the file) and we can HMR.
+          // This covers inline-template-only, inline-style-only, and
+          // both-at-once changes uniformly, including the multi-component
+          // case (a single edit to one component's template still keeps the
+          // fingerprint, because everything outside the values is unchanged).
+          const cachedFingerprint = componentFingerprintCache.get(ctx.file)
+          if (cachedFingerprint !== undefined) {
             let newContent: string
             try {
               newContent = readFileSync(ctx.file, 'utf-8')
             } catch {
               newContent = ''
             }
-            const newStripped = stripComponentMetadata(newContent, fileDecorators)
-            if (newStripped === cachedStripped) {
+            const newFingerprint = fingerprintOf(newContent, ctx.file, fileClassNames)
+            if (newFingerprint === cachedFingerprint) {
               debugHmr('inline template/styles-only change, dispatching HMR for %s', ctx.file)
-              componentMetadataCache.set(ctx.file, newStripped)
+              componentFingerprintCache.set(ctx.file, newFingerprint)
               // Conservatively dispatch HMR for every component in the file —
               // Angular's runtime no-ops if a component's metadata didn't
               // actually change. Per-component diffing is an easy follow-up.
@@ -1731,44 +1719,23 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 }
 
 /**
- * Empty the `template:` and `styles:` field values of each component's
- * `@Component(...)` in `components` (class name → the decorator as the compiler
- * reported it: `Component`, `Cmp`, `ng.Component`), returning the result. Used
- * to detect "only template/styles changed somewhere in the file" — if the
- * stripped form of the old and new source is byte-identical, the diff is
- * contained within those fields and we can dispatch HMR (one event per
+ * The HMR fingerprint of `code` for the components the transform compiled in
+ * it (`classNames`): see `componentHmrFingerprint`. If the fingerprints of the
+ * old and new source are equal, the diff is contained within those components'
+ * inline `template:` / `styles:` values and we can dispatch HMR (one event per
  * component in the file) instead of a full reload.
  *
- * Only the decorator the compiler took is emptied, found by the spelling it
- * reported, so this never decides on its own which decorators are Angular's.
- * Another library's `@Component`, or another decorator of the same class, is
- * left whole, so a change to it reloads the page. The new source is stripped
- * with the old spellings: a change that could alter them (an import) is outside
- * the emptied fields, so it already makes the two forms differ.
+ * Only the class names travel between saves, not the decorators: the new
+ * source is read through its own `@angular/core` imports, and a change that
+ * could find a different decorator (an import) is outside the left-out values,
+ * so it already makes the two fingerprints differ.
  */
-function stripComponentMetadata(
+function fingerprintOf(
   code: string,
-  components: ReadonlyMap<string, string> | undefined,
+  fileId: string,
+  classNames: ReadonlySet<string> | undefined,
 ): string {
-  // Enumerate decorators ONCE (O(N) walk of source) and look up each one's
-  // template + styles range directly from its argsRange. Calling the
-  // className-based locators per decorator would re-enumerate inside each,
-  // giving O(N²).
-  //
-  // Splice from highest start → lowest so earlier offsets stay valid as we
-  // mutate the string from the end backwards.
-  if (!components || components.size === 0) return code
-  const decorators = locateComponentDecorators(code, components.values())
-  const ranges: Array<[number, number]> = []
-  for (const d of decorators) {
-    if (components.get(d.className) !== d.decorator) continue
-    const tpl = locateTemplateInArgs(code, d.argsRange)
-    if (tpl) ranges.push(tpl)
-    const styles = locateStylesInArgs(code, d.argsRange)
-    if (styles) ranges.push(styles)
-  }
-  ranges.sort((a, b) => b[0] - a[0])
-  return ranges.reduce((acc, range) => emptyDelimitedRange(acc, range), code)
+  return componentHmrFingerprint(code, fileId, classNames ? [...classNames] : []).fingerprint
 }
 
 export { angular as default }

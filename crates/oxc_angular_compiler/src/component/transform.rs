@@ -330,12 +330,13 @@ pub struct TransformResult {
     /// Maps component ID to list of styles.
     pub style_updates: HashMap<String, Vec<String>>,
 
-    /// For HMR: maps the ID of each compiled component (path@ClassName) to its
-    /// `@Component` decorator's callee as written in the source (`Component`,
-    /// `Cmp` for `import { Component as Cmp }`, `ng.Component` for a namespace
-    /// import). It lets a build tool find the decorator the compiler took
-    /// without deciding again which decorators are Angular's.
-    pub component_decorators: HashMap<String, String>,
+    /// For HMR: the fingerprint of the source with the inline `template` /
+    /// `styles` values of the compiled components left out (see
+    /// [`super::component_hmr_fingerprint`]). A build tool compares it with
+    /// the fingerprint of the edited file, taken for the same class names:
+    /// when they are equal, only those values changed and an HMR update is
+    /// enough. `None` unless `hmr` is on.
+    pub hmr_fingerprint: Option<String>,
 
     /// Compilation diagnostics (errors and warnings).
     pub diagnostics: Vec<OxcDiagnostic>,
@@ -3047,7 +3048,8 @@ pub fn transform_angular_file(
     let parser_ret = Parser::new(allocator, source, source_type).parse();
 
     // Collect parse errors
-    if !parser_ret.diagnostics.is_empty() {
+    let parsed_cleanly = parser_ret.diagnostics.is_empty();
+    if !parsed_cleanly {
         for error in parser_ret.diagnostics {
             result.diagnostics.push(OxcDiagnostic::error(error.to_string()));
         }
@@ -3149,6 +3151,10 @@ pub fn transform_angular_file(
     // TypeScript Angular uses ONE file-level constant pool; we simulate this
     // by tracking the next index and passing it to each component.
     let mut shared_pool_index: u32 = 0;
+
+    // The components compiled for HMR, whose inline template and styles the
+    // HMR fingerprint leaves out.
+    let mut hmr_compiled_classes: Vec<String> = Vec::new();
 
     // One analyzer serves both cross-file features: the type-only scan for
     // import elision and, when resolve_imported_values is on, the resolver the
@@ -3635,17 +3641,7 @@ pub fn transform_angular_file(
                                     component_id.clone(),
                                     compilation_result.template_js.clone().unwrap_or_default(),
                                 );
-                                if let Some(decorator) = component_decorator {
-                                    let callee = match &decorator.expression {
-                                        Expression::CallExpression(call) => call.callee.span(),
-                                        expression => expression.span(),
-                                    };
-                                    result.component_decorators.insert(
-                                        component_id.clone(),
-                                        source[callee.start as usize..callee.end as usize]
-                                            .to_string(),
-                                    );
-                                }
+                                hmr_compiled_classes.push(class_name.clone());
                             }
 
                             // Track the decorator span to remove
@@ -4727,6 +4723,23 @@ pub fn transform_angular_file(
         && let Some(analyzer) = &cross_file_analyzer
     {
         result.dependencies.extend(analyzer.take_value_dependencies());
+    }
+
+    // Taken from this parse, for exactly the classes compiled above, so it
+    // equals what `component_hmr_fingerprint` gives for this source and
+    // these class names.
+    if options.hmr {
+        let fingerprint = if parsed_cleanly {
+            super::hmr_fingerprint::hmr_fingerprint_of_program(
+                &parser_ret.program,
+                source,
+                &string_consts,
+                |name| hmr_compiled_classes.iter().any(|compiled| compiled == name),
+            )
+        } else {
+            super::component_hmr_fingerprint(allocator, path, source, &[])
+        };
+        result.hmr_fingerprint = Some(fingerprint.fingerprint);
     }
 
     result

@@ -911,6 +911,7 @@ const {
   compileForHmr,
   compileForHmrSync,
   compileTemplate,
+  componentHmrFingerprint,
   decodeComponentId,
   encapsulateStyle,
   encodeComponentId,
@@ -933,6 +934,7 @@ export { compileFactory }
 export { compileForHmr }
 export { compileForHmrSync }
 export { compileTemplate }
+export { componentHmrFingerprint }
 export { decodeComponentId }
 export { encapsulateStyle }
 export { encodeComponentId }

@@ -12,6 +12,7 @@ mod decorator;
 mod defer_resolver;
 mod definition;
 mod dependency;
+mod hmr_fingerprint;
 mod hoist;
 mod import_elision;
 mod metadata;
@@ -29,6 +30,7 @@ pub use dependency::{
     FactoryTarget, InjectFlags, R3DependencyMetadata, compile_inject_dependencies,
     generate_factory_di_args, get_inject_fn_name,
 };
+pub use hmr_fingerprint::{ComponentHmrFingerprint, component_hmr_fingerprint};
 pub use import_elision::ImportElisionAnalyzer;
 pub use metadata::{
     AngularVersion, ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode,

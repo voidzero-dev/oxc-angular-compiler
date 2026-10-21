@@ -135,6 +135,36 @@ export interface ComponentExtractionResult {
   factoryDef?: string
 }
 
+/**
+ * Take the HMR fingerprint of a component file, from one parse.
+ *
+ * Only `classNames` (the components `transformAngularFile` compiled) are
+ * read, through Angular's `@Component` found by its `@angular/core` import.
+ * A `template` / `styles` value is left out only when it is one string,
+ * template literal or (for `styles`) array literal. A source with syntax
+ * errors leaves nothing out.
+ *
+ * The result equals `TransformResult.hmrFingerprint` for the same source
+ * and class names, so a build tool can compare the two to decide between an
+ * HMR update (equal: only those values changed) and a full reload.
+ */
+export declare function componentHmrFingerprint(
+  source: string,
+  filename: string,
+  classNames: Array<string>,
+): ComponentHmrFingerprint
+
+/** The HMR fingerprint of a component file. */
+export interface ComponentHmrFingerprint {
+  /**
+   * Hash of the source with the inline `template` / `styles` values of the
+   * named components left out (their quotes or brackets are kept).
+   */
+  fingerprint: string
+  /** The named classes whose `@Component({...})` was read, in source order. */
+  components: Array<string>
+}
+
 /** Host metadata extracted from a `@Component` decorator. */
 export interface ComponentHostMetadata {
   /** Host property bindings: [[key, value], ...]. */
@@ -1035,10 +1065,13 @@ export interface TransformResult {
   /** Style updates for HMR (component_id → styles). */
   styleUpdates: Map<string, string[]>
   /**
-   * For HMR: each compiled component's `@Component` decorator callee as
-   * written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+   * For HMR (`hmr: true`): the fingerprint of the source with the inline
+   * `template` / `styles` values of the compiled components left out.
+   * Compare it with `componentHmrFingerprint(newSource, filename,
+   * compiledClassNames).fingerprint` after an edit: equal means only those
+   * values changed, so an HMR update is enough.
    */
-  componentDecorators: Record<string, string>
+  hmrFingerprint?: string
   /** Compilation errors. */
   errors: Array<OxcError>
   /** Compilation warnings. */

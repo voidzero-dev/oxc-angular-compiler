@@ -63,12 +63,12 @@ pub use transform::{HtmlToR3Transform, html_to_r3::html_ast_to_r3_ast};
 
 // Re-export component module types for convenience
 pub use component::{
-    AngularVersion, ChangeDetectionStrategy, CompiledComponent, ComponentMetadata,
-    ComponentResourceUrls, HmrTemplateCompileOutput, HostMetadata, HostMetadataInput, ImportInfo,
-    ImportMap, NamespaceRegistry, Prerelease, ResolvedResources, TemplateCompileOutput,
-    TransformOptions, TransformResult, ViewEncapsulation, build_import_map,
+    AngularVersion, ChangeDetectionStrategy, CompiledComponent, ComponentHmrFingerprint,
+    ComponentMetadata, ComponentResourceUrls, HmrTemplateCompileOutput, HostMetadata,
+    HostMetadataInput, ImportInfo, ImportMap, NamespaceRegistry, Prerelease, ResolvedResources,
+    TemplateCompileOutput, TransformOptions, TransformResult, ViewEncapsulation, build_import_map,
     compile_component_template, compile_for_hmr, compile_template_for_hmr, compile_template_to_js,
-    compile_template_to_js_with_options, extract_component_metadata,
+    compile_template_to_js_with_options, component_hmr_fingerprint, extract_component_metadata,
     extract_component_resource_urls, transform_angular_file,
 };
 

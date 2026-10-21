@@ -387,10 +387,12 @@ pub struct TransformResult {
     #[napi(ts_type = "Map<string, string[]>")]
     pub style_updates: HashMap<String, Vec<String>>,
 
-    /// For HMR: each compiled component's `@Component` decorator callee as
-    /// written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
-    #[napi(ts_type = "Record<string, string>")]
-    pub component_decorators: HashMap<String, String>,
+    /// For HMR (`hmr: true`): the fingerprint of the source with the inline
+    /// `template` / `styles` values of the compiled components left out.
+    /// Compare it with `componentHmrFingerprint(newSource, filename,
+    /// compiledClassNames).fingerprint` after an edit: equal means only those
+    /// values changed, so an HMR update is enough.
+    pub hmr_fingerprint: Option<String>,
 
     /// Compilation errors.
     pub errors: Vec<OxcError>,
@@ -984,6 +986,44 @@ pub fn extract_component_urls(
     AsyncTask::new(ExtractComponentUrlsTask { source, filename, options })
 }
 
+/// The HMR fingerprint of a component file.
+#[napi(object)]
+pub struct ComponentHmrFingerprint {
+    /// Hash of the source with the inline `template` / `styles` values of the
+    /// named components left out (their quotes or brackets are kept).
+    pub fingerprint: String,
+    /// The named classes whose `@Component({...})` was read, in source order.
+    pub components: Vec<String>,
+}
+
+/// Take the HMR fingerprint of a component file, from one parse.
+///
+/// Only `classNames` (the components `transformAngularFile` compiled) are
+/// read, through Angular's `@Component` found by its `@angular/core` import.
+/// A `template` / `styles` value is left out only when it is one string,
+/// template literal or (for `styles`) array literal. A source with syntax
+/// errors leaves nothing out.
+///
+/// The result equals `TransformResult.hmrFingerprint` for the same source
+/// and class names, so a build tool can compare the two to decide between an
+/// HMR update (equal: only those values changed) and a full reload.
+#[napi]
+pub fn component_hmr_fingerprint(
+    source: String,
+    filename: String,
+    class_names: Vec<String>,
+) -> ComponentHmrFingerprint {
+    let allocator = Allocator::default();
+    let class_names: Vec<&str> = class_names.iter().map(String::as_str).collect();
+    let result = oxc_angular_compiler::component_hmr_fingerprint(
+        &allocator,
+        &filename,
+        &source,
+        &class_names,
+    );
+    ComponentHmrFingerprint { fingerprint: result.fingerprint, components: result.components }
+}
+
 /// Top-level declarations extracted from a TypeScript file for HMR.
 ///
 /// These are the symbols that can be passed as local dependencies to
@@ -1246,7 +1286,7 @@ impl Task for TransformAngularFileTask {
             dependencies: result.dependencies,
             template_updates: result.template_updates,
             style_updates: result.style_updates,
-            component_decorators: result.component_decorators,
+            hmr_fingerprint: result.hmr_fingerprint,
             errors,
             warnings: vec![],
             missing_link_urls: result.missing_link_urls,
