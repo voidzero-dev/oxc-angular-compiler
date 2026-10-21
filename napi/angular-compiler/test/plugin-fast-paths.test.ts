@@ -317,3 +317,80 @@ describe('@ng/component endpoint template options', () => {
     expect(body).not.toMatch(/ɵɵtext\(\d+,\s*["'] {3}["']\)/)
   })
 })
+
+describe('stylesheet preprocessing during HMR', () => {
+  const componentSource = (name: string) => `
+    import { Component } from '@angular/core';
+    @Component({
+      selector: 'app-${name}',
+      template: '<h1>Hello</h1>',
+      styleUrl: './${name}.component.scss',
+    })
+    export class StyledComponent {}
+  `
+
+  async function setupStyled(name: string) {
+    const stylePath = join(appDir, `${name}.component.scss`)
+    const componentPath = join(appDir, `${name}.component.ts`)
+    const source = componentSource(name)
+    writeFileSync(stylePath, `$c: red; h1 { color: $c; }`)
+    writeFileSync(componentPath, source)
+
+    const plugin = getAngularPlugin()
+    const server = await setupPlugin(plugin)
+    await transform(plugin, source, componentPath)
+    return { plugin, server, stylePath, componentPath, source }
+  }
+
+  it('preprocesses an edited stylesheet once per HMR cycle', async () => {
+    const { plugin, server, stylePath, componentPath, source } = await setupStyled('once')
+    expect(preprocessCallsFor(stylePath)).toBe(1)
+    spies.preprocessCSS.mockClear()
+
+    writeFileSync(stylePath, `$c: green; h1 { color: $c; }`)
+    await hotUpdate(plugin, stylePath, server)
+    const body = await requestUpdateModule(server, `${componentPath}@StyledComponent`)
+    // The component module was invalidated, so the next request re-runs it.
+    const { code } = await transform(plugin, source, componentPath)
+
+    expect(body).toContain('color: green')
+    expect(code).toContain('color: green')
+    expect(preprocessCallsFor(stylePath)).toBe(1)
+  })
+
+  it('serves the stylesheet as it is on disk when it changed after the cycle started', async () => {
+    const { plugin, server, stylePath, componentPath } = await setupStyled('fresh')
+
+    writeFileSync(stylePath, `$c: green; h1 { color: $c; }`)
+    await hotUpdate(plugin, stylePath, server)
+    // A second write lands before the browser asks for the update.
+    writeFileSync(stylePath, `$c: blue; h1 { color: $c; }`)
+    const body = await requestUpdateModule(server, `${componentPath}@StyledComponent`)
+
+    expect(body).toContain('color: blue')
+    expect(body).not.toContain('color: green')
+  })
+
+  it('rebuilds the styles in a later cycle even when the stylesheet is unchanged', async () => {
+    const { plugin, server, stylePath, componentPath } = await setupStyled('cycle')
+
+    writeFileSync(stylePath, `$c: green; h1 { color: $c; }`)
+    await hotUpdate(plugin, stylePath, server)
+    await requestUpdateModule(server, `${componentPath}@StyledComponent`)
+    spies.preprocessCSS.mockClear()
+
+    // A new file event (here the component's inline template) starts a new
+    // cycle: preprocessor output can depend on files outside its reported
+    // deps (Tailwind scans templates), so the styles are built again.
+    writeFileSync(
+      componentPath,
+      componentSource('cycle').replace('<h1>Hello</h1>', '<h1>Hello again</h1>'),
+    )
+    await hotUpdate(plugin, componentPath, server)
+    const body = await requestUpdateModule(server, `${componentPath}@StyledComponent`)
+
+    expect(body).toContain('Hello again')
+    expect(body).toContain('color: green')
+    expect(preprocessCallsFor(stylePath)).toBe(1)
+  })
+})

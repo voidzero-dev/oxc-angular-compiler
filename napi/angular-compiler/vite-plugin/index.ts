@@ -196,6 +196,13 @@ function markModuleSelfAccepting(mod: ModuleNode): void {
   }
 }
 
+/** A component stylesheet after `preprocessCSS`, with the source it came from. */
+type CompiledStyle = {
+  source: string
+  code: string
+  deps: string[] | undefined
+}
+
 type InlineBuildMinifyOptions = {
   cssMinify?: boolean | string
   minify?: boolean | string
@@ -365,6 +372,47 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
   }
 
+  // `preprocessCSS` output for each component stylesheet (normalized path),
+  // tagged with the source text it was built from. Without it one stylesheet
+  // edit is preprocessed up to three times: by `refreshStyleDeps` in
+  // `handleHotUpdate`, by the `@ng/component` endpoint, and by the next
+  // `transform` of the component.
+  //
+  // An entry only lives for one HMR cycle: `handleHotUpdate` clears the map
+  // as it starts. The output can depend on files that are not in the
+  // reported `deps` (Tailwind scans templates for class names), so a later
+  // template edit must still rebuild the styles the endpoint serves, as it
+  // always has.
+  const compiledStyles = new Map<string, CompiledStyle>()
+  // Bumped with every clear, so a compile that started in an earlier cycle
+  // cannot store its (possibly stale) output in the new one.
+  let styleCycle = 0
+
+  function startStyleCycle(): void {
+    styleCycle++
+    compiledStyles.clear()
+  }
+
+  // Preprocess a component stylesheet (SCSS, Less, PostCSS, ...), reusing the
+  // output built earlier in this HMR cycle from the same source text. Throws
+  // what `preprocessCSS` throws; failures are not cached.
+  async function compileStyle(stylePath: string, source: string): Promise<CompiledStyle> {
+    const key = normalizePath(stylePath)
+    const cached = compiledStyles.get(key)
+    if (cached && cached.source === source) return cached
+    const cycle = styleCycle
+    const processed = await preprocessCSS(source, stylePath, resolvedConfig as any)
+    const compiled: CompiledStyle = {
+      source,
+      code: processed.code,
+      deps: processed.deps ? Array.from(processed.deps) : undefined,
+    }
+    // Builds never start a cycle and `resourceCache` already serves their
+    // repeat reads, so only the dev server keeps entries.
+    if (watchMode && cycle === styleCycle) compiledStyles.set(key, compiled)
+    return compiled
+  }
+
   // Re-read and re-preprocess a style file so its dependency registration in
   // `styleDepsCache`/`styleDepOwners` reflects the current `@use`/`@import`
   // set. Without this, a partial added or switched via HMR would never be
@@ -382,7 +430,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
     if (!content.trim()) return
     try {
-      const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+      const processed = await compileStyle(stylePath, content)
       registerStyleDeps(stylePath, processed.deps)
       // A style edited via HMR can pick up new deps (possibly outside the
       // dev-server root); register them with the watcher so their edits reach
@@ -494,7 +542,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // Preprocess styles (SCSS, Less, etc.)
           if (resolvedConfig) {
             try {
-              const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+              const processed = await compileStyle(stylePath, content)
               content = processed.code
               registerStyleDeps(stylePath, processed.deps)
             } catch (e) {
@@ -755,12 +803,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     try {
                       let styleContent = await readFile(stylePath, 'utf-8')
                       if (resolvedConfig) {
-                        const processed = await preprocessCSS(
-                          styleContent,
-                          stylePath,
-                          resolvedConfig as any,
-                        )
-                        styleContent = processed.code
+                        // Read from disk every time; only the preprocessing
+                        // is shared, and only for unchanged text built in
+                        // this HMR cycle (see `compileStyle`).
+                        styleContent = (await compileStyle(stylePath, styleContent)).code
                       }
                       contents.push(styleContent)
                     } catch {
@@ -1195,6 +1241,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         },
       },
       async handleHotUpdate(ctx) {
+        // Every file event starts a new HMR cycle for compiled styles, before
+        // anything below can preprocess one (see `compiledStyles`).
+        startStyleCycle()
+
         if (!pluginOptions.liveReload) return
 
         debugHmr('handleHotUpdate file=%s', ctx.file)
