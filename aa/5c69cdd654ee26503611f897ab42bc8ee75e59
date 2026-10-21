@@ -1,0 +1,35 @@
+crates/oxc_angular_compiler/src/transform/control_flow.rs
+  s_3fc362be4abda1::t_0f1eeb69091526 778-779,789-790,793-803,806-809,812-822,825-832,835,837,839,844,848-849,853-854,865,870,880-882,885-895,900-903,905-907,913-916,933-937,939,941-945,947-950,952-961,965-971,973-977,979,983-987,989-1007,1010,1012,1015,1017-1023,1025,1027-1031,1033-1037,1039,1041-1046,1049-1065,1067-1071,1073-1090,1092-1093,1095-1100,1103-1106,1108-1113,1115-1120,1122,1124,1126-1140,1142-1150,1154-1157,1159-1161,1164-1180,1182-1183,1185,1187-1189,1191-1193,1195-1196,1198-1200,1202-1255,1257-1300,1302,1304-1309,1311,1313-1314,1316-1336,1338,1341-1349,1351-1352,1355-1369,1371,1374-1376,1379-1382,1384,1387-1396,1398-1402,1404-1420,1422-1423,1425-1426,1428-1429,1431-1437,1439,1441-1452,1454-1457,1459-1462,1464-1504,1507-1515,1518-1520,1522-1594
+crates/oxc_angular_compiler/src/transform/html_to_r3.rs
+  s_3fc362be4abda1::t_50947186b8148a 37-39,2886-2891,2895-2898
+crates/oxc_angular_compiler/tests/defer_trigger_parsing_test.rs
+  s_e83d09f3aacd9d::t_8f9f44e1d71b92 1-175
+napi/angular-compiler/e2e/compare/fixtures/defer/defer-trigger-lists.fixture.ts
+  s_3fc362be4abda1::t_ddfd020622a6f9 1-87
+crates/oxc_angular_compiler/tests/fixtures/defer_triggers_ngtsc.json
+  s_3fc362be4abda1::t_3a03e47eba2484 1-718
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aa5c69cdd654ee26503611f897ab42bc8ee75e59",
+  "prompts": {},
+  "sessions": {
+    "s_3fc362be4abda1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a237fd75f168825f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_e83d09f3aacd9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab20be3c84c4262f4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
