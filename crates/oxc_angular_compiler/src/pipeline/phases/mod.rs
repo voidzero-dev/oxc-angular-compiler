@@ -64,6 +64,7 @@ mod remove_unused_i18n_attrs;
 mod resolve_contexts;
 mod resolve_defer_deps_fns;
 mod resolve_dollar_event;
+mod resolve_i18n_attr_sanitizers;
 mod resolve_i18n_element_placeholders;
 mod resolve_i18n_expression_placeholders;
 mod resolve_names;
@@ -499,6 +500,13 @@ pub static PHASES: &[Phase] = &[
         run: i18n_const_collection::collect_i18n_consts,
         run_host: None,
         name: "collectI18nConsts",
+    },
+    // Phase 52b: resolveI18nAttrSanitizers (Template only)
+    Phase {
+        kind: CompilationJobKind::Template,
+        run: resolve_i18n_attr_sanitizers::resolve_i18n_attr_sanitizers,
+        run_host: None,
+        name: "resolveI18nAttrSanitizers",
     },
     // Phase 53: collectConstExpressions (Template only)
     Phase {

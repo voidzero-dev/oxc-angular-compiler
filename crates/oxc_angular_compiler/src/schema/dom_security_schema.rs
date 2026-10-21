@@ -179,6 +179,17 @@ pub fn rejects_iframe_src_i18n(version: Option<crate::AngularVersion>) -> bool {
     security_profile(version).iframe_src_i18n
 }
 
+/// Whether the `resolveI18nAttrSanitizers` phase runs.
+///
+/// The phase wraps static i18n attribute values in their sanitizer /
+/// `ɵɵvalidateAttribute`. It landed in the same upstream commit as
+/// `normalizeTagName` ("prefix-insensitive DOM schema lookups and compile-time
+/// i18n attribute validation", angular/angular@61a97f22e8), so it shares that
+/// version range.
+pub fn sanitizes_i18n_attrs(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).normalizes_tag_names
+}
+
 /// Whether `resolve_sanitizers` applies the `ɵɵvalidateIframeAttribute`
 /// fallback. Upstream kept it on versions without the iframe
 /// `attributeNoBinding` schema keys (everything before 19.2.17 / 20.3.15 /

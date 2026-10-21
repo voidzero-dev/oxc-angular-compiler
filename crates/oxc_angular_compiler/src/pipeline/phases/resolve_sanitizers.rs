@@ -186,17 +186,12 @@ pub fn resolve_sanitizers(job: &mut ComponentCompilationJob<'_>) {
 /// Resolves sanitizers for host binding compilation.
 ///
 /// Host version - only processes the root unit (no embedded views).
+///
+/// Unlike templates, host attributes get no trusted value functions: upstream
+/// skips that step when `job.kind === CompilationJobKind.Host`, so
+/// `host: {'srcdoc': '...'}` stays a plain string in `hostAttrs`.
 pub fn resolve_sanitizers_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let iframe_validation = uses_iframe_attr_validation(job.angular_version);
-
-    // Process create ops - set trusted value functions for extracted attributes
-    for op in job.root.create.iter_mut() {
-        if let CreateOp::ExtractedAttribute(attr) = op {
-            if let Some(fn_name) = get_trusted_value_fn(attr.security_context) {
-                attr.trusted_value_fn = Some(Ident::from(fn_name));
-            }
-        }
-    }
 
     // Process update ops - set sanitizers for property/attribute bindings
     for op in job.root.update.iter_mut() {

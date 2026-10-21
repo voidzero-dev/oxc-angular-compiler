@@ -17851,3 +17851,152 @@ fn test_lone_surrogate_host_listener_argument_is_diagnostic() {
         assert_eq!(expect_diagnostics(&source), [expected], "`{member}`");
     }
 }
+
+// ============================================================================
+// Security-sensitive static attributes
+// ============================================================================
+// Constant values of security-sensitive attributes become trusted constants in
+// the consts array (`ɵɵtrustConstantHtml` / `ɵɵtrustConstantResourceUrl`), host
+// attributes stay plain, and static i18n attributes are wrapped in their
+// sanitizer by `resolveI18nAttrSanitizers` (19.2.23 / 20.3.22 / 21.2.15 / 22+).
+
+/// Compiles `template` in a component for `version` and returns the code with
+/// all whitespace removed.
+fn compile_component_compact(template: &str, version: Option<AngularVersion>) -> String {
+    let allocator = Allocator::default();
+    let source = format!(
+        "import {{ Component }} from '@angular/core';\n\
+         @Component({{ selector: 'my-component', template: {template:?} }})\n\
+         export class MyComponent {{}}\n"
+    );
+    let options = ComponentTransformOptions { angular_version: version, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", &source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    result.code.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// Port of `r3_compiler_compliance/elements/security_sensitive_constant_attributes`.
+#[test]
+fn test_security_sensitive_constant_attributes_use_trusted_value_fns() {
+    let code = compile_component_compact(
+        r#"<embed src="https://angular.io/" />
+        <iframe srcdoc="<h1>Angular</h1>"></iframe>
+        <object data="https://angular.io/" codebase="/"></object>
+        <embed src="https://angular.io/" />
+        <img src="https://angular.io/" />"#,
+        None,
+    );
+    assert!(
+        code.contains(
+            "consts:[[\"src\",i0.ɵɵtrustConstantResourceUrl`https://angular.io/`],\
+             [\"srcdoc\",i0.ɵɵtrustConstantHtml`<h1>Angular</h1>`],\
+             [\"data\",i0.ɵɵtrustConstantResourceUrl`https://angular.io/`,\
+             \"codebase\",i0.ɵɵtrustConstantResourceUrl`/`],[\"src\",\"https://angular.io/\"]]"
+        ),
+        "{code}"
+    );
+    assert!(
+        code.contains(
+            "i0.ɵɵelement(0,\"embed\",0)(1,\"iframe\",1)(2,\"object\",2)(3,\"embed\",0)(4,\"img\",3)"
+        ),
+        "{code}"
+    );
+}
+
+/// Structural templates and `ng-template` look attributes up under `ng-template`;
+/// trusted constants escape template-literal control sequences.
+#[test]
+fn test_security_sensitive_constant_attributes_on_templates() {
+    let code = compile_component_compact(
+        r#"<div *ngIf="c" innerHTML="<b>x</b>"></div><ng-template innerHTML="<i>y</i>"></ng-template>@if (c) {<embed src="/a${x}`b" />}<svg><a href="/s"></a></svg>"#,
+        None,
+    );
+    assert!(
+        code.contains(
+            "consts:[[\"innerHTML\",i0.ɵɵtrustConstantHtml`<b>x</b>`,4,\"ngIf\"],\
+             [\"innerHTML\",i0.ɵɵtrustConstantHtml`<i>y</i>`],[\"src\",\"/a${x}`b\"],\
+             [\"href\",\"/s\"],[\"innerHTML\",i0.ɵɵtrustConstantHtml`<b>x</b>`],\
+             [\"src\",i0.ɵɵtrustConstantResourceUrl`/a$\\{x}\\`b`]]"
+        ),
+        "{code}"
+    );
+}
+
+/// Port of `r3_view_compiler_bindings/host_bindings/security_sensitive_constant_attributes`:
+/// upstream skips trusted value functions for host jobs.
+#[test]
+fn test_host_security_sensitive_constant_attributes_stay_plain() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive } from '@angular/core';
+
+@Directive({
+  selector: '[hostBindingDir]',
+  host: {'src': 'trusted', 'srcdoc': 'trusted'},
+})
+export class HostBindingDir {}
+
+@Directive({
+  selector: 'img',
+  host: {'src': 'trusted', 'srcdoc': 'trusted'},
+})
+export class HostBindingDir2 {}
+";
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert_eq!(
+        code.matches("hostAttrs:[\"src\",\"trusted\",\"srcdoc\",\"trusted\"]").count(),
+        2,
+        "{code}"
+    );
+    assert!(!code.contains("trustConstant"), "{code}");
+}
+
+/// Static i18n attributes are wrapped in their sanitizer, or `ɵɵvalidateAttribute`
+/// with the `:svg:` / `:math:` qualified tag, matching ngtsc 22.2.2.
+#[test]
+fn test_i18n_attribute_sanitizers() {
+    let code = compile_component_compact(
+        r#"<a href="https://x" i18n-href>x</a><svg><a href="https://y" i18n-href></a><animate attributeName="x" i18n-attributeName></animate><set to="x" i18n-to></set></svg><ng-template href="x" i18n-href></ng-template><a *ngIf="c" href="https://z" i18n-href>z</a><math><mi href="https://m" i18n-href></mi></math><form action="/go" i18n-action></form><area href="/a" i18n-href /><div title="t" i18n-title></div>"#,
+        None,
+    );
+    assert!(
+        code.contains(
+            "return[[\"href\",i0.ɵɵsanitizeUrl(i18n_0)],[\"href\",i0.ɵɵsanitizeUrl(i18n_1)],\
+             [\"attributeName\",i0.ɵɵvalidateAttribute(i18n_2,\":svg:animate\",\"attributeName\")],\
+             [\"to\",i0.ɵɵvalidateAttribute(i18n_3,\":svg:set\",\"to\")],[\"href\",i18n_4],\
+             [\"href\",i18n_5,4,\"ngIf\"],[\"href\",i0.ɵɵsanitizeUrl(i18n_6)],\
+             [\"action\",i0.ɵɵsanitizeUrl(i18n_7)],[\"href\",i0.ɵɵsanitizeUrl(i18n_8)],\
+             [\"title\",i18n_9],[\"href\",i0.ɵɵsanitizeUrl(i18n_5)]];"
+        ),
+        "{code}"
+    );
+}
+
+/// `resolveI18nAttrSanitizers` landed with `normalizeTagName`
+/// (angular/angular@61a97f22e8); earlier versions emit the bare i18n variable.
+#[test]
+fn test_i18n_attribute_sanitizers_are_version_gated() {
+    const TEMPLATE: &str = r#"<a href="https://x" i18n-href>x</a>"#;
+    for version in [
+        AngularVersion::new(19, 2, 22),
+        AngularVersion::new(20, 3, 21),
+        AngularVersion::new(21, 2, 14),
+    ] {
+        let code = compile_component_compact(TEMPLATE, Some(version));
+        assert!(code.contains("return[[\"href\",i18n_0]];"), "{version:?}: {code}");
+    }
+    for version in [
+        AngularVersion::new(19, 2, 23),
+        AngularVersion::new(20, 3, 22),
+        AngularVersion::new(21, 2, 15),
+        AngularVersion::new(22, 0, 0),
+    ] {
+        let code = compile_component_compact(TEMPLATE, Some(version));
+        assert!(
+            code.contains("return[[\"href\",i0.ɵɵsanitizeUrl(i18n_0)]];"),
+            "{version:?}: {code}"
+        );
+    }
+}
