@@ -1,0 +1,49 @@
+napi/angular-compiler/e2e/compare/README.md
+  s_8d46e6545fb344::t_73761acb873a72 119-120,145-147,190-191,196-199
+napi/angular-compiler/e2e/compare/fixtures/known-differences.ts
+  s_10ef4cb6b3a8e5::t_d2d33faf57dbb4 6-9,20,26-30,53-71,79-80,135-139,248-249,253-254
+napi/angular-compiler/e2e/compare/fixtures/runner.ts
+  s_551a7dbfd1ad45::t_4962835ce7a152 25-29,40-49,141-145,152-159,161,163,172-178,192-193,208,221,317,415,526,612,771
+napi/angular-compiler/e2e/compare/fixtures/types.ts
+  s_8d46e6545fb344::t_b5650245ba5bf0 10-16,336-338
+napi/angular-compiler/e2e/compare/src/compare.test.ts
+  s_8d46e6545fb344::t_d0b0207ac4dbb0 61-131
+napi/angular-compiler/e2e/compare/src/compare.ts
+  s_8d46e6545fb344::t_7ab5907d5eecea 23-24,87-107,183-186,873-879,881-882,888-894,924-950,965-967,1873-2071,2081-2082,2195-2200,2207,2219,2233,2296-2297,2364-2384
+napi/angular-compiler/e2e/compare/src/runner.ts
+  s_8d46e6545fb344::t_bbbb0bd291ab7a 354,524-526
+napi/angular-compiler/e2e/compare/src/types.ts
+  s_8d46e6545fb344::t_5f4406866cde92 408-414
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3a78e36214c4f7ec04f1d054f55b46ed04b836be",
+  "prompts": {},
+  "sessions": {
+    "s_10ef4cb6b3a8e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aa9ff03f551b7b39b",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_551a7dbfd1ad45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4f5d6ba425543afc",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    },
+    "s_8d46e6545fb344": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7e6e813b1ff832b4",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
