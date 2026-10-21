@@ -79,8 +79,7 @@ struct Inner {
     /// Files currently being analyzed (for circular import detection)
     analyzing: RefCell<FxHashSet<String>>,
     /// Files parsed for `eval_export` and `class_selector`, so each is
-    /// parsed once: `analyze_file` keeps its parse when `values_enabled`, and
-    /// other files are parsed on first use.
+    /// parsed once, on first use. `analyze_file` doesn't keep its parse.
     parsed: RefCell<FxHashMap<String, Rc<ParsedFile>>>,
     /// Memoized per-export value evaluations: `(file, local_name)` -> value.
     /// `None` means evaluated-but-opaque.
@@ -95,9 +94,6 @@ struct Inner {
     evaluating_values: RefCell<FxHashSet<(String, String)>>,
     /// Files read to resolve exported values, so build tools can watch them.
     value_dependencies: RefCell<FxHashSet<String>>,
-    /// Whether exported-value resolution (`resolve_imported_values`) is on.
-    /// When false, `analyze_file` doesn't keep the files it parses.
-    values_enabled: bool,
     /// Handle to this state, for the resolvers of the files in `parsed`
     /// (`parse_file` only sees `&self`).
     this: Weak<Inner>,
@@ -249,9 +245,9 @@ impl CrossFileAnalyzer {
     ///
     /// * `base_dir` - The base directory for module resolution
     /// * `tsconfig_path` - Optional path to tsconfig.json for path aliases
-    /// * `values_enabled` - Enable exported-value resolution (the
+    /// * `_values_enabled` - Unused: files are parsed on demand either way. Was: enable exported-value resolution (the
     ///   `resolve_imported_values` transform option)
-    pub fn new(_base_dir: &Path, tsconfig_path: Option<&Path>, values_enabled: bool) -> Self {
+    pub fn new(_base_dir: &Path, tsconfig_path: Option<&Path>, _values_enabled: bool) -> Self {
         let options = ResolveOptions {
             extensions: vec![".ts".into(), ".tsx".into(), ".js".into(), ".jsx".into()],
             tsconfig: tsconfig_path.map(|p| {
@@ -273,7 +269,6 @@ impl CrossFileAnalyzer {
                 selector_memo: RefCell::new(FxHashMap::default()),
                 evaluating_values: RefCell::new(FxHashSet::default()),
                 value_dependencies: RefCell::new(FxHashSet::default()),
-                values_enabled,
                 this: this.clone(),
             }),
         }
@@ -737,10 +732,8 @@ impl Inner {
         })
     }
 
-    /// `file_path` parsed, from [`Self::parsed`], or read and parsed now when
-    /// `analyze_file` didn't keep it (`values_enabled` off) so behavior
-    /// doesn't depend on which path discovered it first. `None` when the
-    /// file can't be read.
+    /// `file_path` parsed, from [`Self::parsed`], or read and parsed now.
+    /// `None` when the file can't be read.
     fn parsed_file(&self, file_path: &str) -> Option<Rc<ParsedFile>> {
         if let Some(file) = self.parsed.borrow().get(file_path) {
             return Some(Rc::clone(file));
@@ -1036,19 +1029,15 @@ impl Inner {
             }
         };
 
-        // With values on, keep the parsed file for `eval_export` and
-        // `class_selector`, so the file is parsed once per analyzer.
+        // Keep only the export map: the full parse (AST and consts) is built
+        // lazily by `parsed_file` for the few files that are evaluated or
+        // whose selector is read, so a wide `export *` barrel doesn't hold
+        // every analyzed file's AST until the analyzer is dropped.
         let mut exports = FxHashMap::default();
-        if self.values_enabled {
-            let file = Rc::new(self.parse_file(file_path, &source));
-            file.with(|_, program, _| self.analyze_program(program, &mut exports));
-            self.parsed.borrow_mut().insert(file_path.to_string(), file);
-        } else {
-            let allocator = Allocator::default();
-            let source_type = SourceType::from_path(file_path).unwrap_or_default();
-            let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-            self.analyze_program(&parser_ret.program, &mut exports);
-        }
+        let allocator = Allocator::default();
+        let source_type = SourceType::from_path(file_path).unwrap_or_default();
+        let parser_ret = Parser::new(&allocator, &source, source_type).parse();
+        self.analyze_program(&parser_ret.program, &mut exports);
 
         self.cache.borrow_mut().insert(file_path.to_string(), exports);
         self.analyzing.borrow_mut().remove(file_path);
@@ -1972,8 +1961,8 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_value_elision_only_analyzer_resolves_on_demand() {
-        // `resolve_export_value` works without `values_enabled`: `parsed` is
-        // empty and the file is read again for evaluation.
+        // `resolve_export_value` works without `values_enabled`: files are
+        // parsed on demand.
         let dir = TempDir::new().unwrap();
         create_test_file(dir.path(), "other.ts", "export const V = 'v';");
         let main_file = dir.path().join("main.ts");
@@ -2054,7 +2043,7 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_standalone_directive_selector_is_memoized() {
-        // The selector is read from the file `analyze_file` parsed and
+        // The selector is read from the file parsed on first use and
         // memoized, not re-read from disk on every lookup, until the caches
         // are cleared. The file is still reported as a dependency each time.
         let dir = TempDir::new().unwrap();
@@ -2079,8 +2068,8 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_value_file_parsed_once() {
-        // `analyze_file`'s parse serves every later evaluation and selector
-        // lookup in the file: an edit made after it isn't seen.
+        // The first evaluation's parse serves every later one in the file: an
+        // edit made after it isn't seen.
         let dir = TempDir::new().unwrap();
         let meta =
             create_test_file(dir.path(), "meta.ts", "export const A = 'a';\nexport const B = 'b';");
@@ -2095,6 +2084,31 @@ export { doSomething } from './utils';
         assert!(matches!(
             resolve(&analyzer, &main_file, "./meta", "B"),
             Some(StaticValue::String(s)) if s == "b"
+        ));
+        assert_eq!(analyzer.inner.parsed.borrow().len(), 1);
+    }
+
+    #[test]
+    fn test_value_analysis_does_not_keep_asts_of_barrel_files() {
+        // Analyzing a wide `export *` barrel keeps only export maps; just the
+        // file whose value is evaluated is parsed and kept.
+        let dir = TempDir::new().unwrap();
+        let mut barrel = String::new();
+        for i in 0..5 {
+            create_test_file(
+                dir.path(),
+                &format!("f{i}.ts"),
+                &format!("export const V{i} = 'v{i}';"),
+            );
+            barrel.push_str(&format!("export * from './f{i}';\n"));
+        }
+        create_test_file(dir.path(), "barrel.ts", &barrel);
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./barrel", "V4"),
+            Some(StaticValue::String(s)) if s == "v4"
         ));
         assert_eq!(analyzer.inner.parsed.borrow().len(), 1);
     }
