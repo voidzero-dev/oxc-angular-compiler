@@ -219,6 +219,24 @@ impl AngularVersion {
         self.is_at_least(22, 0, 0)
     }
 
+    /// Check if this version compiles component templates in DOM-only mode
+    /// (v20.1.0-next.3+).
+    ///
+    /// From that release a full build compiles the template of a standalone
+    /// component without directive dependencies with `ɵɵdomElementStart`,
+    /// `ɵɵdomListener`, `ɵɵdomProperty` and the other DOM-only instructions
+    /// (`TemplateCompilationMode.DomOnly`). `20.1.0-next.2` and earlier always
+    /// use the full instructions.
+    pub fn supports_dom_only_templates(&self) -> bool {
+        if self.major == 20 && self.minor == 1 && self.patch == 0 {
+            return match self.prerelease {
+                None => true,
+                Some(prerelease) => prerelease >= Prerelease::Next(3),
+            };
+        }
+        self.is_at_least(20, 1, 0)
+    }
+
     /// Check if this version's `ShadowCss` still runs the legacy Shadow DOM
     /// polyfill passes (before v22.0.0-rc.0).
     ///
@@ -529,6 +547,17 @@ pub struct ComponentMetadata<'a> {
     /// requires cross-file selector info OXC doesn't have.
     pub deferred_imports: Vec<'a, Ident<'a>>,
 
+    /// `true` when the decorator provably brings nothing into the template's
+    /// scope: `imports` and `deferredImports` are each absent or an empty
+    /// array literal, and the config object has no spread that could add
+    /// them. `false` when unknown.
+    ///
+    /// A standalone component whose scope is provably empty can only match
+    /// itself in its template, which is what a full ngtsc build checks before
+    /// compiling the template in DOM-only mode (`hasDirectiveDependencies` in
+    /// `packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts`).
+    pub imports_provably_empty: bool,
+
     /// Animation triggers for the component.
     ///
     /// Corresponds to the `animations` property in `@Component`.
@@ -834,6 +863,7 @@ impl<'a> ComponentMetadata<'a> {
             declaration_list_emit_mode: DeclarationListEmitMode::default(),
             raw_imports: None,
             deferred_imports: Vec::new_in(&allocator),
+            imports_provably_empty: false,
             animations: None,
             schemas: Vec::new_in(&allocator),
             is_signal: false,
@@ -949,6 +979,32 @@ mod tests {
             parse("22.0.0-beta.1"),
         ] {
             assert!(!version.supports_incremental_hydration_runtime(), "{version:?}");
+        }
+    }
+
+    #[test]
+    fn dom_only_templates_start_at_20_1_0_next_3() {
+        let parse = |s| AngularVersion::parse(s).unwrap();
+
+        for version in [
+            parse("20.1.0-next.3"),
+            parse("20.1.0-rc.0"),
+            parse("20.1.0"),
+            parse("20.3.4"),
+            parse("21.0.0-next.0"),
+            parse("22.2.2"),
+        ] {
+            assert!(version.supports_dom_only_templates(), "{version:?}");
+        }
+
+        for version in [
+            parse("19.2.0"),
+            parse("20.0.7"),
+            parse("20.1.0-next.2"),
+            // Unknown tags parse to `Other`, below `next`.
+            parse("20.1.0-beta.1"),
+        ] {
+            assert!(!version.supports_dom_only_templates(), "{version:?}");
         }
     }
 

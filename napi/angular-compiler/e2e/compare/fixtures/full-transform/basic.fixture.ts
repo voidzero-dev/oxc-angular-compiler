@@ -44,7 +44,7 @@ export class BasicComponent {
 }
     `.trim(),
     template: `<div>{{ message }}</div>`,
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵtext', 'ɵɵtextInterpolate1'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵtext', 'ɵɵtextInterpolate1'],
   },
 
   {
@@ -65,7 +65,7 @@ export class CustomSelectorComponent {}
     `.trim(),
     template: `<span>Custom selector component</span>`,
     selector: 'my-custom-selector',
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   // ==========================================================================
@@ -92,7 +92,7 @@ export class InputComponent {
 }
     `.trim(),
     template: `<div [title]="title">{{ value }}</div>`,
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵproperty', 'ɵɵtextInterpolate1'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵdomProperty', 'ɵɵtextInterpolate1'],
   },
 
   {
@@ -118,7 +118,7 @@ export class OutputComponent {
 }
     `.trim(),
     template: `<button (click)="onClick()">Click me</button>`,
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵlistener'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵdomListener'],
   },
 
   // ==========================================================================
@@ -145,7 +145,7 @@ export class NoEncapsulationComponent {}
     template: `<div class="global">Global styles</div>`,
     encapsulation: 'None',
     // encapsulation only appears in full component definition, not template output
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   {
@@ -168,7 +168,7 @@ export class ShadowDomComponent {}
     template: `<div class="shadow">Shadow DOM content</div>`,
     encapsulation: 'ShadowDom',
     // encapsulation only appears in full component definition, not template output
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   {
@@ -194,7 +194,7 @@ export class OnPushComponent {
     template: `<div>{{ data }}</div>`,
     changeDetection: 'OnPush',
     // changeDetection only appears in full component definition, not template output
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵtextInterpolate1'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵtextInterpolate1'],
   },
 
   // ==========================================================================
@@ -230,7 +230,7 @@ export class HostPropertyComponent {
       '[style.opacity]': 'opacity',
     },
     // Template output is simple div element
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   {
@@ -262,7 +262,7 @@ export class HostListenerComponent {
       '(keydown.enter)': 'handleEnter()',
     },
     // Host listeners appear in hostBindings, not template - template is simple element
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   {
@@ -295,7 +295,7 @@ export class HostAttributeComponent {
       '[attr.aria-label]': 'label',
     },
     // Template output is simple span element
-    expectedFeatures: ['ɵɵelement'],
+    expectedFeatures: ['ɵɵdomElement'],
   },
 
   // ==========================================================================
@@ -530,7 +530,7 @@ export class LetDeclarationsComponent {
     @let tripled = value * 3;
     <div>Value: {{ value }}, Doubled: {{ doubled }}, Tripled: {{ tripled }}</div>
   `,
-    expectedFeatures: ['ɵɵdeclareLet', 'ɵɵelementStart'],
+    expectedFeatures: ['ɵɵdeclareLet', 'ɵɵdomElementStart'],
   },
 
   // ==========================================================================
@@ -715,7 +715,7 @@ export class PreserveWhitespaceComponent {}
     `.trim(),
     template: `<pre>  preserved   whitespace  </pre>`,
     preserveWhitespaces: true,
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵtext'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵtext'],
   },
 
   // ==========================================================================
@@ -847,6 +847,6 @@ export class StyledComponent {
   `,
     styles: [`.container { padding: 1rem; }`, `.title { font-size: 2rem; font-weight: bold; }`],
     // styles: array only appears in component definition, not template output
-    expectedFeatures: ['ɵɵelementStart', 'ɵɵtextInterpolate1'],
+    expectedFeatures: ['ɵɵdomElementStart', 'ɵɵtextInterpolate1'],
   },
 ]

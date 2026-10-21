@@ -10,6 +10,8 @@ import type { Fixture } from '../types.js'
 export const fixtures: Fixture[] = [
   {
     name: 'forwardref-basic-import',
+    // The components it imports have no imports of their own and compile like a full build.
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'Basic forwardRef in imports array',
     className: 'ForwardRefBasicImportComponent',
@@ -36,6 +38,8 @@ export class ChildComponent {}
   },
   {
     name: 'forwardref-multiple-imports',
+    // The components it imports have no imports of their own and compile like a full build.
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'Multiple forwardRef in imports',
     className: 'ForwardRefMultipleImportsComponent',
@@ -72,6 +76,8 @@ export class ComponentC {}
   },
   {
     name: 'forwardref-mixed-imports',
+    // The components it imports have no imports of their own and compile like a full build.
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'Mix of regular and forwardRef imports',
     className: 'ForwardRefMixedImportsComponent',
@@ -138,6 +144,8 @@ export class TreeNodeComponent {
   },
   {
     name: 'forwardref-with-template',
+    // The components it imports have no imports of their own and compile like a full build.
+    ngtscMode: 'full',
     category: 'edge-cases',
     description: 'forwardRef with multiple lazy-loaded components',
     className: 'ForwardRefWithTemplateComponent',

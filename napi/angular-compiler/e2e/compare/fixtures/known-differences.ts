@@ -40,6 +40,8 @@ const DOM_ONLY =
   'templates use ɵɵelementStart/ɵɵlistener where a full ngtsc build of a standalone component without directive dependencies emits the DOM-only ɵɵdomElementStart/ɵɵdomListener'
 const COMPONENT_DEPS =
   'dependencies use the local-compilation ɵɵgetComponentDepsFactory(Cmp, imports) where a full ngtsc build lists the resolved dependencies'
+const SELF_DEPENDENCY =
+  'a standalone component without imports that uses its own selector in its template has no `dependencies` where a full ngtsc build lists the component itself (ngtsc local mode omits it too)'
 const SET_CLASS_METADATA_IMPORT =
   'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
 const ALIASED_INJECTABLE =
@@ -47,7 +49,8 @@ const ALIASED_INJECTABLE =
 
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
-const NG_MODULE_SCOPE_ORDER = 'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
+const NG_MODULE_SCOPE_ORDER =
+  'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
 const DEBUG_INFO_PATH =
   'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
 const DEBUG_INFO_LINE =
@@ -126,51 +129,35 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     ],
     reasons: [SET_CLASS_METADATA_IMPORT],
   },
-  'component-meta/change-detection-default': {
-    fields: ['ChangeDetectionDefaultComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'component-meta/change-detection-onpush': {
-    fields: ['ChangeDetectionOnPushComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
   'edge-cases/aliased-injectable': {
     fields: ['AliasedService.ɵfac'],
     metadataDiffs: ['AliasedService.setClassMetadata'],
     reasons: [ALIASED_INJECTABLE],
+  },
+  'edge-cases/forwardref-basic-import': {
+    fields: ['ForwardRefBasicImportComponent.ɵcmp'],
+    reasons: [COMPONENT_DEPS],
+  },
+  'edge-cases/forwardref-mixed-imports': {
+    fields: ['ForwardRefMixedImportsComponent.ɵcmp'],
+    reasons: [COMPONENT_DEPS],
+  },
+  'edge-cases/forwardref-multiple-imports': {
+    fields: ['ForwardRefMultipleImportsComponent.ɵcmp'],
+    reasons: [COMPONENT_DEPS],
+  },
+  'edge-cases/forwardref-with-template': {
+    fields: ['ForwardRefWithTemplateComponent.ɵcmp'],
+    reasons: [COMPONENT_DEPS],
   },
   'edge-cases/unicode-special-escapes': {
     fields: [],
     statements: ['ɵsetClassDebugInfo(UnicodeSpecialEscapesComponent)'],
     reasons: [DEBUG_INFO_LINE, DEBUG_INFO_PATH],
   },
-  'edge-cases/multiple-custom-decorators': {
-    fields: ['MultiDecoratorComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'edge-cases/single-custom-decorator': {
-    fields: ['MyComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'full-transform/full-transform-complex': {
-    fields: [],
-    functions: [
-      'ComplexComponent_Conditional_0_Template',
-      'ComplexComponent_Conditional_1_For_1_Template',
-    ],
-    reasons: [DOM_ONLY],
-  },
   'full-transform/full-transform-host-attribute': {
     fields: ['HostAttributeComponent.ɵcmp'],
     reasons: [HOST_ATTRS_ORDER],
-  },
-  'full-transform/full-transform-onpush': {
-    fields: ['OnPushComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'full-transform/transform-api-onpush': {
-    fields: ['OnPushComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
   },
   'host-bindings/host-attribute': {
     fields: ['HostAttributeComponent.ɵcmp'],
@@ -186,22 +173,10 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['HostDirectivesOnPushComponent.ɵcmp'],
     reasons: [DOM_ONLY, COMPONENT_DEPS],
   },
-  'providers/providers-with-change-detection': {
-    fields: ['ProvidersWithChangeDetectionComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'regressions/class-debug-info-change-detection': {
-    fields: ['OnPushDebugInfoComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
   'regressions/formfield-alias-repro': {
     fields: ['AppComponent.ɵcmp'],
     classes: ['AppComponent'],
     reasons: [COMPONENT_DEPS, DEBUG_NAME],
-  },
-  'schemas/schemas-with-change-detection': {
-    fields: ['SchemasWithOnPushComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
   },
   'styles/shadow-css-child-combinator': {
     fields: ['ChildCombinatorComponent.ɵcmp'],
@@ -336,14 +311,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'styles/shadow-css-where-with-host': {
     fields: ['WhereWithHostComponent.ɵcmp'],
     reasons: [CSS_WS],
-  },
-  'styles/style-onpush-encapsulation': {
-    fields: ['OnPushStyleComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
-  },
-  'styles/style-onpush-none': {
-    fields: ['OnPushNoneStyleComponent.ɵcmp'],
-    reasons: [DOM_ONLY],
   },
   'templates/arrow-control-flow-expressions': {
     fields: [],
@@ -538,6 +505,18 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'templates/case-raw-text': {
     fields: ['CaseRawTextComponent.ɵcmp'],
     reasons: [CSS_WS],
+  },
+  'templates/dom-only-empty-imports': {
+    fields: ['DomOnlyEmptyImportsComponent.ɵcmp'],
+    reasons: [COMPONENT_DEPS],
+  },
+  'templates/dom-only-not-for-default-selector-self-reference': {
+    fields: ['DefaultSelectorComponent.ɵcmp'],
+    reasons: [SELF_DEPENDENCY],
+  },
+  'templates/dom-only-not-for-self-reference': {
+    fields: ['TreeComponent.ɵcmp'],
+    reasons: [SELF_DEPENDENCY],
   },
   'templates/ng-arrow-function-dollar-event': {
     fields: [],

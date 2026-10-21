@@ -13,9 +13,9 @@ static ɵfac = function MultiStyledComponent_Factory(__ngFactoryType__) {
 static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:MultiStyledComponent,selectors:[["app-multi-styled"]],
     decls:2,vars:0,template:function MultiStyledComponent_Template(rf,ctx) {
       if ((rf & 1)) {
-        i0.ɵɵelementStart(0,"div");
+        i0.ɵɵdomElementStart(0,"div");
         i0.ɵɵtext(1,"Content");
-        i0.ɵɵelementEnd();
+        i0.ɵɵdomElementEnd();
       }
     },styles:[".first[_ngcontent-%COMP%] { color: blue; }",".second[_ngcontent-%COMP%] { background: white; }"]});
 }

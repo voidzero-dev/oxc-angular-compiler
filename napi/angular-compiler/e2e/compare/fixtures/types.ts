@@ -202,7 +202,9 @@ export interface Fixture {
   filePath?: string
 
   /**
-   * ngtsc compilation mode for the reference output (default: 'local').
+   * ngtsc compilation mode for the reference output. The default is 'full' when every component
+   * in the file is standalone and has no `imports` or `deferredImports` (Oxc then compiles it
+   * like a full build, with the DOM-only template instructions), and 'local' otherwise.
    *
    * 'local' (`experimental-local`) is fast, but it differs from a real build wherever ngtsc
    * needs more than the file itself; use 'full' for fixtures that depend on that.

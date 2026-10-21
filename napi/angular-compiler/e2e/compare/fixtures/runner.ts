@@ -13,12 +13,14 @@ import { cpus } from 'os'
 import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
 import { compileFactory, Severity } from '@oxc-angular/vite/api'
 import pLimit from 'p-limit'
+import ts from 'typescript'
 
 import { compareFullFileSemantically, type ImportDiff } from '../src/compare.js'
 import {
   compileWithNgtsc,
   generateComponentSource,
   printDiagnosticWarningSummary,
+  type NgtscMode,
 } from '../src/compilers/angular-ngtsc.js'
 import { compileWithOxcFullFile } from '../src/compilers/oxc.js'
 import { discoverFixtures } from './index.js'
@@ -46,6 +48,76 @@ const FIXTURE_TSCONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), '..'
  */
 function ngtscFilePath(filePath: string): string {
   return join(dirname(FIXTURE_TSCONFIG_PATH), filePath)
+}
+
+/**
+ * The ngtsc mode a fixture's reference output comes from: its `ngtscMode`, or else `full` when
+ * the file has components and each is standalone and provably imports nothing, and `local`
+ * otherwise.
+ *
+ * The file alone shows such a component has no directive dependencies, so Oxc compiles its
+ * template like a full build does, with the DOM-only instructions; ngtsc's local mode assumes
+ * dependencies and never uses them. Any other component needs what local mode assumes about
+ * the imports it cannot see.
+ */
+function referenceNgtscMode(fixture: Fixture, source: string): NgtscMode {
+  if (fixture.ngtscMode) {
+    return fixture.ngtscMode
+  }
+  const file = ts.createSourceFile('fixture.ts', source, ts.ScriptTarget.Latest)
+  let components = 0
+  let allWithoutImports = true
+  const visit = (node: ts.Node): void => {
+    if (ts.isClassDeclaration(node)) {
+      for (const decorator of ts.getDecorators(node) ?? []) {
+        const call = decorator.expression
+        if (
+          ts.isCallExpression(call) &&
+          ts.isIdentifier(call.expression) &&
+          call.expression.text === 'Component'
+        ) {
+          components++
+          const config = call.arguments[0]
+          if (
+            config === undefined ||
+            !ts.isObjectLiteralExpression(config) ||
+            !isStandaloneWithoutImports(config)
+          ) {
+            allWithoutImports = false
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return components > 0 && allWithoutImports ? 'full' : 'local'
+}
+
+/**
+ * Whether a `@Component` config is standalone and its `imports` and `deferredImports` are each
+ * absent or `[]`, with no spread or shorthand property that could hide them.
+ */
+function isStandaloneWithoutImports(config: ts.ObjectLiteralExpression): boolean {
+  return config.properties.every((property) => {
+    if (!ts.isPropertyAssignment(property)) {
+      return false
+    }
+    const key =
+      ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+        ? property.name.text
+        : undefined
+    if (key === 'standalone') {
+      return property.initializer.kind !== ts.SyntaxKind.FalseKeyword
+    }
+    if (key === 'imports' || key === 'deferredImports') {
+      return (
+        ts.isArrayLiteralExpression(property.initializer) &&
+        property.initializer.elements.length === 0
+      )
+    }
+    return true
+  })
 }
 import type {
   Fixture,
@@ -316,7 +388,7 @@ async function testComponentFixture(fixture: Fixture, verbose?: boolean): Promis
   try {
     const result = await compileWithNgtsc(source, ngtscFilePath(filePath), {
       tsconfigPath: FIXTURE_TSCONFIG_PATH,
-      mode: fixture.ngtscMode,
+      mode: referenceNgtscMode(fixture, source),
     })
     tsOutput = {
       code: result.code,
@@ -524,7 +596,7 @@ async function testFullTransformFixture(
   const tsStart = performance.now()
   try {
     const result = await compileWithNgtsc(fixture.sourceCode, ngtscFilePath(filePath), {
-      mode: fixture.ngtscMode,
+      mode: referenceNgtscMode(fixture, fixture.sourceCode),
       tsconfigPath: FIXTURE_TSCONFIG_PATH,
     })
     tsOutput = {
@@ -696,7 +768,7 @@ async function testClassMetadataFixture(
   const tsStart = performance.now()
   try {
     const result = await compileWithNgtsc(fixture.sourceCode, filePath, {
-      mode: fixture.ngtscMode,
+      mode: referenceNgtscMode(fixture, fixture.sourceCode),
       tsconfigPath: FIXTURE_TSCONFIG_PATH,
     })
     tsOutput = {

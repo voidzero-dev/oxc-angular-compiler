@@ -614,6 +614,7 @@ describe('object spread in template bindings', () => {
 })
 
 describe('capitalised element names', () => {
+  // Standalone without imports, so the templates use the DOM-only instructions.
   it('compiles <View> as an element instead of dropping the template', async () => {
     const source = `import { Component } from '@angular/core';
 @Component({ selector: 'x', template: '<View><text>hi</text></View>' })
@@ -623,7 +624,7 @@ export class X {}`
 
     expect(result.errors).toHaveLength(0)
     expect(result.code).toMatch(/decls:\s*3/)
-    expect(result.code).toMatch(/ɵɵelementStart\(0,\s*"View"\)\(1,\s*"text"\)/)
+    expect(result.code).toMatch(/ɵɵdomElementStart\(0,\s*"View"\)\(1,\s*"text"\)/)
     expect(result.code).toMatch(/ɵɵtext\(2,\s*"hi"\)/)
   })
 
@@ -636,7 +637,7 @@ export class X {}`
 
     expect(result.errors).toHaveLength(0)
     expect(result.code).toMatch(/decls:\s*5/)
-    expect(result.code).toMatch(/ɵɵelementStart\(0,\s*"UL"\)\(1,\s*"LI"\)/)
+    expect(result.code).toMatch(/ɵɵdomElementStart\(0,\s*"UL"\)\(1,\s*"LI"\)/)
   })
 })
 
