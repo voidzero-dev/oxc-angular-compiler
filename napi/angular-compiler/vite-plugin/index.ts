@@ -25,7 +25,6 @@ import {
   transformAngularFile,
   extractComponentMetadataSync,
   extractComponentUrls,
-  encapsulateStyle,
   compileForHmrSync,
   type TransformOptions,
   type ResolvedResources,
@@ -1538,9 +1537,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   }
 
   /**
-   * Plugin to encapsulate component styles.
-   */
-  /**
    * Augment library `.d.ts` files with Angular's Ivy type declarations.
    *
    * Vite/Rolldown don't emit declarations themselves — a separate dts
@@ -1606,38 +1602,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     }
   }
 
-  function stylesPlugin(): Plugin {
-    return {
-      name: '@oxc-angular/vite-styles',
-      transform: {
-        filter: {
-          id: /ngcomp/,
-        },
-        handler(code, id) {
-          if (!pluginOptions.liveReload) return
-
-          const params = new URL(id, 'http://localhost').searchParams
-          const componentId = params.get('ngcomp')
-          const encapsulation = params.get('e')
-
-          // Only encapsulate for emulated encapsulation (e=0)
-          if (encapsulation === '0' && componentId) {
-            const encapsulated = encapsulateStyle(code, componentId)
-            return {
-              code: encapsulated,
-              map: null,
-            }
-          }
-
-          return undefined
-        },
-      },
-    }
-  }
-
   return [
     angularPlugin(),
-    stylesPlugin(),
     dtsPlugin(),
     angularLinkerPlugin({ angularVersion: pluginOptions.angularVersion }),
     pluginOptions.jit &&
