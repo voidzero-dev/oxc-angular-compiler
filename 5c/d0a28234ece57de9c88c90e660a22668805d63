@@ -1,0 +1,23 @@
+crates/oxc_angular_compiler/src/component/import_elision.rs
+  s_0673db97cc1822::t_17da837d400733 67-74,97-98,134-135,146-147,160-161,176-178,190,203,206-212,899,903-916,919-923,942
+crates/oxc_angular_compiler/src/component/transform.rs
+  s_0673db97cc1822::t_bbe592ec759a19 3245-3293,3540-3544,3553-3555,3594,4959,5113,5118-5132
+crates/oxc_angular_compiler/tests/defer_implicit_imports_test.rs
+  s_0673db97cc1822::t_90378737323559 414-731
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5cd0a28234ece57de9c88c90e660a22668805d63",
+  "prompts": {},
+  "sessions": {
+    "s_0673db97cc1822": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aac6388f4bd51ed93",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
