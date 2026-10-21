@@ -15,12 +15,12 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BindingPattern, Class, Declaration, ExportDefaultDeclarationKind, Expression,
-    ObjectPropertyKind, Statement, TSNamespaceDeclarationBody,
+    ObjectPropertyKind, Program, Statement, TSNamespaceDeclarationBody,
 };
 use oxc_parser::Parser;
 use oxc_resolver::{
@@ -29,7 +29,7 @@ use oxc_resolver::{
 use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::directive::ImportValueResolver;
+use crate::directive::{ImportValueResolver, StringConsts};
 
 /// Result of analyzing a file's exports
 #[derive(Debug, Clone)]
@@ -48,6 +48,10 @@ pub struct ExportInfo {
     /// hit a file already in `analyzing`, making the result depend on which
     /// file happened to be read first.
     pub(crate) value_local: Option<String>,
+    /// A top-level `export class` or `export function`: the evaluator reads
+    /// it as a reference, which `StaticValue` can't hold, so
+    /// [`Inner::export_value_at`] answers `None` without evaluating it.
+    pub(crate) never_static: bool,
 }
 
 /// Bounds a re-export chain (`export { X } from ...`, `export *`) followed
@@ -74,9 +78,10 @@ struct Inner {
     cache: RefCell<FxHashMap<String, FxHashMap<String, ExportInfo>>>,
     /// Files currently being analyzed (for circular import detection)
     analyzing: RefCell<FxHashSet<String>>,
-    /// Source text of analyzed files, kept so `eval_export` can re-parse
-    /// on demand. Only populated when `values_enabled`.
-    sources: RefCell<FxHashMap<String, String>>,
+    /// Files parsed for `eval_export` and `class_selector`, so each is
+    /// parsed once: `analyze_file` keeps its parse when `values_enabled`, and
+    /// other files are parsed on first use.
+    parsed: RefCell<FxHashMap<String, Rc<ParsedFile>>>,
     /// Memoized per-export value evaluations: `(file, local_name)` -> value.
     /// `None` means evaluated-but-opaque.
     value_memo: RefCell<FxHashMap<(String, String), Option<crate::directive::StaticValue>>>,
@@ -91,11 +96,61 @@ struct Inner {
     /// Files read to resolve exported values, so build tools can watch them.
     value_dependencies: RefCell<FxHashSet<String>>,
     /// Whether exported-value resolution (`resolve_imported_values`) is on.
-    /// When false, `analyze_file` doesn't retain source text.
+    /// When false, `analyze_file` doesn't keep the files it parses.
     values_enabled: bool,
-    /// `Rc` handle to this state, for resolvers built while analyzing a file
-    /// (`eval_export` only sees `&self`).
-    this: std::rc::Weak<Inner>,
+    /// Handle to this state, for the resolvers of the files in `parsed`
+    /// (`parse_file` only sees `&self`).
+    this: Weak<Inner>,
+}
+
+/// A file parsed once per analyzer: its program, and the consts the
+/// evaluator reads it through, which resolve its imports with a
+/// [`ParsedFileResolver`].
+struct ParsedFile {
+    // `consts` and `program` borrow `allocator`, which also holds the source
+    // text. They're declared first so they drop first; the allocator is boxed
+    // so it stays put when `ParsedFile` moves.
+    consts: StringConsts<'static>,
+    program: &'static Program<'static>,
+    allocator: Box<Allocator>,
+}
+
+impl ParsedFile {
+    /// Run `f` on the file's allocator, program and consts. `f` works for
+    /// any lifetime, so nothing borrowed from them outlives `self`.
+    fn with<R>(
+        &self,
+        f: impl for<'a> FnOnce(&'a Allocator, &'a Program<'a>, &'a StringConsts<'a>) -> R,
+    ) -> R {
+        // SAFETY: `program` and `consts` only borrow `self.allocator`, which
+        // lives as long as `self`, so they're valid for the borrow of `self`.
+        // `StringConsts` is invariant over its lifetime (its caches are
+        // `RefCell`s), hence the cast; `f` can only store data borrowed for
+        // that same lifetime in them, i.e. from the allocator.
+        let consts = unsafe { &*std::ptr::from_ref(&self.consts).cast::<StringConsts<'_>>() };
+        f(&self.allocator, self.program, consts)
+    }
+}
+
+/// The [`ImportValueResolver`] of a file in [`Inner::parsed`]: a
+/// [`CrossFileResolver`] holding a `Weak` handle, so the cache doesn't keep
+/// the analyzer alive.
+struct ParsedFileResolver {
+    inner: Weak<Inner>,
+    from_file: PathBuf,
+}
+
+impl ImportValueResolver for ParsedFileResolver {
+    fn resolve(&self, module: &str, name: &str) -> Option<crate::directive::StaticValue> {
+        self.inner.upgrade()?.resolve_export_value(module, name, &self.from_file)
+    }
+
+    fn exports(
+        &self,
+        module: &str,
+    ) -> Option<Vec<(String, Option<crate::directive::StaticValue>)>> {
+        self.inner.upgrade()?.export_values_of(module, &self.from_file)
+    }
 }
 
 /// An [`ImportValueResolver`] bound to the file whose imports it resolves:
@@ -119,22 +174,17 @@ impl ImportValueResolver for CrossFileResolver {
     }
 }
 
-/// The selector of the class `local` declares in `source` (the text of
-/// `file_path`; `"default"` for `export default class`) and exports as
-/// `exported`, when it is a standalone `@Component` or `@Directive` whose
-/// `selector` and `standalone` are literals.
-fn standalone_class_selector(
-    file_path: &str,
-    source: &str,
+/// The selector of the class `local` declares in `program` (`"default"` for
+/// `export default class`) and exports as `exported`, when it is a
+/// standalone `@Component` or `@Directive` whose `selector` and `standalone`
+/// are literals. `consts` are the program's.
+fn standalone_class_selector<'a>(
+    program: &'a Program<'a>,
+    consts: &StringConsts<'a>,
     exported: &str,
     local: &str,
     implicit_standalone: bool,
 ) -> Option<String> {
-    let allocator = Allocator::default();
-    let source_type = SourceType::from_path(file_path).unwrap_or_default();
-    let parser_ret = Parser::new(&allocator, source, source_type).parse();
-    let program = &parser_ret.program;
-
     // A plain `class Local` must be exported as `exported` by a local
     // `export { Local as exported }`: the export map also records namespace
     // members, which can share the name of a top-level class the file doesn't
@@ -165,9 +215,8 @@ fn standalone_class_selector(
         _ => None,
     })?;
 
-    let consts = crate::directive::collect_string_consts(&allocator, program);
     let decorator = ["Component", "Directive"].iter().find_map(|name| {
-        crate::directive::find_angular_class_decorator(&class.decorators, name, &consts)
+        crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
     })?;
     let Expression::CallExpression(call) = &decorator.expression else { return None };
     let Some(Expression::ObjectExpression(object)) =
@@ -219,7 +268,7 @@ impl CrossFileAnalyzer {
                 resolver: Resolver::new(options),
                 cache: RefCell::new(FxHashMap::default()),
                 analyzing: RefCell::new(FxHashSet::default()),
-                sources: RefCell::new(FxHashMap::default()),
+                parsed: RefCell::new(FxHashMap::default()),
                 value_memo: RefCell::new(FxHashMap::default()),
                 selector_memo: RefCell::new(FxHashMap::default()),
                 evaluating_values: RefCell::new(FxHashSet::default()),
@@ -495,7 +544,7 @@ impl Inner {
     }
 
     /// [`standalone_class_selector`] memoized per `(file, exported, local)`,
-    /// reading the source `analyze_file` kept instead of the file again.
+    /// reading the file through [`Self::parsed_file`].
     fn class_selector(
         &self,
         file_path: &str,
@@ -508,16 +557,10 @@ impl Inner {
         if let Some(cached) = self.selector_memo.borrow().get(&key) {
             return cached.clone();
         }
-        // `sources` is populated when `values_enabled`; read the file
-        // directly as a fallback, like `eval_export_uncached`.
-        let source = self
-            .sources
-            .borrow()
-            .get(file_path)
-            .cloned()
-            .or_else(|| std::fs::read_to_string(file_path).ok());
-        let selector = source.and_then(|source| {
-            standalone_class_selector(file_path, &source, exported, local, implicit_standalone)
+        let selector = self.parsed_file(file_path).and_then(|file| {
+            file.with(|_, program, consts| {
+                standalone_class_selector(program, consts, exported, local, implicit_standalone)
+            })
         });
         self.selector_memo.borrow_mut().insert(key, selector.clone());
         selector
@@ -650,6 +693,9 @@ impl Inner {
 
         // A local export: evaluate its binding lazily. `local` is `"default"`
         // for `export default <expr>`.
+        if export_info.never_static {
+            return None;
+        }
         self.eval_export(file_path, &export_info.value_local?)
     }
 
@@ -672,39 +718,57 @@ impl Inner {
         value
     }
 
-    /// [`Self::eval_export`] without the memo: re-parse the cached source and
-    /// evaluate the named binding.
+    /// [`Self::eval_export`] without the memo: evaluate the named binding in
+    /// the parsed file.
     fn eval_export_uncached(
         &self,
         file_path: &str,
         local: &str,
     ) -> Option<crate::directive::StaticValue> {
-        // `sources` is populated by `analyze_file` when `values_enabled`;
-        // read the file directly as a fallback so behavior doesn't depend on
-        // which path discovered it first.
-        let source = self
-            .sources
-            .borrow()
-            .get(file_path)
-            .cloned()
-            .or_else(|| std::fs::read_to_string(file_path).ok())?;
+        let file = self.parsed_file(file_path)?;
+        file.with(|allocator, program, consts| {
+            let evaluator = crate::directive::Evaluator::new(consts);
+            if local == "default" {
+                return self
+                    .find_default_expr(&program.body)
+                    .and_then(|expr| evaluator.evaluate(expr).as_static());
+            }
+            evaluator.evaluate_name(allocator.alloc_str(local)).as_static()
+        })
+    }
 
-        let allocator = Allocator::default();
-        let source_type = SourceType::from_path(file_path).unwrap_or_default();
-        let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-        let Some(inner) = self.this.upgrade() else { return None };
-        let consts =
-            crate::directive::collect_string_consts(&allocator, &parser_ret.program).with_resolver(
-                Rc::new(CrossFileResolver { inner, from_file: Path::new(file_path).to_path_buf() }),
-            );
-        let evaluator = crate::directive::Evaluator::new(&consts);
-
-        if local == "default" {
-            return self
-                .find_default_expr(&parser_ret.program.body)
-                .and_then(|expr| evaluator.evaluate(expr).as_static());
+    /// `file_path` parsed, from [`Self::parsed`], or read and parsed now when
+    /// `analyze_file` didn't keep it (`values_enabled` off) so behavior
+    /// doesn't depend on which path discovered it first. `None` when the
+    /// file can't be read.
+    fn parsed_file(&self, file_path: &str) -> Option<Rc<ParsedFile>> {
+        if let Some(file) = self.parsed.borrow().get(file_path) {
+            return Some(Rc::clone(file));
         }
-        evaluator.evaluate_name(allocator.alloc_str(local)).as_static()
+        let source = std::fs::read_to_string(file_path).ok()?;
+        let file = Rc::new(self.parse_file(file_path, &source));
+        self.parsed.borrow_mut().insert(file_path.to_string(), Rc::clone(&file));
+        Some(file)
+    }
+
+    /// Parse `source`, the text of `file_path`, with consts whose imports
+    /// resolve from `file_path`.
+    fn parse_file(&self, file_path: &str, source: &str) -> ParsedFile {
+        let allocator = Box::new(Allocator::default());
+        // SAFETY: the boxed allocator outlives the program and consts that
+        // borrow it (see `ParsedFile`), and `ParsedFile::with` only lends
+        // them for the borrow of the `ParsedFile`.
+        let arena: &'static Allocator = unsafe { &*std::ptr::from_ref::<Allocator>(&*allocator) };
+        let source = arena.alloc_str(source);
+        let source_type = SourceType::from_path(file_path).unwrap_or_default();
+        let program = arena.alloc(Parser::new(arena, source, source_type).parse().program);
+        let resolver = ParsedFileResolver {
+            inner: Weak::clone(&self.this),
+            from_file: Path::new(file_path).to_path_buf(),
+        };
+        let consts = crate::directive::collect_string_consts(arena, program)
+            .with_resolver(Rc::new(resolver));
+        ParsedFile { consts, program, allocator }
     }
 
     /// The initializer expression of `export default <expr>`, searching the
@@ -863,6 +927,7 @@ impl Inner {
                     is_type_only: info.is_type_only,
                     re_export_source: Some((resolved, export_name.to_string())),
                     value_local: None,
+                    never_static: false,
                 });
             }
 
@@ -872,6 +937,7 @@ impl Inner {
                     is_type_only: info.is_type_only,
                     re_export_source: Some((resolved, export_name.to_string())),
                     value_local: None,
+                    never_static: false,
                 });
             }
         }
@@ -970,30 +1036,74 @@ impl Inner {
             }
         };
 
-        if self.values_enabled {
-            self.sources.borrow_mut().insert(file_path.to_string(), source.clone());
-        }
-
-        let allocator = Allocator::default();
-        let source_type = SourceType::from_path(file_path).unwrap_or_default();
-        let parser_ret = Parser::new(&allocator, &source, source_type).parse();
-
+        // With values on, keep the parsed file for `eval_export` and
+        // `class_selector`, so the file is parsed once per analyzer.
         let mut exports = FxHashMap::default();
-
-        for stmt in &parser_ret.program.body {
-            self.analyze_statement(stmt, &mut exports);
+        if self.values_enabled {
+            let file = Rc::new(self.parse_file(file_path, &source));
+            file.with(|_, program, _| self.analyze_program(program, &mut exports));
+            self.parsed.borrow_mut().insert(file_path.to_string(), file);
+        } else {
+            let allocator = Allocator::default();
+            let source_type = SourceType::from_path(file_path).unwrap_or_default();
+            let parser_ret = Parser::new(&allocator, &source, source_type).parse();
+            self.analyze_program(&parser_ret.program, &mut exports);
         }
 
         self.cache.borrow_mut().insert(file_path.to_string(), exports);
         self.analyzing.borrow_mut().remove(file_path);
     }
 
-    /// Analyze a statement for export information.
-    fn analyze_statement(&self, stmt: &Statement, exports: &mut FxHashMap<String, ExportInfo>) {
+    /// Collect `program`'s exports into `exports`.
+    fn analyze_program(&self, program: &Program, exports: &mut FxHashMap<String, ExportInfo>) {
+        for stmt in &program.body {
+            self.analyze_statement(stmt, exports, true);
+        }
+        // A top-level variable or enum shadows a class or function of the
+        // same name for the evaluator (a duplicate declaration TypeScript
+        // rejects): evaluate those exports as before.
+        if !exports.values().any(|info| info.never_static) {
+            return;
+        }
+        for stmt in &program.body {
+            let decl = match stmt {
+                Statement::ExportDeclaration(decl) => &decl.declaration,
+                _ => match stmt.as_declaration() {
+                    Some(decl) => decl,
+                    None => continue,
+                },
+            };
+            let mut shadow = |name: &str| {
+                if let Some(info) = exports.get_mut(name) {
+                    info.never_static = false;
+                }
+            };
+            match decl {
+                Declaration::VariableDeclaration(vars) => {
+                    for var in &vars.declarations {
+                        for id in var.id.get_binding_identifiers() {
+                            shadow(&id.name);
+                        }
+                    }
+                }
+                Declaration::TSEnumDeclaration(e) => shadow(&e.id.name),
+                _ => {}
+            }
+        }
+    }
+
+    /// Analyze a statement for export information. `top_level` is whether
+    /// `stmt` is in the program body rather than a namespace or module block.
+    fn analyze_statement(
+        &self,
+        stmt: &Statement,
+        exports: &mut FxHashMap<String, ExportInfo>,
+        top_level: bool,
+    ) {
         match stmt {
             // export class/function/const/interface/type Foo { ... }
             Statement::ExportDeclaration(decl) => {
-                self.analyze_declaration(&decl.declaration, exports);
+                self.analyze_declaration(&decl.declaration, exports, top_level);
             }
             // Local named export: export { X, Y } / export type { X }
             Statement::ExportNamedDeclaration(decl) => {
@@ -1006,6 +1116,7 @@ impl Inner {
                                 is_type_only: true,
                                 re_export_source: None,
                                 value_local: None,
+                                never_static: false,
                             },
                         );
                     }
@@ -1022,7 +1133,12 @@ impl Inner {
                     let value_local = (!is_type_only).then(|| spec.local.name().to_string());
                     exports.insert(
                         name,
-                        ExportInfo { is_type_only, re_export_source: None, value_local },
+                        ExportInfo {
+                            is_type_only,
+                            re_export_source: None,
+                            value_local,
+                            never_static: false,
+                        },
                     );
                 }
             }
@@ -1040,6 +1156,7 @@ impl Inner {
                                 is_type_only: true,
                                 re_export_source: None,
                                 value_local: None,
+                                never_static: false,
                             },
                         );
                     }
@@ -1058,6 +1175,7 @@ impl Inner {
                             is_type_only: spec.export_kind.is_type(),
                             re_export_source: source.map(|source| (source.to_string(), local_name)),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 }
@@ -1075,6 +1193,7 @@ impl Inner {
                         is_type_only,
                         re_export_source: None,
                         value_local: (!is_type_only).then(|| "default".to_string()),
+                        never_static: false,
                     },
                 );
             }
@@ -1090,6 +1209,7 @@ impl Inner {
                             is_type_only: false, // Namespace re-export - assume value
                             re_export_source: Some((source_module, "*".to_string())),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 } else {
@@ -1102,6 +1222,7 @@ impl Inner {
                             is_type_only: false,
                             re_export_source: Some((source_module, "*".to_string())),
                             value_local: None,
+                            never_static: false,
                         },
                     );
                 }
@@ -1110,7 +1231,7 @@ impl Inner {
             Statement::TSExternalModuleDeclaration(module_decl) => {
                 if let Some(block) = &module_decl.body {
                     for inner_stmt in &block.body {
-                        self.analyze_statement(inner_stmt, exports);
+                        self.analyze_statement(inner_stmt, exports, false);
                     }
                 }
             }
@@ -1121,7 +1242,7 @@ impl Inner {
             // declare global { ... }
             Statement::TSGlobalDeclaration(global_decl) => {
                 for inner_stmt in &global_decl.body.body {
-                    self.analyze_statement(inner_stmt, exports);
+                    self.analyze_statement(inner_stmt, exports, false);
                 }
             }
             _ => {}
@@ -1137,7 +1258,7 @@ impl Inner {
         match body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => {
                 for inner_stmt in &block.body {
-                    self.analyze_statement(inner_stmt, exports);
+                    self.analyze_statement(inner_stmt, exports, false);
                 }
             }
             TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
@@ -1146,15 +1267,26 @@ impl Inner {
         }
     }
 
-    /// Analyze a declaration and add export information.
-    fn analyze_declaration(&self, decl: &Declaration, exports: &mut FxHashMap<String, ExportInfo>) {
+    /// Analyze a declaration and add export information. `top_level` is
+    /// whether it's declared in the program body (see
+    /// [`ExportInfo::never_static`]).
+    fn analyze_declaration(
+        &self,
+        decl: &Declaration,
+        exports: &mut FxHashMap<String, ExportInfo>,
+        top_level: bool,
+    ) {
         // A runtime export binds the declared name; its value is evaluated
         // lazily by `eval_export`. Type declarations have no value local.
         let value_info = |name: &str, is_type_only: bool| ExportInfo {
             is_type_only,
             re_export_source: None,
             value_local: (!is_type_only).then(|| name.to_string()),
+            never_static: false,
         };
+        // A class or function evaluates to a reference to itself.
+        let reference_info =
+            |name: &str| ExportInfo { never_static: top_level, ..value_info(name, false) };
         match decl {
             Declaration::TSInterfaceDeclaration(d) => {
                 exports.insert(d.id.name.to_string(), value_info(&d.id.name, true));
@@ -1164,12 +1296,12 @@ impl Inner {
             }
             Declaration::ClassDeclaration(d) => {
                 if let Some(id) = &d.id {
-                    exports.insert(id.name.to_string(), value_info(&id.name, false));
+                    exports.insert(id.name.to_string(), reference_info(&id.name));
                 }
             }
             Declaration::FunctionDeclaration(d) => {
                 if let Some(id) = &d.id {
-                    exports.insert(id.name.to_string(), value_info(&id.name, false));
+                    exports.insert(id.name.to_string(), reference_info(&id.name));
                 }
             }
             Declaration::VariableDeclaration(d) => {
@@ -1199,7 +1331,7 @@ impl Inner {
     /// Clear the analysis cache.
     pub fn clear_cache(&self) {
         self.cache.borrow_mut().clear();
-        self.sources.borrow_mut().clear();
+        self.parsed.borrow_mut().clear();
         self.value_memo.borrow_mut().clear();
         self.selector_memo.borrow_mut().clear();
     }
@@ -1840,8 +1972,8 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_value_elision_only_analyzer_resolves_on_demand() {
-        // `resolve_export_value` works without `values_enabled`: `sources` is
-        // empty and the file is re-read for evaluation.
+        // `resolve_export_value` works without `values_enabled`: `parsed` is
+        // empty and the file is read again for evaluation.
         let dir = TempDir::new().unwrap();
         create_test_file(dir.path(), "other.ts", "export const V = 'v';");
         let main_file = dir.path().join("main.ts");
@@ -1922,7 +2054,7 @@ export { doSomething } from './utils';
 
     #[test]
     fn test_standalone_directive_selector_is_memoized() {
-        // The selector is read from the source `analyze_file` kept and
+        // The selector is read from the file `analyze_file` parsed and
         // memoized, not re-read from disk on every lookup, until the caches
         // are cleared. The file is still reported as a dependency each time.
         let dir = TempDir::new().unwrap();
@@ -1943,5 +2075,74 @@ export { doSomething } from './utils';
 
         analyzer.clear_cache();
         assert_eq!(selector(&analyzer).as_deref(), Some("app-b"));
+    }
+
+    #[test]
+    fn test_value_file_parsed_once() {
+        // `analyze_file`'s parse serves every later evaluation and selector
+        // lookup in the file: an edit made after it isn't seen.
+        let dir = TempDir::new().unwrap();
+        let meta =
+            create_test_file(dir.path(), "meta.ts", "export const A = 'a';\nexport const B = 'b';");
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./meta", "A"),
+            Some(StaticValue::String(s)) if s == "a"
+        ));
+        fs::write(&meta, "export const A = 'x';\nexport const B = 'y';").unwrap();
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./meta", "B"),
+            Some(StaticValue::String(s)) if s == "b"
+        ));
+        assert_eq!(analyzer.inner.parsed.borrow().len(), 1);
+    }
+
+    #[test]
+    fn test_value_class_and_function_exports_are_opaque() {
+        // Top-level classes and functions resolve to `None` without being
+        // evaluated; the export map still gives their local for selectors.
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "decls.ts",
+            "export class C {}\nexport function f() { return 1; }\nexport const V = 'v';",
+        );
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(resolve(&analyzer, &main_file, "./decls", "C").is_none());
+        assert!(resolve(&analyzer, &main_file, "./decls", "f").is_none());
+        assert!(analyzer.inner.value_memo.borrow().is_empty());
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./decls", "V"),
+            Some(StaticValue::String(s)) if s == "v"
+        ));
+    }
+
+    #[test]
+    fn test_value_namespace_class_export_still_evaluates() {
+        // A namespace member's export entry evaluates the top-level name it
+        // shares (here a `const`): only top-level declarations skip
+        // evaluation, as do ones a top-level variable doesn't shadow.
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "ns.ts",
+            "export const Foo = 'x';\nexport namespace N { export class Foo {} }",
+        );
+        create_test_file(dir.path(), "dup.ts", "const Bar = 'y';\nexport class Bar {}");
+        let main_file = dir.path().join("main.ts");
+        let analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
+
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./ns", "Foo"),
+            Some(StaticValue::String(s)) if s == "x"
+        ));
+        assert!(matches!(
+            resolve(&analyzer, &main_file, "./dup", "Bar"),
+            Some(StaticValue::String(s)) if s == "y"
+        ));
     }
 }
