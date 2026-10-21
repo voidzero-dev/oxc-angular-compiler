@@ -3605,7 +3605,7 @@ pub fn transform_angular_file(
                             if options.hmr {
                                 result.template_updates.insert(
                                     component_id.clone(),
-                                    compilation_result.template_js.clone(),
+                                    compilation_result.template_js.clone().unwrap_or_default(),
                                 );
                                 if let Some(decorator) = component_decorator {
                                     let callee = match &decorator.expression {
@@ -4715,8 +4715,9 @@ pub fn transform_angular_file(
 
 /// Result of full component compilation including ɵcmp/ɵfac.
 struct FullCompilationResult {
-    /// Compiled template function as JavaScript.
-    template_js: String,
+    /// Compiled template function as JavaScript, for HMR template updates.
+    /// `None` when HMR is off (nothing reads it then) and in partial mode.
+    template_js: Option<String>,
 
     /// ɵcmp definition as JavaScript.
     cmp_js: String,
@@ -4821,7 +4822,7 @@ fn compile_component_partial<'a>(
 
     let emitter = JsEmitter::new();
     FullCompilationResult {
-        template_js: String::new(),
+        template_js: None,
         cmp_js: emitter.emit_expression(&cmp_expr),
         fac_js: emitter.emit_expression(&fac_expr),
         declarations_js: String::new(),
@@ -5315,14 +5316,21 @@ fn compile_component_full<'a>(
     }
 
     // For HMR, we emit the template separately using compile_template_to_js
-    // The ɵcmp already contains the template function inline
-    let template_js =
-        compile_template_to_js(allocator, template, metadata.class_name.as_str(), file_path)
-            .map_err(|diags| {
-                let mut all_diags = diagnostics.clone();
-                all_diags.extend(diags);
-                all_diags
-            })?;
+    // The ɵcmp already contains the template function inline. Only the HMR
+    // `template_updates` map reads it, so skip the second template compile
+    // otherwise.
+    let template_js = if options.hmr {
+        Some(
+            compile_template_to_js(allocator, template, metadata.class_name.as_str(), file_path)
+                .map_err(|diags| {
+                    let mut all_diags = diagnostics.clone();
+                    all_diags.extend(diags);
+                    all_diags
+                })?,
+        )
+    } else {
+        None
+    };
 
     let cmp_js = emitter.emit_expression(&definitions.cmp_definition);
     let fac_js = emitter.emit_expression(&definitions.fac_definition);
