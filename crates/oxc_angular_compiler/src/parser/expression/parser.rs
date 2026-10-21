@@ -115,11 +115,9 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// Creates a new parser.
     pub fn new(allocator: &'a Allocator, source: &'a str) -> Self {
-        // Strip comments from the source before tokenizing
-        let stripped_source = Self::strip_comments(source);
-        // Allocate the stripped source in the allocator to get 'a lifetime
-        let stripped_ref: &'a str = allocator.alloc_str(&stripped_source);
-        let lexer = Lexer::new(allocator, stripped_ref);
+        // Strip comments from the source before tokenizing. The stripped source is a prefix
+        // of `source`, so it is borrowed rather than copied.
+        let lexer = Lexer::new(allocator, Self::strip_comments(source));
         let tokens = lexer.tokenize();
 
         // Collect error tokens from the lexer
@@ -177,9 +175,11 @@ impl<'a> Parser<'a> {
     ///
     /// Comments are only recognized outside of quoted strings.
     /// This matches Angular's behavior in `_stripComments`.
-    fn strip_comments(input: &str) -> String {
-        let comment_start = Self::find_comment_start(input);
-        if let Some(idx) = comment_start { input[..idx].to_string() } else { input.to_string() }
+    fn strip_comments(input: &str) -> &str {
+        match Self::find_comment_start(input) {
+            Some(idx) => &input[..idx],
+            None => input,
+        }
     }
 
     /// Finds the start index of a `//` comment, respecting quoted strings.
@@ -983,6 +983,11 @@ impl<'a> Parser<'a> {
         start_delimiter: &str,
         end_delimiter: &str,
     ) -> Option<ParseResult<'a>> {
+        // Text without a start delimiter has no interpolation.
+        if !self.source.contains(start_delimiter) {
+            return None;
+        }
+
         // Find interpolation boundaries
         let start_len = start_delimiter.len();
         let end_len = end_delimiter.len();

@@ -183,6 +183,9 @@ pub struct HtmlToR3Transform<'a> {
     icu_names: IcuPlaceholderNames,
     /// Full names (`:svg:svg`) of the enclosing elements, for i18n placeholder names.
     element_full_names: std::vec::Vec<String>,
+    /// The template as a source file for i18n messages, built on first use and shared by
+    /// every message so the template text is copied once.
+    i18n_source_file: std::cell::OnceCell<std::sync::Arc<crate::util::ParseSourceFile>>,
 }
 
 /// Placeholder names taken from an i18n message, keyed by source offset, so that the r3 AST
@@ -236,7 +239,15 @@ impl<'a> HtmlToR3Transform<'a> {
             message_names: MessagePlaceholderNames::default(),
             icu_names: IcuPlaceholderNames::default(),
             element_full_names: std::vec::Vec::new(),
+            i18n_source_file: std::cell::OnceCell::new(),
         }
+    }
+
+    /// Returns the template source file that i18n messages point into.
+    fn i18n_source_file(&self) -> std::sync::Arc<crate::util::ParseSourceFile> {
+        std::sync::Arc::clone(self.i18n_source_file.get_or_init(|| {
+            std::sync::Arc::new(crate::util::ParseSourceFile::new(self.source_text, "<template>"))
+        }))
     }
 
     fn security_context(&self, element: &str, property: &str) -> SecurityContext {
@@ -493,10 +504,7 @@ impl<'a> HtmlToR3Transform<'a> {
             } else {
                 // Use I18nMessageFactory to convert children to i18n AST and serialize
                 let factory = I18nMessageFactory::new(false, true);
-                let source_file = std::sync::Arc::new(crate::util::ParseSourceFile::new(
-                    self.source_text,
-                    "<template>",
-                ));
+                let source_file = self.i18n_source_file();
                 let meta = parse_i18n_meta(attr.value.as_str());
 
                 let message = factory.create_message(
@@ -1419,8 +1427,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // `_generateI18nMessage([expansion], currentMessage || meta)`). An ICU that is the only
         // child of an i18n element shares that element's message, so it is the message rather
         // than a sub-message of it.
-        let source_file =
-            std::sync::Arc::new(crate::util::ParseSourceFile::new(self.source_text, "<template>"));
+        let source_file = self.i18n_source_file();
         let icu_message = I18nMessageFactory::new(false, true).create_icu_message(
             expansion,
             self.element_full_names.last().map(String::as_str),
@@ -3460,10 +3467,8 @@ impl<'a> HtmlToR3Transform<'a> {
         &self,
         attr: &HtmlAttribute<'a>,
     ) -> (String, Vec<'a, I18nNode<'a>>) {
-        let source_file =
-            std::sync::Arc::new(crate::util::ParseSourceFile::new(self.source_text, "<template>"));
-        let message =
-            I18nMessageFactory::new(false, true).create_attribute_message(attr, source_file);
+        let message = I18nMessageFactory::new(false, true)
+            .create_attribute_message(attr, self.i18n_source_file());
         let span = |s: &crate::util::ParseSourceSpan| Span::new(s.start.offset, s.end.offset);
         let mut nodes = Vec::new_in(&self.allocator);
         let mut push = |node: &crate::i18n::ast::Node| match node {
