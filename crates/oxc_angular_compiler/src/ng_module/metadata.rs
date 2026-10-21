@@ -38,7 +38,8 @@ pub enum R3SelectorScopeMode {
     Inline,
 
     /// Scope is patched via ɵɵsetNgModuleScope in a side effect call.
-    /// Supports tree-shaking via ngJitMode guard.
+    /// Unlike ngtsc, Oxc does not guard the call with ngJitMode, because
+    /// component dependencies are resolved at runtime from this scope.
     SideEffect,
 
     /// No scope information is generated.

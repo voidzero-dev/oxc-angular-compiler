@@ -17,7 +17,6 @@ use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
 use super::metadata::{R3NgModuleMetadata, R3Reference};
-use crate::class_metadata::jit_only_guarded_expression;
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr,
     LiteralMapEntry, LiteralMapExpr, OutputExpression, OutputStatement, ParenthesizedExpr,
@@ -233,14 +232,23 @@ fn create_define_ng_module_call<'a>(
 /// Generates:
 /// ```javascript
 /// (function() {
-///   (typeof ngJitMode === "undefined" || ngJitMode) &&
-///     ɵɵsetNgModuleScope(ModuleClass, {
-///       declarations: [...],
-///       imports: [...],
-///       exports: [...]
-///     });
+///   ɵɵsetNgModuleScope(ModuleClass, {
+///     declarations: [...],
+///     imports: [...],
+///     exports: [...]
+///   });
 /// })()
 /// ```
+///
+/// ngtsc guards the call with `(typeof ngJitMode === "undefined" || ngJitMode)`
+/// so production builds can drop it. That is safe for ngtsc only because it
+/// lists every component's dependencies statically. Oxc compiles one file at
+/// a time and resolves dependencies at runtime with `ɵɵgetComponentDepsFactory`,
+/// which reads the scope this call puts on ɵmod (and only this call registers
+/// the module with the deps tracker). The Vite plugin defines `ngJitMode` as
+/// `false` in production, so a guarded call would leave every component that
+/// is declared in, or imports, an Oxc-compiled NgModule without its directives
+/// and pipes. The call is therefore always made.
 fn create_set_scope_side_effect<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
@@ -307,14 +315,12 @@ fn create_set_scope_side_effect<'a>(
         &allocator,
     ));
 
-    // Create: (typeof ngJitMode === "undefined" || ngJitMode) && setNgModuleScope(...)
-    let guarded_call = jit_only_guarded_expression(allocator, set_scope_call);
-
-    // Wrap in IIFE: (function() { ... })()
+    // Wrap in IIFE: (function() { setNgModuleScope(...); })()
+    // No ngJitMode guard; see the doc comment above.
     let params = Vec::new_in(&allocator);
     let mut body = Vec::new_in(&allocator);
     body.push(OutputStatement::Expression(Box::new_in(
-        crate::output::ast::ExpressionStatement { expr: guarded_call, source_span: None },
+        crate::output::ast::ExpressionStatement { expr: set_scope_call, source_span: None },
         &allocator,
     )));
 

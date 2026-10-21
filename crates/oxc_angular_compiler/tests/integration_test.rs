@@ -16184,9 +16184,11 @@ export class D {}
 }
 
 #[test]
-fn test_ng_module_scope_is_set_by_a_jit_only_side_effect() {
+fn test_ng_module_scope_is_set_by_a_side_effect() {
     // Like ngtsc in full compilation: the class keeps ɵmod with only the
-    // type, and a ngJitMode-guarded IIFE after it patches the scope on.
+    // type, and an IIFE after it patches the scope on. Unlike ngtsc the call
+    // is not ngJitMode-guarded, since ɵɵgetComponentDepsFactory reads this
+    // scope at runtime, also in production builds.
     let allocator = Allocator::default();
     let source = r"
 import { NgModule } from '@angular/core';
@@ -16207,10 +16209,9 @@ export class M {}
     );
     assert!(
         result.code.contains(
-            "(function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
-             i0.ɵɵsetNgModuleScope(M,{imports:[SHARED,\n      FormsModule]}));\n})();"
+            "(function() {\n  i0.ɵɵsetNgModuleScope(M,{imports:[SHARED,FormsModule]});\n})();"
         ),
-        "Should patch the scope on in a ngJitMode-guarded IIFE. Got:\n{}",
+        "Should patch the scope on in an unguarded IIFE. Got:\n{}",
         result.code
     );
 

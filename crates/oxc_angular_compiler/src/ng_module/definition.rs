@@ -10,18 +10,17 @@
 //! ## Generated Output
 //!
 //! ```javascript
-//! // Module definition (the scope is patched on below, JIT only):
+//! // Module definition (the scope is patched on below):
 //! AppModule.ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({
 //!   type: AppModule,
 //!   bootstrap: [AppComponent]
 //! });
 //! (function() {
-//!   (typeof ngJitMode === "undefined" || ngJitMode) &&
-//!     i0.ɵɵsetNgModuleScope(AppModule, {
-//!       declarations: [MyComponent],
-//!       imports: [CommonModule],
-//!       exports: [MyComponent]
-//!     });
+//!   i0.ɵɵsetNgModuleScope(AppModule, {
+//!     declarations: [MyComponent],
+//!     imports: [CommonModule],
+//!     exports: [MyComponent]
+//!   });
 //! })();
 //!
 //! // Factory function:
@@ -106,11 +105,10 @@ pub struct FullNgModuleDefinition<'a> {
 ///   exports: [MyComponent]
 /// });
 ///
-/// // Module with side-effect scope (for tree-shaking):
+/// // Module with side-effect scope (not ngJitMode-guarded, see compiler.rs):
 /// AppModule.ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({ type: AppModule });
 /// (function() {
-///   (typeof ngJitMode === "undefined" || ngJitMode) &&
-///     i0.ɵɵsetNgModuleScope(AppModule, { declarations: [...], imports: [...] });
+///   i0.ɵɵsetNgModuleScope(AppModule, { declarations: [...], imports: [...] });
 /// })();
 /// ```
 pub fn generate_ng_module_definition<'a>(
@@ -788,11 +786,13 @@ mod tests {
     }
 
     #[test]
-    fn test_ng_module_scope_is_a_jit_only_side_effect() {
+    fn test_ng_module_scope_is_a_side_effect() {
         // Like ngtsc in full compilation: ɵmod keeps only `type` and
-        // `bootstrap`, the scope goes to a `ngJitMode`-guarded
-        // ɵɵsetNgModuleScope call, and a class without a constructor or a
-        // superclass gets a plain factory.
+        // `bootstrap`, the scope goes to a ɵɵsetNgModuleScope call, and a
+        // class without a constructor or a superclass gets a plain factory.
+        // Unlike ngtsc the call has no `ngJitMode` guard: Oxc resolves
+        // component dependencies at runtime from this scope, so it must run
+        // in production builds too.
         let js = full_module_js(
             r"
             @NgModule({
@@ -809,8 +809,8 @@ mod tests {
             "M.ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({type:M,bootstrap:[A]});\n\
              M.ɵfac = function M_Factory(__ngFactoryType__) {\n  return new (__ngFactoryType__ || M)();\n};\n\
              M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[CommonModule]});\n\
-             (function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
-             i0.ɵɵsetNgModuleScope(M,{declarations:[A],\n      imports:[CommonModule],exports:[A]}));\n})();"
+             (function() {\n  \
+             i0.ɵɵsetNgModuleScope(M,{declarations:[A],imports:[CommonModule],exports:[A]});\n})();"
         );
     }
 
@@ -840,9 +840,8 @@ mod tests {
             (
                 "M.ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({type:M});",
                 Some(
-                    "(function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
-                     i0.ɵɵsetNgModuleScope(M,{declarations:[...DECLS,\n      P],\
-                     imports:[SHARED,RouterModule.forChild([])],exports:DECLS}));\n})();"
+                    "(function() {\n  i0.ɵɵsetNgModuleScope(M,{declarations:[...DECLS,P],\
+                     imports:[SHARED,RouterModule.forChild([])],\n      exports:DECLS});\n})();"
                 )
             )
         );
@@ -860,10 +859,7 @@ mod tests {
         );
         assert_eq!(
             mod_and_scope(&js).1,
-            Some(
-                "(function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
-                 i0.ɵɵsetNgModuleScope(M,{imports:[CommonModule]}));\n})();"
-            )
+            Some("(function() {\n  i0.ɵɵsetNgModuleScope(M,{imports:[CommonModule]});\n})();")
         );
 
         let js = full_module_js(
@@ -889,10 +885,7 @@ mod tests {
         );
         assert_eq!(
             mod_and_scope(&js).1,
-            Some(
-                "(function() {\n  (((typeof ngJitMode === \"undefined\") || ngJitMode) && \
-                 i0.ɵɵsetNgModuleScope(M,{declarations:() =>[Late]}));\n})();"
-            )
+            Some("(function() {\n  i0.ɵɵsetNgModuleScope(M,{declarations:() =>[Late]});\n})();")
         );
     }
 
