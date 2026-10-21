@@ -75,11 +75,44 @@ export class ListComponent {
         code.contains(r#"minVersion:"17.0.0""#),
         "expected minVersion:\"17.0.0\" (block syntax), got:\n{code}"
     );
-    // The template stays a string — no instruction emission, no @if
-    // parsing on our side.
+    // The template stays a string — no instruction emission; it is only
+    // parsed to report errors.
     assert!(
         code.contains(r#"template:"@if"#),
         "expected raw @if in template literal, got:\n{code}"
+    );
+}
+
+#[test]
+fn broken_template_reports_errors_in_partial_mode() {
+    // ngtsc parses the template in partial mode too: its errors are reported
+    // and `compilePartial` emits no declaration for the class.
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+
+@Component({ selector: 'app-broken', template: '<div>@if (a) {' })
+export class BrokenComponent {}
+
+@Component({ selector: 'app-binding', template: '<b [x]=\"a +\"></b>' })
+export class BindingComponent {}
+";
+    let options =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "broken.component.ts", source, Some(&options), None);
+    let messages: Vec<_> = result.diagnostics.iter().map(|d| d.message.to_string()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("Unclosed block \"@if\"")),
+        "expected the HTML parse error, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("Unexpected end of expression")),
+        "expected the binding parse error, got: {messages:?}"
+    );
+    assert!(
+        !result.code.contains("\u{0275}\u{0275}ngDeclareComponent"),
+        "a broken template must not get a declaration, got:\n{}",
+        result.code
     );
 }
 

@@ -47,13 +47,8 @@ const ALIASED_INJECTABLE =
 
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
-const NG_MODULE_SCOPE_ORDER = 'ɵɵsetNgModuleScope is emitted before ɵsetClassMetadata where Angular emits it after'
 const DEBUG_INFO_PATH =
   'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
-const DEBUG_INFO_LINE =
-  'ɵsetClassDebugInfo lineNumber counts only \\n line breaks where TypeScript also counts \\r, U+2028 and U+2029'
-const DEBUG_INFO_ORDER =
-  'ɵsetClassDebugInfo is emitted before ɵsetClassMetadata where Angular emits it after'
 
 /**
  * Differences every fixture may have, matched against the labels `KnownDifference` uses. A
@@ -62,29 +57,33 @@ const DEBUG_INFO_ORDER =
  */
 export const GLOBAL_KNOWN_DIFFERENCES: Array<{ label: RegExp; reason: string }> = [
   { label: /^statement ɵsetClassDebugInfo\([^()]+\)(#\d+)? filePath$/, reason: DEBUG_INFO_PATH },
-  { label: /^statement order ɵsetClassDebugInfo\([^()]+\)(#\d+)?$/, reason: DEBUG_INFO_ORDER },
 ]
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'class-metadata/class-metadata-ngmodule': {
     fields: [],
-    statements: ['ɵɵsetNgModuleScope(TestableModule)', 'order ɵɵsetNgModuleScope(TestableModule)'],
-    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+    statements: ['ɵɵsetNgModuleScope(TestableModule)'],
+    reasons: [NG_MODULE_SCOPE],
   },
   'injector/injector-with-both': {
     fields: [],
-    statements: ['ɵɵsetNgModuleScope(FullModule)', 'order ɵɵsetNgModuleScope(FullModule)'],
-    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+    statements: ['ɵɵsetNgModuleScope(FullModule)'],
+    reasons: [NG_MODULE_SCOPE],
   },
   'injector/injector-with-imports': {
     fields: [],
-    statements: ['ɵɵsetNgModuleScope(FeatureModule)', 'order ɵɵsetNgModuleScope(FeatureModule)'],
-    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+    statements: ['ɵɵsetNgModuleScope(FeatureModule)'],
+    reasons: [NG_MODULE_SCOPE],
   },
   'injector/injector-with-spread-declarations': {
     fields: [],
-    statements: ['ɵɵsetNgModuleScope(SpreadModule)', 'order ɵɵsetNgModuleScope(SpreadModule)'],
-    reasons: [NG_MODULE_SCOPE, NG_MODULE_SCOPE_ORDER],
+    statements: ['ɵɵsetNgModuleScope(SpreadModule)'],
+    reasons: [NG_MODULE_SCOPE],
+  },
+  'injector/injector-with-exports': {
+    fields: [],
+    statements: ['ɵɵsetNgModuleScope(ExportingModule)'],
+    reasons: [NG_MODULE_SCOPE],
   },
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
@@ -138,11 +137,6 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     fields: ['AliasedService.ɵfac'],
     metadataDiffs: ['AliasedService.setClassMetadata'],
     reasons: [ALIASED_INJECTABLE],
-  },
-  'edge-cases/unicode-special-escapes': {
-    fields: [],
-    statements: ['ɵsetClassDebugInfo(UnicodeSpecialEscapesComponent)'],
-    reasons: [DEBUG_INFO_LINE, DEBUG_INFO_PATH],
   },
   'edge-cases/multiple-custom-decorators': {
     fields: ['MultiDecoratorComponent.ɵcmp'],

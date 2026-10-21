@@ -863,16 +863,25 @@ fn get_trigger_parameters_start(value: &str, start_position: usize) -> Option<us
 
 /// Parses all triggers from @defer block parameters.
 /// Reference: Angular's r3_deferred_blocks.ts parsePrimaryTriggers function
+///
+/// `supports_idle_timeout` is whether the target Angular version accepts
+/// `idle(<time>)` (v22+); before that `idle` takes no parameters.
 pub fn parse_defer_triggers<'a>(
     allocator: &'a Allocator,
     parameters: &[HtmlBlockParameter<'a>],
     binding_parser: &BindingParser<'a>,
     block_start_span: Span,
+    supports_idle_timeout: bool,
 ) -> DeferTriggerParseResult<'a> {
     let mut triggers = R3DeferredBlockTriggers::default();
     let mut prefetch_triggers = R3DeferredBlockTriggers::default();
     let mut hydrate_triggers = R3DeferredBlockTriggers::default();
     let mut errors = std::vec::Vec::new();
+    let on_trigger = |param: &TriggerParameter<'a>,
+                      triggers: &mut R3DeferredBlockTriggers<'a>,
+                      errors: &mut std::vec::Vec<DeferTriggerError>| {
+        parse_on_trigger(allocator, param, binding_parser, triggers, errors, supports_idle_timeout);
+    };
 
     for param in parameters {
         let expr = param.expression.as_str();
@@ -886,21 +895,15 @@ pub fn parse_defer_triggers<'a>(
         if starts_with_keyword(expr, "when", has_trailing_ws) {
             parse_when_trigger(&param, binding_parser, &mut triggers, &mut errors);
         } else if starts_with_keyword(expr, "on", has_trailing_ws) {
-            parse_on_trigger(allocator, &param, binding_parser, &mut triggers, &mut errors);
+            on_trigger(&param, &mut triggers, &mut errors);
         } else if starts_with_keyword_pair(expr, "prefetch", "when", has_trailing_ws) {
             parse_when_trigger(&param, binding_parser, &mut prefetch_triggers, &mut errors);
         } else if starts_with_keyword_pair(expr, "prefetch", "on", has_trailing_ws) {
-            parse_on_trigger(
-                allocator,
-                &param,
-                binding_parser,
-                &mut prefetch_triggers,
-                &mut errors,
-            );
+            on_trigger(&param, &mut prefetch_triggers, &mut errors);
         } else if starts_with_keyword_pair(expr, "hydrate", "when", has_trailing_ws) {
             parse_when_trigger(&param, binding_parser, &mut hydrate_triggers, &mut errors);
         } else if starts_with_keyword_pair(expr, "hydrate", "on", has_trailing_ws) {
-            parse_on_trigger(allocator, &param, binding_parser, &mut hydrate_triggers, &mut errors);
+            on_trigger(&param, &mut hydrate_triggers, &mut errors);
         } else if is_hydrate_never_pattern(expr) {
             parse_never_trigger(&param, &mut hydrate_triggers, &mut errors);
         } else {
@@ -1053,6 +1056,7 @@ fn parse_on_trigger<'a>(
     binding_parser: &BindingParser<'a>,
     triggers: &mut R3DeferredBlockTriggers<'a>,
     errors: &mut std::vec::Vec<DeferTriggerError>,
+    supports_idle_timeout: bool,
 ) {
     // This is here just to be safe, we shouldn't enter this function
     // in the first place if a block doesn't have the "on" keyword.
@@ -1082,6 +1086,7 @@ fn parse_on_trigger<'a>(
         triggers,
         errors,
         is_hydration_trigger,
+        supports_idle_timeout,
         prefetch_span: param.prefetch_span(),
         on_source_span: param.span_at(on_index, "on".len()),
         hydrate_span: param.hydrate_span(),
@@ -1118,6 +1123,8 @@ struct OnTriggerParser<'p, 'a> {
     triggers: &'p mut R3DeferredBlockTriggers<'a>,
     errors: &'p mut std::vec::Vec<DeferTriggerError>,
     is_hydration_trigger: bool,
+    /// Whether `idle` accepts a timeout parameter (Angular v22+).
+    supports_idle_timeout: bool,
     prefetch_span: Option<Span>,
     on_source_span: Span,
     hydrate_span: Option<Span>,
@@ -1213,7 +1220,7 @@ impl<'a> OnTriggerParser<'_, 'a> {
             Span::new(if is_first_trigger { self.span.start } else { name_start }, end);
 
         let result = match identifier.str_value.as_str() {
-            "idle" => create_idle_trigger(parameters).map(|timeout| {
+            "idle" => create_idle_trigger(parameters, self.supports_idle_timeout).map(|timeout| {
                 let trigger = R3IdleDeferredTrigger {
                     timeout,
                     source_span,
@@ -1519,7 +1526,17 @@ impl<'a> OnTriggerParser<'_, 'a> {
     }
 }
 
-fn create_idle_trigger(parameters: &[ParsedParameter<'_>]) -> Result<Option<f64>, String> {
+fn create_idle_trigger(
+    parameters: &[ParsedParameter<'_>],
+    supports_timeout: bool,
+) -> Result<Option<f64>, String> {
+    // Before v22 `idle` takes no parameters.
+    if !supports_timeout {
+        if !parameters.is_empty() {
+            return Err("\"idle\" trigger cannot have parameters".to_string());
+        }
+        return Ok(None);
+    }
     if parameters.len() > 1 {
         return Err("\"idle\" trigger can only have zero or one parameters".to_string());
     }

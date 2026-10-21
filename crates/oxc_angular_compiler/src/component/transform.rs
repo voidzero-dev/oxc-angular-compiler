@@ -3726,20 +3726,15 @@ pub fn transform_angular_file(
 
                             // Split declarations into two groups:
                             // 1. decls_before_class: child view functions, constants (needed BEFORE class)
-                            // 2. decls_after_class: debug info, metadata, HMR code (references class, needs AFTER)
+                            // 2. decls_after_class: metadata, debug info, HMR code (references class, needs AFTER)
+                            //
+                            // The order follows ngtsc's `compileResults`
+                            // (annotations/common/src/util.ts): class metadata, then
+                            // class debug info, then the HMR initializer.
                             let decls_before_class = compilation_result.declarations_js.clone();
                             let mut decls_after_class = String::new();
 
-                            // Add class debug info (before class metadata, following Angular's order)
-                            if let Some(debug_info_js) = &compilation_result.class_debug_info_js {
-                                if !decls_after_class.is_empty() {
-                                    decls_after_class.push('\n');
-                                }
-                                decls_after_class.push_str(debug_info_js);
-                                decls_after_class.push(';');
-                            }
-
-                            // Add class metadata for TestBed support (after debug info, before HMR)
+                            // Add class metadata for TestBed support (before debug info and HMR)
                             // Only emit when enabled and not in advanced optimizations mode
                             if options.emit_class_metadata && !options.advanced_optimizations {
                                 // List ALL of the class's `@angular/core` decorators, in
@@ -3880,6 +3875,15 @@ pub fn transform_angular_file(
                                     decls_after_class.push_str(&metadata_js);
                                     decls_after_class.push(';');
                                 }
+                            }
+
+                            // Add class debug info (after class metadata, before HMR)
+                            if let Some(debug_info_js) = &compilation_result.class_debug_info_js {
+                                if !decls_after_class.is_empty() {
+                                    decls_after_class.push('\n');
+                                }
+                                decls_after_class.push_str(debug_info_js);
+                                decls_after_class.push(';');
                             }
 
                             // Add HMR initializer last
@@ -4330,8 +4334,10 @@ pub fn transform_angular_file(
                             has_injectable,
                         ));
 
-                        // Emit setClassMetadata for TestBed support (overrideModule),
-                        // appended after the NgModule's external declarations.
+                        // Emit setClassMetadata for TestBed support (overrideModule).
+                        // ngtsc's `insertMetadataStatement` (ng_module/src/handler.ts)
+                        // unshifts it in front of the ɵmod statements, so it comes
+                        // before the `ɵɵsetNgModuleScope` IIFE.
                         let metadata = build_set_class_metadata_decls(
                             &allocator,
                             class,
@@ -4344,9 +4350,9 @@ pub fn transform_angular_file(
                         );
                         if !metadata.is_empty() {
                             if !external_decls.is_empty() {
-                                external_decls.push('\n');
+                                external_decls.insert(0, '\n');
                             }
-                            external_decls.push_str(&metadata);
+                            external_decls.insert_str(0, &metadata);
                         }
 
                         // NgModule: external_decls go AFTER the class (they reference the class name)
@@ -5274,8 +5280,8 @@ fn compile_component_partial<'a>(
         ng_content_selectors: Vec::new(),
         has_defer_block,
         implicitly_deferred_imports: Vec::new(),
-        // Partial mode never parses the template; the linker collects link
-        // URLs at consumer build time.
+        // Partial mode only parses the template to report its errors; the
+        // linker collects link URLs at consumer build time.
         template_style_urls: Vec::new(),
         missing_link_urls: Vec::new(),
         hmr_update: None,
@@ -5385,24 +5391,6 @@ fn compile_component_full<'a>(
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
 
-    // Partial-mode early branch: skip the entire template pipeline.
-    // Partial declarations carry the template as a verbatim string and
-    // let the linker re-parse at consumer build time. Known gap: this also
-    // means template parse errors (incl. `IncompleteBlockOpen`) go unreported
-    // for library builds — upstream ngtsc still parses the template in
-    // declaration mode and surfaces those diagnostics.
-    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
-        return Ok(compile_component_partial(
-            allocator,
-            namespace_registry.angular_core_ns().as_str(),
-            template,
-            metadata,
-            &view_queries,
-            &content_queries,
-            pool_starting_index,
-        ));
-    }
-
     let mut diagnostics = Vec::new();
 
     // Stage 1: Parse HTML
@@ -5455,6 +5443,22 @@ fn compile_component_full<'a>(
             diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
         }
         return Err(diagnostics);
+    }
+
+    // Partial mode stops here. Its declaration carries the template as a
+    // verbatim string for the linker to compile at consumer build time, but
+    // ngtsc still parses it first: its template errors are reported and
+    // `compilePartial` emits nothing for the class (handler.ts).
+    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
+        return Ok(compile_component_partial(
+            allocator,
+            namespace_registry.angular_core_ns().as_str(),
+            template,
+            metadata,
+            &view_queries,
+            &content_queries,
+            pool_starting_index,
+        ));
     }
 
     // Capture ng-content selectors from the R3 AST for .d.ts generation
@@ -5844,7 +5848,7 @@ fn compile_component_full<'a>(
     // Generate class debug info for dev-mode runtime errors
     // This provides class name, file path, and line number for better error messages
     let class_debug_info_js = if !options.advanced_optimizations {
-        use crate::class_debug_info::{R3ClassDebugInfo, compile_class_debug_info};
+        use crate::class_debug_info::{R3ClassDebugInfo, compile_class_debug_info, line_number_at};
         use crate::output::ast::{OutputExpression, ReadVarExpr};
 
         // Create component type expression (reference to the class)
@@ -5853,17 +5857,9 @@ fn compile_component_full<'a>(
             &allocator,
         ));
 
-        // Compute the 1-indexed line number of the class declaration from its byte offset
-        let class_line_number = {
-            let offset = metadata.class_span.start as usize;
-            let mut line = 1u32;
-            for &byte in &source.as_bytes()[..offset.min(source.len())] {
-                if byte == b'\n' {
-                    line += 1;
-                }
-            }
-            line
-        };
+        // The 1-indexed line of the `class` keyword (ngtsc uses `clazz.name.pos`,
+        // which sits right after it), with TypeScript's line-break rules.
+        let class_line_number = line_number_at(source, metadata.class_span.start as usize);
 
         // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())

@@ -43,6 +43,11 @@ pub struct NgModuleMetadata<'a> {
     /// Exported declarations and modules as class names.
     pub exports: Vec<'a, Ident<'a>>,
 
+    /// Raw exports expression. Like ngtsc's local compilation, its elements
+    /// also go into the ɵinj imports, so the providers of exported NgModules
+    /// are registered.
+    pub raw_exports_expr: Option<OutputExpression<'a>>,
+
     /// The `declarations`, `imports` and `exports` expressions as written,
     /// kept only for a list that is not a plain array of class references
     /// (a const array, a spread, a `forRoot()` call...), whose names above
@@ -84,6 +89,7 @@ impl<'a> NgModuleMetadata<'a> {
             imports: Vec::new_in(&allocator),
             raw_imports_expr: None,
             exports: Vec::new_in(&allocator),
+            raw_exports_expr: None,
             declarations_scope_expr: None,
             imports_scope_expr: None,
             exports_scope_expr: None,
@@ -296,9 +302,11 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
                     if has_forward_refs {
                         metadata.contains_forward_decls = true;
                     }
+                    metadata.raw_exports_expr =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                     if !is_static {
                         metadata.exports_scope_expr =
-                            convert_oxc_expression(allocator, &prop.value, source_text);
+                            metadata.raw_exports_expr.as_ref().map(|e| e.clone_in(allocator));
                     }
                 }
                 "providers" => {

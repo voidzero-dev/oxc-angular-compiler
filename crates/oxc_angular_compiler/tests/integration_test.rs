@@ -595,6 +595,43 @@ fn test_defer_on_viewport() {
     insta::assert_snapshot!("defer_on_viewport", js);
 }
 
+#[test]
+fn test_defer_idle_timeout() {
+    // Angular's reify passes `trigger.timeout` to every idle instruction
+    // (`on`, `prefetch on` and `hydrate on`) when one is given.
+    let js = compile_template_to_js(
+        "@defer (on idle(100ms); prefetch on idle(2s)) {a} @defer (on idle; hydrate on idle(250)) {b}",
+        "TestComponent",
+    );
+    for expected in [
+        "i0.ɵɵdeferOnIdle(100);",
+        "i0.ɵɵdeferPrefetchOnIdle(2000);",
+        "i0.ɵɵdeferOnIdle();",
+        "i0.ɵɵdeferHydrateOnIdle(250);",
+    ] {
+        assert!(js.contains(expected), "expected `{expected}` in:\n{js}");
+    }
+}
+
+#[test]
+fn test_defer_idle_timeout_needs_v22() {
+    // Before v22, Angular's `createIdleTrigger` rejects any parameter.
+    let allocator = Allocator::default();
+    let template = "@defer (on idle(100ms)) {a}";
+    let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+    let options = TransformOptions {
+        angular_version: Some(AngularVersion::new(21, 2, 0)),
+        ..TransformOptions::default()
+    };
+    let r3_result =
+        HtmlToR3Transform::new(&allocator, template, options).transform(&html_result.nodes);
+    let errors: Vec<_> = r3_result.errors.iter().map(|e| e.msg.as_str()).collect();
+    assert!(
+        errors.iter().any(|e| e.contains("\"idle\" trigger cannot have parameters")),
+        "expected the pre-v22 idle parameter error, got: {errors:?}"
+    );
+}
+
 /// Reproduces voidzero-dev/oxc-angular-compiler#289 (aligned with Angular's
 /// local-compilation behavior): a `@defer` block on a component whose lazy
 /// dependency is declared in the `@Component.deferredImports` array must emit
@@ -16253,6 +16290,44 @@ export class M {}
         parsed.diagnostics.is_empty(),
         "Output should parse: {:?}\n{}",
         parsed.diagnostics,
+        result.code
+    );
+}
+
+#[test]
+fn test_ng_module_class_metadata_precedes_scope() {
+    // ngtsc's `insertMetadataStatement` unshifts ɵsetClassMetadata in front
+    // of the ɵmod statements, so it comes before the ɵɵsetNgModuleScope IIFE.
+    let allocator = Allocator::default();
+    let source = r"
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+@NgModule({ imports: [CommonModule] })
+export class M {}
+";
+    let result = transform_angular_file(&allocator, "m.module.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let metadata = result.code.find("ɵsetClassMetadata(M").expect("setClassMetadata");
+    let scope = result.code.find("ɵɵsetNgModuleScope(M").expect("setNgModuleScope");
+    assert!(metadata < scope, "setClassMetadata should come first. Got:\n{}", result.code);
+}
+
+#[test]
+fn test_component_class_metadata_precedes_debug_info() {
+    // ngtsc's `compileResults` pushes the class metadata, then the debug info.
+    // The debug info line counts `\r\n`, `\r`, U+2028 and U+2029 like
+    // TypeScript's `computeLineStarts`.
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';\r\n// \u{2028}\r@Component({ selector: 'c', template: '' })\r\nexport class C {}\n";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let metadata = result.code.find("ɵsetClassMetadata(C").expect("setClassMetadata");
+    let debug_info = result.code.find("ɵsetClassDebugInfo(C").expect("setClassDebugInfo");
+    assert!(metadata < debug_info, "setClassMetadata should come first. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("lineNumber:5"),
+        "class is on line 5 by TypeScript's count. Got:\n{}",
         result.code
     );
 }

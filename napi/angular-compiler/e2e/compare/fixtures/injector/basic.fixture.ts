@@ -118,6 +118,31 @@ export class SpreadModule {}
   },
   {
     type: 'full-transform',
+    name: 'injector-with-exports',
+    category: 'injector',
+    description: 'NgModule whose exports, like its imports, are added to the injector imports',
+    className: 'ExportingModule',
+    sourceCode: `
+import { Component, NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+
+@Component({ selector: 'app-a', template: '', standalone: false })
+export class AComponent {}
+
+const SHARED = [CommonModule];
+
+@NgModule({
+  declarations: [AComponent],
+  imports: SHARED,
+  exports: [AComponent, FormsModule],
+})
+export class ExportingModule {}
+    `.trim(),
+    expectedFeatures: ['defineInjector', 'defineNgModule', 'ɵɵsetNgModuleScope', 'FormsModule'],
+  },
+  {
+    type: 'full-transform',
     name: 'injector-extends-base-without-constructor',
     category: 'injector',
     description: 'NgModule that extends a base class without a constructor inherits its factory',

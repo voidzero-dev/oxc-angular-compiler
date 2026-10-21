@@ -209,11 +209,12 @@ pub fn create_defer_on_stmt<'a>(
 
     // Build arguments based on trigger kind, matching Angular's reify.ts behavior
     match trigger {
-        DeferTriggerKind::Never | DeferTriggerKind::Idle | DeferTriggerKind::Immediate => {
+        DeferTriggerKind::Never | DeferTriggerKind::Immediate => {
             // No arguments for these triggers
         }
-        DeferTriggerKind::Timer => {
-            // Timer trigger takes the delay as first argument
+        DeferTriggerKind::Timer | DeferTriggerKind::Idle => {
+            // Timer takes its delay as first argument; idle takes its optional
+            // timeout (`idle(100ms)`) when one was given.
             if let Some(d) = delay {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Number(d), source_span: None },

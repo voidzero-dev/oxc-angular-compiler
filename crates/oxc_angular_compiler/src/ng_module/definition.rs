@@ -325,17 +325,34 @@ fn build_injector_metadata<'a>(
         builder = builder.providers(providers.clone_in(allocator));
     }
 
-    // Prefer raw_imports_expr (preserves StoreModule.forRoot(...) and
-    // spread elements needed for ModuleWithProviders resolution).
-    if let Some(raw_imports) = &metadata.raw_imports_expr {
-        builder = builder.raw_imports(raw_imports.clone_in(allocator));
-    } else {
-        for import in &metadata.imports {
-            let import_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                ReadVarExpr { name: import.clone(), source_span: None },
-                &allocator,
-            ));
-            builder = builder.add_import(import_expr);
+    // Like ngtsc's local compilation (ng_module/src/handler.ts `analyze`), the
+    // injector imports are the raw `imports` followed by the raw `exports`: an
+    // array literal adds its elements (keeping `StoreModule.forRoot(...)` calls
+    // and spreads), any other expression is added as is. A full ngtsc build
+    // filters both lists by what each reference resolves to, which needs other
+    // files; the runtime ignores entries that are neither NgModules nor
+    // standalone components.
+    for (raw, names) in [
+        (&metadata.raw_imports_expr, &metadata.imports),
+        (&metadata.raw_exports_expr, &metadata.exports),
+    ] {
+        match raw {
+            Some(OutputExpression::LiteralArray(array)) => {
+                for entry in &array.entries {
+                    builder = builder.add_import(entry.clone_in(allocator));
+                }
+            }
+            Some(expr) => builder = builder.add_import(expr.clone_in(allocator)),
+            // The expression could not be converted: fall back to the names.
+            None => {
+                for name in names {
+                    let import_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                        ReadVarExpr { name: *name, source_span: None },
+                        &allocator,
+                    ));
+                    builder = builder.add_import(import_expr);
+                }
+            }
         }
     }
 
@@ -792,7 +809,8 @@ mod tests {
         // class without a constructor or a superclass gets a plain factory.
         // Unlike ngtsc the call has no `ngJitMode` guard: Oxc resolves
         // component dependencies at runtime from this scope, so it must run
-        // in production builds too.
+        // in production builds too. ɵinj lists the imports and then the
+        // exports, like ngtsc's local compilation.
         let js = full_module_js(
             r"
             @NgModule({
@@ -808,9 +826,38 @@ mod tests {
             js,
             "M.ɵmod = /*@__PURE__*/ i0.ɵɵdefineNgModule({type:M,bootstrap:[A]});\n\
              M.ɵfac = function M_Factory(__ngFactoryType__) {\n  return new (__ngFactoryType__ || M)();\n};\n\
-             M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[CommonModule]});\n\
+             M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[CommonModule,A]});\n\
              (function() {\n  \
              i0.ɵɵsetNgModuleScope(M,{declarations:[A],imports:[CommonModule],exports:[A]});\n})();"
+        );
+    }
+
+    #[test]
+    fn test_ng_module_injector_imports_include_exports() {
+        // ngtsc's local compilation adds the raw `imports` and `exports` to
+        // ɵinj: an array literal entry by entry, any other expression as is.
+        // An exported NgModule's providers are registered this way.
+        let inj_line = |code: &str| {
+            full_module_js(code).lines().find(|l| l.starts_with("M.ɵinj")).unwrap().to_string()
+        };
+        assert_eq!(
+            inj_line(
+                "@NgModule({ imports: [SHARED, ...MORE, R.forRoot()], exports: [SharedModule] })
+                 export class M {}"
+            ),
+            "M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[SHARED,...MORE,R.forRoot(),SharedModule]});"
+        );
+        assert_eq!(
+            inj_line("@NgModule({ imports: SHARED, exports: EXPORTED }) export class M {}"),
+            "M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[SHARED,EXPORTED]});"
+        );
+        assert_eq!(
+            inj_line("@NgModule({ exports: [SharedModule] }) export class M {}"),
+            "M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({imports:[SharedModule]});"
+        );
+        assert_eq!(
+            inj_line("@NgModule({ imports: [], exports: [] }) export class M {}"),
+            "M.ɵinj = /*@__PURE__*/ i0.ɵɵdefineInjector({});"
         );
     }
 

@@ -1085,7 +1085,7 @@ pub struct DeferOnOp<'a> {
     pub target_slot_view_steps: Option<i32>,
     /// Target name for local ref targeting.
     pub target_name: Option<Ident<'a>>,
-    /// Timer delay.
+    /// Timer delay, or the optional idle timeout.
     pub delay: Option<f64>,
     /// Viewport options (for viewport trigger).
     pub options: Option<Box<'a, IrExpression<'a>>>,

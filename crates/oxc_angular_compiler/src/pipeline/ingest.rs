@@ -3484,7 +3484,8 @@ fn ingest_defer_triggers<'a>(
             target_slot: None,
             target_slot_view_steps: None,
             target_name: None,
-            delay: None,
+            // The optional `idle(<time>)` timeout (Angular's `trigger.timeout`).
+            delay: idle_trigger.timeout,
             options: None,
         });
         if let Some(view) = job.view_mut(view_xref) {

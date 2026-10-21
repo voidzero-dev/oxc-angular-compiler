@@ -18,4 +18,4 @@ mod compiler;
 mod metadata;
 
 pub use compiler::compile_class_debug_info;
-pub use metadata::R3ClassDebugInfo;
+pub use metadata::{R3ClassDebugInfo, line_number_at};

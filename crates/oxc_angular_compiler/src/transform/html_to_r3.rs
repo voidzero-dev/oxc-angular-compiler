@@ -2865,12 +2865,14 @@ impl<'a> HtmlToR3Transform<'a> {
 
         let children = self.visit_children(&block.children);
 
-        // Parse defer triggers from block parameters
+        // Parse defer triggers from block parameters. `idle(<time>)` is v22+;
+        // an unknown version is treated as the latest.
         let trigger_result = parse_defer_triggers(
             self.allocator,
             &block.parameters,
             &self.binding_parser,
             block.start_span,
+            self.angular_version.is_none_or(|v| v.major >= 22),
         );
 
         // Report trigger parsing errors via diagnostics
