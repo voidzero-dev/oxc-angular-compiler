@@ -775,6 +775,8 @@ use crate::ast::r3::{
     R3ImmediateDeferredTrigger, R3InteractionDeferredTrigger, R3NeverDeferredTrigger,
     R3TimerDeferredTrigger, R3ViewportDeferredTrigger,
 };
+use crate::parser::expression::{Lexer, Token, TokenType};
+use crate::util::ParseError;
 
 /// Result of parsing defer block triggers.
 pub struct DeferTriggerParseResult<'a> {
@@ -784,88 +786,72 @@ pub struct DeferTriggerParseResult<'a> {
     pub prefetch_triggers: R3DeferredBlockTriggers<'a>,
     /// Hydrate triggers.
     pub hydrate_triggers: R3DeferredBlockTriggers<'a>,
-    /// Parse errors.
-    pub errors: std::vec::Vec<String>,
+    /// Parse errors, in the order Angular reports them.
+    pub errors: std::vec::Vec<DeferTriggerError>,
+}
+
+/// An error produced while parsing `@defer` triggers.
+pub enum DeferTriggerError {
+    /// A trigger error.
+    Trigger {
+        /// Where the error is reported (an absolute template span).
+        span: Span,
+        /// The error message.
+        msg: String,
+    },
+    /// An error from parsing a trigger expression (`when` condition or `viewport` options).
+    Expression(ParseError),
+}
+
+impl DeferTriggerError {
+    fn new(span: Span, msg: impl Into<String>) -> Self {
+        Self::Trigger { span, msg: msg.into() }
+    }
 }
 
 // Pattern matching functions for Angular's r3_deferred_blocks.ts
-// These handle whitespace/newlines between keywords correctly
+// These handle whitespace/newlines between keywords correctly.
+//
+// The HTML lexer trims block parameters, while Angular matches its patterns
+// against the untrimmed text. `has_trailing_ws` restores the trimmed trailing
+// whitespace, so that e.g. `on ` matches `^on\s` but `on` does not.
 
-/// Check if string starts with a keyword followed by whitespace, then another keyword followed by whitespace.
-fn starts_with_keyword_pair(s: &str, first: &str, second: &str) -> bool {
-    if !s.starts_with(first) {
+/// Pattern `^keyword\s`.
+fn starts_with_keyword(s: &str, keyword: &str, has_trailing_ws: bool) -> bool {
+    s.strip_prefix(keyword)
+        .is_some_and(|rest| rest.chars().next().map_or(has_trailing_ws, char::is_whitespace))
+}
+
+/// Pattern `^first\s+second\s`.
+fn starts_with_keyword_pair(s: &str, first: &str, second: &str, has_trailing_ws: bool) -> bool {
+    let Some(after_first) = s.strip_prefix(first) else {
         return false;
-    }
-    let after_first = &s[first.len()..];
-    // Must have at least one whitespace
+    };
     let trimmed = after_first.trim_start();
-    if trimmed.len() == after_first.len() {
-        return false; // No whitespace after first keyword
-    }
-    if !trimmed.starts_with(second) {
-        return false;
-    }
-    let after_second = &trimmed[second.len()..];
-    // Must have at least one whitespace after second keyword (or be at end for "never")
-    !after_second.is_empty() && after_second.chars().next().map_or(false, |c| c.is_whitespace())
+    // Must have at least one whitespace after the first keyword
+    trimmed.len() != after_first.len() && starts_with_keyword(trimmed, second, has_trailing_ws)
 }
 
-/// Pattern to identify a `prefetch when` trigger.
-fn is_prefetch_when_pattern(s: &str) -> bool {
-    starts_with_keyword_pair(s, "prefetch", "when")
-}
-
-/// Pattern to identify a `prefetch on` trigger.
-fn is_prefetch_on_pattern(s: &str) -> bool {
-    starts_with_keyword_pair(s, "prefetch", "on")
-}
-
-/// Pattern to identify a `hydrate when` trigger.
-fn is_hydrate_when_pattern(s: &str) -> bool {
-    starts_with_keyword_pair(s, "hydrate", "when")
-}
-
-/// Pattern to identify a `hydrate on` trigger.
-fn is_hydrate_on_pattern(s: &str) -> bool {
-    starts_with_keyword_pair(s, "hydrate", "on")
-}
-
-/// Pattern to identify a `hydrate never` trigger.
+/// Pattern to identify a `hydrate never` trigger: `^hydrate\s+never(\s*)$`.
 fn is_hydrate_never_pattern(s: &str) -> bool {
-    if !s.starts_with("hydrate") {
+    let Some(after_hydrate) = s.strip_prefix("hydrate") else {
         return false;
-    }
-    let after_hydrate = &s["hydrate".len()..];
+    };
     let trimmed = after_hydrate.trim_start();
     if trimmed.len() == after_hydrate.len() {
         return false; // No whitespace after "hydrate"
     }
-    // Check for "never" followed by optional whitespace to end
-    trimmed.strip_prefix("never").map_or(false, |rest| rest.trim().is_empty())
-}
-
-/// Pattern to identify a `when` parameter in a block.
-/// Matches "when" followed by whitespace, or bare "when" (which can occur after trimming).
-fn is_when_pattern(s: &str) -> bool {
-    s.starts_with("when")
-        && (s.len() == 4 || (s.len() > 4 && s.as_bytes()[4].is_ascii_whitespace()))
-}
-
-/// Pattern to identify an `on` parameter in a block.
-/// Matches "on" followed by whitespace, or bare "on" (which can occur after trimming).
-fn is_on_pattern(s: &str) -> bool {
-    s.starts_with("on") && (s.len() == 2 || (s.len() > 2 && s.as_bytes()[2].is_ascii_whitespace()))
+    trimmed.strip_prefix("never").is_some_and(|rest| rest.trim().is_empty())
 }
 
 /// Gets the index within an expression at which the trigger parameters start.
-/// After finding the keyword (e.g., "when", "on"), this function skips any
-/// separator characters (whitespace/newlines) to find where the actual content begins.
+/// Starting at `start_position`, skips to the first non-whitespace character that
+/// follows at least one whitespace character.
 fn get_trigger_parameters_start(value: &str, start_position: usize) -> Option<usize> {
-    let chars: std::vec::Vec<char> = value.chars().collect();
     let mut has_found_separator = false;
 
-    for i in start_position..chars.len() {
-        if chars[i].is_whitespace() {
+    for (i, ch) in value.char_indices().skip_while(|(i, _)| *i < start_position) {
+        if ch.is_whitespace() {
             has_found_separator = true;
         } else if has_found_separator {
             return Some(i);
@@ -876,11 +862,12 @@ fn get_trigger_parameters_start(value: &str, start_position: usize) -> Option<us
 }
 
 /// Parses all triggers from @defer block parameters.
-/// Reference: Angular's r3_deferred_blocks.ts parseTriggers function
+/// Reference: Angular's r3_deferred_blocks.ts parsePrimaryTriggers function
 pub fn parse_defer_triggers<'a>(
     allocator: &'a Allocator,
     parameters: &[HtmlBlockParameter<'a>],
     binding_parser: &BindingParser<'a>,
+    block_start_span: Span,
 ) -> DeferTriggerParseResult<'a> {
     let mut triggers = R3DeferredBlockTriggers::default();
     let mut prefetch_triggers = R3DeferredBlockTriggers::default();
@@ -890,93 +877,43 @@ pub fn parse_defer_triggers<'a>(
     for param in parameters {
         let expr = param.expression.as_str();
         let span = param.span;
+        // The parameter span still covers the whitespace trimmed off the expression.
+        let has_trailing_ws = span.size() as usize > expr.len();
+        let param = TriggerParameter { expression: expr, span };
 
         // Match against patterns in the same order as Angular's TypeScript implementation
-        // Reference: r3_deferred_blocks.ts lines 279-295
-        if is_when_pattern(expr) {
-            parse_when_trigger_from_expr(
-                &allocator,
+        // Reference: r3_deferred_blocks.ts parsePrimaryTriggers
+        if starts_with_keyword(expr, "when", has_trailing_ws) {
+            parse_when_trigger(&param, binding_parser, &mut triggers, &mut errors);
+        } else if starts_with_keyword(expr, "on", has_trailing_ws) {
+            parse_on_trigger(allocator, &param, binding_parser, &mut triggers, &mut errors);
+        } else if starts_with_keyword_pair(expr, "prefetch", "when", has_trailing_ws) {
+            parse_when_trigger(&param, binding_parser, &mut prefetch_triggers, &mut errors);
+        } else if starts_with_keyword_pair(expr, "prefetch", "on", has_trailing_ws) {
+            parse_on_trigger(
+                allocator,
+                &param,
                 binding_parser,
-                expr,
-                span,
-                None,
-                None,
-                &mut triggers,
-                &mut errors,
-            );
-        } else if is_on_pattern(expr) {
-            parse_on_trigger_from_expr(
-                &allocator,
-                expr,
-                span,
-                None,
-                None,
-                &mut triggers,
-                &mut errors,
-                binding_parser,
-            );
-        } else if is_prefetch_when_pattern(expr) {
-            let prefetch_span = Some(Span::new(span.start, span.start + 8)); // "prefetch"
-            parse_when_trigger_from_expr(
-                &allocator,
-                binding_parser,
-                expr,
-                span,
-                prefetch_span,
-                None,
                 &mut prefetch_triggers,
                 &mut errors,
             );
-        } else if is_prefetch_on_pattern(expr) {
-            let prefetch_span = Some(Span::new(span.start, span.start + 8)); // "prefetch"
-            parse_on_trigger_from_expr(
-                &allocator,
-                expr,
-                span,
-                prefetch_span,
-                None,
-                &mut prefetch_triggers,
-                &mut errors,
-                binding_parser,
-            );
-        } else if is_hydrate_when_pattern(expr) {
-            let hydrate_span = Some(Span::new(span.start, span.start + 7)); // "hydrate"
-            parse_when_trigger_from_expr(
-                &allocator,
-                binding_parser,
-                expr,
-                span,
-                None,
-                hydrate_span,
-                &mut hydrate_triggers,
-                &mut errors,
-            );
-        } else if is_hydrate_on_pattern(expr) {
-            let hydrate_span = Some(Span::new(span.start, span.start + 7)); // "hydrate"
-            parse_on_trigger_from_expr(
-                &allocator,
-                expr,
-                span,
-                None,
-                hydrate_span,
-                &mut hydrate_triggers,
-                &mut errors,
-                binding_parser,
-            );
+        } else if starts_with_keyword_pair(expr, "hydrate", "when", has_trailing_ws) {
+            parse_when_trigger(&param, binding_parser, &mut hydrate_triggers, &mut errors);
+        } else if starts_with_keyword_pair(expr, "hydrate", "on", has_trailing_ws) {
+            parse_on_trigger(allocator, &param, binding_parser, &mut hydrate_triggers, &mut errors);
         } else if is_hydrate_never_pattern(expr) {
-            let hydrate_span = Some(Span::new(span.start, span.start + 7)); // "hydrate"
-            parse_never_trigger(expr, span, hydrate_span, &mut hydrate_triggers, &mut errors);
-        } else if !expr.trim().is_empty() {
-            errors.push(format!("Unrecognized trigger: \"{}\"", expr.trim()));
+            parse_never_trigger(&param, &mut hydrate_triggers, &mut errors);
+        } else {
+            errors.push(DeferTriggerError::new(span, "Unrecognized trigger"));
         }
     }
 
     // Validate that `hydrate never` is not combined with other hydrate triggers
     if hydrate_triggers.never.is_some() && has_other_hydrate_triggers(&hydrate_triggers) {
-        errors.push(
-            "Cannot specify additional `hydrate` triggers if `hydrate never` is present"
-                .to_string(),
-        );
+        errors.push(DeferTriggerError::new(
+            block_start_span,
+            "Cannot specify additional `hydrate` triggers if `hydrate never` is present",
+        ));
     }
 
     DeferTriggerParseResult { triggers, prefetch_triggers, hydrate_triggers, errors }
@@ -993,658 +930,668 @@ fn has_other_hydrate_triggers(triggers: &R3DeferredBlockTriggers<'_>) -> bool {
         || triggers.viewport.is_some()
 }
 
-/// Parses a "never" trigger (only valid for hydrate).
-fn parse_never_trigger(
-    expr: &str,
+/// A `@defer` block parameter holding a trigger.
+struct TriggerParameter<'a> {
+    /// The (trimmed) parameter text.
+    expression: &'a str,
+    /// The parameter span, including trimmed trailing whitespace.
     span: Span,
-    hydrate_span: Option<Span>,
-    triggers: &mut R3DeferredBlockTriggers<'_>,
-    errors: &mut std::vec::Vec<String>,
-) {
-    let never_index = expr.find("never");
+}
 
-    if let Some(idx) = never_index {
-        let never_start = span.start + idx as u32;
-        let never_span = Span::new(never_start, never_start + 5); // "never" is 5 chars
+impl TriggerParameter<'_> {
+    /// Span of the `prefetch` keyword, if the parameter starts with it.
+    fn prefetch_span(&self) -> Option<Span> {
+        self.keyword_span("prefetch")
+    }
 
-        if triggers.never.is_some() {
-            errors.push("Duplicate 'never' trigger is not allowed".to_string());
-            return;
-        }
+    /// Span of the `hydrate` keyword, if the parameter starts with it.
+    fn hydrate_span(&self) -> Option<Span> {
+        self.keyword_span("hydrate")
+    }
 
-        triggers.never = Some(R3NeverDeferredTrigger {
-            source_span: span,
-            name_span: Some(never_span),
-            prefetch_span: None,
-            when_or_on_source_span: Some(never_span),
-            hydrate_span,
-        });
-    } else {
-        errors.push("Could not find \"never\" keyword in expression".to_string());
+    fn keyword_span(&self, keyword: &str) -> Option<Span> {
+        self.expression
+            .starts_with(keyword)
+            .then(|| Span::new(self.span.start, self.span.start + keyword.len() as u32))
+    }
+
+    /// Span of `len` bytes starting `offset` bytes into the parameter.
+    fn span_at(&self, offset: usize, len: usize) -> Span {
+        let start = self.span.start + offset as u32;
+        Span::new(start, start + len as u32)
     }
 }
 
-/// Parses a "when" trigger from the full expression.
-fn parse_when_trigger_from_expr<'a>(
-    allocator: &'a Allocator,
-    binding_parser: &BindingParser<'a>,
-    expr: &'a str,
-    span: Span,
-    prefetch_span: Option<Span>,
-    hydrate_span: Option<Span>,
-    triggers: &mut R3DeferredBlockTriggers<'a>,
-    errors: &mut std::vec::Vec<String>,
-) {
-    let when_index = expr.find("when");
-
-    if let Some(idx) = when_index {
-        let when_start = span.start + idx as u32;
-        let when_source_span = Span::new(when_start, when_start + 4); // "when" is 4 chars
-
-        // Find where the actual condition starts (after "when" + whitespace)
-        let start = get_trigger_parameters_start(expr, idx + 4);
-
-        if let Some(start_idx) = start {
-            let condition_str = &expr[start_idx..];
-            // The full source span should cover from the start of the parameter
-            // (including prefetch/hydrate/when keywords) to the end
-            let full_source_span = span;
-            parse_when_trigger(
-                &allocator,
-                binding_parser,
-                condition_str,
-                Span::new(span.start + start_idx as u32, span.end),
-                full_source_span,
-                prefetch_span,
-                hydrate_span,
-                when_source_span,
-                triggers,
-                errors,
-            );
-        }
-        // If no condition found (e.g., bare "when" after trimming),
-        // Angular silently accepts it with no triggers. Match that behavior.
-    } else {
-        errors.push("Could not find \"when\" keyword in expression".to_string());
-    }
-}
-
-/// Parses an "on" trigger from the full expression.
-fn parse_on_trigger_from_expr<'a>(
-    allocator: &'a Allocator,
-    expr: &'a str,
-    span: Span,
-    prefetch_span: Option<Span>,
-    hydrate_span: Option<Span>,
-    triggers: &mut R3DeferredBlockTriggers<'a>,
-    errors: &mut std::vec::Vec<String>,
-    binding_parser: &BindingParser<'a>,
-) {
-    let on_index = expr.find("on");
-
-    if let Some(idx) = on_index {
-        // Find where the actual trigger names start (after "on" + whitespace)
-        let start = get_trigger_parameters_start(expr, idx + 2);
-
-        if let Some(start_idx) = start {
-            let triggers_str = &expr[start_idx..];
-            // Calculate span for the triggers portion
-            let triggers_span = Span::new(span.start + start_idx as u32, span.end);
-            // The full span starts from the beginning (including prefetch/hydrate/on keywords)
-            let full_source_span_start = span.start;
-            parse_on_triggers(
-                &allocator,
-                triggers_str,
-                triggers_span,
-                full_source_span_start,
-                prefetch_span,
-                hydrate_span,
-                triggers,
-                errors,
-                binding_parser,
-            );
-        }
-        // If no trigger parameters found (e.g., bare "on" after trimming),
-        // Angular silently accepts it with no triggers. Match that behavior.
-    } else {
-        errors.push("Could not find \"on\" keyword in expression".to_string());
-    }
-}
-
-/// Parses a "when condition" trigger.
-fn parse_when_trigger<'a>(
-    _allocator: &'a Allocator,
-    binding_parser: &BindingParser<'a>,
-    condition_str: &'a str,
-    span: Span,
-    full_source_span: Span,
-    prefetch_span: Option<Span>,
-    hydrate_span: Option<Span>,
-    when_source_span: Span,
-    triggers: &mut R3DeferredBlockTriggers<'a>,
-    errors: &mut std::vec::Vec<String>,
-) {
-    if condition_str.is_empty() {
-        errors.push("@defer 'when' trigger requires a condition expression".to_string());
-        return;
-    }
-
-    if triggers.when.is_some() {
-        errors.push("Duplicate 'when' trigger is not allowed".to_string());
-        return;
-    }
-
-    // Parse the condition expression
-    let parsed = binding_parser.parse_binding(condition_str, span);
-
-    // source_span should cover the entire trigger clause including keywords
-    triggers.when = Some(R3BoundDeferredTrigger {
-        value: parsed.ast,
-        source_span: full_source_span,
-        prefetch_span,
-        when_source_span,
-        hydrate_span,
-    });
-}
-
-/// Splits a string by top-level commas, respecting nested parentheses, braces, and brackets.
-fn split_by_top_level_comma(s: &str) -> std::vec::Vec<&str> {
-    let mut parts = std::vec::Vec::new();
-    let mut start = 0;
-    let mut depth_paren: i32 = 0;
-    let mut depth_brace: i32 = 0;
-    let mut depth_bracket: i32 = 0;
-    let mut in_string = false;
-    let mut escape_next = false;
-    let mut string_char = '"';
-
-    for (i, ch) in s.char_indices() {
-        if escape_next {
-            escape_next = false;
-            continue;
-        }
-
-        if ch == '\\' {
-            escape_next = true;
-            continue;
-        }
-
-        if in_string {
-            if ch == string_char {
-                in_string = false;
-            }
-            continue;
-        }
-
-        match ch {
-            '"' | '\'' => {
-                in_string = true;
-                string_char = ch;
-            }
-            '(' => depth_paren += 1,
-            ')' => depth_paren = depth_paren.saturating_sub(1),
-            '{' => depth_brace += 1,
-            '}' => depth_brace = depth_brace.saturating_sub(1),
-            '[' => depth_bracket += 1,
-            ']' => depth_bracket = depth_bracket.saturating_sub(1),
-            ',' if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-
-    // Push the last part
-    if start < s.len() {
-        parts.push(&s[start..]);
-    } else if start == s.len() && !s.is_empty() && s.ends_with(',') {
-        parts.push("");
-    }
-
-    parts
-}
-
-/// Parses "on <type>" triggers (can have multiple comma-separated).
-/// The span passed here should already point to the start of the triggers portion
-/// (after "on" and its trailing whitespace).
-fn parse_on_triggers<'a>(
-    allocator: &'a Allocator,
-    triggers_str: &'a str,
-    span: Span,
-    full_source_span_start: u32,
-    prefetch_span: Option<Span>,
-    hydrate_span: Option<Span>,
-    triggers: &mut R3DeferredBlockTriggers<'a>,
-    errors: &mut std::vec::Vec<String>,
-    binding_parser: &BindingParser<'a>,
-) {
-    // The span now starts at the triggers portion (after "on" + whitespace)
-    let triggers_str_start = span.start;
-
-    // Split by top-level commas only, respecting nested structures
-    // E.g., "idle, viewport({trigger: foo, margin: 1})" splits into:
-    // - "idle"
-    // - " viewport({trigger: foo, margin: 1})"
-    let parts = split_by_top_level_comma(triggers_str);
-
-    let mut current_pos = 0u32;
-    let mut is_first_trigger = true;
-
-    for trigger_part_raw in parts {
-        // Calculate position of this trigger in the original string
-        let original_len = trigger_part_raw.len() as u32;
-        let leading_whitespace = trigger_part_raw.len() - trigger_part_raw.trim_start().len();
-        let trigger_part = trigger_part_raw.trim();
-        if trigger_part.is_empty() {
-            // Account for the empty part and comma separator
-            current_pos += original_len + 1;
-            continue;
-        }
-
-        // Calculate the actual span for this trigger
-        let trigger_start = triggers_str_start + current_pos + leading_whitespace as u32;
-        let trigger_end = trigger_start + trigger_part.len() as u32;
-        let trigger_span = Span::new(trigger_start, trigger_end);
-
-        // For the first trigger, source_span includes the "on"/"prefetch on"/"hydrate on" prefix
-        // For subsequent triggers, source_span is just the trigger name
-        let source_span = if is_first_trigger {
-            Span::new(full_source_span_start, trigger_end)
-        } else {
-            trigger_span
-        };
-
-        // Parse individual trigger
-        parse_single_on_trigger(
-            &allocator,
-            trigger_part,
-            trigger_span,
-            source_span,
-            prefetch_span,
-            hydrate_span,
-            triggers,
-            errors,
-            binding_parser,
-        );
-
-        // Move past this trigger and the comma separator
-        current_pos += original_len + 1;
-        is_first_trigger = false;
-    }
-}
-
-/// Parses a single "on" trigger like "idle", "timer(500ms)", "hover(ref)".
-/// `trigger_span` is the span of just the trigger (e.g., "idle" or "hover(button)")
-/// `source_span` is the full span including any prefix (e.g., "on hover(button)")
-fn parse_single_on_trigger<'a>(
-    allocator: &'a Allocator,
-    trigger_str: &'a str,
-    trigger_span: Span,
+/// Records a trigger, reporting an error if one of the same kind already exists.
+fn track_trigger<T>(
+    name: &str,
+    slot: &mut Option<T>,
+    trigger: T,
     source_span: Span,
-    prefetch_span: Option<Span>,
-    hydrate_span: Option<Span>,
-    triggers: &mut R3DeferredBlockTriggers<'a>,
-    errors: &mut std::vec::Vec<String>,
-    binding_parser: &BindingParser<'a>,
+    errors: &mut std::vec::Vec<DeferTriggerError>,
 ) {
-    // Extract trigger name and optional parameters
-    let (name, params) = if let Some(paren_start) = trigger_str.find('(') {
-        let name = trigger_str[..paren_start].trim();
-        let params_end = trigger_str.rfind(')').unwrap_or(trigger_str.len());
-        let params_str = trigger_str[paren_start + 1..params_end].trim();
-        // Empty parentheses like `idle()` should be treated as zero parameters,
-        // matching Angular's consumeParameters() which returns an empty array for `()`.
-        (name, if params_str.is_empty() { None } else { Some(params_str) })
+    if slot.is_some() {
+        errors.push(DeferTriggerError::new(
+            source_span,
+            format!("Duplicate \"{name}\" trigger is not allowed"),
+        ));
     } else {
-        (trigger_str.trim(), None)
+        *slot = Some(trigger);
+    }
+}
+
+/// Parses a `hydrate never` trigger.
+fn parse_never_trigger(
+    param: &TriggerParameter<'_>,
+    triggers: &mut R3DeferredBlockTriggers<'_>,
+    errors: &mut std::vec::Vec<DeferTriggerError>,
+) {
+    // This is here just to be safe, we shouldn't enter this function
+    // in the first place if a block doesn't have the "never" keyword.
+    let Some(never_index) = param.expression.find("never") else {
+        errors.push(DeferTriggerError::new(
+            param.span,
+            "Could not find \"never\" keyword in expression",
+        ));
+        return;
     };
 
-    match name {
-        "idle" => {
-            // v22+: `idle` accepts an optional timeout parameter, e.g. `on idle(100)`.
-            let timeout = if let Some(param_str) = params {
-                if param_str.contains(',') {
-                    errors
-                        .push("\"idle\" trigger can only have zero or one parameters".to_string());
-                    return;
-                }
-                match parse_deferred_time(param_str) {
-                    Some(t) => Some(t),
-                    None => {
-                        errors.push("Could not parse time value of trigger \"idle\"".to_string());
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
-            if triggers.idle.is_some() {
-                errors.push("Duplicate 'idle' trigger is not allowed".to_string());
-                return;
-            }
-            triggers.idle = Some(R3IdleDeferredTrigger {
-                timeout,
-                source_span,
-                name_span: Some(trigger_span),
-                prefetch_span,
-                when_or_on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        "immediate" => {
-            if params.is_some() {
-                errors.push("'immediate' trigger cannot have parameters".to_string());
-                return;
-            }
-            if triggers.immediate.is_some() {
-                errors.push("Duplicate 'immediate' trigger is not allowed".to_string());
-                return;
-            }
-            triggers.immediate = Some(R3ImmediateDeferredTrigger {
-                source_span,
-                name_span: Some(trigger_span),
-                prefetch_span,
-                when_or_on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        "timer" => {
-            let delay = if let Some(param_str) = params {
-                match parse_deferred_time(param_str) {
-                    Some(d) => d,
-                    None => {
-                        errors.push(format!(
-                            "Could not parse time value '{}' for 'timer' trigger",
-                            param_str
-                        ));
-                        return;
-                    }
-                }
-            } else {
-                errors.push("'timer' trigger must have exactly one parameter".to_string());
-                return;
-            };
-
-            if triggers.timer.is_some() {
-                errors.push("Duplicate 'timer' trigger is not allowed".to_string());
-                return;
-            }
-            triggers.timer = Some(R3TimerDeferredTrigger {
-                delay,
-                source_span,
-                name_span: trigger_span,
-                prefetch_span,
-                on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        "hover" => {
-            if triggers.hover.is_some() {
-                errors.push("Duplicate 'hover' trigger is not allowed".to_string());
-                return;
-            }
-            // Hydration triggers for hover cannot have parameters
-            if hydrate_span.is_some() && params.is_some() {
-                errors.push("Hydration trigger \"hover\" cannot have parameters".to_string());
-                return;
-            }
-            // Validate zero or one parameter (matching Angular's validatePlainReferenceBasedTrigger)
-            if let Some(p) = params {
-                let param_parts: std::vec::Vec<&str> =
-                    p.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-                if param_parts.len() > 1 {
-                    errors
-                        .push("\"hover\" trigger can only have zero or one parameters".to_string());
-                    return;
-                }
-            }
-            let reference = params.map(|s| Ident::from(s.trim()));
-            triggers.hover = Some(R3HoverDeferredTrigger {
-                reference,
-                source_span,
-                name_span: trigger_span,
-                prefetch_span,
-                on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        "interaction" => {
-            if triggers.interaction.is_some() {
-                errors.push("Duplicate 'interaction' trigger is not allowed".to_string());
-                return;
-            }
-            // Hydration triggers for interaction cannot have parameters
-            if hydrate_span.is_some() && params.is_some() {
-                errors.push("Hydration trigger \"interaction\" cannot have parameters".to_string());
-                return;
-            }
-            // Validate zero or one parameter (matching Angular's validatePlainReferenceBasedTrigger)
-            if let Some(p) = params {
-                let param_parts: std::vec::Vec<&str> =
-                    p.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-                if param_parts.len() > 1 {
-                    errors.push(
-                        "\"interaction\" trigger can only have zero or one parameters".to_string(),
-                    );
-                    return;
-                }
-            }
-            let reference = params.map(|s| Ident::from(s.trim()));
-            triggers.interaction = Some(R3InteractionDeferredTrigger {
-                reference,
-                source_span,
-                name_span: trigger_span,
-                prefetch_span,
-                on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        "viewport" => {
-            if triggers.viewport.is_some() {
-                errors.push("Duplicate 'viewport' trigger is not allowed".to_string());
-                return;
-            }
-
-            // Validate parameter count before parsing (matching Angular's validator).
-            // Non-hydrate: validatePlainReferenceBasedTrigger → max 1 parameter
-            // Hydrate: validateHydrateReferenceBasedTrigger → max 1 parameter
-            // Use top-level comma splitting to respect nested {}, [], () in object literals.
-            if let Some(p) = params {
-                let param_parts: std::vec::Vec<&str> = split_by_top_level_comma(p)
-                    .into_iter()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if param_parts.len() > 1 {
-                    if hydrate_span.is_some() {
-                        errors.push(
-                            "Hydration trigger \"viewport\" cannot have more than one parameter"
-                                .to_string(),
-                        );
-                    } else {
-                        errors.push(
-                            "\"viewport\" trigger can only have zero or one parameters".to_string(),
-                        );
-                    }
-                    return;
-                }
-            }
-
-            let (reference, options) = if let Some(param_str) = params {
-                let trimmed = param_str.trim();
-                if trimmed.starts_with('{') {
-                    // Parse as object literal for options
-                    let parsed = binding_parser.parse_binding(trimmed, trigger_span);
-                    // Extract reference from 'trigger' key if present and filter it from options
-                    let result =
-                        extract_viewport_trigger_and_options(allocator, parsed.ast, trigger_span);
-                    // Add any errors from extraction
-                    errors.extend(result.errors);
-                    (result.reference, result.options)
-                } else {
-                    // Simple reference name
-                    (Some(Ident::from(trimmed)), None)
-                }
-            } else {
-                (None, None)
-            };
-
-            // Hydration viewport triggers cannot have a reference
-            if hydrate_span.is_some() && reference.is_some() {
-                errors.push("\"viewport\" hydration trigger cannot have a \"trigger\"".to_string());
-                return;
-            }
-
-            triggers.viewport = Some(R3ViewportDeferredTrigger {
-                reference,
-                options,
-                source_span,
-                name_span: trigger_span,
-                prefetch_span,
-                on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
-        _ => {
-            // "never" is only valid as "hydrate never" (top-level pattern), not as an on-trigger.
-            // Angular's OnTriggerParser switch has no case for NEVER, so it falls to default.
-            errors.push(format!("Unrecognized trigger type \"{}\"", name));
-        }
-    }
+    let never_span = param.span_at(never_index, "never".len());
+    let trigger = R3NeverDeferredTrigger {
+        source_span: param.span,
+        name_span: Some(never_span),
+        prefetch_span: param.prefetch_span(),
+        when_or_on_source_span: None,
+        hydrate_span: param.hydrate_span(),
+    };
+    track_trigger("never", &mut triggers.never, trigger, param.span, errors);
 }
 
-/// Result type for viewport trigger extraction.
-struct ViewportTriggerResult<'a> {
-    reference: Option<Ident<'a>>,
-    options: Option<AngularExpression<'a>>,
-    errors: std::vec::Vec<String>,
+/// Parses a `when` trigger.
+fn parse_when_trigger<'a>(
+    param: &TriggerParameter<'a>,
+    binding_parser: &BindingParser<'a>,
+    triggers: &mut R3DeferredBlockTriggers<'a>,
+    errors: &mut std::vec::Vec<DeferTriggerError>,
+) {
+    // This is here just to be safe, we shouldn't enter this function
+    // in the first place if a block doesn't have the "when" keyword.
+    let Some(when_index) = param.expression.find("when") else {
+        errors.push(DeferTriggerError::new(
+            param.span,
+            "Could not find \"when\" keyword in expression",
+        ));
+        return;
+    };
+
+    // When no condition follows the keyword (`when ` with only whitespace after it),
+    // Angular slices from index -1 and parses the trailing whitespace into an empty
+    // `when` trigger, which ngtsc then fails to compile ("Unsupported reification of
+    // ir.Expression kind: EmptyExpr"). Accept it without a trigger instead.
+    let Some(start) = get_trigger_parameters_start(param.expression, when_index + 1) else {
+        return;
+    };
+    let condition = &param.expression[start..];
+    let parsed = binding_parser
+        .parse_binding(condition, Span::new(param.span.start + start as u32, param.span.end));
+    errors.extend(parsed.errors.into_iter().map(DeferTriggerError::Expression));
+
+    let trigger = R3BoundDeferredTrigger {
+        value: parsed.ast,
+        source_span: param.span,
+        prefetch_span: param.prefetch_span(),
+        when_source_span: param.span_at(when_index, "when".len()),
+        hydrate_span: param.hydrate_span(),
+    };
+    track_trigger("when", &mut triggers.when, trigger, param.span, errors);
 }
 
-/// Checks if an expression contains dynamic nodes (not literal values).
-fn contains_dynamic_node(expr: &AngularExpression<'_>) -> bool {
-    match expr {
-        AngularExpression::LiteralPrimitive(_) => false,
-        AngularExpression::LiteralArray(arr) => arr.expressions.iter().any(contains_dynamic_node),
-        AngularExpression::LiteralMap(map) => map.values.iter().any(contains_dynamic_node),
-        // All other expression types are considered dynamic
-        _ => true,
-    }
-}
-
-/// Extracts the trigger reference and options from a viewport trigger object literal.
-///
-/// Given `{trigger: foo, rootMargin: "123px", threshold: [1, 2, 3]}`, returns:
-/// - reference: `Some("foo")`
-/// - options: `LiteralMap({rootMargin: "123px", threshold: [1, 2, 3]})`
-fn extract_viewport_trigger_and_options<'a>(
+/// Parses an `on` trigger.
+fn parse_on_trigger<'a>(
     allocator: &'a Allocator,
-    expr: AngularExpression<'a>,
-    _span: Span,
-) -> ViewportTriggerResult<'a> {
-    use crate::ast::expression::{LiteralMap, LiteralMapKey, LiteralMapPropertyKey};
+    param: &TriggerParameter<'a>,
+    binding_parser: &BindingParser<'a>,
+    triggers: &mut R3DeferredBlockTriggers<'a>,
+    errors: &mut std::vec::Vec<DeferTriggerError>,
+) {
+    // This is here just to be safe, we shouldn't enter this function
+    // in the first place if a block doesn't have the "on" keyword.
+    let Some(on_index) = param.expression.find("on") else {
+        errors.push(DeferTriggerError::new(
+            param.span,
+            "Could not find \"on\" keyword in expression",
+        ));
+        return;
+    };
 
-    let mut errors = std::vec::Vec::new();
+    // Without anything after the keyword, Angular tokenizes just the trailing
+    // whitespace character, which yields no tokens and therefore no triggers.
+    let Some(start) = get_trigger_parameters_start(param.expression, on_index + 1) else {
+        return;
+    };
 
-    if let AngularExpression::LiteralMap(map) = expr {
-        let mut trigger_ref: Option<Ident<'a>> = None;
-        let mut trigger_idx: Option<usize> = None;
+    let is_hydration_trigger = param.expression.starts_with("hydrate");
+    let mut parser = OnTriggerParser {
+        allocator,
+        binding_parser,
+        expression: param.expression,
+        start,
+        span: param.span,
+        tokens: Lexer::new(allocator, &param.expression[start..]).tokenize(),
+        index: 0,
+        triggers,
+        errors,
+        is_hydration_trigger,
+        prefetch_span: param.prefetch_span(),
+        on_source_span: param.span_at(on_index, "on".len()),
+        hydrate_span: param.hydrate_span(),
+    };
+    parser.parse();
+}
 
-        // First pass: find the trigger key, check for "root" key, and extract trigger value
-        for (idx, (key, value)) in map.keys.iter().zip(map.values.iter()).enumerate() {
-            let key_str = match key {
-                LiteralMapKey::Property(prop) => prop.key.as_str(),
-                LiteralMapKey::Spread(_) => continue, // Skip spread keys
-            };
-            if key_str == "trigger" {
-                trigger_idx = Some(idx);
-                // Extract reference from the trigger value
-                if let AngularExpression::PropertyRead(prop) = value {
-                    // It's a simple identifier like `foo`
-                    trigger_ref = Some(prop.name.clone());
-                } else {
-                    errors.push(
-                        "\"trigger\" option of the \"viewport\" trigger must be an identifier"
+/// Reference and options of a `viewport` trigger.
+type ViewportReferenceAndOptions<'a> = (Option<Ident<'a>>, Option<AngularExpression<'a>>);
+
+/// Parsed information about a defer trigger parameter.
+struct ParsedParameter<'a> {
+    /// Expression of the parameter.
+    expression: &'a str,
+    /// Index within the trigger at which the parameter starts.
+    start: u32,
+}
+
+/// Port of Angular's `OnTriggerParser`: parses the comma-separated trigger
+/// list of an `on`, `prefetch on` or `hydrate on` parameter from the
+/// expression lexer's tokens.
+struct OnTriggerParser<'p, 'a> {
+    allocator: &'a Allocator,
+    binding_parser: &'p BindingParser<'a>,
+    /// The whole parameter text.
+    expression: &'a str,
+    /// Index within `expression` at which the trigger list starts.
+    start: usize,
+    /// Span of the whole parameter.
+    span: Span,
+    /// Tokens of `expression[start..]`.
+    tokens: std::vec::Vec<Token<'a>>,
+    index: usize,
+    triggers: &'p mut R3DeferredBlockTriggers<'a>,
+    errors: &'p mut std::vec::Vec<DeferTriggerError>,
+    is_hydration_trigger: bool,
+    prefetch_span: Option<Span>,
+    on_source_span: Span,
+    hydrate_span: Option<Span>,
+}
+
+/// Pairs of characters that form syntax that is comma-delimited.
+fn comma_delimited_closer(token: &Token<'_>) -> Option<char> {
+    if token.token_type != TokenType::Character {
+        return None;
+    }
+    if token.is_character('{') {
+        Some('}') // Object literals
+    } else if token.is_character('[') {
+        Some(']') // Array literals
+    } else if token.is_character('(') {
+        Some(')') // Function calls
+    } else {
+        None
+    }
+}
+
+/// Angular's `Token.toString()`, used in "Unexpected token" errors.
+fn token_text(token: &Token<'_>) -> String {
+    match token.token_type {
+        TokenType::Number => token.num_value.to_string(),
+        TokenType::NoSubstitutionTemplate
+        | TokenType::TemplateHead
+        | TokenType::TemplateMiddle
+        | TokenType::TemplateTail => "null".to_string(),
+        _ => token.str_value.to_string(),
+    }
+}
+
+impl<'a> OnTriggerParser<'_, 'a> {
+    fn parse(&mut self) {
+        while !self.tokens.is_empty() && self.index < self.tokens.len() {
+            let token = self.token().clone();
+
+            if !token.is_identifier() {
+                self.unexpected_token(&token);
+                break;
+            }
+
+            // An identifier immediately followed by a comma or the end of
+            // the expression cannot have parameters so we can exit early.
+            if self.is_followed_by_or_last(',') {
+                self.consume_trigger(&token, &[]);
+                self.advance();
+            } else if self.is_followed_by_or_last('(') {
+                self.advance(); // Advance to the opening paren.
+                let prev_errors = self.errors.len();
+                let parameters = self.consume_parameters();
+                if self.errors.len() != prev_errors {
+                    break;
+                }
+                self.consume_trigger(&token, &parameters);
+                self.advance(); // Advance past the closing paren.
+            } else if self.index < self.tokens.len() - 1 {
+                let next = self.tokens[self.index + 1].clone();
+                self.unexpected_token(&next);
+            }
+
+            self.advance();
+        }
+    }
+
+    fn advance(&mut self) {
+        self.index += 1;
+    }
+
+    fn is_followed_by_or_last(&self, ch: char) -> bool {
+        if self.index == self.tokens.len() - 1 {
+            return true;
+        }
+        self.tokens[self.index + 1].is_character(ch)
+    }
+
+    fn token(&self) -> &Token<'a> {
+        &self.tokens[self.index.min(self.tokens.len() - 1)]
+    }
+
+    fn consume_trigger(&mut self, identifier: &Token<'a>, parameters: &[ParsedParameter<'a>]) {
+        let name_start =
+            self.span.start + self.start as u32 + identifier.index - self.tokens[0].index;
+        let name_span = Span::new(name_start, name_start + identifier.str_value.len() as u32);
+        let end = name_start + (self.token().end - identifier.index);
+
+        // Put the prefetch and on spans with the first trigger
+        // This should maybe be refactored to have something like an outer OnGroup AST
+        // Since triggers can be grouped with commas "on hover(x), interaction(y)"
+        let is_first_trigger = identifier.index == 0;
+        let source_span =
+            Span::new(if is_first_trigger { self.span.start } else { name_start }, end);
+
+        let result = match identifier.str_value.as_str() {
+            "idle" => create_idle_trigger(parameters).map(|timeout| {
+                let trigger = R3IdleDeferredTrigger {
+                    timeout,
+                    source_span,
+                    name_span: Some(name_span),
+                    prefetch_span: if is_first_trigger { self.prefetch_span } else { None },
+                    when_or_on_source_span: is_first_trigger.then_some(self.on_source_span),
+                    hydrate_span: if is_first_trigger { self.hydrate_span } else { None },
+                };
+                track_trigger("idle", &mut self.triggers.idle, trigger, source_span, self.errors);
+            }),
+            "timer" => create_timer_trigger(parameters).map(|delay| {
+                let trigger = R3TimerDeferredTrigger {
+                    delay,
+                    source_span,
+                    name_span,
+                    prefetch_span: self.prefetch_span,
+                    on_source_span: Some(self.on_source_span),
+                    hydrate_span: self.hydrate_span,
+                };
+                track_trigger("timer", &mut self.triggers.timer, trigger, source_span, self.errors);
+            }),
+            "interaction" => {
+                self.validate_reference_based_trigger("interaction", parameters).map(|()| {
+                    let trigger = R3InteractionDeferredTrigger {
+                        reference: parameters.first().map(|p| Ident::from(p.expression)),
+                        source_span,
+                        name_span,
+                        prefetch_span: self.prefetch_span,
+                        on_source_span: Some(self.on_source_span),
+                        hydrate_span: self.hydrate_span,
+                    };
+                    track_trigger(
+                        "interaction",
+                        &mut self.triggers.interaction,
+                        trigger,
+                        source_span,
+                        self.errors,
+                    );
+                })
+            }
+            "immediate" => create_immediate_trigger(parameters).map(|()| {
+                let trigger = R3ImmediateDeferredTrigger {
+                    source_span,
+                    name_span: Some(name_span),
+                    prefetch_span: self.prefetch_span,
+                    when_or_on_source_span: Some(self.on_source_span),
+                    hydrate_span: self.hydrate_span,
+                };
+                track_trigger(
+                    "immediate",
+                    &mut self.triggers.immediate,
+                    trigger,
+                    source_span,
+                    self.errors,
+                );
+            }),
+            "hover" => self.validate_reference_based_trigger("hover", parameters).map(|()| {
+                let trigger = R3HoverDeferredTrigger {
+                    reference: parameters.first().map(|p| Ident::from(p.expression)),
+                    source_span,
+                    name_span,
+                    prefetch_span: self.prefetch_span,
+                    on_source_span: Some(self.on_source_span),
+                    hydrate_span: self.hydrate_span,
+                };
+                track_trigger("hover", &mut self.triggers.hover, trigger, source_span, self.errors);
+            }),
+            "viewport" => {
+                self.create_viewport_trigger(parameters, source_span).map(|(reference, options)| {
+                    let trigger = R3ViewportDeferredTrigger {
+                        reference,
+                        options,
+                        source_span,
+                        name_span,
+                        prefetch_span: self.prefetch_span,
+                        on_source_span: Some(self.on_source_span),
+                        hydrate_span: self.hydrate_span,
+                    };
+                    track_trigger(
+                        "viewport",
+                        &mut self.triggers.viewport,
+                        trigger,
+                        source_span,
+                        self.errors,
+                    );
+                })
+            }
+            // `never` is only valid as `hydrate never`, so it is unrecognized here too.
+            name => Err(format!("Unrecognized trigger type \"{name}\"")),
+        };
+
+        if let Err(msg) = result {
+            self.error(identifier, msg);
+        }
+    }
+
+    fn consume_parameters(&mut self) -> std::vec::Vec<ParsedParameter<'a>> {
+        let mut parameters = std::vec::Vec::new();
+
+        if !self.token().is_character('(') {
+            let token = self.token().clone();
+            self.unexpected_token(&token);
+            return parameters;
+        }
+
+        self.advance();
+
+        let mut comma_delim_stack: std::vec::Vec<char> = std::vec::Vec::new();
+        // Index range (into `self.tokens`) of the current parameter's tokens.
+        let mut param_tokens: Option<(usize, usize)> = None;
+
+        while self.index < self.tokens.len() {
+            let token = self.token();
+
+            // Stop parsing if we've hit the end character and we're outside of a comma-delimited
+            // syntax. Note that we don't need to account for strings here since the lexer already
+            // parsed them into string tokens.
+            if token.is_character(')') && comma_delim_stack.is_empty() {
+                if let Some(range) = param_tokens {
+                    parameters.push(self.token_range_parameter(range));
+                }
+                break;
+            }
+
+            // In the `on` microsyntax "top-level" commas (e.g. ones outside of an parameters)
+            // separate the different triggers (e.g. `on idle,timer(500)`). This is problematic,
+            // because the function-like syntax also implies that multiple parameters can be passed
+            // into the individual trigger (e.g. `on foo(a, b)`). To avoid tripping up the parser
+            // with commas that are part of other sorts of syntax (object literals, arrays), we
+            // treat anything inside a comma-delimited syntax block as plain text.
+            if let Some(closer) = comma_delimited_closer(token) {
+                comma_delim_stack.push(closer);
+            }
+
+            if comma_delim_stack.last().is_some_and(|&closer| token.is_character(closer)) {
+                comma_delim_stack.pop();
+            }
+
+            // If we hit a comma outside of a comma-delimited syntax, it means
+            // that we're at the top level and we're starting a new parameter.
+            if comma_delim_stack.is_empty()
+                && token.is_character(',')
+                && let Some(range) = param_tokens.take()
+            {
+                parameters.push(self.token_range_parameter(range));
+                self.advance();
+                continue;
+            }
+
+            // Otherwise treat the token as a plain text character in the current parameter.
+            param_tokens = Some(match param_tokens {
+                Some((first, _)) => (first, self.index),
+                None => (self.index, self.index),
+            });
+            self.advance();
+        }
+
+        if !self.token().is_character(')') || !comma_delim_stack.is_empty() {
+            let token = self.token().clone();
+            self.error(&token, "Unexpected end of expression");
+        }
+
+        if self.index + 1 < self.tokens.len() && !self.tokens[self.index + 1].is_character(',') {
+            let next = self.tokens[self.index + 1].clone();
+            self.unexpected_token(&next);
+        }
+
+        parameters
+    }
+
+    /// Creates a parameter from the source text covered by a range of tokens.
+    fn token_range_parameter(&self, (first, last): (usize, usize)) -> ParsedParameter<'a> {
+        let first = &self.tokens[first];
+        let last = &self.tokens[last];
+        ParsedParameter {
+            expression: &self.expression
+                [self.start + first.index as usize..self.start + last.end as usize],
+            start: first.index,
+        }
+    }
+
+    fn error(&mut self, token: &Token<'_>, msg: impl Into<String>) {
+        let start = self.span.start + self.start as u32 + token.index;
+        let span = Span::new(start, start + (token.end - token.index));
+        self.errors.push(DeferTriggerError::new(span, msg));
+    }
+
+    fn unexpected_token(&mut self, token: &Token<'_>) {
+        self.error(token, format!("Unexpected token \"{}\"", token_text(token)));
+    }
+
+    /// Checks the structure of a reference-based trigger (`validatePlainReferenceBasedTrigger`
+    /// or `validateHydrateReferenceBasedTrigger`, depending on the trigger kind).
+    fn validate_reference_based_trigger(
+        &self,
+        name: &str,
+        parameters: &[ParsedParameter<'_>],
+    ) -> Result<(), String> {
+        if self.is_hydration_trigger {
+            if name == "viewport" {
+                if parameters.len() > 1 {
+                    return Err(format!(
+                        "Hydration trigger \"{name}\" cannot have more than one parameter"
+                    ));
+                }
+            } else if !parameters.is_empty() {
+                return Err(format!("Hydration trigger \"{name}\" cannot have parameters"));
+            }
+        } else if parameters.len() > 1 {
+            return Err(format!("\"{name}\" trigger can only have zero or one parameters"));
+        }
+        Ok(())
+    }
+
+    /// Returns the `viewport` trigger's reference and options.
+    fn create_viewport_trigger(
+        &mut self,
+        parameters: &[ParsedParameter<'a>],
+        source_span: Span,
+    ) -> Result<ViewportReferenceAndOptions<'a>, String> {
+        use crate::ast::expression::{LiteralMap, LiteralMapKey};
+
+        self.validate_reference_based_trigger("viewport", parameters)?;
+
+        let (reference, options) = match parameters.first() {
+            None => (None, None),
+            Some(param) if !param.expression.starts_with('{') => {
+                (Some(Ident::from(param.expression)), None)
+            }
+            Some(param) => {
+                let offset = source_span.start + self.start as u32 + param.start;
+                let parsed = self.binding_parser.parse_binding(
+                    param.expression,
+                    Span::new(offset, offset + param.expression.len() as u32),
+                );
+                self.errors.extend(parsed.errors.into_iter().map(DeferTriggerError::Expression));
+
+                let AngularExpression::LiteralMap(map) = parsed.ast else {
+                    return Err(
+                        "Options parameter of the \"viewport\" trigger must be an object literal"
                             .to_string(),
                     );
-                }
-            } else if key_str == "root" {
-                errors.push(
-                    "The \"root\" option is not supported in the options parameter of the \"viewport\" trigger".to_string()
-                );
-            }
-        }
-
-        // If no trigger key found, return the original expression as options
-        let trigger_idx = match trigger_idx {
-            Some(idx) => idx,
-            None => {
-                // Check for dynamic nodes in options
-                if map.values.iter().any(contains_dynamic_node) {
-                    errors.push(
-                        "Options of the \"viewport\" trigger must be an object literal containing only literal values".to_string()
-                    );
-                }
-                return ViewportTriggerResult {
-                    reference: None,
-                    options: Some(AngularExpression::LiteralMap(map)),
-                    errors,
                 };
+                let is_property = |key: &LiteralMapKey<'_>, name: &str| matches!(key, LiteralMapKey::Property(prop) if prop.key == name);
+                if map.keys.iter().any(|key| matches!(key, LiteralMapKey::Spread(_))) {
+                    return Err("Spread operator are not allowed in this context".to_string());
+                }
+                if map.keys.iter().any(|key| is_property(key, "root")) {
+                    return Err("The \"root\" option is not supported in the options parameter of the \"viewport\" trigger".to_string());
+                }
+
+                match map.keys.iter().position(|key| is_property(key, "trigger")) {
+                    None => (None, Some(AngularExpression::LiteralMap(map))),
+                    Some(trigger_index) => {
+                        let reference = match &map.values[trigger_index] {
+                            AngularExpression::PropertyRead(read)
+                                if matches!(
+                                    read.receiver,
+                                    AngularExpression::ImplicitReceiver(_)
+                                ) =>
+                            {
+                                read.name
+                            }
+                            _ => {
+                                return Err("\"trigger\" option of the \"viewport\" trigger must be an identifier".to_string());
+                            }
+                        };
+
+                        let LiteralMap { span, source_span, keys, values } = map.unbox();
+                        let mut filtered_keys = Vec::new_in(&self.allocator);
+                        let mut filtered_values = Vec::new_in(&self.allocator);
+                        for (index, (key, value)) in keys.into_iter().zip(values).enumerate() {
+                            if index != trigger_index {
+                                filtered_keys.push(key);
+                                filtered_values.push(value);
+                            }
+                        }
+                        let options = AngularExpression::LiteralMap(oxc_allocator::Box::new_in(
+                            LiteralMap {
+                                span,
+                                source_span,
+                                keys: filtered_keys,
+                                values: filtered_values,
+                            },
+                            &self.allocator,
+                        ));
+                        (Some(reference), Some(options))
+                    }
+                }
             }
         };
 
-        // Unbox the map to get ownership of keys and values
-        let LiteralMap { span: map_span, source_span: map_source_span, keys, values } = map.unbox();
-
-        // Second pass: filter out the trigger key
-        let mut filtered_keys = Vec::new_in(&allocator);
-        let mut filtered_values = Vec::new_in(&allocator);
-
-        for (idx, (key, value)) in keys.into_iter().zip(values.into_iter()).enumerate() {
-            if idx != trigger_idx {
-                // Check for dynamic values
-                if contains_dynamic_node(&value) {
-                    errors.push(
-                        "Options of the \"viewport\" trigger must be an object literal containing only literal values".to_string()
-                    );
-                }
-                // Only include property keys, skip spread keys
-                if let LiteralMapKey::Property(prop) = key {
-                    filtered_keys.push(LiteralMapKey::Property(LiteralMapPropertyKey {
-                        key: prop.key,
-                        quoted: prop.quoted,
-                        is_shorthand_initialized: prop.is_shorthand_initialized,
-                    }));
-                    filtered_values.push(value);
-                }
-            }
+        if self.is_hydration_trigger && reference.is_some() {
+            return Err("\"viewport\" hydration trigger cannot have a \"trigger\"".to_string());
+        }
+        if let Some(dynamic_node) = options.as_ref().and_then(find_dynamic_node) {
+            return Err(format!(
+                "Options of the \"viewport\" trigger must be an object literal containing only literal values, but \"{dynamic_node}\" was found"
+            ));
         }
 
-        // Always create a LiteralMap for options, even if empty (matching Angular behavior).
-        // Angular keeps an empty LiteralMap {} when only the trigger key was present.
-        let options = Some(AngularExpression::LiteralMap(oxc_allocator::Box::new_in(
-            LiteralMap {
-                span: map_span,
-                source_span: map_source_span,
-                keys: filtered_keys,
-                values: filtered_values,
-            },
-            &allocator,
-        )));
+        Ok((reference, options))
+    }
+}
 
-        ViewportTriggerResult { reference: trigger_ref, options, errors }
-    } else {
-        // Not a LiteralMap
-        errors.push(
-            "Options parameter of the \"viewport\" trigger must be an object literal".to_string(),
-        );
-        ViewportTriggerResult { reference: None, options: Some(expr), errors }
+fn create_idle_trigger(parameters: &[ParsedParameter<'_>]) -> Result<Option<f64>, String> {
+    if parameters.len() > 1 {
+        return Err("\"idle\" trigger can only have zero or one parameters".to_string());
+    }
+    // v22+: `idle` accepts an optional timeout parameter, e.g. `on idle(100)`.
+    parameters
+        .first()
+        .map(|param| {
+            parse_deferred_time(param.expression)
+                .ok_or_else(|| "Could not parse time value of trigger \"idle\"".to_string())
+        })
+        .transpose()
+}
+
+fn create_timer_trigger(parameters: &[ParsedParameter<'_>]) -> Result<f64, String> {
+    if parameters.len() != 1 {
+        return Err("\"timer\" trigger must have exactly one parameter".to_string());
+    }
+    parse_deferred_time(parameters[0].expression)
+        .ok_or_else(|| "Could not parse time value of trigger \"timer\"".to_string())
+}
+
+fn create_immediate_trigger(parameters: &[ParsedParameter<'_>]) -> Result<(), String> {
+    if !parameters.is_empty() {
+        return Err("\"immediate\" trigger cannot have parameters".to_string());
+    }
+    Ok(())
+}
+
+/// Port of Angular's `DynamicAstValidator`: returns the class name of the last
+/// non-literal node found in a `viewport` options expression.
+fn find_dynamic_node(expr: &AngularExpression<'_>) -> Option<&'static str> {
+    match expr {
+        AngularExpression::LiteralPrimitive(_) => None,
+        AngularExpression::LiteralArray(arr) => {
+            arr.expressions.iter().rev().find_map(find_dynamic_node)
+        }
+        AngularExpression::LiteralMap(map) => map.values.iter().rev().find_map(find_dynamic_node),
+        _ => Some(angular_ast_class_name(expr)),
+    }
+}
+
+/// The name of the Angular AST class an expression corresponds to.
+fn angular_ast_class_name(expr: &AngularExpression<'_>) -> &'static str {
+    match expr {
+        AngularExpression::Empty(_) => "EmptyExpr",
+        AngularExpression::ImplicitReceiver(_) => "ImplicitReceiver",
+        AngularExpression::ThisReceiver(_) => "ThisReceiver",
+        AngularExpression::Chain(_) => "Chain",
+        AngularExpression::Conditional(_) => "Conditional",
+        AngularExpression::PropertyRead(_) => "PropertyRead",
+        AngularExpression::SafePropertyRead(_) => "SafePropertyRead",
+        AngularExpression::KeyedRead(_) => "KeyedRead",
+        AngularExpression::SafeKeyedRead(_) => "SafeKeyedRead",
+        AngularExpression::BindingPipe(_) => "BindingPipe",
+        AngularExpression::LiteralPrimitive(_) => "LiteralPrimitive",
+        AngularExpression::LiteralArray(_) => "LiteralArray",
+        AngularExpression::LiteralMap(_) => "LiteralMap",
+        AngularExpression::Interpolation(_) => "Interpolation",
+        AngularExpression::Binary(_) => "Binary",
+        AngularExpression::Unary(_) => "Unary",
+        AngularExpression::PrefixNot(_) => "PrefixNot",
+        AngularExpression::TypeofExpression(_) => "TypeofExpression",
+        AngularExpression::VoidExpression(_) => "VoidExpression",
+        AngularExpression::NonNullAssert(_) => "NonNullAssert",
+        AngularExpression::Call(_) => "Call",
+        AngularExpression::SafeCall(_) => "SafeCall",
+        AngularExpression::TaggedTemplateLiteral(_) => "TaggedTemplateLiteral",
+        AngularExpression::TemplateLiteral(_) => "TemplateLiteral",
+        AngularExpression::ParenthesizedExpression(_) => "ParenthesizedExpression",
+        AngularExpression::RegularExpressionLiteral(_) => "RegularExpressionLiteral",
+        AngularExpression::SpreadElement(_) => "SpreadElement",
+        AngularExpression::ArrowFunction(_) => "ArrowFunction",
     }
 }
 
