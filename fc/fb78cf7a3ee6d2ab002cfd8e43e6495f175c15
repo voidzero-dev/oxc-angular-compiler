@@ -1,0 +1,19 @@
+crates/oxc_angular_compiler/tests/integration_test.rs
+  s_6758e5705fad20::t_acc2609df53d3e 16334-16335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fcfb78cf7a3ee6d2ab002cfd8e43e6495f175c15",
+  "prompts": {},
+  "sessions": {
+    "s_6758e5705fad20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6bd5797772edefe6",
+        "model": "unknown"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
