@@ -386,6 +386,68 @@ fn walk_expression(
         Expression::ClassExpression(class_expr) => {
             walk_class_body(&class_expr.body, source, filename, options, edits);
         }
+        // Declarations nested in data, as Babel's linker visits every call: Deepkit's runtime types record each
+        // static property's initializer as a function in a `static __type = [...]` array, so a class compiled
+        // with them carries a second `ɵɵngDeclareComponent(...)` there. Unlinked, its `ngImport: i0` keeps all of
+        // @angular/core in the bundle.
+        Expression::ArrayExpression(array) => {
+            for element in &array.elements {
+                match element {
+                    oxc_ast::ast::ArrayExpressionElement::SpreadElement(spread) => {
+                        walk_expression(&spread.argument, source, filename, options, edits);
+                    }
+                    oxc_ast::ast::ArrayExpressionElement::Elision(_) => {}
+                    other => {
+                        if let Some(expr) = other.as_expression() {
+                            walk_expression(expr, source, filename, options, edits);
+                        }
+                    }
+                }
+            }
+        }
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                match property {
+                    oxc_ast::ast::ObjectPropertyKind::ObjectProperty(prop) => {
+                        walk_expression(&prop.value, source, filename, options, edits);
+                    }
+                    oxc_ast::ast::ObjectPropertyKind::SpreadProperty(spread) => {
+                        walk_expression(&spread.argument, source, filename, options, edits);
+                    }
+                }
+            }
+        }
+        Expression::NewExpression(new_expr) => {
+            walk_expression(&new_expr.callee, source, filename, options, edits);
+            for arg in &new_expr.arguments {
+                if let Argument::SpreadElement(_) = arg {
+                    continue;
+                }
+                walk_expression(arg.to_expression(), source, filename, options, edits);
+            }
+        }
+        Expression::StaticMemberExpression(member) => {
+            walk_expression(&member.object, source, filename, options, edits);
+        }
+        Expression::ComputedMemberExpression(member) => {
+            walk_expression(&member.object, source, filename, options, edits);
+            walk_expression(&member.expression, source, filename, options, edits);
+        }
+        Expression::UnaryExpression(unary) => {
+            walk_expression(&unary.argument, source, filename, options, edits);
+        }
+        Expression::BinaryExpression(binary) => {
+            walk_expression(&binary.left, source, filename, options, edits);
+            walk_expression(&binary.right, source, filename, options, edits);
+        }
+        Expression::AwaitExpression(await_expr) => {
+            walk_expression(&await_expr.argument, source, filename, options, edits);
+        }
+        Expression::TemplateLiteral(template) => {
+            for expr in &template.expressions {
+                walk_expression(expr, source, filename, options, edits);
+            }
+        }
         _ => {}
     }
 }

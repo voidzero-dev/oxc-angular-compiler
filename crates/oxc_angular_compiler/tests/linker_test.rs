@@ -551,3 +551,21 @@ export { P };
         result.code
     );
 }
+
+/// Babel's linker links every declaration call; Deepkit's runtime types keep a copy of each static initializer in a
+/// `__type` array, whose declarations must not stay unlinked (their `ngImport: i0` keeps all of @angular/core)
+#[test]
+fn test_link_declarations_nested_in_arrays_and_objects() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class Cmp {
+    static { this.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }
+    static { this.__type = ['ɵfac', function () { return i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }]; }
+}
+const table = { factory: () => i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }) };
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    assert!(!result.code.contains("ɵɵngDeclare"), "every declaration links:\n{}", result.code);
+    assert!(!result.code.contains("ngImport"), "{}", result.code);
+}
