@@ -113,6 +113,18 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     ],
     reasons: [SET_CLASS_METADATA_IMPORT],
   },
+  'factory/component-inject-string-token': {
+    fields: [],
+    importDiffs: [
+      {
+        type: 'different',
+        moduleSource: '@angular/core',
+        expected: ['Component'],
+        actual: ['Component', 'Inject', 'Optional', 'Self'],
+      },
+    ],
+    reasons: [SET_CLASS_METADATA_IMPORT],
+  },
   'full-file/component-with-services': {
     fields: [],
     importDiffs: [

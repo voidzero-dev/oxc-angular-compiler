@@ -723,15 +723,12 @@ fn extract_param_dependency<'a>(
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(arg) = call.arguments.first() {
-                            // `@Inject('TOKEN')`: a string token, as ngtsc compiles it
-                            if let Argument::StringLiteral(lit) = arg
-                                && let Some(value) = lit.value.as_str()
-                            {
-                                inject_token = Some(value.into());
-                                inject_token_is_string = true;
-                            } else {
-                                inject_token = extract_inject_token(arg);
-                            }
+                            // `@Inject('TOKEN')`: a string token, as ngtsc compiles it.
+                            // The last `@Inject` wins, so the flag is set on every one.
+                            let string_token =
+                                arg.as_expression().and_then(extract_string_inject_token);
+                            inject_token_is_string = string_token.is_some();
+                            inject_token = string_token.or_else(|| extract_inject_token(arg));
                         }
                     }
                 }
@@ -810,6 +807,18 @@ fn extract_param_dependency<'a>(
     dep.host = host;
 
     dep
+}
+
+/// The value of a string `@Inject` token: a string literal, or a template literal with no
+/// substitutions, also inside parentheses or a TypeScript cast.
+fn extract_string_inject_token<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
+    match expr.get_inner_expression() {
+        Expression::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first()?.value.cooked.as_ref()?.as_str().map(Ident::from)
+        }
+        _ => None,
+    }
 }
 
 /// Extract the injection token from an @Inject decorator argument.

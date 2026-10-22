@@ -87,3 +87,63 @@ export class APipe {
     );
     assert_contains(&code, r#"(i0.ɵɵdirectiveInject("API_URL",16))"#);
 }
+
+#[test]
+fn component_string_token_forms() {
+    // A template literal with no substitutions, parentheses and TypeScript casts are
+    // still string tokens.
+    let code = compile(
+        r"
+import { Component, Inject } from '@angular/core';
+@Component({ selector: 'a-cmp', template: '' })
+export class ACmp {
+  constructor(@Inject(`TPL`) a: string, @Inject(('PAREN')) b: string, @Inject('CAST' as any) c: string) {}
+}
+",
+    );
+    assert_contains(
+        &code,
+        r#"(i0.ɵɵdirectiveInject("TPL"),i0.ɵɵdirectiveInject("PAREN"),i0.ɵɵdirectiveInject("CAST"))"#,
+    );
+}
+
+#[test]
+fn component_last_inject_wins() {
+    // ngtsc uses the last `@Inject`, so a class token after a string one is not a string.
+    let code = compile(
+        r"
+import { Component, Inject } from '@angular/core';
+class Svc {}
+@Component({ selector: 'a-cmp', template: '' })
+export class ACmp {
+  constructor(@Inject('dup') @Inject(Svc) a: any) {}
+}
+",
+    );
+    assert_contains(&code, r"(i0.ɵɵdirectiveInject(Svc))");
+}
+
+#[test]
+fn partial_component_factory_declares_the_string() {
+    let allocator = Allocator::default();
+    let options = TransformOptions {
+        compilation_mode: oxc_angular_compiler::CompilationMode::Partial,
+        ..TransformOptions::default()
+    };
+    let result = transform_angular_file(
+        &allocator,
+        "test.ts",
+        r#"
+import { Component, Inject, Optional } from '@angular/core';
+@Component({ selector: 'a-cmp', template: '' })
+export class ACmp {
+  constructor(@Inject('API_URL') url: string, @Optional() @Inject("it's") b: string) {}
+}
+"#,
+        Some(&options),
+        None,
+    );
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert_contains(&code, r#"deps:[{token:"API_URL"},{token:"it's",optional:true}]"#);
+}

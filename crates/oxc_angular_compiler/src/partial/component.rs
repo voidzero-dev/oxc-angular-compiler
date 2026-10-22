@@ -822,7 +822,7 @@ fn ident_array_string_literals<'a>(
 /// Converts `component::dependency::R3DependencyMetadata` (which stores
 /// tokens as bare `Ident`s) into the `factory::R3DependencyMetadata` shape
 /// (which stores tokens as `OutputExpression`s) by wrapping each token in
-/// a `ReadVar`.
+/// a `ReadVar`, or a string literal for a string `@Inject` token.
 fn clone_factory_deps<'a>(
     allocator: &'a Allocator,
     deps: &Option<Vec<'a, ComponentDep<'a>>>,
@@ -833,10 +833,21 @@ fn clone_factory_deps<'a>(
             let mut out = Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 let token_expr = dep.token.as_ref().map(|t| {
-                    OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: t.clone(), source_span: None },
-                        &allocator,
-                    ))
+                    if dep.token_is_string {
+                        // `@Inject('TOKEN')` injects the string itself
+                        OutputExpression::Literal(Box::new_in(
+                            LiteralExpr {
+                                value: LiteralValue::String(t.clone()),
+                                source_span: None,
+                            },
+                            &allocator,
+                        ))
+                    } else {
+                        OutputExpression::ReadVar(Box::new_in(
+                            ReadVarExpr { name: t.clone(), source_span: None },
+                            &allocator,
+                        ))
+                    }
                 });
                 let attr_expr = dep.attribute_name.as_ref().map(|a| {
                     OutputExpression::Literal(Box::new_in(
