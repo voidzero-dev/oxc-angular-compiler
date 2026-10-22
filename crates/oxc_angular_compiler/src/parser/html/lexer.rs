@@ -784,6 +784,9 @@ impl<'a> HtmlLexer<'a> {
     fn peek(&self) -> char {
         let ch = self.raw_peek();
         if self.escaped_string && ch == '\\' {
+            if let Some((ch, _)) = self.code_point_escape_at(self.index as usize) {
+                return ch;
+            }
             // Look ahead to see what character is being escaped
             let next = self.input[(self.index as usize + 1)..].chars().next().unwrap_or(chars::EOF);
             Self::unescape_char(next)
@@ -808,6 +811,39 @@ impl<'a> HtmlLexer<'a> {
         }
     }
 
+    /// A code-point escape at byte `pos` (a backslash), as Angular's `EscapedCharacterCursor` reads it as one
+    /// character: `\u{X...}`, `\uXXXX`, `\xXX`, or up to three octal digits. Returns the character it stands for
+    /// and the escape's length in bytes; none for any other escape, an invalid one (whose text
+    /// `process_escape_sequences` reports), or one for NUL, the cursor's end of input (as `$EOF` is in Angular's
+    /// cursor; `process_escape_sequences` ends the text there).
+    fn code_point_escape_at(&self, pos: usize) -> Option<(char, usize)> {
+        self.decode_code_point_escape(pos).filter(|(ch, _)| *ch != '\0')
+    }
+
+    fn decode_code_point_escape(&self, pos: usize) -> Option<(char, usize)> {
+        let rest = self.input.get(pos..)?.strip_prefix('\\')?;
+        let hex = |digits: &str| u32::from_str_radix(digits, 16).ok().and_then(char::from_u32);
+        if let Some(braced) = rest.strip_prefix("u{") {
+            let digits = &braced[..braced.find('}')?];
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            Some((hex(digits)?, 4 + digits.len()))
+        } else if let Some(fixed) = rest.strip_prefix('u') {
+            let digits = fixed.get(..4).filter(|d| d.bytes().all(|b| b.is_ascii_hexdigit()))?;
+            Some((hex(digits)?, 6))
+        } else if let Some(fixed) = rest.strip_prefix('x') {
+            let digits = fixed.get(..2).filter(|d| d.bytes().all(|b| b.is_ascii_hexdigit()))?;
+            Some((hex(digits)?, 4))
+        } else {
+            let digits = rest.bytes().take(3).take_while(|b| (b'0'..=b'7').contains(b)).count();
+            if digits == 0 {
+                return None;
+            }
+            Some((char::from_u32(u32::from_str_radix(&rest[..digits], 8).ok()?)?, 1 + digits))
+        }
+    }
+
     /// Peeks at a character at offset from current position.
     /// Note: offset is in characters, not bytes.
     /// When escaped_string is true, this accounts for escape sequences.
@@ -821,7 +857,9 @@ impl<'a> HtmlLexer<'a> {
             let mut remaining = offset;
             while remaining > 0 && pos < self.length as usize {
                 let ch = self.input[pos..].chars().next().unwrap_or(chars::EOF);
-                if ch == '\\' {
+                if let Some((_, len)) = self.code_point_escape_at(pos) {
+                    pos += len;
+                } else if ch == '\\' {
                     // Skip past escape sequence
                     pos += 1;
                     if pos < self.length as usize {
@@ -837,7 +875,9 @@ impl<'a> HtmlLexer<'a> {
                 chars::EOF
             } else {
                 let ch = self.input[pos..].chars().next().unwrap_or(chars::EOF);
-                if ch == '\\' {
+                if let Some((ch, _)) = self.code_point_escape_at(pos) {
+                    ch
+                } else if ch == '\\' {
                     let next = self.input[(pos + 1)..].chars().next().unwrap_or(chars::EOF);
                     Self::unescape_char(next)
                 } else {
@@ -899,8 +939,14 @@ impl<'a> HtmlLexer<'a> {
                 return self.advance();
             }
 
-            // For unicode escapes (\uXXXX or \u{XXXX}) and hex (\xXX), we need to handle specially
-            // For now, just skip the backslash and escaped char
+            // A code-point escape is one character, as in Angular's cursor
+            if let Some((ch, len)) = self.code_point_escape_at(self.index as usize) {
+                self.index += len as u32;
+                self.column += len as u32;
+                return ch;
+            }
+
+            // Otherwise skip the backslash and the escaped character
             let unescaped = Self::unescape_char(next);
 
             // Skip backslash
@@ -998,10 +1044,9 @@ impl<'a> HtmlLexer<'a> {
         // Angular behavior: standalone `}` becomes BLOCK_CLOSE when:
         // - tokenize_blocks is true (default), AND
         // - We're not inside an expansion case or expansion form
-        // - We're not in escaped_string mode (where `}` may be part of `\u{...}` escape)
+        // (In escaped_string mode the cursor reads a `\u{...}` escape as one character, so a `}` here is a `}`.)
         if self.peek() == '}'
             && self.tokenize_blocks
-            && !self.escaped_string
             && !self.is_in_expansion_case()
             && !self.is_in_expansion_form()
         {
@@ -3080,11 +3125,10 @@ impl<'a> HtmlLexer<'a> {
             }
 
             // Stop at `}`:
-            // - When blocks are enabled (it becomes BLOCK_CLOSE) - unless we're in expansion or escaped_string
+            // - When blocks are enabled (it becomes BLOCK_CLOSE) - unless we're in expansion
             // - When we're in an expansion case (it ends the case)
             if ch == '}' {
                 if self.tokenize_blocks
-                    && !self.escaped_string
                     && !self.is_in_expansion_case()
                     && !self.is_in_expansion_form()
                 {
@@ -3404,6 +3448,21 @@ mod tests {
                 .iter()
                 .any(|t| t.token_type == HtmlTokenType::BlockOpenStart && t.value() == "if")
         );
+    }
+
+    #[test]
+    fn test_block_close_in_escaped_string() {
+        // An inline template, lexed as its string literal's raw text: `}` still closes the block. So does an escaped
+        // one (`\u{7d}`), as in Angular: the cursor reads it as the `}` the string's value holds.
+        for (input, closes) in [
+            ("@if (a) {<b></b>}", 1),
+            ("<div>@if (a) {\n<b></b>\n}</div>", 1),
+            ("@if (a) {\\u{7d}}", 2),
+        ] {
+            let tokens = HtmlLexer::new(input).with_escaped_string(true).tokenize().tokens;
+            let found = tokens.iter().filter(|t| t.token_type == HtmlTokenType::BlockClose).count();
+            assert_eq!(found, closes, "{input}");
+        }
     }
 
     #[test]
