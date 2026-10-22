@@ -55,3 +55,23 @@ export class E3Cmp {}
         "Got:\n{code}"
     );
 }
+
+#[test]
+fn evaluator_only_template_literals_keep_their_fields() {
+    // `${W * 2}` (with `W` an alias of another const) folds only through the
+    // partial evaluator. ngtsc keeps the fields as written in setClassMetadata
+    // and uses the folded selector.
+    let code = compile(
+        r#"
+import { Component } from '@angular/core';
+const BASE = 150;
+const W = BASE;
+@Component({ selector: `x-${W * 2}`, exportAs: `e${+W}`, template: `<i style="width: ${W * 2}px"></i>` })
+export class C {}
+"#,
+    );
+    assert!(code.contains(r#"selectors:[["x-300"]]"#), "Got:\n{code}");
+    assert!(code.contains(r#"exportAs:["e150"]"#), "Got:\n{code}");
+    assert!(code.contains("selector:`x-${"), "Got:\n{code}");
+    assert!(code.contains("template:`<istyle=\"width:${"), "Got:\n{code}");
+}

@@ -14,8 +14,6 @@ use oxc_ast::ast::{
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
-use oxc_syntax::number::ToJsString;
-use oxc_syntax::operator::UnaryOperator;
 
 use super::evaluator::{Evaluator, FileScope, Prop, RefKind, Value, transform_error};
 use super::metadata::{
@@ -145,7 +143,8 @@ pub fn extract_directive_metadata<'a>(
 
                 match key_name.as_str() {
                     "selector" => {
-                        if let Some(selector) = extract_string_value(allocator, &prop.value, consts)
+                        if let Some(selector) =
+                            evaluate_string_value(allocator, &prop.value, consts)
                         {
                             builder = builder.selector(selector);
                         }
@@ -157,7 +156,7 @@ pub fn extract_directive_metadata<'a>(
                     }
                     "exportAs" => {
                         if let Some(export_as) =
-                            extract_string_value(allocator, &prop.value, consts)
+                            evaluate_string_value(allocator, &prop.value, consts)
                         {
                             // exportAs can be comma-separated: "foo, bar"
                             for part in export_as.as_str().split(',') {
@@ -492,8 +491,6 @@ fn has_ng_on_changes_method(class: &Class<'_>) -> bool {
 #[derive(Default)]
 pub struct StringConsts<'a> {
     strings: HashMap<&'a str, Ident<'a>>,
-    /// `const NAME = 123`: numbers a template literal's `${...}` can interpolate.
-    numbers: HashMap<&'a str, f64>,
     program: Option<&'a Program<'a>>,
     /// Built on first use: most files have no decorator metadata to evaluate.
     scope: std::cell::OnceCell<FileScope<'a>>,
@@ -539,7 +536,6 @@ impl<'a> StringConsts<'a> {
     pub(crate) fn declarations_of(program: &'a Program<'a>) -> Self {
         Self {
             strings: HashMap::default(),
-            numbers: HashMap::default(),
             program: Some(program),
             scope: std::cell::OnceCell::new(),
             #[cfg(feature = "cross_file_elision")]
@@ -599,10 +595,6 @@ pub fn collect_string_consts<'a>(
 
     let mut map = StringConsts {
         strings: HashMap::default(),
-        numbers: pending
-            .iter()
-            .filter_map(|(name, init)| Some((*name, numeric_literal_value(init)?)))
-            .collect(),
         program: Some(program),
         scope: std::cell::OnceCell::new(),
         #[cfg(feature = "cross_file_elision")]
@@ -641,23 +633,9 @@ fn literal_string_from_expression<'a>(expr: &Expression<'a>) -> Option<Ident<'a>
     }
 }
 
-/// The value of a number literal (`150`, `-1.5`).
-fn numeric_literal_value(expr: &Expression<'_>) -> Option<f64> {
-    match expr {
-        Expression::NumericLiteral(lit) => Some(lit.value),
-        Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::UnaryNegation => {
-            match &unary.argument {
-                Expression::NumericLiteral(lit) => Some(-lit.value),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
 /// Fold a template literal whose `${...}` interpolations reference known
-/// string consts, number consts or number literals. Returns `None` if any
-/// interpolation can't be statically resolved to a string — matching Angular's all-or-nothing partial evaluator
+/// string consts. Returns `None` if any interpolation can't be statically
+/// resolved to a string — matching Angular's all-or-nothing partial evaluator
 /// for static metadata fields.
 pub(crate) fn resolve_template_literal<'a>(
     allocator: &'a Allocator,
@@ -674,17 +652,8 @@ pub(crate) fn resolve_template_literal<'a>(
         let cooked = quasi.value.cooked?.as_str()?;
         buf.push_str(cooked);
         if let Some(expr) = tpl.expressions.get(i) {
-            if let Some(resolved) = extract_string_value(allocator, expr, consts) {
-                buf.push_str(resolved.as_str());
-            } else {
-                // `${150}` or `${WIDTH}` with `const WIDTH = 150`: the number as
-                // JavaScript converts it to a string
-                let number = match expr {
-                    Expression::Identifier(id) => *consts.numbers.get(id.name.as_str())?,
-                    _ => numeric_literal_value(expr)?,
-                };
-                buf.push_str(&number.to_js_string());
-            }
+            let resolved = extract_string_value(allocator, expr, consts)?;
+            buf.push_str(resolved.as_str());
         }
     }
     Some(Ident::from(allocator.alloc_str(&buf)))

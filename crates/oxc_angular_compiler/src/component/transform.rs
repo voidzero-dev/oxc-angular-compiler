@@ -853,7 +853,7 @@ fn find_last_import_end(program_body: &[Statement<'_>]) -> Option<usize> {
 #[allow(clippy::too_many_arguments)]
 fn build_set_class_metadata_decls<'a>(
     allocator: &'a Allocator,
-    class: &oxc_ast::ast::Class<'a>,
+    class: &'a oxc_ast::ast::Class<'a>,
     class_name: &str,
     options: &TransformOptions,
     source: &'a str,

@@ -30,8 +30,7 @@ pub(crate) use decorator::evaluate_host_directives;
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{
     HostKey, angular_decorator_config, evaluate_host_metadata, evaluate_string_value,
-    evaluate_style_urls, evaluate_styles, extract_string_value, resolve_template_literal,
-    styles_error,
+    evaluate_style_urls, evaluate_styles, extract_string_value, styles_error,
 };
 pub(crate) use decorator::{
     INPUT_API, InitializerApi, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS,

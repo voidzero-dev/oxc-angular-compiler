@@ -86,7 +86,7 @@ pub fn extract_component_metadata<'a>(
             match key_name.as_str() {
                 "selector" => {
                     metadata.selector =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts)
                             // ngtsc maps `selector: ''` to the default selector
                             // ('ng-component' for components), same as a missing
                             // selector. See annotations/directive/src/shared.ts
@@ -195,7 +195,7 @@ pub fn extract_component_metadata<'a>(
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
                     if let Some(export_as) =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts)
                     {
                         for part in export_as.as_str().split(',') {
                             let trimmed = part.trim();

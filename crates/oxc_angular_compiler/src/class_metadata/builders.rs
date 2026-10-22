@@ -15,7 +15,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::directive::{
-    QUERY_APIS, R3InputMetadata, StringConsts, initializer_api_call, resolve_template_literal,
+    QUERY_APIS, R3InputMetadata, StringConsts, evaluate_string_value, initializer_api_call,
     try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
 };
 use crate::output::ast::{
@@ -55,11 +55,11 @@ use crate::util::lone_surrogate::js_str_to_ident;
 /// upstream's `if (dec.name !== 'Component') return dec;`.
 pub fn build_decorator_metadata_array<'a>(
     allocator: &'a Allocator,
-    decorators: &[&Decorator<'a>],
+    decorators: &[&'a Decorator<'a>],
     source_text: Option<&'a str>,
     inlined_template: Option<&'a str>,
     inlined_styles: Option<&[Ident<'a>]>,
-    component_decorator: Option<&Decorator<'a>>,
+    component_decorator: Option<&'a Decorator<'a>>,
     consts: Option<&StringConsts<'a>>,
 ) -> OutputExpression<'a> {
     // Whether `transformDecoratorResources` rewrites the `args` of decorators
@@ -339,7 +339,7 @@ fn inline_component_resources<'a>(
 fn drop_unresolvable_template_literal_fields<'a>(
     allocator: &'a Allocator,
     converted: &mut OutputExpression<'a>,
-    source: &Expression<'a>,
+    source: &'a Expression<'a>,
     consts: &StringConsts<'a>,
 ) {
     let Expression::ObjectExpression(obj) = source else {
@@ -360,7 +360,10 @@ fn drop_unresolvable_template_literal_fields<'a>(
         if tpl.expressions.is_empty() {
             continue;
         }
-        if resolve_template_literal(allocator, tpl, consts).is_some() {
+        // Read the value the way the compile path reads `template`: the
+        // const folder first, then the partial evaluator (`${WIDTH}px` with
+        // `const WIDTH = 150`, `${A + B}`, an imported const, ...).
+        if evaluate_string_value(allocator, &prop.value, consts).is_some() {
             continue; // Resolvable — leave the converted value as-is.
         }
         if let Some(key) = get_property_key_name(&prop.key) {
@@ -395,7 +398,7 @@ fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> Liter
 /// [`build_ctor_params_metadata_in`] recognises only Angular's, like ngtsc.
 pub fn build_ctor_params_metadata<'a>(
     allocator: &'a Allocator,
-    class: &Class<'a>,
+    class: &'a Class<'a>,
     constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
@@ -426,7 +429,7 @@ pub fn build_ctor_params_metadata<'a>(
 /// `decorators: []`.
 pub fn build_ctor_params_metadata_in<'a>(
     allocator: &'a Allocator,
-    class: &Class<'a>,
+    class: &'a Class<'a>,
     constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
@@ -537,7 +540,7 @@ pub fn build_ctor_params_metadata_in<'a>(
 /// only Angular's, like ngtsc.
 pub fn build_prop_decorators_metadata<'a>(
     allocator: &'a Allocator,
-    class: &Class<'a>,
+    class: &'a Class<'a>,
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
@@ -554,7 +557,7 @@ pub fn build_prop_decorators_metadata<'a>(
 /// same way (`outputFromObservable` from `@angular/core/rxjs-interop`).
 pub fn build_prop_decorators_metadata_in<'a>(
     allocator: &'a Allocator,
-    class: &Class<'a>,
+    class: &'a Class<'a>,
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     consts: Option<&StringConsts<'a>>,
