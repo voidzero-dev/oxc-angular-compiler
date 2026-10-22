@@ -12808,6 +12808,45 @@ export class AppComponent {}
     );
 }
 
+/// JIT mode: a resource URL interpolating a number (`${1}`, a number const or
+/// an expression of one) folds through the partial evaluator, like in AOT.
+#[test]
+fn jit_resource_urls_with_number_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const V = 2;
+
+@Component({
+    selector: 'app-root',
+    templateUrl: `./v${1}.html`,
+    styleUrl: `./v${V}.css`,
+    standalone: true,
+})
+export class AppComponent {}
+
+@Component({
+    selector: 'app-other',
+    template: '<h1>x</h1>',
+    styleUrls: [`./w${V * 2}.css`],
+})
+export class OtherComponent {}
+"#;
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    for specifier in [
+        "angular:jit:template:file;./v1.html",
+        "angular:jit:style:file;./v2.css",
+        "angular:jit:style:file;./w4.css",
+    ] {
+        assert!(result.code.contains(specifier), "Expected `{specifier}`.\nCode:\n{}", result.code);
+    }
+}
+
 /// JIT mode: `templateUrl` may be a bare identifier referencing a same-file
 /// string `const`. Must also fold.
 #[test]

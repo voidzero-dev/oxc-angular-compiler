@@ -1994,7 +1994,7 @@ fn build_ctor_parameters_text(params: &[JitCtorParam]) -> Option<String> {
 fn build_jit_decorator_text<'a>(
     allocator: &'a Allocator,
     source: &str,
-    decorator: &oxc_ast::ast::Decorator<'a>,
+    decorator: &'a oxc_ast::ast::Decorator<'a>,
     decorator_kind: AngularDecoratorKind,
     resource_counter: &mut u32,
     resource_imports: &mut std::vec::Vec<(String, String)>, // (import_name, specifier)
@@ -2035,11 +2035,11 @@ fn build_jit_decorator_text<'a>(
 
             match key_name {
                 Some("templateUrl") => {
-                    // Resolve the URL through the same const/template-literal
-                    // folder used by AOT extraction so JIT and AOT accept the
-                    // same metadata shapes.
+                    // Resolve the URL the way AOT extraction reads it (the
+                    // const folder, then the partial evaluator) so JIT and AOT
+                    // accept the same metadata shapes.
                     if let Some(url) =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts)
                     {
                         let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
                         let specifier = format!("angular:jit:template:file;{}", url.as_str());
@@ -2056,7 +2056,7 @@ fn build_jit_decorator_text<'a>(
                 Some("styleUrl") => {
                     // Single style URL
                     if let Some(url) =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                        crate::directive::evaluate_string_value(allocator, &prop.value, consts)
                     {
                         let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
                         let specifier = format!("angular:jit:style:file;{}", url.as_str());
@@ -2080,9 +2080,9 @@ fn build_jit_decorator_text<'a>(
                             // through `as_expression()` and let the resolver
                             // decide which shapes fold.
                             let Some(elem_expr) = elem.as_expression() else { continue };
-                            if let Some(url) =
-                                crate::directive::extract_string_value(allocator, elem_expr, consts)
-                            {
+                            if let Some(url) = crate::directive::evaluate_string_value(
+                                allocator, elem_expr, consts,
+                            ) {
                                 let import_name =
                                     format!("__NG_CLI_RESOURCE__{}", *resource_counter);
                                 let specifier = format!("angular:jit:style:file;{}", url.as_str());
@@ -2547,7 +2547,7 @@ fn synthetic_default_name(taken: &mut rustc_hash::FxHashSet<String>) -> String {
 fn collect_jit_class_info<'a>(
     allocator: &'a Allocator,
     source: &str,
-    class: &oxc_ast::ast::Class<'a>,
+    class: &'a oxc_ast::ast::Class<'a>,
     class_name: String,
     stmt_start: u32,
     is_exported: bool,
