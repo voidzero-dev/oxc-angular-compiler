@@ -5,9 +5,9 @@
 
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
-    BindingPattern, Class, ClassElement, Declaration, Decorator, Expression, FormalParameter,
-    MethodDefinitionKind, ObjectPropertyKind, PropertyKey, Statement, TSNamespaceDeclarationBody,
-    TSType, TSTypeName, VariableDeclaration,
+    BindingPattern, ChainElement, Class, ClassElement, Declaration, Decorator, Expression,
+    FormalParameter, MethodDefinitionKind, ObjectPropertyKind, PropertyKey, Statement,
+    TSNamespaceDeclarationBody, TSType, TSTypeName, VariableDeclaration,
 };
 use oxc_span::GetSpan;
 use oxc_str::Ident;
@@ -790,6 +790,10 @@ fn build_signal_query_decorator<'a>(
             let string_or_call = match expr {
                 Expression::StringLiteral(_) | Expression::CallExpression(_) => true,
                 Expression::TemplateLiteral(template) => template.expressions.is_empty(),
+                // `a?.b()` is a call too, as `ts.isCallExpression` sees it
+                Expression::ChainExpression(chain) => {
+                    matches!(chain.expression, ChainElement::CallExpression(_))
+                }
                 _ => false,
             };
             if string_or_call {

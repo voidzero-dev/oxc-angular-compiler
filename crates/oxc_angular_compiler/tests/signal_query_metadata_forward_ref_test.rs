@@ -79,3 +79,27 @@ export class FParent {
     assert_contains(&code, "legacy:[{type:ContentChildren,args:[FPane]}]");
     assert_contains(&code, r#"strings:[{type:ViewChildren,args:["a,b"]}]"#);
 }
+
+#[test]
+fn call_predicates_stay_as_written() {
+    // ngtsc leaves a call as written, an optional call (`a?.b()`) included, since
+    // `ts.isCallExpression` is true for it.
+    let code = compile(
+        r"
+import { Component, viewChild } from '@angular/core';
+const tokens: any = { get: () => 'ref' };
+@Component({ selector: 'g-cmp', template: '' })
+export class GCmp {
+  plain = viewChild(tokens.get());
+  optional = viewChild(tokens?.get());
+  optionalCall = viewChild(tokens.get?.());
+}
+",
+    );
+    assert_contains(&code, "plain:[{type:i0.ViewChild,args:[tokens.get(),{isSignal:true}]}]");
+    assert_contains(&code, "optional:[{type:i0.ViewChild,args:[tokens?.get(),{isSignal:true}]}]");
+    assert_contains(
+        &code,
+        "optionalCall:[{type:i0.ViewChild,args:[tokens.get?.(),{isSignal:true}]}]",
+    );
+}
