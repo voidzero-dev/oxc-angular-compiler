@@ -42,3 +42,41 @@ export class CCmp {
     );
     assert!(code.contains("hostVars:3"), "Got:\n{}", result.code);
 }
+
+#[test]
+fn an_unreadable_argument_on_a_later_stacked_decorator_is_reported() {
+    // A lone surrogate (`'\uD800'`) can't be read. Like on the first decorator, it is
+    // reported instead of compiling a fallback (the member name, no listener, no args).
+    for (member, expected) in [
+        (
+            r"@HostBinding('title') @HostBinding('\uD800') v = 'a';",
+            "@HostBinding's argument must be a string Value could not be determined statically.",
+        ),
+        (
+            r"@HostListener('click') @HostListener('\uD800') a() {}",
+            "@HostListener's event name argument must be a string Value could not be \
+             determined statically.",
+        ),
+        (
+            r"@HostListener('click') @HostListener('x', ['\uD800']) a(x: any) {}",
+            "Failed to resolve @HostListener.args at position 0 to a string Value could not be \
+             determined statically.",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, HostBinding, HostListener }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n  {member}\n}}"
+        );
+        let allocator = Allocator::default();
+        let result = transform_angular_file(
+            &allocator,
+            "test.ts",
+            &source,
+            Some(&TransformOptions::default()),
+            None,
+        );
+        let messages: Vec<String> = result.diagnostics.iter().map(|d| format!("{d}")).collect();
+        assert_eq!(messages, [expected], "`{member}`");
+    }
+}

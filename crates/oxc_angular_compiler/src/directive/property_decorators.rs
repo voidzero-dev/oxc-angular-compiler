@@ -1940,28 +1940,40 @@ pub(crate) fn lone_surrogate_host_error<'a>(
     consts: &super::StringConsts<'a>,
 ) -> Option<(String, Span)> {
     // The members `extract_host_bindings_in` / `extract_host_listeners_in`
-    // compile, with their decorator's call.
+    // compile, with the call of each of their decorators.
     let members = |name: &'static str| {
-        class.body.body.iter().filter_map(move |element| {
-            let (decorators, key, is_static) = match element {
-                ClassElement::PropertyDefinition(prop) => {
-                    (&prop.decorators, &prop.key, prop.r#static)
+        class
+            .body
+            .body
+            .iter()
+            .filter_map(move |element| {
+                let (decorators, key, is_static) = match element {
+                    ClassElement::PropertyDefinition(prop) => {
+                        (&prop.decorators, &prop.key, prop.r#static)
+                    }
+                    ClassElement::MethodDefinition(method) => {
+                        (&method.decorators, &method.key, method.r#static)
+                    }
+                    ClassElement::AccessorProperty(prop) => {
+                        (&prop.decorators, &prop.key, prop.r#static)
+                    }
+                    _ => return None,
+                };
+                if is_static || get_property_key_name(key).is_none() {
+                    return None;
                 }
-                ClassElement::MethodDefinition(method) => {
-                    (&method.decorators, &method.key, method.r#static)
-                }
-                ClassElement::AccessorProperty(prop) => {
-                    (&prop.decorators, &prop.key, prop.r#static)
-                }
-                _ => return None,
-            };
-            if is_static || get_property_key_name(key).is_none() {
-                return None;
-            }
-            let decorator = find_decorator_by_name(decorators, name, Some(consts))?;
-            let Expression::CallExpression(call) = &decorator.expression else { return None };
-            Some((decorator, call))
-        })
+                // Every stacked decorator is compiled, so every one is checked
+                Some(decorators.iter().filter_map(move |decorator| {
+                    if angular_member_decorator(decorator, Some(consts)) != Some(name) {
+                        return None;
+                    }
+                    let Expression::CallExpression(call) = &decorator.expression else {
+                        return None;
+                    };
+                    Some((decorator, call))
+                }))
+            })
+            .flatten()
     };
     let suffix = Value::Dynamic.wrong_type_suffix();
     let is_lone = |arg: &Argument<'_>| arg.as_expression().is_some_and(is_lone_surrogate_literal);
