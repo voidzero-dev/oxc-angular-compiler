@@ -3724,3 +3724,46 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body, 'a definitively styleless class must still be cleared').toContain('styles: []')
   })
 })
+
+describe('a template edited while its component fails to compile', () => {
+  it('is compiled from the edited file once the component compiles again', async () => {
+    const dir = join(tempDir, 'src', 'stale')
+    mkdirSync(dir, { recursive: true })
+    const template = join(dir, 'stale.component.html')
+    const component = join(dir, 'stale.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+
+      @Component({ selector: 'app-stale', templateUrl: './stale.component.html' })
+      export class StaleComponent {}
+    `
+    writeFileSync(component, source)
+    writeFileSync(template, '<h1>Before</h1>')
+
+    const plugin = getAngularPlugin()
+    const server = await setupPluginWithServer(plugin)
+    const transform = async (code: string) => {
+      if (!plugin.transform || typeof plugin.transform === 'function') {
+        throw new Error('Expected plugin transform handler')
+      }
+      return (await plugin.transform.handler.call(
+        { error() {}, warn() {}, addWatchFile() {} } as any,
+        code,
+        component,
+      )) as { code: string } | undefined
+    }
+
+    expect((await transform(source))?.code).toContain('Before')
+
+    // the component stops compiling, and its template is edited meanwhile
+    await transform(
+      source.replace('export class StaleComponent {}', 'export class StaleComponent { x = ; }'),
+    ).catch(() => {})
+    writeFileSync(template, '<h1>After</h1>')
+    await callHandleHotUpdate(plugin, createMockHmrContext(template, [], server))
+
+    const fixed = (await transform(source))?.code
+    expect(fixed).toContain('After')
+    expect(fixed).not.toContain('Before')
+  })
+})

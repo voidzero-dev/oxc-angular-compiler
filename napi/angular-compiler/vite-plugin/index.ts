@@ -1286,6 +1286,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // anything below can preprocess one (see `compiledStyles`).
         startStyleCycle()
 
+        // The file's cached contents are stale, whatever its role now. A
+        // template edited while its component fails to compile is not
+        // registered as the component's at that moment (the failed transform
+        // found no templateUrl), so the branches below would leave its old
+        // contents cached for the component's next transform.
+        resourceCache.delete(normalizePath(ctx.file))
+
         if (!pluginOptions.liveReload) return
 
         debugHmr('handleHotUpdate file=%s', ctx.file)
