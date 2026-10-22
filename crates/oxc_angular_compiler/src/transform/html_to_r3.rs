@@ -6023,10 +6023,7 @@ mod key_span_tests {
             key_spans(r#"<div [someProp]="v"></div>"#),
             pairs(&[("BoundAttribute", "someProp")])
         );
-        assert_eq!(
-            key_spans(r#"<div [someProp]></div>"#),
-            pairs(&[("BoundAttribute", "someProp")])
-        );
+        assert_eq!(key_spans("<div [someProp]></div>"), pairs(&[("BoundAttribute", "someProp")]));
         // `attr.`, `class.` and `style.` stay in the key span: `parseAttribute` does not split them.
         assert_eq!(
             key_spans(r#"<div [attr.role]="r" [class.on]="c" [style.width.px]="w"></div>"#),
@@ -6053,10 +6050,7 @@ mod key_span_tests {
             key_spans(r#"<div bind-animate-animationName="v"></div>"#),
             pairs(&[("BoundAttribute", "animationName")])
         );
-        assert_eq!(
-            key_spans(r#"<div @animation></div>"#),
-            pairs(&[("BoundAttribute", "animation")])
-        );
+        assert_eq!(key_spans("<div @animation></div>"), pairs(&[("BoundAttribute", "animation")]));
     }
 
     #[test]
@@ -6103,9 +6097,9 @@ mod key_span_tests {
 
     #[test]
     fn references_and_variables() {
-        assert_eq!(key_spans(r#"<div #a></div>"#), pairs(&[("Reference", "a")]));
+        assert_eq!(key_spans("<div #a></div>"), pairs(&[("Reference", "a")]));
         assert_eq!(key_spans(r#"<div #a="b"></div>"#), pairs(&[("Reference", "a")]));
-        assert_eq!(key_spans(r#"<div ref-a></div>"#), pairs(&[("Reference", "a")]));
+        assert_eq!(key_spans("<div ref-a></div>"), pairs(&[("Reference", "a")]));
         assert_eq!(
             key_spans(r#"<ng-template let-a="b"></ng-template>"#),
             pairs(&[("Variable", "a")])
@@ -6114,7 +6108,7 @@ mod key_span_tests {
 
     #[test]
     fn template_attribute() {
-        assert_eq!(key_spans(r#"<div *ngIf></div>"#), pairs(&[("TextAttribute", "ngIf")]));
+        assert_eq!(key_spans("<div *ngIf></div>"), pairs(&[("TextAttribute", "ngIf")]));
         assert_eq!(
             key_spans(r#"<div *ngFor="let item of items; trackBy: trackByFn"></div>"#),
             pairs(&[
