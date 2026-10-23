@@ -951,7 +951,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     {
                         for param in &method.value.params.items {
                             for decorator in &param.decorators {
-                                if Self::is_removed_param_decorator(decorator, consts) {
+                                // by what it resolves to: `@I(TOKEN)` for `import { Inject as I }` is removed too
+                                if crate::directive::angular_param_decorator(
+                                    decorator,
+                                    Some(consts),
+                                )
+                                .is_some()
+                                {
                                     references.visit_decorator(decorator);
                                 }
                             }
@@ -967,24 +973,6 @@ impl<'a> ImportElisionAnalyzer<'a> {
             }
         }
         references.0
-    }
-
-    /// One of Angular's constructor parameter decorators (`@Inject(TOKEN)`, `@Optional()`, ...), which compilation
-    /// removes; another module's `@Inject` stays in the output (like ngtsc)
-    fn is_removed_param_decorator(
-        decorator: &'a oxc_ast::ast::Decorator<'a>,
-        consts: &crate::directive::StringConsts<'a>,
-    ) -> bool {
-        let name = match &decorator.expression {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::CallExpression(call) => match &call.callee {
-                Expression::Identifier(id) => id.name.as_str(),
-                _ => return false,
-            },
-            _ => return false,
-        };
-        PARAM_DECORATORS.contains(&name)
-            && crate::directive::angular_param_decorator(decorator, Some(consts)).is_some()
     }
 
     /// The number of value references to an import binding, or `usize::MAX`
@@ -1976,6 +1964,27 @@ export class TestService {{
             );
             assert!(type_only.contains("Inject"), "Inject is still elided with `{elsewhere}`");
         }
+    }
+
+    #[test]
+    fn test_aliased_inject_counts_as_removed() {
+        // `@I(TOKEN)` is Angular's Inject under an alias, which compilation removes like `@Inject(TOKEN)`
+        let source = r#"
+import { Injectable, Inject } from "@angular/core";
+import { Inject as I } from "@angular/core";
+import { TOKEN } from "./tokens";
+
+@Injectable()
+export class A {
+    constructor(@I(TOKEN) private value: unknown) {}
+}
+
+@Injectable()
+export class B {
+    constructor(@Inject(TOKEN) private value: unknown) {}
+}
+"#;
+        assert!(analyze_source(source).contains("TOKEN"));
     }
 
     #[test]
