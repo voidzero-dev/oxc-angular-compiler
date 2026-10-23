@@ -52,12 +52,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::optimizer::Edit;
 
-/// Angular constructor parameter decorators that are removed during compilation.
-/// These decorators are downleveled to factory metadata and their imports can be elided.
-///
-/// Reference: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts
-const PARAM_DECORATORS: &[&str] = &["Inject", "Optional", "Self", "SkipSelf", "Host", "Attribute"];
-
 /// Analyzer for determining which imports are type-only and can be elided.
 pub struct ImportElisionAnalyzer<'a> {
     /// Set of import specifier local names that should be removed (type-only).
@@ -106,19 +100,10 @@ impl<'a> ImportElisionAnalyzer<'a> {
         let mut declaration_specifiers = Vec::new();
         let mut declaration_of = FxHashMap::default();
 
-        // First, collect all symbols that are used ONLY in constructor parameter decorators.
-        // These should be elided because Angular removes these decorators during compilation.
-        // When class metadata is emitted, `ctorParameters`/`propDecorators` reference the
-        // same names, so nothing collected here is elidable.
+        // The references inside decorators compilation removes: an import is decorator-only when every value
+        // reference to it is one of them. When class metadata is emitted, `ctorParameters`/`propDecorators`
+        // name the same identifiers, so none is removed.
         let consts = crate::directive::StringConsts::declarations_of(program);
-        let ctor_param_decorator_only = if emit_metadata {
-            FxHashSet::default()
-        } else {
-            Self::collect_ctor_param_decorator_only_imports(program, &consts)
-        };
-        // The references inside decorators compilation removes: a name is decorator-only when every value
-        // reference to it is one of them, wherever else in the file the walk above didn't look (an exported const,
-        // a function, ...)
         let removed_references = if emit_metadata {
             FxHashSet::default()
         } else {
@@ -167,8 +152,8 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         if Self::is_type_only_import(&spec.local, semantic) {
                             type_only_specifiers.insert(name.clone());
                         }
-                        // Check if this import is only used in constructor parameter decorators
-                        else if ctor_param_decorator_only.contains(name.as_str())
+                        // Check if this import is only used in decorators compilation removes
+                        else if !removed_references.is_empty()
                             && Self::value_references_only_among(
                                 &spec.local,
                                 semantic,
@@ -532,355 +517,6 @@ impl<'a> ImportElisionAnalyzer<'a> {
         }
     }
 
-    /// Collect import names that are used ONLY in compiler-handled positions.
-    ///
-    /// This includes:
-    /// 1. Constructor parameter decorators (`@Inject`, `@Optional`, etc.) - removed by Angular
-    /// 2. `@Inject(TOKEN)` arguments - only used in ctor param decorators
-    /// 3. `declare` property decorator arguments - `declare` properties are not emitted by
-    ///    TypeScript, so their decorator arguments have no runtime value references
-    ///
-    /// Reference: packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
-    fn collect_ctor_param_decorator_only_imports(
-        program: &'a Program<'a>,
-        consts: &crate::directive::StringConsts<'a>,
-    ) -> FxHashSet<&'a str> {
-        let mut result = FxHashSet::default();
-
-        // Track:
-        // 1. Symbols used ONLY in ctor param decorator position (the decorator itself)
-        // 2. Symbols used ONLY as @Inject() arguments
-        // 3. Symbols used ONLY in `declare` property decorator arguments
-        let mut ctor_param_decorator_uses: FxHashSet<&'a str> = FxHashSet::default();
-        let mut inject_arg_uses: FxHashSet<&'a str> = FxHashSet::default();
-        let mut declare_prop_decorator_uses: FxHashSet<&'a str> = FxHashSet::default();
-        let mut other_value_uses: FxHashSet<&'a str> = FxHashSet::default();
-
-        // Walk the AST to find constructor parameters and their decorators
-        for stmt in &program.body {
-            Self::collect_uses_from_statement(
-                stmt,
-                consts,
-                &mut ctor_param_decorator_uses,
-                &mut inject_arg_uses,
-                &mut declare_prop_decorator_uses,
-                &mut other_value_uses,
-            );
-        }
-
-        // A symbol can be elided if it appears ONLY in compiler-handled positions
-        // and NOT in other value positions
-        for name in ctor_param_decorator_uses {
-            if !other_value_uses.contains(name) {
-                result.insert(name);
-            }
-        }
-        for name in inject_arg_uses {
-            if !other_value_uses.contains(name) {
-                result.insert(name);
-            }
-        }
-        for name in declare_prop_decorator_uses {
-            if !other_value_uses.contains(name) {
-                result.insert(name);
-            }
-        }
-
-        result
-    }
-
-    /// Recursively collect uses from a statement.
-    fn collect_uses_from_statement(
-        stmt: &'a Statement<'a>,
-        consts: &crate::directive::StringConsts<'a>,
-        ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
-        inject_arg_uses: &mut FxHashSet<&'a str>,
-        declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
-        other_value_uses: &mut FxHashSet<&'a str>,
-    ) {
-        match stmt {
-            Statement::ClassDeclaration(class) => {
-                Self::collect_uses_from_class(
-                    class,
-                    consts,
-                    ctor_param_decorator_uses,
-                    inject_arg_uses,
-                    declare_prop_decorator_uses,
-                    other_value_uses,
-                );
-            }
-            Statement::ExportDefaultDeclaration(export) => {
-                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
-                    &export.declaration
-                {
-                    Self::collect_uses_from_class(
-                        class,
-                        consts,
-                        ctor_param_decorator_uses,
-                        inject_arg_uses,
-                        declare_prop_decorator_uses,
-                        other_value_uses,
-                    );
-                }
-            }
-            Statement::ExportDeclaration(export) => {
-                if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration {
-                    Self::collect_uses_from_class(
-                        class,
-                        consts,
-                        ctor_param_decorator_uses,
-                        inject_arg_uses,
-                        declare_prop_decorator_uses,
-                        other_value_uses,
-                    );
-                }
-            }
-            // Collect value uses from variable declarations
-            Statement::VariableDeclaration(var_decl) => {
-                for decl in &var_decl.declarations {
-                    if let Some(init) = &decl.init {
-                        Self::collect_value_uses_from_expr(init, other_value_uses);
-                    }
-                }
-            }
-            // Collect value uses from expression statements
-            Statement::ExpressionStatement(expr_stmt) => {
-                Self::collect_value_uses_from_expr(&expr_stmt.expression, other_value_uses);
-            }
-            _ => {}
-        }
-    }
-
-    /// Collect uses from a class declaration.
-    fn collect_uses_from_class(
-        class: &'a oxc_ast::ast::Class<'a>,
-        consts: &crate::directive::StringConsts<'a>,
-        ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
-        inject_arg_uses: &mut FxHashSet<&'a str>,
-        declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
-        other_value_uses: &mut FxHashSet<&'a str>,
-    ) {
-        // Process class decorators - these are NOT elided (they run at runtime)
-        for decorator in &class.decorators {
-            Self::collect_value_uses_from_expr(&decorator.expression, other_value_uses);
-        }
-
-        // Process class members
-        for element in &class.body.body {
-            match element {
-                ClassElement::MethodDefinition(method) => {
-                    // Process method decorators (e.g., @HostListener) - NOT elided
-                    for decorator in &method.decorators {
-                        Self::collect_value_uses_from_expr(&decorator.expression, other_value_uses);
-                    }
-
-                    if method.kind == MethodDefinitionKind::Constructor {
-                        // This is the constructor - process parameter decorators specially
-                        Self::collect_uses_from_constructor_params(
-                            &method.value.params,
-                            consts,
-                            ctor_param_decorator_uses,
-                            inject_arg_uses,
-                        );
-                    }
-                }
-                ClassElement::PropertyDefinition(prop) => {
-                    if prop.declare {
-                        // `declare` properties are not emitted by TypeScript, so their
-                        // decorators and arguments have no runtime value references.
-                        // Track them separately for elision.
-                        for decorator in &prop.decorators {
-                            Self::collect_value_uses_from_expr(
-                                &decorator.expression,
-                                declare_prop_decorator_uses,
-                            );
-                        }
-                    } else {
-                        // Process property decorators (e.g., @Input, @ViewChild) - NOT elided
-                        for decorator in &prop.decorators {
-                            Self::collect_value_uses_from_expr(
-                                &decorator.expression,
-                                other_value_uses,
-                            );
-                        }
-                    }
-                    // Process property initializers (e.g., doc = DOCUMENT)
-                    if let Some(init) = &prop.value {
-                        Self::collect_value_uses_from_expr(init, other_value_uses);
-                    }
-                }
-                ClassElement::AccessorProperty(prop) => {
-                    for decorator in &prop.decorators {
-                        Self::collect_value_uses_from_expr(&decorator.expression, other_value_uses);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Collect uses from constructor parameters.
-    ///
-    /// This is the key function that identifies parameter decorators and their arguments.
-    fn collect_uses_from_constructor_params(
-        params: &'a oxc_ast::ast::FormalParameters<'a>,
-        consts: &crate::directive::StringConsts<'a>,
-        ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
-        inject_arg_uses: &mut FxHashSet<&'a str>,
-    ) {
-        for param in &params.items {
-            for decorator in &param.decorators {
-                // Get the decorator name
-                let (decorator_name, call_args) = match &decorator.expression {
-                    // @Optional (without call)
-                    Expression::Identifier(id) => (Some(id.name.as_str()), None),
-                    // @Optional() or @Inject(TOKEN)
-                    Expression::CallExpression(call) => {
-                        if let Expression::Identifier(id) = &call.callee {
-                            (Some(id.name.as_str()), Some(&call.arguments))
-                        } else {
-                            (None, None)
-                        }
-                    }
-                    _ => (None, None),
-                };
-
-                if let Some(name) = decorator_name {
-                    // Check if this is one of Angular's parameter decorators,
-                    // which compilation removes. Another module's `@Inject`
-                    // stays in the output (like ngtsc), so its import must too.
-                    if PARAM_DECORATORS.contains(&name)
-                        && crate::directive::angular_param_decorator(decorator, Some(consts))
-                            .is_some()
-                    {
-                        ctor_param_decorator_uses.insert(name);
-
-                        // If this is @Inject(TOKEN), collect the TOKEN argument
-                        if name == "Inject" {
-                            if let Some(args) = call_args {
-                                for arg in args {
-                                    // Handle spread elements by extracting their inner expression
-                                    if let oxc_ast::ast::Argument::SpreadElement(spread) = arg {
-                                        Self::collect_inject_arg_uses(
-                                            &spread.argument,
-                                            inject_arg_uses,
-                                        );
-                                    } else if let Some(expr) = arg.as_expression() {
-                                        Self::collect_inject_arg_uses(expr, inject_arg_uses);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Collect identifier uses from an @Inject() argument.
-    fn collect_inject_arg_uses(expr: &'a Expression<'a>, inject_arg_uses: &mut FxHashSet<&'a str>) {
-        match expr {
-            Expression::Identifier(id) => {
-                inject_arg_uses.insert(id.name.as_str());
-            }
-            // Handle property access like SomeModule.TOKEN
-            Expression::StaticMemberExpression(member) => {
-                if let Expression::Identifier(id) = &member.object {
-                    inject_arg_uses.insert(id.name.as_str());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Collect all identifier uses from an expression (for "other" non-elided uses).
-    fn collect_value_uses_from_expr(
-        expr: &'a Expression<'a>,
-        other_value_uses: &mut FxHashSet<&'a str>,
-    ) {
-        match expr {
-            Expression::Identifier(id) => {
-                other_value_uses.insert(id.name.as_str());
-            }
-            Expression::CallExpression(call) => {
-                Self::collect_value_uses_from_expr(&call.callee, other_value_uses);
-                for arg in &call.arguments {
-                    // Handle spread elements by extracting their inner expression
-                    if let oxc_ast::ast::Argument::SpreadElement(spread) = arg {
-                        Self::collect_value_uses_from_expr(&spread.argument, other_value_uses);
-                    } else if let Some(expr) = arg.as_expression() {
-                        Self::collect_value_uses_from_expr(expr, other_value_uses);
-                    }
-                }
-            }
-            Expression::StaticMemberExpression(member) => {
-                Self::collect_value_uses_from_expr(&member.object, other_value_uses);
-            }
-            Expression::ComputedMemberExpression(member) => {
-                Self::collect_value_uses_from_expr(&member.object, other_value_uses);
-                Self::collect_value_uses_from_expr(&member.expression, other_value_uses);
-            }
-            Expression::ObjectExpression(obj) => {
-                for prop in &obj.properties {
-                    if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(prop) = prop {
-                        Self::collect_value_uses_from_expr(&prop.value, other_value_uses);
-                    }
-                }
-            }
-            Expression::ArrayExpression(arr) => {
-                for elem in &arr.elements {
-                    match elem {
-                        oxc_ast::ast::ArrayExpressionElement::SpreadElement(spread) => {
-                            Self::collect_value_uses_from_expr(&spread.argument, other_value_uses);
-                        }
-                        oxc_ast::ast::ArrayExpressionElement::Elision(_) => {}
-                        _ => {
-                            if let Some(expr) = elem.as_expression() {
-                                Self::collect_value_uses_from_expr(expr, other_value_uses);
-                            }
-                        }
-                    }
-                }
-            }
-            Expression::NewExpression(new_expr) => {
-                Self::collect_value_uses_from_expr(&new_expr.callee, other_value_uses);
-                for arg in &new_expr.arguments {
-                    // Handle spread elements by extracting their inner expression
-                    if let oxc_ast::ast::Argument::SpreadElement(spread) = arg {
-                        Self::collect_value_uses_from_expr(&spread.argument, other_value_uses);
-                    } else if let Some(expr) = arg.as_expression() {
-                        Self::collect_value_uses_from_expr(expr, other_value_uses);
-                    }
-                }
-            }
-            Expression::ArrowFunctionExpression(arrow) => {
-                // Arrow function bodies may contain value references, e.g.,
-                // `forwardRef(() => TagPickerComponent)` in Component imports.
-                if let Some(expr) = arrow.get_expression() {
-                    Self::collect_value_uses_from_expr(expr, other_value_uses);
-                } else if let Some(body) = arrow.get_function_body() {
-                    for stmt in &body.statements {
-                        match stmt {
-                            Statement::ExpressionStatement(expr_stmt) => {
-                                Self::collect_value_uses_from_expr(
-                                    &expr_stmt.expression,
-                                    other_value_uses,
-                                );
-                            }
-                            Statement::ReturnStatement(ret) => {
-                                if let Some(arg) = &ret.argument {
-                                    Self::collect_value_uses_from_expr(arg, other_value_uses);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Check if an import binding is only used in type positions.
     fn is_type_only_import(id: &BindingIdentifier<'a>, semantic: &Semantic<'a>) -> bool {
         let symbol_id = id.symbol_id();
@@ -914,9 +550,20 @@ impl<'a> ImportElisionAnalyzer<'a> {
         })
     }
 
-    /// The references inside the decorators compilation removes: Angular's constructor parameter decorators of the
-    /// classes [`Self::collect_ctor_param_decorator_only_imports`] looks at, and the decorators of `declare`
-    /// properties
+    /// The references the compiled output no longer has, because the transform strips the decorator that held
+    /// them and compiles nothing that names them. Only on a class the transform compiles (one with an Angular
+    /// class decorator, see [`crate::directive::angular_class_decorator`]):
+    ///
+    /// - an Angular constructor parameter decorator of the first constructor (the one
+    ///   `collect_constructor_decorator_spans` strips and the factory reads), with the argument of `@Inject(X)`
+    ///   when it is a bare identifier: the factory names `X` through a namespace import (`i1.X`), while any other
+    ///   argument (`TOKEN.sub`, `forwardRef(() => TOKEN)`) is copied as written
+    /// - the Angular member decorator itself on a `declare` property, not its arguments: a query predicate
+    ///   (`viewQuery(Foo)`) or an input `transform` is compiled into the definition by its local name
+    ///
+    /// A decorator that stays in the output (not Angular's, or on a class that isn't compiled) keeps all of its
+    /// references. `transform` also keeps the imports of decorators it didn't strip after all (a component whose
+    /// template is missing).
     fn removed_decorator_references(
         program: &'a Program<'a>,
         consts: &crate::directive::StringConsts<'a>,
@@ -927,6 +574,15 @@ impl<'a> ImportElisionAnalyzer<'a> {
             fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
                 if let Some(reference) = it.reference_id.get() {
                     self.0.insert(reference);
+                }
+            }
+        }
+        impl References {
+            /// The decorator's callee: `Inject` in `@Inject(TOKEN)`, `core` in `@core.Optional()`
+            fn visit_callee<'a>(&mut self, decorator: &oxc_ast::ast::Decorator<'a>) {
+                match &decorator.expression {
+                    Expression::CallExpression(call) => self.visit_expression(&call.callee),
+                    expression => self.visit_expression(expression),
                 }
             }
         }
@@ -944,31 +600,48 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 },
                 _ => continue,
             };
-            for element in &class.body.body {
-                match element {
-                    ClassElement::MethodDefinition(method)
-                        if method.kind == MethodDefinitionKind::Constructor =>
+            if !class.decorators.iter().any(|decorator| {
+                crate::directive::angular_class_decorator(decorator, consts).is_some()
+            }) {
+                continue;
+            }
+            let constructor = class.body.body.iter().find_map(|element| match element {
+                ClassElement::MethodDefinition(method)
+                    if method.kind == MethodDefinitionKind::Constructor =>
+                {
+                    Some(method)
+                }
+                _ => None,
+            });
+            for param in constructor.into_iter().flat_map(|ctor| &ctor.value.params.items) {
+                for decorator in &param.decorators {
+                    // by what it resolves to: `@I(TOKEN)` for `import { Inject as I }` is removed too
+                    let Some(name) =
+                        crate::directive::angular_param_decorator(decorator, Some(consts))
+                    else {
+                        continue;
+                    };
+                    references.visit_callee(decorator);
+                    if name == "Inject"
+                        && let Expression::CallExpression(call) = &decorator.expression
+                        && let Some(oxc_ast::ast::Argument::Identifier(token)) =
+                            call.arguments.first()
                     {
-                        for param in &method.value.params.items {
-                            for decorator in &param.decorators {
-                                // by what it resolves to: `@I(TOKEN)` for `import { Inject as I }` is removed too
-                                if crate::directive::angular_param_decorator(
-                                    decorator,
-                                    Some(consts),
-                                )
-                                .is_some()
-                                {
-                                    references.visit_decorator(decorator);
-                                }
-                            }
+                        references.visit_identifier_reference(token);
+                    }
+                }
+            }
+            for element in &class.body.body {
+                if let ClassElement::PropertyDefinition(prop) = element
+                    && prop.declare
+                {
+                    for decorator in &prop.decorators {
+                        if crate::directive::angular_member_decorator(decorator, Some(consts))
+                            .is_some()
+                        {
+                            references.visit_callee(decorator);
                         }
                     }
-                    ClassElement::PropertyDefinition(prop) if prop.declare => {
-                        for decorator in &prop.decorators {
-                            references.visit_decorator(decorator);
-                        }
-                    }
-                    _ => {}
                 }
             }
         }
@@ -2290,10 +1963,10 @@ type AddEditFieldForm = FormGroup<{ name: FormControl<string> }>;
     }
 
     #[test]
-    fn test_declare_property_viewchild_arg_elided() {
+    fn test_declare_property_viewchild_arg_kept() {
         // Case 2: `@ViewChild(GridstackComponent) declare gridstack: GridstackComponent;`
-        // When a property is `declare`, TypeScript does not emit it, so the decorator
-        // and its arguments have no runtime value references. Angular strips it.
+        // The decorator is stripped, but the query is compiled into `ɵɵviewQuery(GridstackComponent, 5)`, which
+        // names the predicate by its local name (ngtsc keeps the import too).
         let source = r#"
 import { Component, ViewChild } from '@angular/core';
 import { GridstackComponent, GridstackModule } from 'gridstack/dist/angular';
@@ -2306,14 +1979,12 @@ class MyComponent {
 "#;
         let type_only = analyze_source(source);
 
-        // GridstackComponent is only used on a `declare` property — must be elided
         assert!(
-            type_only.contains("GridstackComponent"),
-            "GridstackComponent on declare property should be elided"
+            !type_only.contains("GridstackComponent"),
+            "GridstackComponent is the query predicate the definition names"
         );
 
-        // ViewChild is only used as decorator on a `declare` property — must also be elided.
-        // TypeScript does not emit `declare` properties, so the decorator has no runtime effect.
+        // ViewChild is only used as decorator on a `declare` property, which compilation strips
         assert!(
             type_only.contains("ViewChild"),
             "ViewChild decorator on declare property should be elided"
