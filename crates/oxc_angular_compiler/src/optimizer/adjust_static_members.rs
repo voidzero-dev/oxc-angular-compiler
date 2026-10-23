@@ -321,7 +321,8 @@ fn class_static_members_wrappable(
     source: &str,
 ) -> bool {
     if class.heritage.as_ref().is_some_and(|h| {
-        !has_pure_annotation(h.expression.span(), source) && !is_pure(&h.expression, bindings)
+        !has_pure_annotation(h.expression.span(), source)
+            && !is_pure_reference(&h.expression, bindings)
     }) {
         return false;
     }
@@ -331,7 +332,7 @@ fn class_static_members_wrappable(
             && element
                 .property_key()
                 .and_then(PropertyKey::as_expression)
-                .is_none_or(|key| !is_pure(key, bindings))
+                .is_none_or(|key| !is_pure_reference(key, bindings))
         {
             return false;
         }
@@ -405,11 +406,21 @@ fn has_pure_annotation(span: Span, source: &str) -> bool {
         || comment.contains("@pureOrBreakMyCode")
 }
 
+/// A superclass or computed key the CLI would not check at all: a pure value, or a member read on one such as
+/// `i0.Base` or `Symbol.iterator`. A member read could run a getter, so static values do not accept it.
+fn is_pure_reference(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
+    match expr {
+        Expression::StaticMemberExpression(m) => is_pure_reference(&m.object, bindings),
+        Expression::ParenthesizedExpression(p) => is_pure_reference(&p.expression, bindings),
+        _ => is_pure(expr, bindings),
+    }
+}
+
 /// Globals that can be read without side effects
 const PURE_GLOBALS: &[&str] = &["undefined", "NaN", "Infinity", "Symbol"];
 
 /// Babel's `scope.isPure`, for what static members hold: literals, functions, classes, bound identifiers, and
-/// arrays, objects, templates, member reads and operators made of those
+/// arrays, objects, templates and operators made of those
 fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
     match expr {
         Expression::BooleanLiteral(_)
@@ -422,11 +433,6 @@ fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
         | Expression::ArrowFunctionExpression(_) => true,
         Expression::Identifier(id) => {
             bindings.contains(id.name.as_str()) || PURE_GLOBALS.contains(&id.name.as_str())
-        }
-        // like the CLI's isPure, reading a member counts as pure
-        Expression::StaticMemberExpression(m) => is_pure(&m.object, bindings),
-        Expression::ComputedMemberExpression(m) => {
-            is_pure(&m.object, bindings) && is_pure(&m.expression, bindings)
         }
         Expression::LogicalExpression(l) => {
             is_pure(&l.left, bindings) && is_pure(&l.right, bindings)
@@ -626,6 +632,8 @@ export { ButtonComponent };"#;
             "class A { static x = 0; [register()]() {} }",
             "class A { static x = 0; [register()] = 1; }",
             "class A { static x = 0; static accessor y = register(); }",
+            // a member read could run a getter
+            "import { registry } from 'x';\nclass A { static x = registry.value; }",
         ] {
             assert_eq!(transform(code), code, "{code}");
         }
@@ -635,7 +643,7 @@ export { ButtonComponent };"#;
         // pure superclasses, computed keys and values still wrap
         for code in [
             "class B {}\nclass A extends B { static x = 0; ['k']() {} }",
-            "import * as i0 from 'x';\nclass A extends i0.Base { static x = i0.Foo; *[Symbol.iterator]() {} }",
+            "import * as i0 from 'x';\nclass A extends i0.Base { static x = 0; *[Symbol.iterator]() {} }",
             "class A extends /* @__PURE__ */ mixin() { static x = 0; }",
             "let a, b;\nclass A { static x = a || b; static y = undefined; }",
         ] {
