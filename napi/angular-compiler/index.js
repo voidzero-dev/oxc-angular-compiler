@@ -929,6 +929,8 @@ const {
   parseComponentId,
   transformAngularFile,
   transformAngularFileSync,
+  transformForBrowser,
+  transformForBrowserSync,
   Severity,
 } = nativeBinding
 export { compileClassMetadata }
@@ -954,5 +956,7 @@ export { optimizeAngularPackage }
 export { parseComponentId }
 export { transformAngularFile }
 export { transformAngularFileSync }
+export { transformForBrowser }
+export { transformForBrowserSync }
 export { Severity }
 export const __napiBindingTarget = __napiLoadedBindingTarget

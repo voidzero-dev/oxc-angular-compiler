@@ -28,6 +28,7 @@ mod util;
 mod validation;
 
 pub mod ast;
+pub mod browser;
 pub mod class_debug_info;
 pub mod class_metadata;
 pub mod compilation_mode;

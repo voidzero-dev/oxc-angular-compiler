@@ -3253,3 +3253,86 @@ pub fn link_angular_package(
 ) -> AsyncTask<LinkAngularPackageTask> {
     AsyncTask::new(LinkAngularPackageTask { code, filename, options })
 }
+
+// =============================================================================
+// Browser transform (TypeScript and async lowering for zone.js)
+// =============================================================================
+
+/// Options for `transformForBrowser`.
+#[napi(object)]
+#[derive(Default)]
+pub struct BrowserTransformOptions {
+    /// Generate a source map (default: false)
+    pub sourcemap: Option<bool>,
+    /// `async`/`await`, async generators and `for await` as generators, for zone.js (default: true)
+    pub lower_async: Option<bool>,
+}
+
+/// Result of `transformForBrowser`.
+#[napi(object)]
+pub struct BrowserTransformResult {
+    pub code: String,
+    pub map: Option<String>,
+    pub errors: Vec<String>,
+}
+
+/// TypeScript stripped with Angular's settings (`experimentalDecorators`, `useDefineForClassFields: false`) and
+/// `async` lowered to generators, which zone.js needs; JavaScript gets only the lowering. Runtime helpers are
+/// imported from `@oxc-project/runtime`.
+#[napi]
+pub fn transform_for_browser_sync(
+    code: String,
+    filename: String,
+    options: Option<BrowserTransformOptions>,
+) -> BrowserTransformResult {
+    use oxc_angular_compiler::browser::{
+        BrowserTransformOptions as RustOptions, transform_for_browser,
+    };
+
+    let options = options.unwrap_or_default();
+    let allocator = Allocator::default();
+    let result = transform_for_browser(
+        &allocator,
+        &code,
+        &filename,
+        &RustOptions {
+            sourcemap: options.sourcemap.unwrap_or(false),
+            lower_async: options.lower_async.unwrap_or(true),
+        },
+    );
+    BrowserTransformResult { code: result.code, map: result.map, errors: result.errors }
+}
+
+pub struct TransformForBrowserTask {
+    code: String,
+    filename: String,
+    options: Option<BrowserTransformOptions>,
+}
+
+#[napi]
+impl Task for TransformForBrowserTask {
+    type JsValue = BrowserTransformResult;
+    type Output = BrowserTransformResult;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        Ok(transform_for_browser_sync(
+            std::mem::take(&mut self.code),
+            std::mem::take(&mut self.filename),
+            self.options.take(),
+        ))
+    }
+
+    fn resolve(&mut self, _: napi::Env, result: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(result)
+    }
+}
+
+/// `transformForBrowserSync` on a worker thread
+#[napi]
+pub fn transform_for_browser(
+    code: String,
+    filename: String,
+    options: Option<BrowserTransformOptions>,
+) -> AsyncTask<TransformForBrowserTask> {
+    AsyncTask::new(TransformForBrowserTask { code, filename, options })
+}
