@@ -473,6 +473,8 @@ fn test_link_factory_starting_a_statement_keeps_its_meaning() {
         (format!("l: {d}.x;"), "l: (function X_Factory("),
         (format!("switch (c) {{ case 1: {d}.x; }}"), "case 1: ;(function X_Factory("),
         (format!("const f = () => {d}.x;"), "const f = () => function X_Factory("),
+        // nor does `@function …`
+        (format!("@{d} class Y {{}}"), "@(function X_Factory("),
         // the whole statement, or not its start: as before
         (format!("{d};"), "\nfunction X_Factory("),
         (format!("const z = {d}.x;"), "const z = function X_Factory("),

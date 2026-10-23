@@ -35,9 +35,9 @@
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BindingPattern, CallExpression, ExportDefaultDeclaration,
-    Expression, ExpressionStatement, ObjectExpression, ObjectPropertyKind, Program, PropertyKey,
-    Statement,
+    Argument, ArrayExpressionElement, BindingPattern, CallExpression, Decorator,
+    ExportDefaultDeclaration, Expression, ExpressionStatement, ObjectExpression,
+    ObjectPropertyKind, Program, PropertyKey, Statement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -156,8 +156,15 @@ fn collect_declaration_edits(
     options: &LinkOptions,
     edits: &mut Vec<Edit>,
 ) {
-    DeclarationCollector { source, filename, options, edits, statement_start: None }
-        .visit_program(program);
+    DeclarationCollector {
+        source,
+        filename,
+        options,
+        edits,
+        statement_start: None,
+        decorator: None,
+    }
+    .visit_program(program);
 }
 
 struct DeclarationCollector<'s> {
@@ -168,6 +175,8 @@ struct DeclarationCollector<'s> {
     /// The expression of the statement being visited, and whether a `;` may go before it: true for a statement in
     /// a statement list, false for `export default` or the bare body of `if`, a loop or a label
     statement_start: Option<(Span, bool)>,
+    /// The expression of the decorator being visited
+    decorator: Option<Span>,
 }
 
 impl DeclarationCollector<'_> {
@@ -195,6 +204,12 @@ impl<'a> Visit<'a> for DeclarationCollector<'_> {
         self.visit_statement_expression(&stmt.expression, false);
     }
 
+    fn visit_decorator(&mut self, decorator: &Decorator<'a>) {
+        let outer = self.decorator.replace(decorator.expression.span());
+        walk::walk_decorator(self, decorator);
+        self.decorator = outer;
+    }
+
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
         match decl.declaration.as_expression() {
             Some(expr) => self.visit_statement_expression(expr, false),
@@ -210,7 +225,10 @@ impl<'a> Visit<'a> for DeclarationCollector<'_> {
             // A linked factory is a `function` expression: where it starts a longer statement, such as
             // `ɵɵngDeclareFactory(…).name;`, it would be read as a declaration, so it gets parentheses (and, in a
             // statement list, a `;` so that they do not call the line before)
-            if let Some((expr, is_statement)) = self.statement_start
+            // `@function …` does not parse either
+            if self.decorator.is_some_and(|expr| expr.start == call.span.start) {
+                edit.replacement = format!("({})", edit.replacement);
+            } else if let Some((expr, is_statement)) = self.statement_start
                 && expr.start == call.span.start
                 && expr != call.span
             {
