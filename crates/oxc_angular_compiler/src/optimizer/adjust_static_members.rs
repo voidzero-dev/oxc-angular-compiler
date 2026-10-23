@@ -112,11 +112,13 @@ impl AdjustStaticMembersTransformer {
             if group.side_effects || !group.class.decorators.is_empty() {
                 continue;
             }
+            let Some(members_wrap) = class_static_members_wrappable(group.class, &bindings, source)
+            else {
+                continue;
+            };
             // Like the Angular CLI's adjust-static-class-members: downleveled Angular statics after the class, or
             // static members inside it that are all safe to wrap
-            let wrap = !group.static_members.is_empty()
-                || class_static_members_wrappable(group.class, &bindings, source);
-            if wrap {
+            if !group.static_members.is_empty() || members_wrap {
                 edits.extend(self.wrap_class_group(&group, source));
             }
         }
@@ -311,7 +313,8 @@ fn top_level_bindings<'a>(program: &'a Program<'a>) -> FxHashSet<&'a str> {
     names
 }
 
-/// The Angular CLI's `analyzeClassStaticProperties`: every static property, and every nonempty static block, is
+/// The Angular CLI's `analyzeClassStaticProperties`, run for every class: `None` when defining the class can have
+/// side effects, else whether its static members alone make it worth wrapping. Every static property, and every nonempty static block, is
 /// `this.<name> = …` holding an Angular definition or a value without side effects. Private and computed static
 /// fields and other static blocks are not wrapped. Unlike the CLI, an impure superclass or computed key also keeps
 /// the class out: both run when the class is defined, and the pure wrapper would let them be dropped.
@@ -319,12 +322,12 @@ fn class_static_members_wrappable(
     class: &Class<'_>,
     bindings: &FxHashSet<&str>,
     source: &str,
-) -> bool {
+) -> Option<bool> {
     if class.heritage.as_ref().is_some_and(|h| {
         !has_pure_annotation(h.expression.span(), source)
             && !is_pure_reference(&h.expression, bindings)
     }) {
-        return false;
+        return None;
     }
     let mut should_wrap = false;
     for element in &class.body.body {
@@ -334,11 +337,11 @@ fn class_static_members_wrappable(
                 .and_then(PropertyKey::as_expression)
                 .is_none_or(|key| !is_pure_reference(key, bindings))
         {
-            return false;
+            return None;
         }
         match element {
             ClassElement::PropertyDefinition(prop) if prop.r#static => {
-                let PropertyKey::StaticIdentifier(key) = &prop.key else { return false };
+                let PropertyKey::StaticIdentifier(key) = &prop.key else { return None };
                 match &prop.value {
                     None => should_wrap = true,
                     Some(value)
@@ -346,41 +349,41 @@ fn class_static_members_wrappable(
                     {
                         should_wrap = true
                     }
-                    Some(_) => return false,
+                    Some(_) => return None,
                 }
             }
             ClassElement::StaticBlock(block) => {
                 let stmt = match block.body.as_slice() {
                     [] => continue,
                     [Statement::ExpressionStatement(stmt)] => stmt,
-                    _ => return false,
+                    _ => return None,
                 };
                 let Expression::AssignmentExpression(assign) = &stmt.expression else {
-                    return false;
+                    return None;
                 };
                 let AssignmentTarget::StaticMemberExpression(member) = &assign.left else {
-                    return false;
+                    return None;
                 };
                 if !matches!(member.object, Expression::ThisExpression(_)) {
-                    return false;
+                    return None;
                 }
                 if can_wrap_property(member.property.name.as_str(), &assign.right, bindings, source)
                 {
                     should_wrap = true;
                 } else {
-                    return false;
+                    return None;
                 }
             }
             // `static accessor x = …` runs its initializer when the class is defined, and the CLI does not check it
             ClassElement::AccessorProperty(accessor)
                 if accessor.r#static && accessor.value.is_some() =>
             {
-                return false;
+                return None;
             }
             _ => {}
         }
     }
-    should_wrap
+    Some(should_wrap)
 }
 
 /// The Angular CLI's `canWrapProperty`: an Angular definition, a value marked pure, or a pure expression
@@ -632,6 +635,10 @@ export { ButtonComponent };"#;
             "class A { static x = 0; [register()]() {} }",
             "class A { static x = 0; [register()] = 1; }",
             "class A { static x = 0; static accessor y = register(); }",
+            // the same with a downleveled Angular static after the class
+            "class A extends registerBase() {}\nA.ɵfac = f;",
+            "class A {\n    static x = register();\n}\nA.ɵfac = f;",
+            "class A {\n    static { register(A); }\n}\nA.ɵfac = f;",
             // a member read could run a getter
             "import { registry } from 'x';\nclass A { static x = registry.value; }",
         ] {
