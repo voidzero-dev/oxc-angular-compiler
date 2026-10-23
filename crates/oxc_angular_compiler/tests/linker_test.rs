@@ -630,3 +630,52 @@ export { P };
         result.code
     );
 }
+
+#[test]
+fn test_link_escapes_metadata_strings() {
+    let code = r#"import * as i0 from "@angular/core";
+export class P {}
+P.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: P, isStandalone: true, name: 'a"+x+"' });
+export class D {}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.0.0", ngImport: i0, type: D, isStandalone: true, selector: "[t='a\"b']", inputs: { 'a.b"c': "c" }, host: { classAttribute: 'k"+x+"' }, controlCreate: { passThroughInput: 'f"+x+"' } });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    for expected in [
+        r#"name: "a\"+x+\"""#,
+        r#"selectors: [["", "t", "a\"b"]]"#,
+        r#"inputs: { "a.b\"c": "c" }"#,
+        r#"hostAttrs: [1, "k\"+x+\""]"#,
+        r#"ɵɵControlFeature("f\"+x+\"")"#,
+    ] {
+        assert!(result.code.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
+}
+
+#[test]
+fn test_link_defer_block_dependencies() {
+    // `deferBlockDependencies` follows the binder's block order: the outer
+    // block, the block nested in it, the block in its placeholder, then the
+    // next top-level block.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "22.2.2", ngImport: i0, type: C, isStandalone: true, selector: "c", template: "@defer { <lazy-cmp/> @defer { <b-b></b-b> } } @placeholder { @defer { <i-i></i-i> } } @defer (on idle) { <x-y/> }", deferBlockDependencies: [() => [import("./lazy").then(m => m.LazyCmp)], null, () => [import("./b").then(m => m.B)], () => [import("./x").then(m => m.X), import("./y").then(m => m.Y)]] });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    // Fragments of the TS linker's output.
+    for expected in [
+        r#"constC_Defer_2_DepsFn=()=>[import("./lazy").then(m=>m.LazyCmp)];"#,
+        r#"constC_Defer_5_DepsFn=()=>[import("./x").then(m=>m.X),import("./y").then(m=>m.Y)];"#,
+        r#"constC_DeferPlaceholder_1_Defer_1_DepsFn=()=>[import("./b").then(m=>m.B)];"#,
+        "i0.ɵɵdefer(2,1);",
+        "i0.ɵɵdefer(1,0,C_DeferPlaceholder_1_Defer_1_DepsFn);",
+        "i0.ɵɵdefer(2,0,C_Defer_2_DepsFn,null,1);",
+        "i0.ɵɵdefer(5,4,C_Defer_5_DepsFn);",
+    ] {
+        assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
+}

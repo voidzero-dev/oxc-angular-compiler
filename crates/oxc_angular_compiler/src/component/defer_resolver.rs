@@ -77,6 +77,35 @@ pub fn template_has_defer_block<'a>(nodes: &[R3Node<'a>]) -> bool {
     visitor.found
 }
 
+/// Source spans of every `@defer` block, in the order Angular's binder lists
+/// them (`getDeferBlocks()`): a block comes before the blocks nested in it, and
+/// its main content before its `@placeholder`, `@loading` and `@error`.
+pub fn defer_block_spans(nodes: &[R3Node<'_>]) -> std::vec::Vec<oxc_span::Span> {
+    struct DeferCollector {
+        spans: std::vec::Vec<oxc_span::Span>,
+    }
+
+    impl<'a> R3Visitor<'a> for DeferCollector {
+        fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
+            self.spans.push(block.source_span);
+            visit_all(self, &block.children);
+            if let Some(placeholder) = &block.placeholder {
+                self.visit_deferred_block_placeholder(placeholder);
+            }
+            if let Some(loading) = &block.loading {
+                self.visit_deferred_block_loading(loading);
+            }
+            if let Some(error) = &block.error {
+                self.visit_deferred_block_error(error);
+            }
+        }
+    }
+
+    let mut visitor = DeferCollector { spans: std::vec::Vec::new() };
+    visit_all(&mut visitor, nodes);
+    visitor.spans
+}
+
 /// Build the list of `R3DeferPerComponentDependency` describing the
 /// `@Component.deferredImports` entries, used to emit `setClassMetadataAsync`
 /// and the per-component `ɵɵdefer` resolver.

@@ -107,6 +107,10 @@ pub struct IngestOptions<'a> {
     /// Ported from Angular's ingestComponent parameter (line 65 in ingest.ts).
     pub all_deferrable_deps_fn: Option<OutputExpression<'a>>,
 
+    /// Dependency function of each `@defer` block, keyed by the block's source
+    /// span. Only read in `PerBlock` mode.
+    pub defer_blocks: FxHashMap<oxc_span::Span, Option<OutputExpression<'a>>>,
+
     /// Starting index for the constant pool's name counter.
     ///
     /// This is used when compiling multiple components in the same file to ensure
@@ -145,6 +149,7 @@ impl Default for IngestOptions<'_> {
             enable_debug_locations: false,
             template_source: None,
             all_deferrable_deps_fn: None,
+            defer_blocks: FxHashMap::default(),
             pool_starting_index: 0,
             angular_version: None,
             legacy_optional_chaining: None,
@@ -891,7 +896,7 @@ pub fn ingest_component_with_options<'a>(
     // The all_deferrable_deps_fn is stored on the job and referenced during emit
     job.defer_meta = match options.defer_block_deps_emit_mode {
         DeferBlockDepsEmitMode::PerBlock => {
-            DeferMetadata::PerBlock { blocks: FxHashMap::default() }
+            DeferMetadata::PerBlock { blocks: options.defer_blocks }
         }
         DeferBlockDepsEmitMode::PerComponent => {
             // In PerComponent mode, dependencies_fn is set from all_deferrable_deps_fn during emit

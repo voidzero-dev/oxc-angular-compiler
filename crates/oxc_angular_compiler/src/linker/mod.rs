@@ -45,6 +45,7 @@ use oxc_span::{GetSpan, SourceType, Span};
 
 use crate::AngularVersion;
 use crate::optimizer::Edit;
+use crate::output::emitter::escape_string;
 use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
@@ -57,7 +58,7 @@ fn needs_object_key_quoting(key: &str) -> bool {
 
 /// Quote a property key if it contains unsafe characters (dots or hyphens).
 fn quote_key(key: &str) -> String {
-    if needs_object_key_quoting(key) { format!("\"{key}\"") } else { key.to_string() }
+    if needs_object_key_quoting(key) { escape_string(key, false) } else { key.to_string() }
 }
 
 /// Partial declaration function names to link.
@@ -736,7 +737,7 @@ fn parse_selector(selector: &str) -> String {
             let parts: Vec<String> = elements
                 .iter()
                 .map(|el| match el {
-                    R3SelectorElement::String(s) => format!("\"{s}\""),
+                    R3SelectorElement::String(s) => escape_string(s, false),
                     R3SelectorElement::Flag(f) => f.to_string(),
                 })
                 .collect();
@@ -794,7 +795,7 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
         // Split classes and add each separately
         attrs.push("1".to_string()); // AttributeMarker.Classes
         for class in class_attr.split_whitespace() {
-            attrs.push(format!("\"{class}\""));
+            attrs.push(escape_string(class, false));
         }
     }
 
@@ -1141,7 +1142,7 @@ fn link_pipe(
     ns: &str,
     type_name: &str,
 ) -> Option<String> {
-    let pipe_name = get_string_property(meta, "name")?;
+    let pipe_name = escape_string(get_string_property(meta, "name")?, false);
     let pure = get_property_source(meta, "pure", source).unwrap_or("true");
     let standalone = get_bool_property(meta, "isStandalone")
         .unwrap_or_else(|| get_default_standalone_value(meta));
@@ -1150,7 +1151,7 @@ fn link_pipe(
         if standalone { String::new() } else { ", standalone: false".to_string() };
 
     Some(format!(
-        "/*@__PURE__*/ {ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}{standalone_part} }})"
+        "/*@__PURE__*/ {ns}.\u{0275}\u{0275}definePipe({{ name: {pipe_name}, type: {type_name}, pure: {pure}{standalone_part} }})"
     ))
 }
 
@@ -1731,7 +1732,7 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
     //    emits `ɵɵControlFeature("formField")` or `ɵɵControlFeature(null)`
     if let Some(control_create) = get_object_property(meta, "controlCreate") {
         let pass_through = match get_string_property(control_create, "passThroughInput") {
-            Some(s) => format!("\"{s}\""),
+            Some(s) => escape_string(s, false),
             None => "null".to_string(),
         };
         features.push(format!("{ns}.\u{0275}\u{0275}ControlFeature({pass_through})"));
@@ -1772,6 +1773,23 @@ fn link_component(
     let template_owned: String = template.to_string();
     let template_ref: &str = template_allocator.alloc_str(&template_owned);
 
+    // `deferBlockDependencies: [() => [import("./a").then(m => m.A)], null]`,
+    // one entry per `@defer` block, emitted as written.
+    let defer_block_deps: Vec<Option<&str>> = get_array_property(meta, "deferBlockDependencies")
+        .map(|deps| {
+            deps.elements
+                .iter()
+                .map(|el| match el.as_expression() {
+                    Some(Expression::NullLiteral(_)) | None => None,
+                    Some(expr) => {
+                        let span = expr.span();
+                        Some(&source[span.start as usize..span.end as usize])
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     let template_output = crate::component::compile_template_for_linker(
         &template_allocator,
         template_ref,
@@ -1780,6 +1798,7 @@ fn link_component(
         preserve_whitespaces,
         ns,
         options.angular_version,
+        &defer_block_deps,
     )
     .ok()?;
 
