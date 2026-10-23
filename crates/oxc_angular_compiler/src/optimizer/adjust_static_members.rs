@@ -325,7 +325,7 @@ fn class_static_members_wrappable(
 ) -> Option<bool> {
     if class.heritage.as_ref().is_some_and(|h| {
         !has_pure_annotation(h.expression.span(), source)
-            && !is_pure_reference(&h.expression, bindings)
+            && !is_pure_superclass(&h.expression, bindings)
     }) {
         return None;
     }
@@ -335,8 +335,18 @@ fn class_static_members_wrappable(
             && element
                 .property_key()
                 .and_then(PropertyKey::as_expression)
-                .is_none_or(|key| !is_pure_reference(key, bindings))
+                .is_none_or(|key| !is_pure_key(key, bindings))
         {
+            return None;
+        }
+        // decorators on members run when the class is defined
+        let decorated = match element {
+            ClassElement::MethodDefinition(m) => !m.decorators.is_empty(),
+            ClassElement::PropertyDefinition(p) => !p.decorators.is_empty(),
+            ClassElement::AccessorProperty(a) => !a.decorators.is_empty(),
+            _ => false,
+        };
+        if decorated {
             return None;
         }
         match element {
@@ -409,13 +419,32 @@ fn has_pure_annotation(span: Span, source: &str) -> bool {
         || comment.contains("@pureOrBreakMyCode")
 }
 
-/// A superclass or computed key the CLI would not check at all: a pure value, or a member read on one such as
-/// `i0.Base` or `Symbol.iterator`. A member read could run a getter, so static values do not accept it.
-fn is_pure_reference(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
+/// A superclass the CLI would not check at all: a declared name, `null` or a pure class expression. Reading a
+/// member could run a getter, so `ns.Base` does not count.
+fn is_pure_superclass(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
     match expr {
-        Expression::StaticMemberExpression(m) => is_pure_reference(&m.object, bindings),
-        Expression::ParenthesizedExpression(p) => is_pure_reference(&p.expression, bindings),
-        _ => is_pure(expr, bindings),
+        Expression::Identifier(id) => bindings.contains(id.name.as_str()),
+        Expression::NullLiteral(_) | Expression::ClassExpression(_) => is_pure(expr, bindings),
+        Expression::ParenthesizedExpression(p) => is_pure_superclass(&p.expression, bindings),
+        _ => false,
+    }
+}
+
+/// A computed key the CLI would not check at all. The key is turned into a property key, which can call
+/// `toString` on an object, so only literals, declared names (such as a `const` holding a `Symbol()`) and
+/// well-known symbols such as `Symbol.iterator` count.
+fn is_pure_key(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
+    match expr {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BigIntLiteral(_) => true,
+        Expression::Identifier(id) => bindings.contains(id.name.as_str()),
+        Expression::TemplateLiteral(t) => t.expressions.is_empty(),
+        Expression::StaticMemberExpression(m) => {
+            matches!(&m.object, Expression::Identifier(id) if id.name == "Symbol" && !bindings.contains("Symbol"))
+        }
+        Expression::ParenthesizedExpression(p) => is_pure_key(&p.expression, bindings),
+        _ => false,
     }
 }
 
@@ -639,6 +668,10 @@ export { ButtonComponent };"#;
             "class A extends registerBase() {}\nA.ɵfac = f;",
             "class A {\n    static x = register();\n}\nA.ɵfac = f;",
             "class A {\n    static { register(A); }\n}\nA.ɵfac = f;",
+            // a member read could run a getter, a computed key could call `toString`, a member decorator runs
+            "import * as ns from 'x';\nclass A extends ns.Base { static x = 0; }",
+            "class A { static x = 0; [{ toString() { register(); return 'm'; } }]() {} }",
+            "class A { @register method() {} static x = 0; }",
             // a member read could run a getter
             "import { registry } from 'x';\nclass A { static x = registry.value; }",
         ] {
@@ -650,7 +683,7 @@ export { ButtonComponent };"#;
         // pure superclasses, computed keys and values still wrap
         for code in [
             "class B {}\nclass A extends B { static x = 0; ['k']() {} }",
-            "import * as i0 from 'x';\nclass A extends i0.Base { static x = 0; *[Symbol.iterator]() {} }",
+            "import { Base } from 'x';\nconst K = Symbol();\nclass A extends Base { static x = 0; *[Symbol.iterator]() {} [`k`]() {} [K]; }",
             "class A extends /* @__PURE__ */ mixin() { static x = 0; }",
             "let a, b;\nclass A { static x = a || b; static y = undefined; }",
         ] {
