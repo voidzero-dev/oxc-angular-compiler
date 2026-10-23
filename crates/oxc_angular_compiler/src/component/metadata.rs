@@ -310,6 +310,99 @@ impl AngularVersion {
         self.at_22_2_2_cutoff_or_later()
     }
 
+    /// Check if this version sanitizes two-way property bindings
+    /// (`[(innerHTML)]`, `[(href)]`, ...).
+    ///
+    /// `angular/angular@3c70270c96` added `TwoWayProperty` to
+    /// `resolveSanitizers`. First released in 20.3.25, 21.2.17, 22.0.1 and
+    /// 22.1.0-next.0; the 19.2.x line never got it.
+    pub fn sanitizes_two_way_properties(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(20, 3, 25),
+            Self::new(21, 2, 17),
+            Self::new(22, 0, 1),
+            Self::new(22, 1, 0).with_prerelease(Prerelease::Next(0)),
+        ])
+    }
+
+    /// Check if this version treats `href` / `xlink:href` of every MathML
+    /// element as a URL sink (`:math:*`), not only a fixed element list.
+    ///
+    /// `angular/angular@3927a5b271`, first in 22.0.1 and 22.1.0-next.0.
+    pub fn matches_any_mathml_href(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(22, 0, 1),
+            Self::new(22, 1, 0).with_prerelease(Prerelease::Next(0)),
+        ])
+    }
+
+    /// Check if this version's security lookup falls back from the
+    /// `:svg:` / `:math:` table to the HTML table (`<svg><iframe [src]>` is a
+    /// resource URL), and marks iframe `credentialless` as security
+    /// sensitive.
+    ///
+    /// `angular/angular@32d7315094` and `angular/angular@0152e3cbdf`, both
+    /// first in 22.0.2 and 22.1.0-next.1.
+    pub fn uses_22_0_2_security_schema(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(22, 0, 2),
+            Self::new(22, 1, 0).with_prerelease(Prerelease::Next(1)),
+        ])
+    }
+
+    /// Check if this version looks up an SVG animation element written
+    /// outside `<svg>` (no namespace) in the SVG table.
+    ///
+    /// `angular/angular@7168bed663`, first in 22.1.5 and 22.2.0-next.5.
+    pub fn validates_svg_animation_outside_svg(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(22, 1, 5),
+            Self::new(22, 2, 0).with_prerelease(Prerelease::Next(5)),
+        ])
+    }
+
+    /// Check if this version computes host binding security contexts against
+    /// every possible concrete host element instead of only the declaring
+    /// selector.
+    ///
+    /// `angular/angular@d06e3748b7`, first in 20.3.28, 21.2.20, 22.1.0 and
+    /// 22.2.0-next.0. No 22.0.x release has it.
+    pub fn sanitizes_host_bindings_on_concrete_hosts(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(20, 3, 28),
+            Self::new(21, 2, 20),
+            Self::new(22, 1, 0),
+            Self::new(22, 2, 0).with_prerelease(Prerelease::Next(0)),
+        ])
+    }
+
+    /// Whether a fix is in this version, given the first fixed release on
+    /// each release line, oldest line first.
+    ///
+    /// A version on a listed `major.minor` line compares against that line's
+    /// cutoff; a version newer than every listed line has the fix; a version
+    /// on any other line does not.
+    fn fixed_since(&self, cutoffs: &[AngularVersion]) -> bool {
+        if let Some(cutoff) =
+            cutoffs.iter().find(|c| c.major == self.major && c.minor == self.minor)
+        {
+            return self.cmp_release(cutoff).is_ge();
+        }
+        cutoffs.last().is_some_and(|newest| (self.major, self.minor) > (newest.major, newest.minor))
+    }
+
+    /// Orders two versions, a stable release sorting after its prereleases.
+    fn cmp_release(&self, other: &AngularVersion) -> std::cmp::Ordering {
+        (self.major, self.minor, self.patch)
+            .cmp(&(other.major, other.minor, other.patch))
+            .then_with(|| match (self.prerelease, other.prerelease) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (Some(a), Some(b)) => a.cmp(&b),
+            })
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// The `-next.N` / `-rc.N` prerelease tag is retained; any other suffix
@@ -960,6 +1053,48 @@ mod tests {
             assert!(!version.drops_img_video_src_url_context(), "{version:?}");
             assert!(!version.strips_namespaced_block_tag(), "{version:?}");
         }
+    }
+
+    /// Security fixes backported per release line: a version on a listed line
+    /// compares against that line's first fixed release, a newer line has the
+    /// fix, and an unlisted older line (21.0.x, 21.1.x, 22.0.x for host
+    /// bindings) never got it.
+    #[test]
+    fn security_backports_follow_each_release_line() {
+        let parse = |s| AngularVersion::parse(s).unwrap();
+
+        for version in
+            ["20.3.28", "21.2.20", "22.1.0", "22.1.3", "22.2.0-next.0", "22.2.2", "23.0.0"]
+        {
+            assert!(parse(version).sanitizes_host_bindings_on_concrete_hosts(), "{version}");
+        }
+        for version in [
+            "19.2.25",
+            "20.2.9",
+            "20.3.27",
+            "21.0.9",
+            "21.2.19",
+            "22.0.8",
+            "22.1.0-rc.0",
+            "22.2.0-beta.1",
+        ] {
+            assert!(!parse(version).sanitizes_host_bindings_on_concrete_hosts(), "{version}");
+        }
+
+        for version in ["20.3.25", "21.2.17", "22.0.1", "22.1.0-next.0", "22.1.0-rc.1"] {
+            assert!(parse(version).sanitizes_two_way_properties(), "{version}");
+        }
+        for version in ["19.2.25", "20.3.24", "21.1.5", "21.2.16", "22.0.0", "22.1.0-beta.1"] {
+            assert!(!parse(version).sanitizes_two_way_properties(), "{version}");
+        }
+
+        assert!(parse("22.1.0-next.1").uses_22_0_2_security_schema());
+        assert!(!parse("22.1.0-next.0").uses_22_0_2_security_schema());
+        assert!(parse("22.1.0-next.0").matches_any_mathml_href());
+        assert!(!parse("21.2.25").matches_any_mathml_href());
+        assert!(parse("22.2.0-next.5").validates_svg_animation_outside_svg());
+        assert!(!parse("22.2.0-next.4").validates_svg_animation_outside_svg());
+        assert!(!parse("22.0.8").validates_svg_animation_outside_svg());
     }
 
     #[test]

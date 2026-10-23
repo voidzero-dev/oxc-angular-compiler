@@ -112,9 +112,12 @@ fn resolve_iframe_sanitizer(
 ///
 /// This phase:
 /// 1. For ExtractedAttribute ops (constant attributes), sets the trusted value function
-/// 2. For Property, Attribute, and DomProperty ops, sets the sanitizer function
+/// 2. For Property, Attribute, DomProperty and (from the versions that sanitize
+///    them) TwoWayProperty ops, sets the sanitizer function
 pub fn resolve_sanitizers(job: &mut ComponentCompilationJob<'_>) {
     let iframe_validation = uses_iframe_attr_validation(job.angular_version);
+    let sanitize_two_way =
+        job.angular_version.is_none_or(|version| version.sanitizes_two_way_properties());
     // Collect view xrefs to avoid borrow issues
     let view_xrefs: Vec<_> = job.all_views().map(|v| v.xref).collect();
 
@@ -174,6 +177,13 @@ pub fn resolve_sanitizers(job: &mut ComponentCompilationJob<'_>) {
                                 dom_prop.name.as_str(),
                                 &mut dom_prop.sanitizer,
                             );
+                        }
+                    }
+                    // The legacy iframe fallback predates two-way sanitization,
+                    // so it never applies here.
+                    UpdateOp::TwoWayProperty(two_way) if sanitize_two_way => {
+                        if let Some(fn_name) = get_sanitizer_fn(two_way.security_context) {
+                            two_way.sanitizer = Some(Ident::from(fn_name));
                         }
                     }
                     _ => {}

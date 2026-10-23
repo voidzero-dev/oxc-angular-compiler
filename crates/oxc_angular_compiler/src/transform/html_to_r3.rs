@@ -5525,9 +5525,17 @@ mod security_tests {
             "{contexts:?}"
         );
 
-        // A namespaced host does not fall back to the bare iframe sink.
-        let (_, contexts, _) =
-            compile_selectorless(r#"<MyComp:svg:iframe [src]="url"></MyComp:svg:iframe>"#);
+        // A namespaced host falls back to the bare iframe sink from 22.0.2;
+        // before that the `:svg:iframe|src` miss has no sanitizer.
+        let source = r#"<MyComp:svg:iframe [src]="url"></MyComp:svg:iframe>"#;
+        let (_, contexts, _) = compile_selectorless(source);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
+        let (_, contexts, _) = compile_selectorless_at(source, Some(AngularVersion::new(22, 0, 1)));
         assert!(
             contexts.iter().all(|(name, ctx)| name != "src" || *ctx == SecurityContext::None),
             "{contexts:?}"
@@ -5599,11 +5607,19 @@ mod security_tests {
         );
 
         // `<MyComp>` inside `<svg>` resolves to `:svg:ng-component`, so its
-        // children stay namespaced.
-        let (_, contexts, _) =
-            compile_selectorless(r#"<svg><MyComp><iframe [src]="url"></iframe></MyComp></svg>"#);
+        // children stay namespaced: `:svg:iframe|src` only hits the HTML
+        // `iframe|src` key through the 22.0.2+ fallback.
+        let source = r#"<svg><MyComp><iframe [src]="url"></iframe></MyComp></svg>"#;
+        let (_, contexts, _) = compile_selectorless_at(source, Some(AngularVersion::new(22, 0, 1)));
         assert!(
             contexts.iter().all(|(name, ctx)| name != "src" || *ctx == SecurityContext::None),
+            "{contexts:?}"
+        );
+        let (_, contexts, _) = compile_selectorless(source);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
             "{contexts:?}"
         );
 

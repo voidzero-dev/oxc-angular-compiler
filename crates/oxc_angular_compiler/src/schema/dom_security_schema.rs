@@ -42,12 +42,18 @@ enum SchemaKind {
     V21_2_7,
     /// 21.2.14 only. Namespaced keys but no `:svg:a|href` yet.
     V21_2_14,
-    /// 19.2.23+, 20.3.22+, 21.2.15+, 22.0.0–22.2.1. Namespaced keys with
+    /// 19.2.23+, 20.3.22+, 21.2.15+, 22.0.0. Namespaced keys with
     /// `:svg:a|href`. `script|src` and `script|href` are gone.
     V22,
+    /// 22.0.1 / 22.1.0-next.0. `href` / `xlink:href` are URL sinks on every
+    /// MathML element (`:math:*`), and lookups try the `:ns:*` key.
+    V22_0_1,
+    /// 22.0.2+ / 22.1.0-next.1+ through 22.2.1. Adds iframe `credentialless`
+    /// and falls back from the `:svg:` / `:math:` keys to the HTML keys.
+    V22_0_2,
     /// 22.2.2+ / 22.3.0-next.1+. `angular/angular@439ff1bdf4` removed `img|src`
     /// and `video|src` from the URL context; the fix was never backported to
-    /// the older maintained lines, so `V22` still carries them.
+    /// the older maintained lines, so the other kinds still carry them.
     V22_2_2,
 }
 
@@ -76,19 +82,27 @@ struct SecurityProfile {
     /// removed this when the iframe `attributeNoBinding` keys landed
     /// (19.2.17 / 20.3.15 / 21.0.2), so it only exists on the legacy schema.
     iframe_attr_validation: bool,
+    /// A tag with no namespace that misses the HTML keys is looked up in the
+    /// SVG keys, so `<animate>` written outside `<svg>` still hits
+    /// `:svg:animate|to` (22.1.5+ / 22.2.0-next.5+).
+    svg_animation_fallback: bool,
 }
 
 fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     let Some(version) = version else {
-        return v22_profile(SchemaKind::V22_2_2);
+        return v22_profile(SchemaKind::V22_2_2, true);
     };
     if version.major >= 22 {
         let kind = if version.drops_img_video_src_url_context() {
             SchemaKind::V22_2_2
+        } else if version.uses_22_0_2_security_schema() {
+            SchemaKind::V22_0_2
+        } else if version.matches_any_mathml_href() {
+            SchemaKind::V22_0_1
         } else {
             SchemaKind::V22
         };
-        return v22_profile(kind);
+        return v22_profile(kind, version.validates_svg_animation_outside_svg());
     }
 
     let (kind, iframe_src_i18n) = match version.major {
@@ -124,7 +138,7 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
         _ => (SchemaKind::Legacy, false),
     };
 
-    let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22 | SchemaKind::V22_2_2);
+    let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22);
     // `:svg:style` stripping existed only in 19.2.23, 20.3.22 and 21.2.14.
     let strip_svg_style = matches!(kind, SchemaKind::V21_2_14)
         || (version.major == 20 && version.minor == 3 && version.patch == 22)
@@ -135,15 +149,16 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
         // `normalizeTagName` in `securityContext` landed with the schema
         // backports that carried `:svg:a|href` (19.2.23 / 20.3.22 / 21.2.15);
         // 21.2.14 has namespaced keys but no normalizer.
-        normalizes_tag_names: matches!(kind, SchemaKind::V22 | SchemaKind::V22_2_2),
+        normalizes_tag_names: matches!(kind, SchemaKind::V22),
         strip_svg_script: namespaced,
         strip_svg_style,
         iframe_src_i18n,
         iframe_attr_validation: matches!(kind, SchemaKind::Legacy),
+        svg_animation_fallback: false,
     }
 }
 
-fn v22_profile(kind: SchemaKind) -> SecurityProfile {
+fn v22_profile(kind: SchemaKind, svg_animation_fallback: bool) -> SecurityProfile {
     SecurityProfile {
         kind,
         namespaced: true,
@@ -152,6 +167,7 @@ fn v22_profile(kind: SchemaKind) -> SecurityProfile {
         strip_svg_style: false,
         iframe_src_i18n: true,
         iframe_attr_validation: false,
+        svg_animation_fallback,
     }
 }
 
@@ -214,6 +230,11 @@ fn build_v22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
     // (`angular/angular@439ff1bdf4`); that change was never backported to
     // the 21.x/20.x/19.x lines.
     let with_img_video_src = kind != SchemaKind::V22_2_2;
+    // `angular/angular@3927a5b271` replaced the MathML element list with `*`.
+    let mathml_wildcard =
+        matches!(kind, SchemaKind::V22_0_1 | SchemaKind::V22_0_2 | SchemaKind::V22_2_2);
+    // `angular/angular@0152e3cbdf` added iframe `credentialless`.
+    let with_credentialless = matches!(kind, SchemaKind::V22_0_2 | SchemaKind::V22_2_2);
     let mut schema = FxHashMap::default();
 
     register(
@@ -245,11 +266,12 @@ fn build_v22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
         );
     }
 
+    let mathml_url_elements: &[&str] = if mathml_wildcard { &["*"] } else { MATHML_URL_ELEMENTS };
     register_uniform(
         &mut schema,
         SecurityContext::Url,
         Some("math"),
-        MATHML_URL_ELEMENTS,
+        mathml_url_elements,
         &["href", "xlink:href"],
     );
 
@@ -312,12 +334,24 @@ fn build_v22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
             ),
         ],
     );
+    if with_credentialless {
+        register(
+            &mut schema,
+            SecurityContext::AttributeNoBinding,
+            None,
+            &[("unknown", &["credentialless"]), ("iframe", &["credentialless"])],
+        );
+    }
 
     schema
 }
 
 static V22_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_v22_schema(SchemaKind::V22));
+static V22_0_1_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_v22_schema(SchemaKind::V22_0_1));
+static V22_0_2_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_v22_schema(SchemaKind::V22_0_2));
 static V22_2_2_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_v22_schema(SchemaKind::V22_2_2));
 static V21_2_14_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
@@ -345,6 +379,8 @@ fn schema_for(kind: SchemaKind) -> &'static FxHashMap<String, SecurityContext> {
         SchemaKind::V21_2_7 => &V21_27_SCHEMA,
         SchemaKind::V21_2_14 => &V21_2_14_SCHEMA,
         SchemaKind::V22 => &V22_SCHEMA,
+        SchemaKind::V22_0_1 => &V22_0_1_SCHEMA,
+        SchemaKind::V22_0_2 => &V22_0_2_SCHEMA,
         SchemaKind::V22_2_2 => &V22_2_2_SCHEMA,
     }
 }
@@ -806,9 +842,8 @@ fn register_uniform(
 ) {
     for element in elements {
         let tag = match namespace {
-            Some(ns) if *element != "*" && *element != "unknown" => {
-                format!(":{ns}:{element}").to_ascii_lowercase()
-            }
+            // A namespaced `*` is that namespace's wildcard (`:math:*`).
+            Some(ns) if *element != "unknown" => format!(":{ns}:{element}").to_ascii_lowercase(),
             _ => (*element).to_ascii_lowercase(),
         };
         for attr in attrs {
@@ -862,14 +897,34 @@ pub fn get_security_context_for(
     let property_lower = property.to_ascii_lowercase();
     let schema = schema_for(profile.kind);
 
-    let key = format!("{tag}|{property_lower}");
-    if let Some(&ctx) = schema.get(&key) {
+    let lookup = |tag: &str| schema.get(&format!("{tag}|{property_lower}")).copied();
+    if let Some(ctx) = lookup(&tag) {
         return ctx;
     }
 
-    let wildcard_key = format!("*|{property_lower}");
-    if let Some(&ctx) = schema.get(&wildcard_key) {
+    // `checkSecurityContext` (22.0.1+) tries the namespace's own `*` key, and
+    // from 22.0.2 falls back to the HTML keys of the local name.
+    let namespaced_lookup =
+        matches!(profile.kind, SchemaKind::V22_0_1 | SchemaKind::V22_0_2 | SchemaKind::V22_2_2);
+    let (ns, local_name) = split_ns_name(&tag);
+    let ns = ns.filter(|ns| matches!(*ns, "svg" | "math"));
+    if let Some(ns) = ns.filter(|_| namespaced_lookup) {
+        let html_fallback = profile.kind != SchemaKind::V22_0_1;
+        let ctx = lookup(&format!(":{ns}:*"))
+            .or_else(|| html_fallback.then(|| lookup(local_name)).flatten());
+        if let Some(ctx) = ctx {
+            return ctx;
+        }
+    }
+
+    if let Some(ctx) = lookup("*") {
         return ctx;
+    }
+
+    // An `<animate>` outside `<svg>` can still animate once projected into
+    // an SVG subtree.
+    if profile.svg_animation_fallback && ns.is_none() {
+        return lookup(&format!(":svg:{tag}")).unwrap_or(SecurityContext::None);
     }
 
     SecurityContext::None
@@ -879,7 +934,7 @@ pub fn get_security_context_for(
 ///
 /// `Url` together with `ResourceUrl` collapses to `UrlOrResourceUrl`.
 pub fn calc_security_context_for_unknown_element(property: &str) -> SecurityContext {
-    host_binding_security_context("", property)
+    reduce_security_contexts(&collect_host_contexts("", property, None))
 }
 
 /// Security context of a host binding on the latest schema (v22).
@@ -896,12 +951,49 @@ pub fn host_binding_security_context_for(
     prop_name: &str,
     version: Option<crate::AngularVersion>,
 ) -> SecurityContext {
-    let contexts = if security_profile(version).namespaced {
+    let declaring = collect_host_contexts(selector, prop_name, version);
+    if !version.is_none_or(|v| v.sanitizes_host_bindings_on_concrete_hosts()) {
+        return reduce_security_contexts(&declaring);
+    }
+
+    // `calcHostBindingSecurityContexts`: the binding can run on any concrete
+    // host (`hostDirectives`, inherited host bindings, `createComponent`), so
+    // the declaring selector only wins when it covers every context a known
+    // element has for this name.
+    let concrete = collect_host_contexts("", prop_name, version);
+    let has_none = concrete.contains(&SecurityContext::None);
+    let mut sinks = concrete.iter().filter(|ctx| **ctx != SecurityContext::None).peekable();
+    if has_none && sinks.peek().is_some() {
+        // NONE next to a URL kind defers the choice to runtime.
+        let url_kinds_only = concrete.iter().all(|ctx| {
+            matches!(
+                ctx,
+                SecurityContext::None | SecurityContext::Url | SecurityContext::ResourceUrl
+            )
+        });
+        if url_kinds_only {
+            return SecurityContext::UrlOrResourceUrl;
+        }
+        return reduce_security_contexts(&concrete);
+    }
+    if sinks.any(|ctx| !declaring.contains(ctx)) {
+        return reduce_security_contexts(&concrete);
+    }
+    reduce_security_contexts(&declaring)
+}
+
+/// `calcPossibleSecurityContexts` for a host selector; an empty selector
+/// stands for every known element.
+fn collect_host_contexts(
+    selector: &str,
+    prop_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> Vec<SecurityContext> {
+    if security_profile(version).namespaced {
         collect_namespaced_contexts(selector, prop_name, version)
     } else {
         collect_bare_contexts(selector, prop_name, version)
-    };
-    reduce_security_contexts(&contexts)
+    }
 }
 
 /// Security context of a property/attribute binding on a concrete element,
@@ -1130,6 +1222,20 @@ fn security_context_rank(ctx: SecurityContext) -> u8 {
 mod tests {
     use super::*;
 
+    /// The declaring-selector half of a host lookup, before the concrete-host
+    /// widening of `calcHostBindingSecurityContexts`.
+    fn declaring_selector_context(selector: &str, prop_name: &str) -> SecurityContext {
+        declaring_selector_context_for(selector, prop_name, None)
+    }
+
+    fn declaring_selector_context_for(
+        selector: &str,
+        prop_name: &str,
+        version: Option<crate::AngularVersion>,
+    ) -> SecurityContext {
+        reduce_security_contexts(&collect_host_contexts(selector, prop_name, version))
+    }
+
     #[test]
     fn test_html_context() {
         assert_eq!(get_security_context("iframe", "srcdoc"), SecurityContext::Html);
@@ -1177,7 +1283,7 @@ mod tests {
                 "{version:?}"
             );
             assert_eq!(
-                host_binding_security_context_for("img", "src", version),
+                declaring_selector_context_for("img", "src", version),
                 SecurityContext::None,
                 "{version:?}"
             );
@@ -1236,9 +1342,25 @@ mod tests {
             SecurityContext::AttributeNoBinding
         );
         assert_eq!(get_security_context(":svg:set", "to"), SecurityContext::AttributeNoBinding);
-        // The un-namespaced key is not registered. HTML `<animate>` is not the SVG element.
-        assert_eq!(get_security_context("animate", "to"), SecurityContext::None);
-        assert_eq!(get_security_context("animate", "attributeName"), SecurityContext::None);
+        // There is no un-namespaced key, but from 22.1.5 an `<animate>` written
+        // outside `<svg>` falls back to the SVG keys, since it can still end
+        // up animating inside an SVG subtree.
+        assert_eq!(get_security_context("animate", "to"), SecurityContext::AttributeNoBinding);
+        assert_eq!(
+            get_security_context("animate", "attributeName"),
+            SecurityContext::AttributeNoBinding
+        );
+        for version in ["22.1.4", "22.2.0-next.4", "22.0.8"] {
+            let version = crate::AngularVersion::parse(version);
+            assert_eq!(get_security_context_for("animate", "to", version), SecurityContext::None);
+        }
+        for version in ["22.1.5", "22.2.0-next.5", "22.2.1"] {
+            let version = crate::AngularVersion::parse(version);
+            assert_eq!(
+                get_security_context_for("animate", "to", version),
+                SecurityContext::AttributeNoBinding
+            );
+        }
     }
 
     #[test]
@@ -1291,15 +1413,15 @@ mod tests {
     #[test]
     fn test_host_selector_promotes_svg_animate() {
         assert_eq!(
-            host_binding_security_context("animate", "to"),
+            declaring_selector_context("animate", "to"),
             SecurityContext::AttributeNoBinding
         );
-        assert_eq!(host_binding_security_context("a", "href"), SecurityContext::Url);
-        assert_eq!(host_binding_security_context("iframe", "src"), SecurityContext::ResourceUrl);
+        assert_eq!(declaring_selector_context("a", "href"), SecurityContext::Url);
+        assert_eq!(declaring_selector_context("iframe", "src"), SecurityContext::ResourceUrl);
         // 22.2.2 removed `img|src` from the URL context; 22.2.1 kept it.
-        assert_eq!(host_binding_security_context("img", "src"), SecurityContext::None);
+        assert_eq!(declaring_selector_context("img", "src"), SecurityContext::None);
         assert_eq!(
-            host_binding_security_context_for(
+            declaring_selector_context_for(
                 "img",
                 "src",
                 Some(crate::AngularVersion::new(22, 2, 1))
@@ -1310,9 +1432,9 @@ mod tests {
 
     #[test]
     fn test_host_not_selector_drops_the_only_contributor() {
-        assert_eq!(host_binding_security_context("[x]:not(object)", "data"), SecurityContext::None);
+        assert_eq!(declaring_selector_context("[x]:not(object)", "data"), SecurityContext::None);
         assert_eq!(
-            host_binding_security_context("[x]:not(img):not(video)", "src"),
+            declaring_selector_context("[x]:not(img):not(video)", "src"),
             SecurityContext::ResourceUrl
         );
     }
@@ -1324,12 +1446,12 @@ mod tests {
         for selector in ["*", "*[x]", "[x]"] {
             // 22.2.2 removed the `src` URL keys, leaving only ResourceUrl.
             assert_eq!(
-                host_binding_security_context(selector, "src"),
+                declaring_selector_context(selector, "src"),
                 SecurityContext::ResourceUrl,
                 "{selector}"
             );
             assert_eq!(
-                host_binding_security_context(selector, "formAction"),
+                declaring_selector_context(selector, "formAction"),
                 SecurityContext::Url,
                 "{selector}"
             );
@@ -1337,14 +1459,14 @@ mod tests {
         // Same expansion on the pre-namespaced lookup path.
         let version = Some(crate::AngularVersion::new(21, 0, 1));
         assert_eq!(
-            host_binding_security_context_for("*[x]", "src", version),
+            declaring_selector_context_for("*[x]", "src", version),
             SecurityContext::UrlOrResourceUrl
         );
         // A `:not(...)`-only selector parses to a literal `*` element upstream
         // and is looked up as the `*|attr` key, which has no `src` entry.
-        assert_eq!(host_binding_security_context("*:not(img)", "src"), SecurityContext::None);
+        assert_eq!(declaring_selector_context("*:not(img)", "src"), SecurityContext::None);
         assert_eq!(
-            host_binding_security_context(":not(img):not(video)", "src"),
+            declaring_selector_context(":not(img):not(video)", "src"),
             SecurityContext::None
         );
     }
@@ -1353,12 +1475,12 @@ mod tests {
     fn test_host_selector_leading_not_is_not_a_namespace() {
         // `:not(...)` is a pseudo-class, not a `:ns:` prefix.
         assert_eq!(
-            host_binding_security_context(":not(img):not(video)", "src"),
+            declaring_selector_context(":not(img):not(video)", "src"),
             SecurityContext::None
         );
         // A real `:svg:` prefix still namespaces the lookup.
         assert_eq!(
-            host_binding_security_context(":svg:animate", "to"),
+            declaring_selector_context(":svg:animate", "to"),
             SecurityContext::AttributeNoBinding
         );
     }
