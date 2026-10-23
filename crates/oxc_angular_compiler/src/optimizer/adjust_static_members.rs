@@ -108,7 +108,8 @@ impl AdjustStaticMembersTransformer {
         let bindings = top_level_bindings(program);
         let mut edits = Vec::new();
         for group in self.find_class_groups(program, &bindings, source) {
-            if group.side_effects {
+            // decorators run when the class is defined, and `@dec export let X = …` would not parse
+            if group.side_effects || !group.class.decorators.is_empty() {
                 continue;
             }
             // Like the Angular CLI's adjust-static-class-members: downleveled Angular statics after the class, or
@@ -272,7 +273,7 @@ impl AdjustStaticMembersTransformer {
 /// read, as Babel's `scope.isPure` sees one with a binding
 fn top_level_bindings<'a>(program: &'a Program<'a>) -> FxHashSet<&'a str> {
     let mut names = FxHashSet::default();
-    let mut add_pattern = |p: &'a BindingPattern<'a>, names: &mut FxHashSet<&'a str>| {
+    let add_pattern = |p: &'a BindingPattern<'a>, names: &mut FxHashSet<&'a str>| {
         if let BindingPattern::BindingIdentifier(id) = p {
             names.insert(id.name.as_str());
         }
@@ -310,24 +311,33 @@ fn top_level_bindings<'a>(program: &'a Program<'a>) -> FxHashSet<&'a str> {
     names
 }
 
-/// The Angular CLI's `analyzeClassStaticProperties`: every static property, and every static block assigning
-/// `this.<name> = …`, holds an Angular definition or a value without side effects. Static blocks of more than one
-/// statement, computed keys, and assignments to anything but `this` are not wrapped.
+/// The Angular CLI's `analyzeClassStaticProperties`: every static property, and every nonempty static block, is
+/// `this.<name> = …` holding an Angular definition or a value without side effects. Private and computed static
+/// fields and other static blocks are not wrapped. Unlike the CLI, an impure superclass or computed key also keeps
+/// the class out: both run when the class is defined, and the pure wrapper would let them be dropped.
 fn class_static_members_wrappable(
     class: &Class<'_>,
     bindings: &FxHashSet<&str>,
     source: &str,
 ) -> bool {
+    if class.heritage.as_ref().is_some_and(|h| {
+        !has_pure_annotation(h.expression.span(), source) && !is_pure(&h.expression, bindings)
+    }) {
+        return false;
+    }
     let mut should_wrap = false;
     for element in &class.body.body {
+        if element.computed()
+            && element
+                .property_key()
+                .and_then(PropertyKey::as_expression)
+                .is_none_or(|key| !is_pure(key, bindings))
+        {
+            return false;
+        }
         match element {
             ClassElement::PropertyDefinition(prop) if prop.r#static => {
-                let PropertyKey::StaticIdentifier(key) = &prop.key else {
-                    if matches!(prop.key, PropertyKey::PrivateIdentifier(_)) {
-                        continue;
-                    }
-                    return false;
-                };
+                let PropertyKey::StaticIdentifier(key) = &prop.key else { return false };
                 match &prop.value {
                     None => should_wrap = true,
                     Some(value)
@@ -339,22 +349,16 @@ fn class_static_members_wrappable(
                 }
             }
             ClassElement::StaticBlock(block) => {
-                if block.body.len() > 1 {
-                    return false;
-                }
-                let Some(Statement::ExpressionStatement(stmt)) = block.body.first() else {
-                    continue;
+                let stmt = match block.body.as_slice() {
+                    [] => continue,
+                    [Statement::ExpressionStatement(stmt)] => stmt,
+                    _ => return false,
                 };
-                let Expression::AssignmentExpression(assign) = &stmt.expression else { continue };
+                let Expression::AssignmentExpression(assign) = &stmt.expression else {
+                    return false;
+                };
                 let AssignmentTarget::StaticMemberExpression(member) = &assign.left else {
-                    if matches!(
-                        assign.left,
-                        AssignmentTarget::ComputedMemberExpression(_)
-                            | AssignmentTarget::PrivateFieldExpression(_)
-                    ) {
-                        return false;
-                    }
-                    continue;
+                    return false;
                 };
                 if !matches!(member.object, Expression::ThisExpression(_)) {
                     return false;
@@ -365,6 +369,12 @@ fn class_static_members_wrappable(
                 } else {
                     return false;
                 }
+            }
+            // `static accessor x = …` runs its initializer when the class is defined, and the CLI does not check it
+            ClassElement::AccessorProperty(accessor)
+                if accessor.r#static && accessor.value.is_some() =>
+            {
+                return false;
             }
             _ => {}
         }
@@ -395,8 +405,11 @@ fn has_pure_annotation(span: Span, source: &str) -> bool {
         || comment.contains("@pureOrBreakMyCode")
 }
 
+/// Globals that can be read without side effects
+const PURE_GLOBALS: &[&str] = &["undefined", "NaN", "Infinity", "Symbol"];
+
 /// Babel's `scope.isPure`, for what static members hold: literals, functions, classes, bound identifiers, and
-/// arrays, objects, templates and operators made of those
+/// arrays, objects, templates, member reads and operators made of those
 fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
     match expr {
         Expression::BooleanLiteral(_)
@@ -407,7 +420,17 @@ fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
         | Expression::StringLiteral(_)
         | Expression::FunctionExpression(_)
         | Expression::ArrowFunctionExpression(_) => true,
-        Expression::Identifier(id) => bindings.contains(id.name.as_str()),
+        Expression::Identifier(id) => {
+            bindings.contains(id.name.as_str()) || PURE_GLOBALS.contains(&id.name.as_str())
+        }
+        // like the CLI's isPure, reading a member counts as pure
+        Expression::StaticMemberExpression(m) => is_pure(&m.object, bindings),
+        Expression::ComputedMemberExpression(m) => {
+            is_pure(&m.object, bindings) && is_pure(&m.expression, bindings)
+        }
+        Expression::LogicalExpression(l) => {
+            is_pure(&l.left, bindings) && is_pure(&l.right, bindings)
+        }
         Expression::TemplateLiteral(t) => t.expressions.iter().all(|e| is_pure(e, bindings)),
         Expression::ArrayExpression(a) => a.elements.iter().all(|el| match el {
             oxc_ast::ast::ArrayExpressionElement::SpreadElement(_) => false,
@@ -589,6 +612,35 @@ export { ButtonComponent };"#;
         let result = transform(code);
         assert!(result.starts_with("let A = /* @__PURE__ */ (() => {\nclass A {"), "{result}");
         assert!(result.ends_with("A.ɵcmp = defineComponent({});\n  return A;\n})();"), "{result}");
+    }
+
+    #[test]
+    fn class_definition_side_effects_stay() {
+        // each of these runs code when the class is defined, so a pure wrapper could drop it
+        for code in [
+            "class A { static x = 0; static #r = register(); }",
+            "class A { static x = 0; static { register(A); } }",
+            "let y; class A { static x = 0; static { y = register(); } }",
+            "class A { static x = 0; static { this[key()] = 1; } }",
+            "class A extends registerBase() { static x = 0; }",
+            "class A { static x = 0; [register()]() {} }",
+            "class A { static x = 0; [register()] = 1; }",
+            "class A { static x = 0; static accessor y = register(); }",
+        ] {
+            assert_eq!(transform(code), code, "{code}");
+        }
+        // decorated classes stay too: `@dec export let A = …` would not parse
+        let code = "@dec export class A {\n    static ɵfac = f;\n}";
+        assert_eq!(transform(code), code);
+        // pure superclasses, computed keys and values still wrap
+        for code in [
+            "class B {}\nclass A extends B { static x = 0; ['k']() {} }",
+            "import * as i0 from 'x';\nclass A extends i0.Base { static x = i0.Foo; *[Symbol.iterator]() {} }",
+            "class A extends /* @__PURE__ */ mixin() { static x = 0; }",
+            "let a, b;\nclass A { static x = a || b; static y = undefined; }",
+        ] {
+            assert!(transform(code).contains("/* @__PURE__ */"), "{code}");
+        }
     }
 
     #[test]
