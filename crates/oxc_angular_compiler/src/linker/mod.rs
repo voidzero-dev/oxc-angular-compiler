@@ -165,7 +165,8 @@ struct DeclarationCollector<'s> {
     filename: &'s str,
     options: &'s LinkOptions,
     edits: &'s mut Vec<Edit>,
-    /// The expression of the expression statement (`true`) or `export default` (`false`) being visited
+    /// The expression of the statement being visited, and whether a `;` may go before it: true for a statement in
+    /// a statement list, false for `export default` or the bare body of `if`, a loop or a label
     statement_start: Option<(Span, bool)>,
 }
 
@@ -178,8 +179,20 @@ impl DeclarationCollector<'_> {
 }
 
 impl<'a> Visit<'a> for DeclarationCollector<'_> {
+    fn visit_statements(&mut self, stmts: &oxc_allocator::Vec<'a, Statement<'a>>) {
+        for stmt in stmts {
+            match stmt {
+                Statement::ExpressionStatement(stmt) => {
+                    self.visit_statement_expression(&stmt.expression, true);
+                }
+                _ => self.visit_statement(stmt),
+            }
+        }
+    }
+
+    /// Only reached outside a statement list, such as `if (c) x;`, where a `;` would become the whole body
     fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
-        self.visit_statement_expression(&stmt.expression, true);
+        self.visit_statement_expression(&stmt.expression, false);
     }
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
@@ -195,8 +208,8 @@ impl<'a> Visit<'a> for DeclarationCollector<'_> {
                 link_declaration(name, call, self.source, self.filename, self.options)
         {
             // A linked factory is a `function` expression: where it starts a longer statement, such as
-            // `ɵɵngDeclareFactory(…).name;`, it would be read as a declaration, so it gets parentheses (and a `;`, so
-            // that they do not call the line before)
+            // `ɵɵngDeclareFactory(…).name;`, it would be read as a declaration, so it gets parentheses (and, in a
+            // statement list, a `;` so that they do not call the line before)
             if let Some((expr, is_statement)) = self.statement_start
                 && expr.start == call.span.start
                 && expr != call.span

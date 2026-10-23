@@ -467,6 +467,12 @@ fn test_link_factory_starting_a_statement_keeps_its_meaning() {
         (format!("{d} + 1;"), "\n;(function X_Factory("),
         (format!("{d}.call(null);"), "\n;(function X_Factory("),
         (format!("export default {d} + \"\";"), "export default (function X_Factory("),
+        // a bare body gets no `;`, which would become the body itself
+        (format!("if (c) {d}.x;"), "if (c) (function X_Factory("),
+        (format!("if (c) {{}} else {d}.x;"), "else (function X_Factory("),
+        (format!("l: {d}.x;"), "l: (function X_Factory("),
+        (format!("switch (c) {{ case 1: {d}.x; }}"), "case 1: ;(function X_Factory("),
+        (format!("const f = () => {d}.x;"), "const f = () => function X_Factory("),
         // the whole statement, or not its start: as before
         (format!("{d};"), "\nfunction X_Factory("),
         (format!("const z = {d}.x;"), "const z = function X_Factory("),
