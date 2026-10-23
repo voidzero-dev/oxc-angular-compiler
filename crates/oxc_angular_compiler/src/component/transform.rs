@@ -4549,6 +4549,71 @@ pub fn transform_angular_file(
         }
     }
 
+    // The analyzer counts an Angular constructor parameter decorator, and the Angular decorator of a `declare`
+    // property, as removed on every class with an Angular class decorator. One the walk above left in place (a
+    // component whose template is missing, a constructor after the first) keeps what it references.
+    {
+        let stripped: rustc_hash::FxHashSet<Span> =
+            decorator_spans_to_remove.iter().copied().collect();
+        let mut kept = DecoratorIdentifiers::default();
+        for stmt in &parser_ret.program.body {
+            let class = match stmt {
+                Statement::ClassDeclaration(class) => class.as_ref(),
+                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                    ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                    _ => continue,
+                },
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => class.as_ref(),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            for element in &class.body.body {
+                let decorators: std::vec::Vec<_> = match element {
+                    oxc_ast::ast::ClassElement::MethodDefinition(method)
+                        if method.kind == oxc_ast::ast::MethodDefinitionKind::Constructor =>
+                    {
+                        method
+                            .value
+                            .params
+                            .items
+                            .iter()
+                            .flat_map(|param| &param.decorators)
+                            .filter(|decorator| {
+                                crate::directive::angular_param_decorator(
+                                    decorator,
+                                    Some(&string_consts),
+                                )
+                                .is_some()
+                            })
+                            .collect()
+                    }
+                    oxc_ast::ast::ClassElement::PropertyDefinition(prop) if prop.declare => prop
+                        .decorators
+                        .iter()
+                        .filter(|decorator| {
+                            crate::directive::angular_member_decorator(
+                                decorator,
+                                Some(&string_consts),
+                            )
+                            .is_some()
+                        })
+                        .collect(),
+                    _ => continue,
+                };
+                for decorator in decorators {
+                    if !stripped.contains(&decorator.span) {
+                        oxc_ast_visit::Visit::visit_decorator(&mut kept, decorator);
+                    }
+                }
+            }
+        }
+        for name in kept.0 {
+            import_elision_mut.preserve(name);
+        }
+    }
+
     // 5. Generate output code using span-based edits from the original AST.
     // All edits reference positions in the original source and are applied in one pass.
 
