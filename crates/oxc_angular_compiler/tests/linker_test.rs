@@ -3,6 +3,8 @@
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::AngularVersion;
 use oxc_angular_compiler::linker::{LinkOptions, link, link_with_options};
+use oxc_parser::Parser;
+use oxc_span::SourceType;
 
 /// Helper to build a ɵɵngDeclareDirective source with a given inputs block.
 fn make_directive_source(inputs_block: &str) -> String {
@@ -409,6 +411,75 @@ MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "17.0.0
     );
 }
 
+/// Babel's linker links every declaration call; Deepkit's runtime types keep a copy of each static initializer in a
+/// `__type` array, whose declarations must not stay unlinked (their `ngImport: i0` keeps all of @angular/core)
+#[test]
+fn test_link_declarations_nested_in_arrays_and_objects() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+class Cmp {
+    static { this.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }
+    static { this.__type = ['ɵfac', function () { return i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }]; }
+}
+const table = { factory: () => i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }) };
+"#;
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    assert!(!result.code.contains("ɵɵngDeclare"), "every declaration links:\n{}", result.code);
+    assert!(!result.code.contains("ngImport"), "{}", result.code);
+}
+
+/// Like Babel's linker, every call is visited, whatever expression or statement holds it.
+#[test]
+fn test_link_declarations_in_any_position() {
+    let d = r#"i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "22.0.0", ngImport: i0, type: Svc, providedIn: "root" })"#;
+    let positions = [
+        format!("(function () {{ Svc.ɵprov = {d}; }})();"),
+        format!("(() => {{ Svc.ɵprov = {d}; }})();"),
+        format!("f(...[{d}]);"),
+        format!("if ({d}) {{}}"),
+        format!("for (let x = {d}; {d}; {d}) break;"),
+        format!("for (const x of [{d}]);"),
+        format!("switch ({d}) {{ case {d}: break; }}"),
+        format!("class A extends ({d}, Object) {{ [{d}] = 1; static accessor p = {d}; }}"),
+        format!("({{ [{d}]: 1 }});"),
+        format!("tag`${{{d}}}`;"),
+        format!("f?.({d}); a?.[{d}];"),
+        format!("function* g(a = {d}) {{ yield {d}; }}"),
+        format!("const {{ a = {d} }} = {{}}; x[{d}] = 1;"),
+    ];
+    for position in positions {
+        let allocator = Allocator::default();
+        let code = format!("import * as i0 from \"@angular/core\";\nclass Svc {{}}\n{position}\n");
+        let result = link(&allocator, &code, "test.mjs");
+        assert!(!result.code.contains("ɵɵngDeclare"), "every declaration links:\n{}", result.code);
+    }
+}
+
+/// A linked factory is a `function` expression, so where it starts a longer statement it gets parentheses, like
+/// Babel's output: `function X_Factory() {}.x;` would not parse, and `export default function … + ""` would
+/// export the function
+#[test]
+fn test_link_factory_starting_a_statement_keeps_its_meaning() {
+    let d = r#"i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: X, deps: [], target: i0.ɵɵFactoryTarget.Injectable })"#;
+    for (position, expected) in [
+        (format!("let y = 1\n{d}.x;"), "let y = 1\n;(function X_Factory("),
+        (format!("{d} + 1;"), "\n;(function X_Factory("),
+        (format!("{d}.call(null);"), "\n;(function X_Factory("),
+        (format!("export default {d} + \"\";"), "export default (function X_Factory("),
+        // the whole statement, or not its start: as before
+        (format!("{d};"), "\nfunction X_Factory("),
+        (format!("const z = {d}.x;"), "const z = function X_Factory("),
+    ] {
+        let allocator = Allocator::default();
+        let code = format!("import * as i0 from \"@angular/core\";\nclass X {{}}\n{position}\n");
+        let result = link(&allocator, &code, "test.mjs");
+        assert!(result.code.contains(expected), "expected `{expected}`:\n{}", result.code);
+        let reparsed = Parser::new(&allocator, &result.code, SourceType::mjs()).parse();
+        assert!(reparsed.diagnostics.is_empty(), "{}", result.code);
+    }
+}
+
 /// Every `ɵɵdefine*` call carries `/*@__PURE__*/`, like the output of Angular's
 /// babel linker (`@angular/compiler-cli/linker/babel` 22.2.3) on these declarations.
 /// Factories (function expressions) and `ɵsetClassMetadata` get no annotation.
@@ -550,22 +621,4 @@ export { P };
         "`export` line {out_line} should map to source line {src_line}:\n{}",
         result.code
     );
-}
-
-/// Babel's linker links every declaration call; Deepkit's runtime types keep a copy of each static initializer in a
-/// `__type` array, whose declarations must not stay unlinked (their `ngImport: i0` keeps all of @angular/core)
-#[test]
-fn test_link_declarations_nested_in_arrays_and_objects() {
-    let allocator = Allocator::default();
-    let code = r#"import * as i0 from "@angular/core";
-class Cmp {
-    static { this.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }
-    static { this.__type = ['ɵfac', function () { return i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }); }]; }
-}
-const table = { factory: () => i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.4", ngImport: i0, type: Cmp, deps: [], target: i0.ɵɵFactoryTarget.Component }) };
-"#;
-    let result = link(&allocator, code, "test.mjs");
-    assert!(result.linked);
-    assert!(!result.code.contains("ɵɵngDeclare"), "every declaration links:\n{}", result.code);
-    assert!(!result.code.contains("ngImport"), "{}", result.code);
 }
