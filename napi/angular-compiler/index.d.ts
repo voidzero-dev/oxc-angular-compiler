@@ -35,9 +35,12 @@ export interface BrowserTransformOptions {
 
 /** Result of `transformForBrowser`. */
 export interface BrowserTransformResult {
+  /** The transformed code; empty when there are errors. */
   code: string
+  /** Source map (if the `sourcemap` option was enabled). */
   map?: string
-  errors: Array<string>
+  /** Parse and transform errors. */
+  errors: Array<OxcError>
 }
 
 /** Result of class metadata compilation. */
@@ -1042,9 +1045,9 @@ export declare function transformForBrowser(
 ): Promise<BrowserTransformResult>
 
 /**
- * TypeScript stripped with Angular's settings (`experimentalDecorators`, `useDefineForClassFields: false`) and
- * `async` lowered to generators, which zone.js needs; JavaScript gets only the lowering. Runtime helpers are
- * imported from `@oxc-project/runtime`.
+ * TypeScript stripped as `tsc` does it with Angular's settings (`experimentalDecorators`,
+ * `useDefineForClassFields: false`, target ES2022) and `async` lowered to generators, which zone.js needs;
+ * JavaScript gets only the lowering. Runtime helpers are imported from `@oxc-project/runtime`.
  */
 export declare function transformForBrowserSync(
   code: string,

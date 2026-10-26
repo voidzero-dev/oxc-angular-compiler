@@ -3271,14 +3271,17 @@ pub struct BrowserTransformOptions {
 /// Result of `transformForBrowser`.
 #[napi(object)]
 pub struct BrowserTransformResult {
+    /// The transformed code; empty when there are errors.
     pub code: String,
+    /// Source map (if the `sourcemap` option was enabled).
     pub map: Option<String>,
-    pub errors: Vec<String>,
+    /// Parse and transform errors.
+    pub errors: Vec<OxcError>,
 }
 
-/// TypeScript stripped with Angular's settings (`experimentalDecorators`, `useDefineForClassFields: false`) and
-/// `async` lowered to generators, which zone.js needs; JavaScript gets only the lowering. Runtime helpers are
-/// imported from `@oxc-project/runtime`.
+/// TypeScript stripped as `tsc` does it with Angular's settings (`experimentalDecorators`,
+/// `useDefineForClassFields: false`, target ES2022) and `async` lowered to generators, which zone.js needs;
+/// JavaScript gets only the lowering. Runtime helpers are imported from `@oxc-project/runtime`.
 #[napi]
 pub fn transform_for_browser_sync(
     code: String,
@@ -3300,7 +3303,11 @@ pub fn transform_for_browser_sync(
             lower_async: options.lower_async.unwrap_or(true),
         },
     );
-    BrowserTransformResult { code: result.code, map: result.map, errors: result.errors }
+    BrowserTransformResult {
+        code: result.code,
+        map: result.map,
+        errors: OxcError::from_diagnostics(&filename, &code, result.errors),
+    }
 }
 
 pub struct TransformForBrowserTask {
