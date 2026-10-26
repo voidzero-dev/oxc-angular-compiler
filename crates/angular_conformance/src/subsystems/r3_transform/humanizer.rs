@@ -48,6 +48,11 @@ impl<'s> R3Humanizer<'s> {
     }
 
     /// Extract source text from a span
+    /// The text of an optional span, `<empty>` when there is none (Angular's `humanizeSpan`).
+    fn opt_span_text(&self, span: Option<oxc_span::Span>) -> String {
+        span.map_or_else(|| "<empty>".to_string(), |span| self.span_text(&span))
+    }
+
     fn span_text(&self, span: &oxc_span::Span) -> String {
         let start = span.start as usize;
         let end = span.end as usize;
@@ -192,7 +197,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for attr in &element.attributes {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&attr.source_span);
-                let name = attr.name.to_string();
+                let name = self.opt_span_text(attr.key_span);
                 let value = if attr.value.is_empty() {
                     "<empty>".to_string()
                 } else {
@@ -209,7 +214,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for input in &element.inputs {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&input.source_span);
-                let name = input.name.to_string();
+                let name = self.span_text(&input.key_span);
                 // For source spans, output the source text of the value, not the unparsed expression
                 let value = input
                     .value_span
@@ -257,26 +262,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
             // Source spans mode for events
             for output in &element.outputs {
                 let source_span = self.span_text(&output.source_span);
-                // Determine the name based on event type to match Angular's humanizeSpan(event.keySpan)
-                let name = match output.event_type {
-                    // For two-way bindings, strip the "Change" suffix to get the original property name
-                    oxc_angular_compiler::ast::expression::ParsedEventType::TwoWay => {
-                        output.name.strip_suffix("Change").unwrap_or(&output.name).to_string()
-                    }
-                    // For animation events, include the phase in the name (e.g., "name.done")
-                    oxc_angular_compiler::ast::expression::ParsedEventType::LegacyAnimation
-                    | oxc_angular_compiler::ast::expression::ParsedEventType::Animation => {
-                        if let Some(phase) = &output.phase {
-                            format!("{}.{}", output.name, phase)
-                        } else {
-                            output.name.to_string()
-                        }
-                    }
-                    // Regular events: just use the name
-                    oxc_angular_compiler::ast::expression::ParsedEventType::Regular => {
-                        output.name.to_string()
-                    }
-                };
+                let name = self.span_text(&output.key_span);
                 let handler_text = self.span_text(&output.handler_span);
                 self.result.push(vec!["BoundEvent".to_string(), source_span, name, handler_text]);
             }
@@ -318,7 +304,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for attr in &template.attributes {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&attr.source_span);
-                let name = attr.name.to_string();
+                let name = self.opt_span_text(attr.key_span);
                 let value = if attr.value.is_empty() {
                     "<empty>".to_string()
                 } else {
@@ -335,20 +321,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for input in &template.inputs {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&input.source_span);
-                // For explicit ng-template attributes (key_span has brackets like "[k1]"),
-                // use the name field. For inline template microsyntax bindings (key_span
-                // is just the keyword like "of"), use the key_span text.
-                let key_span_text = self.span_text(&input.key_span);
-                let name = if key_span_text.starts_with('[')
-                    || key_span_text.starts_with("bind-")
-                    || key_span_text.starts_with("data-")
-                {
-                    // Explicit binding syntax - use the parsed name
-                    input.name.to_string()
-                } else {
-                    // Inline template microsyntax - use key_span text
-                    key_span_text
-                };
+                let name = self.span_text(&input.key_span);
                 let value = input
                     .value_span
                     .as_ref()
@@ -374,7 +347,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
                 R3TemplateAttr::Text(text_attr) => {
                     let row = if self.mode == HumanizeMode::SourceSpans {
                         let source_span = self.span_text(&text_attr.source_span);
-                        let name = text_attr.name.to_string();
+                        let name = self.opt_span_text(text_attr.key_span);
                         let value = if text_attr.value.is_empty() {
                             "<empty>".to_string()
                         } else {
@@ -393,16 +366,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
                 R3TemplateAttr::Bound(bound_attr) => {
                     let row = if self.mode == HumanizeMode::SourceSpans {
                         let source_span = self.span_text(&bound_attr.source_span);
-                        // Use key_span text for source spans mode
-                        let key_span_text = self.span_text(&bound_attr.key_span);
-                        let name = if key_span_text.starts_with('[')
-                            || key_span_text.starts_with("bind-")
-                            || key_span_text.starts_with("data-")
-                        {
-                            bound_attr.name.to_string()
-                        } else {
-                            key_span_text
-                        };
+                        let name = self.span_text(&bound_attr.key_span);
                         let value = bound_attr
                             .value_span
                             .as_ref()
@@ -459,7 +423,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for attr in &content.attributes {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&attr.source_span);
-                let name = attr.name.to_string();
+                let name = self.opt_span_text(attr.key_span);
                 let value = if attr.value.is_empty() {
                     "<empty>".to_string()
                 } else {
@@ -505,9 +469,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
     fn visit_variable(&mut self, variable: &R3Variable<'a>) {
         let row = if self.mode == HumanizeMode::SourceSpans {
             let source_span = self.span_text(&variable.source_span);
-            // For implicit context variables (empty source_span), output empty name
-            let name =
-                if source_span.is_empty() { String::new() } else { variable.name.to_string() };
+            let name = self.span_text(&variable.key_span);
             let value = variable
                 .value_span
                 .as_ref()
@@ -524,7 +486,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
     fn visit_reference(&mut self, reference: &R3Reference<'a>) {
         let row = if self.mode == HumanizeMode::SourceSpans {
             let source_span = self.span_text(&reference.source_span);
-            let name = reference.name.to_string();
+            let name = self.span_text(&reference.key_span);
             let value = reference
                 .value_span
                 .as_ref()
@@ -886,7 +848,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for attr in &component.attributes {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&attr.source_span);
-                let name = attr.name.to_string();
+                let name = self.opt_span_text(attr.key_span);
                 let value = if attr.value.is_empty() {
                     "<empty>".to_string()
                 } else {
@@ -902,7 +864,6 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for input in &component.inputs {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&input.source_span);
-                // Use key_span text for the original binding key (e.g., "of" not "ngForOf")
                 let name = self.span_text(&input.key_span);
                 let value = input
                     .value_span
@@ -925,13 +886,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for output in &component.outputs {
             if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&output.source_span);
-                let name = if output.event_type
-                    == oxc_angular_compiler::ast::expression::ParsedEventType::TwoWay
-                {
-                    output.name.strip_suffix("Change").unwrap_or(&output.name).to_string()
-                } else {
-                    output.name.to_string()
-                };
+                let name = self.span_text(&output.key_span);
                 let handler_text = self.span_text(&output.handler_span);
                 self.result.push(vec!["BoundEvent".to_string(), source_span, name, handler_text]);
             } else {
@@ -985,7 +940,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for attr in &directive.attributes {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&attr.source_span);
-                let name = attr.name.to_string();
+                let name = self.opt_span_text(attr.key_span);
                 let value = if attr.value.is_empty() {
                     "<empty>".to_string()
                 } else {
@@ -1001,8 +956,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for input in &directive.inputs {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&input.source_span);
-                // Use the name field directly (without brackets), matching element handling
-                let name = input.name.to_string();
+                let name = self.span_text(&input.key_span);
                 let value = input
                     .value_span
                     .as_ref()
@@ -1024,7 +978,7 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for output in &directive.outputs {
             if self.mode == HumanizeMode::SourceSpans {
                 let source_span = self.span_text(&output.source_span);
-                let name = output.name.to_string();
+                let name = self.span_text(&output.key_span);
                 let handler_text = self.span_text(&output.handler_span);
                 self.result.push(vec!["BoundEvent".to_string(), source_span, name, handler_text]);
             } else {
