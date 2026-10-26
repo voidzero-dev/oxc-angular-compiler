@@ -6060,6 +6060,12 @@ mod key_span_tests {
             key_spans(r#"<div data-prop="{{v}}"></div>"#),
             pairs(&[("BoundAttribute", "data-prop")])
         );
+        // The parser names a namespaced attribute `:xlink:href`, one byte longer than its source,
+        // and Angular measures the key span by that name, so it takes in the `=` (as Angular 22.2.2).
+        assert_eq!(
+            key_spans(r#"<svg><use xlink:href="{{url}}"/></svg>"#),
+            pairs(&[("BoundAttribute", "xlink:href=")])
+        );
     }
 
     #[test]
