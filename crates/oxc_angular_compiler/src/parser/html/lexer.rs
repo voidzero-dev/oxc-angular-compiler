@@ -236,6 +236,21 @@ fn offset_to_position(input: &str, offset: u32) -> (u32, u32) {
     (line, col)
 }
 
+/// The value JavaScript's `parseInt(digits, radix)` gives, for the non-negative values a character can have:
+/// leading whitespace and a `+` are skipped, a `0x` prefix is allowed in base 16, and the longest run of digits
+/// counts.
+fn parse_int_prefix(digits: &str, radix: u32) -> Option<u32> {
+    let digits = digits.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let digits = digits.strip_prefix('+').unwrap_or(digits);
+    let digits = if radix == 16 {
+        digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")).unwrap_or(digits)
+    } else {
+        digits
+    };
+    let end = digits.find(|c: char| !c.is_digit(radix)).unwrap_or(digits.len());
+    u32::from_str_radix(digits.get(..end).filter(|d| !d.is_empty())?, radix).ok()
+}
+
 /// Processes escape sequences in text when in "escaped strings" mode.
 /// This is used when tokenize_expansion_forms is false (Angular's default for inline templates).
 /// Returns (processed_text, errors, encountered_null).
@@ -811,37 +826,40 @@ impl<'a> HtmlLexer<'a> {
         }
     }
 
-    /// A code-point escape at byte `pos` (a backslash), as Angular's `EscapedCharacterCursor` reads it as one
-    /// character: `\u{X...}`, `\uXXXX`, `\xXX`, or up to three octal digits. Returns the character it stands for
-    /// and the escape's length in bytes; none for any other escape, an invalid one (whose text
-    /// `process_escape_sequences` reports), or one for NUL, the cursor's end of input (as `$EOF` is in Angular's
-    /// cursor; `process_escape_sequences` ends the text there).
+    /// A code-point escape at byte `pos` (a backslash), read as one character with the length Angular's
+    /// `EscapedCharacterCursor` gives it: `\u{...}` up to the next `}`, `\u` plus 4 characters, `\x` plus 2, or up
+    /// to three octal digits. Returns the character and the escape's length in bytes; none for any other escape.
+    ///
+    /// The digits are read like JavaScript's `parseInt`, so `\u{41zz}` is `A`. An escape with no digits, one cut
+    /// short by the end of the input, a surrogate, or NUL (the cursor's end of input) reads as U+FFFD, which is no
+    /// structural character: the escape stays inside its token, whose text `process_escape_sequences` decodes,
+    /// reporting the invalid ones and ending the text at NUL.
     fn code_point_escape_at(&self, pos: usize) -> Option<(char, usize)> {
-        self.decode_code_point_escape(pos).filter(|(ch, _)| *ch != '\0')
-    }
-
-    fn decode_code_point_escape(&self, pos: usize) -> Option<(char, usize)> {
         let rest = self.input.get(pos..)?.strip_prefix('\\')?;
-        let hex = |digits: &str| u32::from_str_radix(digits, 16).ok().and_then(char::from_u32);
-        if let Some(braced) = rest.strip_prefix("u{") {
-            let digits = &braced[..braced.find('}')?];
-            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return None;
-            }
-            Some((hex(digits)?, 4 + digits.len()))
+        let take_chars = |s: &str, n: usize| s.char_indices().nth(n).map_or(s.len(), |(i, _)| i);
+        let (digits, radix, len, complete) = if let Some(braced) = rest.strip_prefix("u{") {
+            let digits = braced.find('}').map_or(braced, |end| &braced[..end]);
+            let closed = digits.len() < braced.len();
+            (digits, 16, 3 + digits.len() + usize::from(closed), closed)
         } else if let Some(fixed) = rest.strip_prefix('u') {
-            let digits = fixed.get(..4).filter(|d| d.bytes().all(|b| b.is_ascii_hexdigit()))?;
-            Some((hex(digits)?, 6))
+            let digits = &fixed[..take_chars(fixed, 4)];
+            (digits, 16, 2 + digits.len(), digits.chars().count() == 4)
         } else if let Some(fixed) = rest.strip_prefix('x') {
-            let digits = fixed.get(..2).filter(|d| d.bytes().all(|b| b.is_ascii_hexdigit()))?;
-            Some((hex(digits)?, 4))
+            let digits = &fixed[..take_chars(fixed, 2)];
+            (digits, 16, 2 + digits.len(), digits.chars().count() == 2)
         } else {
-            let digits = rest.bytes().take(3).take_while(|b| (b'0'..=b'7').contains(b)).count();
-            if digits == 0 {
+            let octal = rest.bytes().take(3).take_while(|b| (b'0'..=b'7').contains(b)).count();
+            if octal == 0 {
                 return None;
             }
-            Some((char::from_u32(u32::from_str_radix(&rest[..digits], 8).ok()?)?, 1 + digits))
-        }
+            (&rest[..octal], 8, 1 + octal, true)
+        };
+        let ch = parse_int_prefix(digits, radix)
+            .filter(|_| complete)
+            .and_then(char::from_u32)
+            .filter(|&ch| ch != '\0')
+            .unwrap_or(char::REPLACEMENT_CHARACTER);
+        Some((ch, len))
     }
 
     /// Peeks at a character at offset from current position.
@@ -995,6 +1013,10 @@ impl<'a> HtmlLexer<'a> {
 
     /// Checks if the input starts with the given string at current position.
     fn starts_with(&self, s: &str) -> bool {
+        if self.escaped_string {
+            // Through the cursor, so an escaped `<` or `{` counts, as in Angular's `_attemptStr`
+            return s.chars().zip(0..).all(|(ch, i)| self.peek_at(i) == ch);
+        }
         self.input[self.index as usize..].starts_with(s)
     }
 
@@ -3264,12 +3286,10 @@ impl<'a> HtmlLexer<'a> {
             // Numeric entity: &#123; or &#x7B;
             self.advance(); // consume '#'
             let is_hex = self.peek() == 'x' || self.peek() == 'X';
-            if is_hex {
-                self.advance(); // consume 'x' or 'X'
-            }
+            let hex_marker = if is_hex { Some(self.advance()) } else { None }; // consume 'x' or 'X'
 
-            let num_start = self.index;
-            // Consume digits
+            // Consume digits (the characters the cursor reads, so escaped ones count)
+            let mut num_str = String::new();
             while self.index < self.length {
                 let ch = self.peek();
                 if is_hex {
@@ -3279,12 +3299,12 @@ impl<'a> HtmlLexer<'a> {
                 } else if !ch.is_ascii_digit() {
                     break;
                 }
-                self.advance();
+                num_str.push(self.advance());
             }
 
             // Check for semicolon and that we have at least one digit
-            if self.peek() == ';' && self.index > num_start {
-                let num_str = &self.input[num_start as usize..self.index as usize];
+            if self.peek() == ';' && !num_str.is_empty() {
+                let num_str = num_str.as_str();
                 self.advance(); // consume ';'
 
                 // Parse and decode
@@ -3293,7 +3313,8 @@ impl<'a> HtmlLexer<'a> {
                 {
                     if let Some(ch) = char::from_u32(code_point) {
                         let decoded = ch.to_string();
-                        let original = self.input[start as usize..self.index as usize].to_string();
+                        let marker = hex_marker.map(String::from).unwrap_or_default();
+                        let original = format!("&#{marker}{num_str};");
                         self.tokens.push(HtmlToken::new(
                             HtmlTokenType::EncodedEntity,
                             vec![decoded, original],
@@ -3339,27 +3360,24 @@ impl<'a> HtmlLexer<'a> {
             return false;
         }
 
-        // Named entity: &amp;
-        let name_start = self.index;
+        // Named entity: &amp; (the name is what the cursor reads, so escaped characters count)
+        let mut name = String::new();
         while self.index < self.length {
             let ch = self.peek();
             if !ch.is_ascii_alphanumeric() {
                 break;
             }
-            self.advance();
+            name.push(self.advance());
         }
 
         // Check for semicolon and that we have at least one char
-        if self.peek() == ';' && self.index > name_start {
-            let name = self.input[name_start as usize..self.index as usize].to_string();
+        if self.peek() == ';' && !name.is_empty() {
             self.advance(); // consume ';'
 
             if get_named_entities().contains_key(name.as_str()) {
-                // Safety: contains_key just verified the entity exists
-                if let Some(decoded) =
-                    decode_entity(&self.input[start as usize..self.index as usize])
-                {
-                    let original = self.input[start as usize..self.index as usize].to_string();
+                // As Angular's `getChars`, both parts hold the characters the cursor read
+                let original = format!("&{name};");
+                if let Some(decoded) = decode_entity(&original) {
                     self.tokens.push(HtmlToken::new(
                         HtmlTokenType::EncodedEntity,
                         vec![decoded, original],
@@ -3462,6 +3480,36 @@ mod tests {
             let tokens = HtmlLexer::new(input).with_escaped_string(true).tokenize().tokens;
             let found = tokens.iter().filter(|t| t.token_type == HtmlTokenType::BlockClose).count();
             assert_eq!(found, closes, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_escape_extent_in_escaped_string() {
+        use HtmlTokenType::*;
+        // Each escape is read to the end Angular's cursor gives it, decoded or not, so a `}` inside it never closes a
+        // block, and escaped characters open the same constructs as raw ones.
+        for (input, types, errors) in [
+            // NUL ends the input, as Angular's cursor reads it as EOF.
+            (
+                "@if (a) {x\\u{0}}",
+                &[BlockOpenStart, BlockParameter, BlockOpenEnd, Text, Eof][..],
+                0,
+            ),
+            ("\\u{zz}", &[Text, Eof][..], 1),
+            ("\\x7}", &[Text, Eof][..], 1),
+            ("\\u{7b}{a}}", &[Text, Interpolation, Text, Eof][..], 0),
+            ("{{ \\u{7d}}", &[Text, Interpolation, Text, Eof][..], 0),
+            ("&amp\\x3b", &[Text, EncodedEntity, Text, Eof][..], 0),
+            ("\\x26amp;", &[Text, EncodedEntity, Text, Eof][..], 0),
+            ("\\x3c\\x21-- x -->", &[CommentStart, RawText, CommentEnd, Eof][..], 0),
+            ("a \\x3c\\ud83d\\ude00 b", &[Text, Eof][..], 0),
+            // Cut short by the end of the input, as Angular's cursor reports it.
+            ("a\\u{7d", &[Text, Eof][..], 1),
+        ] {
+            let result = HtmlLexer::new(input).with_escaped_string(true).tokenize();
+            let found: Vec<_> = result.tokens.iter().map(|t| t.token_type).collect();
+            assert_eq!(found, types, "{input}");
+            assert_eq!(result.errors.len(), errors, "{input}: {:?}", result.errors);
         }
     }
 
