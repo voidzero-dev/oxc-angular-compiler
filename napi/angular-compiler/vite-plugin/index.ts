@@ -1292,6 +1292,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // found no templateUrl), so the branches below would leave its old
         // contents cached for the component's next transform.
         resourceCache.delete(normalizePath(ctx.file))
+        // A preprocessor dependency (a Sass partial) has no entry of its own:
+        // its contents are cached in each style compiled from it.
+        for (const style of styleDepOwners.get(normalizePath(ctx.file)) ?? []) {
+          resourceCache.delete(style)
+        }
 
         if (!pluginOptions.liveReload) return
 

@@ -767,3 +767,42 @@ describe('handleHotUpdate for a resource reached through both dispatch paths', (
     expect(ids.filter((id: string) => id === `${ownerPath}@TwoStylesComponent`)).toHaveLength(1)
   })
 })
+
+describe('a Sass partial edited with liveReload off', () => {
+  it('is compiled from the edited file at the component’s next transform', async () => {
+    const dir = join(tempDir, 'src', 'no-live-reload')
+    mkdirSync(dir, { recursive: true })
+    const partial = join(dir, '_vars.scss')
+    const component = join(dir, 'vars.component.ts')
+    writeFileSync(partial, '$c: red;')
+    writeFileSync(join(dir, 'vars.component.scss'), "@use './vars' as v; h1 { color: v.$c; }")
+    const source = componentSource('app-vars', 'vars.component.scss')
+    writeFileSync(component, source)
+
+    const plugin = angular({ liveReload: false }).find(
+      (candidate) => candidate.name === '@oxc-angular/vite',
+    )!
+    const server = await setupPluginWithServer(plugin)
+    const transform = async () => {
+      if (!plugin.transform || typeof plugin.transform === 'function') {
+        throw new Error('Expected plugin transform handler')
+      }
+      return (
+        (await plugin.transform.handler.call(
+          { error() {}, warn() {}, addWatchFile() {} } as any,
+          source,
+          component,
+        )) as { code: string }
+      ).code
+    }
+
+    expect(await transform()).toContain('color: red')
+
+    writeFileSync(partial, '$c: blue;')
+    await (plugin.handleHotUpdate as Function).call(plugin, createMockHmrContext(partial, server))
+
+    const code = await transform()
+    expect(code).toContain('color: blue')
+    expect(code).not.toContain('color: red')
+  })
+})
