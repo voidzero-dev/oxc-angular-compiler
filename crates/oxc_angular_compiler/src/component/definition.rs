@@ -422,10 +422,22 @@ fn generate_cmp_definition<'a>(
             }
             let style_value = Ident::from_in(style.as_str(), &allocator);
 
-            style_entries.push(OutputExpression::Literal(Box::new_in(
-                LiteralExpr { value: LiteralValue::String(style_value), source_span: None },
-                &allocator,
-            )));
+            // A long style is shared once the file uses it twice (Angular's
+            // `constantPool.getConstLiteral(literal(style))`).
+            style_entries.push(job.pool.get_const_literal(
+                OutputExpression::Literal(Box::new_in(
+                    LiteralExpr { value: LiteralValue::String(style_value), source_span: None },
+                    &allocator,
+                )),
+                false,
+            ));
+        }
+        // A style used twice here was inline on its first use; point that use
+        // at the constant too, like Angular's `FixupExpression` does.
+        for entry in &mut style_entries {
+            if let Some(shared) = job.pool.shared_literal(entry) {
+                *entry = shared;
+            }
         }
 
         if !style_entries.is_empty() {

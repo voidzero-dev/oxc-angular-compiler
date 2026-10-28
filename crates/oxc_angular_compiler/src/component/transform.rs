@@ -56,8 +56,8 @@ use crate::ng_module::{
     extract_ng_module_metadata_in, find_ng_module_decorator, generate_full_ng_module_definition,
 };
 use crate::output::ast::{
-    ArrowFunctionBody, ArrowFunctionExpr, DeclareFunctionStmt, FunctionExpr, OutputExpression,
-    OutputStatement, RawSourceExpr, ReadPropExpr, ReadVarExpr, StmtModifier,
+    ArrowFunctionBody, ArrowFunctionExpr, DeclareFunctionStmt, DeclareVarStmt, FunctionExpr,
+    OutputExpression, OutputStatement, RawSourceExpr, ReadPropExpr, ReadVarExpr, StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
 use crate::parser::ParseTemplateOptions;
@@ -67,8 +67,12 @@ use crate::pipe::{
     extract_pipe_metadata_in, find_pipe_decorator, generate_full_pipe_definition_from_decorator,
 };
 use crate::pipeline::compilation::{DeferBlockDepsEmitMode, TemplateCompilationMode};
+use crate::pipeline::constant_pool::{
+    ConstantPool, InheritedFixup, PooledConstantKind, SharedLiterals, is_long_string_literal,
+};
 use crate::pipeline::emit::{
     HostBindingCompilationResult, compile_host_bindings, compile_template,
+    declare_pooled_constants_from,
 };
 use crate::pipeline::ingest::{
     HostBindingInput, IngestOptions, ingest_component, ingest_component_with_options,
@@ -3173,6 +3177,11 @@ pub fn transform_angular_file(
     // TypeScript Angular uses ONE file-level constant pool; we simulate this
     // by tracking the next index and passing it to each component.
     let mut shared_pool_index: u32 = 0;
+    // Likewise, the literals the file's components pooled so far, and the
+    // components whose ɵcmp has a long style inline that a later component
+    // may share: (class name, ɵcmp, its emitted text).
+    let mut shared_literals = SharedLiterals::default();
+    let mut inline_style_cmps: Vec<(String, OutputExpression<'_>, String)> = Vec::new();
 
     // The components compiled for HMR, whose inline template and styles the
     // HMR fingerprint leaves out.
@@ -3613,6 +3622,7 @@ pub fn transform_angular_file(
                         view_queries,
                         content_queries,
                         shared_pool_index,
+                        &mut shared_literals,
                         &mut file_namespace_registry,
                         &import_map,
                         resolved_resources,
@@ -3620,9 +3630,16 @@ pub fn transform_angular_file(
                         Some(&import_elision_mut),
                         false,
                     ) {
-                        Ok(compilation_result) => {
+                        Ok(mut compilation_result) => {
                             // Update the shared pool index for the next component
                             shared_pool_index = compilation_result.next_pool_index;
+                            apply_inherited_fixups(
+                                allocator,
+                                std::mem::take(&mut compilation_result.inherited_fixups),
+                                &mut inline_style_cmps,
+                                &mut class_definitions,
+                                &mut compilation_result.declarations_js,
+                            );
 
                             // `@defer` loads these with a dynamic `import()` now.
                             for name in &compilation_result.implicitly_deferred_imports {
@@ -3905,6 +3922,13 @@ pub fn transform_angular_file(
                                 class_name.clone(),
                                 (property_assignments, decls_before_class, decls_after_class),
                             );
+                            if let Some(cmp_definition) = compilation_result.cmp_definition.take() {
+                                inline_style_cmps.push((
+                                    class_name.clone(),
+                                    cmp_definition,
+                                    compilation_result.cmp_js.clone(),
+                                ));
+                            }
                             class_positions.push((
                                 class_name,
                                 compute_effective_start(
@@ -4844,7 +4868,7 @@ pub fn transform_angular_file(
 }
 
 /// Result of full component compilation including ɵcmp/ɵfac.
-struct FullCompilationResult {
+struct FullCompilationResult<'a> {
     /// Compiled template function as JavaScript, for HMR template updates.
     /// `None` when HMR is off (nothing reads it then), for an HMR update
     /// compile (see `hmr_update`) and in partial mode.
@@ -4900,6 +4924,15 @@ struct FullCompilationResult {
 
     /// The template fields of the ɵcmp, for an HMR update compile only.
     hmr_update: Option<HmrUpdateParts>,
+
+    /// The ɵcmp `cmp_js` was emitted from, kept when its styles hold a long
+    /// string inline that a later component of the file may share.
+    cmp_definition: Option<OutputExpression<'a>>,
+
+    /// The long styles an earlier component of the file has inline that this
+    /// one shared: the caller declares each before that component and points
+    /// its ɵcmp at the constant.
+    inherited_fixups: Vec<InheritedFixup<'a>>,
 }
 
 /// What an HMR update module needs from a component's full compile: the
@@ -5240,6 +5273,7 @@ pub fn compile_component_hmr_update(
         view_queries,
         content_queries,
         0,
+        &mut SharedLiterals::default(),
         &mut namespace_registry,
         &import_map,
         Some(resources),
@@ -5309,7 +5343,7 @@ fn compile_component_partial<'a>(
     content_queries: &[R3QueryMetadata<'a>],
     pool_starting_index: u32,
     namespace_registry: &mut NamespaceRegistry<'a>,
-) -> FullCompilationResult {
+) -> FullCompilationResult<'a> {
     let inputs = crate::partial::PartialComponentInputs {
         template,
         is_inline: metadata.template.is_some(),
@@ -5358,6 +5392,8 @@ fn compile_component_partial<'a>(
         template_style_urls: Vec::new(),
         missing_link_urls: Vec::new(),
         hmr_update: None,
+        cmp_definition: None,
+        inherited_fixups: Vec::new(),
     }
 }
 
@@ -5455,13 +5491,14 @@ fn compile_component_full<'a>(
     view_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     content_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     pool_starting_index: u32,
+    shared_literals: &mut SharedLiterals<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
     deferrable_selector: Option<DeferrableSelector<'_>>,
     import_elision: Option<&ImportElisionAnalyzer<'_>>,
     hmr_update: bool,
-) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
+) -> Result<FullCompilationResult<'a>, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
 
     let mut diagnostics = Vec::new();
@@ -5774,6 +5811,10 @@ fn compile_component_full<'a>(
         ingest_options,
     );
     job.core_namespace = namespace_registry.angular_core_ns();
+    // Reuse the literals the file's earlier components pooled: ngtsc compiles
+    // the whole file with one constant pool. They are handed on only once this
+    // component compiled, as a failed one does not move `shared_pool_index`.
+    job.pool.inherit_literals(shared_literals.clone());
 
     // BEFORE template compilation: Pool attrs const if first selector has attributes.
     // This matches TypeScript Angular which adds attrs to the pool BEFORE template ingestion.
@@ -5860,6 +5901,11 @@ fn compile_component_full<'a>(
     // The namespace registry is shared across all components in the file to ensure
     // consistent namespace assignments between factory generation and import statements.
     // Pass the pre-pooled attrs_ref so the attrs entry uses the correct constant index
+    // The styles pool their long strings after the host bindings' constants.
+    if let Some(index) = host_binding_next_pool_index {
+        job.pool.continue_from(index);
+    }
+    let template_constant_count = job.pool.len();
     let definitions = generate_component_definitions(
         &allocator,
         metadata,
@@ -5901,7 +5947,7 @@ fn compile_component_full<'a>(
             "ngContentSelectors",
         )
         .map(|selectors| emitter.emit_expression(selectors)),
-        styles: cmp_definition_styles(&definitions.cmp_definition),
+        styles: cmp_definition_styles(&definitions.cmp_definition, &job.pool),
     });
 
     // Emit host binding declarations (pooled constants like pure functions)
@@ -5909,6 +5955,13 @@ fn compile_component_full<'a>(
         declarations_js.push_str(&emitter.emit_statement(decl));
         declarations_js.push('\n');
     }
+
+    // Emit the long styles this component shared (the pool's last constants)
+    for decl in &declare_pooled_constants_from(&mut job.pool, template_constant_count) {
+        declarations_js.push_str(&emitter.emit_statement(decl));
+        declarations_js.push('\n');
+    }
+    let inherited_fixups = job.pool.take_inherited_fixups();
 
     // For HMR, we emit the template separately using compile_template_to_js
     // The ɵcmp already contains the template function inline. Only the HMR
@@ -5926,9 +5979,14 @@ fn compile_component_full<'a>(
     } else {
         None
     };
+    *shared_literals = job.pool.take_literals();
 
     let cmp_js = emitter.emit_expression(&definitions.cmp_definition);
     let fac_js = emitter.emit_expression(&definitions.fac_definition);
+    // A later component may share a long style this one has inline; keep the
+    // ɵcmp to point it at the constant then.
+    let cmp_definition = cmp_definition_has_inline_long_style(&definitions.cmp_definition)
+        .then_some(definitions.cmp_definition);
 
     // Generate HMR initialization code if enabled
     let hmr_initializer_js = if options.hmr {
@@ -5994,11 +6052,9 @@ fn compile_component_full<'a>(
     };
 
     // Get the next pool index for the next component in this file
-    // If host bindings were compiled, use the host binding pool's next index
-    // (since it continues from the template pool)
-    // Otherwise, use the template pool's next index
-    let next_pool_index =
-        host_binding_next_pool_index.unwrap_or_else(|| job.pool.next_name_index());
+    // (the template pool continued from the host binding pool's next index
+    // before the styles were pooled)
+    let next_pool_index = job.pool.next_name_index();
 
     // Collect any diagnostics from the compilation job
     // (Done after using job to avoid borrow issues).
@@ -6024,7 +6080,23 @@ fn compile_component_full<'a>(
         template_style_urls,
         missing_link_urls,
         hmr_update,
+        cmp_definition,
+        inherited_fixups,
     })
+}
+
+/// The value of `key` in a `ɵɵdefineComponent({...})` call, to change it.
+fn cmp_definition_field_mut<'b, 'a>(
+    cmp_definition: &'b mut OutputExpression<'a>,
+    key: &str,
+) -> Option<&'b mut OutputExpression<'a>> {
+    let OutputExpression::InvokeFunction(call) = cmp_definition else { return None };
+    let Some(OutputExpression::LiteralMap(config)) = call.args.first_mut() else { return None };
+    config
+        .entries
+        .iter_mut()
+        .find(|entry| !entry.is_spread && entry.key.as_str() == key)
+        .map(|entry| &mut entry.value)
 }
 
 /// The value of `key` in a `ɵɵdefineComponent({...})` call.
@@ -6042,8 +6114,12 @@ fn cmp_definition_field<'b, 'a>(
 }
 
 /// The finished CSS strings in a `ɵɵdefineComponent({...})` call's `styles`
-/// (encapsulated and minified as configured, empty ones dropped).
-fn cmp_definition_styles(cmp_definition: &OutputExpression<'_>) -> Vec<String> {
+/// (encapsulated and minified as configured, empty ones dropped), reading a
+/// shared long style from the component's `pool`.
+fn cmp_definition_styles(
+    cmp_definition: &OutputExpression<'_>,
+    pool: &ConstantPool<'_>,
+) -> Vec<String> {
     use crate::output::ast::LiteralValue;
     let Some(OutputExpression::LiteralArray(styles)) =
         cmp_definition_field(cmp_definition, "styles")
@@ -6053,14 +6129,93 @@ fn cmp_definition_styles(cmp_definition: &OutputExpression<'_>) -> Vec<String> {
     styles
         .entries
         .iter()
-        .filter_map(|style| match style {
-            OutputExpression::Literal(literal) => match &literal.value {
-                LiteralValue::String(style) => Some(style.to_string()),
+        .filter_map(|style| {
+            let style = match style {
+                OutputExpression::ReadVar(read) => {
+                    match &pool.constants().iter().find(|c| c.name == read.name)?.kind {
+                        PooledConstantKind::Literal(literal) => literal.as_ref(),
+                        _ => return None,
+                    }
+                }
+                style => style,
+            };
+            match style {
+                OutputExpression::Literal(literal) => match &literal.value {
+                    LiteralValue::String(style) => Some(style.to_string()),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
+            }
         })
         .collect()
+}
+
+/// Whether a `ɵɵdefineComponent({...})` call's `styles` hold a string long
+/// enough for the constant pool to share inline (its first use in the file).
+fn cmp_definition_has_inline_long_style(cmp_definition: &OutputExpression<'_>) -> bool {
+    let Some(OutputExpression::LiteralArray(styles)) =
+        cmp_definition_field(cmp_definition, "styles")
+    else {
+        return false;
+    };
+    styles.entries.iter().any(is_long_string_literal)
+}
+
+/// Points the earlier component's inline first use of a long style that a
+/// later component shared at the shared constant, and declares it before that
+/// component, like the `FixupExpression` ngtsc's single file pool resolves.
+///
+/// `inline_style_cmps` holds the components whose ɵcmp has a long style inline,
+/// with the ɵcmp text in their `class_definitions` entry. Without one (that
+/// component failed to compile), the constant goes before the current class.
+fn apply_inherited_fixups<'a>(
+    allocator: &'a Allocator,
+    fixups: Vec<InheritedFixup<'a>>,
+    inline_style_cmps: &mut [(String, OutputExpression<'a>, String)],
+    class_definitions: &mut HashMap<String, (String, String, String)>,
+    current_declarations_js: &mut String,
+) {
+    let emitter = JsEmitter::new();
+    for fixup in fixups {
+        let declaration =
+            emitter.emit_statement(&OutputStatement::DeclareVar(oxc_allocator::Box::new_in(
+                DeclareVarStmt {
+                    name: fixup.name,
+                    value: Some(fixup.value.clone_in(allocator)),
+                    modifiers: StmtModifier::FINAL,
+                    leading_comment: None,
+                    source_span: None,
+                },
+                &allocator,
+            )));
+        let first_use = inline_style_cmps.iter_mut().find_map(|(class_name, cmp, cmp_js)| {
+            let Some(OutputExpression::LiteralArray(styles)) =
+                cmp_definition_field_mut(cmp, "styles")
+            else {
+                return None;
+            };
+            let style =
+                styles.entries.iter_mut().find(|style| style.is_equivalent(&fixup.value))?;
+            *style = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                ReadVarExpr { name: fixup.name, source_span: None },
+                &allocator,
+            ));
+            Some((class_name, emitter.emit_expression(cmp), cmp_js))
+        });
+        let first_use = first_use.and_then(|(class_name, new_cmp_js, cmp_js)| {
+            Some((class_definitions.get_mut(class_name.as_str())?, new_cmp_js, cmp_js))
+        });
+        let Some(((property_assignments, decls_before_class, _), new_cmp_js, cmp_js)) = first_use
+        else {
+            current_declarations_js.push_str(&declaration);
+            current_declarations_js.push('\n');
+            continue;
+        };
+        *property_assignments = property_assignments.replacen(cmp_js.as_str(), &new_cmp_js, 1);
+        decls_before_class.push_str(&declaration);
+        decls_before_class.push('\n');
+        *cmp_js = new_cmp_js;
+    }
 }
 
 /// Resolve template content from inline or external source.

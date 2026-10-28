@@ -19,6 +19,7 @@ use oxc_str::Ident;
 use crate::ir::ops::XrefId;
 
 use super::compilation::{ComponentCompilationJob, HostBindingCompilationJob, ViewCompilationUnit};
+use super::constant_pool::ConstantPool;
 use super::phases;
 
 // ============================================================================
@@ -296,6 +297,35 @@ pub fn compile_template<'a>(
     declarations.extend(take_statements(allocator, &mut job.pool.statements));
 
     TemplateCompilationResult { template_fn, declarations }
+}
+
+/// Declares the constants pooled from index `start` on.
+///
+/// For a component's long styles: they are pooled after `compile_template`
+/// has declared the template's constants (Angular's
+/// `compileComponentFromMetadata` pools them last).
+pub fn declare_pooled_constants_from<'a>(
+    pool: &mut ConstantPool<'a>,
+    start: usize,
+) -> OxcVec<'a, OutputStatement<'a>> {
+    use crate::output::ast::DeclareVarStmt;
+
+    let allocator = pool.allocator();
+    let mut declarations = OxcVec::new_in(&allocator);
+    for constant in pool.constants_mut().iter_mut().skip(start) {
+        let value = emit_pooled_constant_value(allocator, &mut constant.kind);
+        declarations.push(OutputStatement::DeclareVar(Box::new_in(
+            DeclareVarStmt {
+                name: constant.name,
+                value: Some(value),
+                modifiers: StmtModifier::FINAL,
+                leading_comment: None,
+                source_span: None,
+            },
+            &allocator,
+        )));
+    }
+    declarations
 }
 
 /// Converts a pure function body expression to an output expression.
