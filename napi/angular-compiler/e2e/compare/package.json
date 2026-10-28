@@ -34,8 +34,8 @@
     "@oxc-node/cli": "catalog:",
     "@oxc-node/core": "catalog:",
     "@types/node": "catalog:",
-    "oxc-parser": "^0.155.0",
-    "oxc-transform": "^0.155.0",
+    "oxc-parser": "^0.156.0",
+    "oxc-transform": "^0.156.0",
     "oxfmt": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
