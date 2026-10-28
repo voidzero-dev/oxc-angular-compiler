@@ -173,10 +173,11 @@ export interface PluginOptions {
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
 const ANGULAR_TS_REGEX = /\.tsx?$/
-// A call of a signal API ngtsc's implicit signal debugName transform names
-// (`signal(`, `input.required(`, `computed<T>(`, ...).
-const SIGNAL_API_CALL_REGEX =
-  /\b(?:signal|computed|linkedSignal|input|model|viewChild|viewChildren|contentChild|contentChildren|effect|afterRenderEffect|resource|httpResource)\s*[(<.]/
+// The name of a signal API ngtsc's implicit signal debugName transform names. Only the
+// name is matched: the file has to import it, and a call can take any shape
+// (`signal?.(0)`, `signal /* c */ (0)`, `input.required(`, `computed<T>(`, ...).
+const SIGNAL_API_NAME_REGEX =
+  /\b(?:signal|computed|linkedSignal|input|model|viewChild|viewChildren|contentChild|contentChildren|effect|afterRenderEffect|resource|httpResource)\b/
 const TEMPLATE_REGEX = /\.html?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
@@ -1069,7 +1070,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             !hasAngularDecorator &&
             !pluginOptions.jit &&
             (code.includes('@angular/core') || code.includes('@angular/common')) &&
-            SIGNAL_API_CALL_REGEX.test(code)
+            SIGNAL_API_NAME_REGEX.test(code)
           if (!hasAngularDecorator && !mayNameSignals) {
             return
           }

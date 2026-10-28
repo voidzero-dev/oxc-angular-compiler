@@ -296,6 +296,25 @@ describe('a file without an Angular decorator', () => {
     expect(spies.extractComponentUrls).not.toHaveBeenCalled()
   })
 
+  it('is compiled for an optional or commented call', async () => {
+    const plugin = getAngularPlugin()
+    await setupPlugin(plugin, 'build')
+
+    const { code, errors } = await transform(
+      plugin,
+      `
+        import { signal } from '@angular/core';
+        export const a = signal?.(0);
+        export const b = signal /* c */ (1);
+      `,
+      join(appDir, 'store-shapes.ts'),
+    )
+
+    expect(errors).toEqual([])
+    expect(code).toContain('debugName: "a"')
+    expect(code).toContain('debugName: "b"')
+  })
+
   it('is skipped when it calls no signal API', async () => {
     const plugin = getAngularPlugin()
     await setupPlugin(plugin, 'build')
