@@ -139,17 +139,10 @@ fn clone_constructor_deps<'a>(
     deps: Option<&Vec<'a, crate::pipe::R3DependencyMetadata<'a>>>,
 ) -> R3FactoryDeps<'a> {
     match deps {
-        // No constructor in source. Match upstream's behavior for
-        // non-inheriting parameterless classes (`deps: []` → no-arg
-        // `new Class()` factory). This is the common case.
-        //
-        // For a Pipe that DOES extend another class (rare), the optimal
-        // emit would be `R3FactoryDeps::None` so the linker calls
-        // `ɵɵgetInheritedFactory`. OXC's Pipe metadata doesn't track
-        // inheritance today, so we default to the safe-and-correct empty
-        // form. An inheriting pipe still gets a working factory (plain
-        // `new`), just without the inherited-factory optimization.
-        None => R3FactoryDeps::Valid(Vec::new_in(&allocator)),
+        // No constructor, but a superclass: `deps: null`, so the linker
+        // uses `ɵɵgetInheritedFactory` (upstream `compileDependencies` in
+        // `packages/compiler/src/render3/partial/util.ts`).
+        None => R3FactoryDeps::None,
         Some(deps) => {
             let mut out = Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
@@ -165,10 +158,7 @@ fn clone_constructor_deps<'a>(
                     optional: dep.optional,
                     self_: dep.self_,
                     skip_self: dep.skip_self,
-                    // Pipe's R3DependencyMetadata predates the type-only-invalid
-                    // tracking (#288); the field doesn't exist on this struct,
-                    // so we default to false.
-                    type_only_invalid: false,
+                    type_only_invalid: dep.type_only_invalid,
                 });
             }
             R3FactoryDeps::Valid(out)
