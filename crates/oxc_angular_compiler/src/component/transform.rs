@@ -34,6 +34,7 @@ use super::hoist::{collect_hoist_edits, program_has_angular_decorated_class};
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
+use super::signal_debug_name;
 use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
@@ -1289,10 +1290,9 @@ fn extract_jit_ctor_params(
         let mut decorators = std::vec::Vec::new();
         for decorator in &param.decorators {
             if !crate::directive::is_angular_core_decorator(decorator, Some(consts)) {
-                let expr = decorator.expression.span();
                 other_decorators.push(format!(
                     "__param({index}, {})",
-                    &source[expr.start as usize..expr.end as usize]
+                    signal_debug_name::source_text(source, decorator.expression.span())
                 ));
                 continue;
             }
@@ -1300,8 +1300,11 @@ fn extract_jit_ctor_params(
                 Expression::CallExpression(call) => {
                     let args = match (call.arguments.first(), call.arguments.last()) {
                         (Some(first), Some(last)) => Some(
-                            source[first.span().start as usize..last.span().end as usize]
-                                .to_string(),
+                            signal_debug_name::source_text(
+                                source,
+                                Span::new(first.span().start, last.span().end),
+                            )
+                            .into_owned(),
                         ),
                         _ => None,
                     };
@@ -1389,7 +1392,10 @@ fn extract_all_jit_member_decorators(
                     } else {
                         let start = call.arguments.first().unwrap().span().start;
                         let end = call.arguments.last().unwrap().span().end;
-                        Some(source[start as usize..end as usize].to_string())
+                        Some(
+                            signal_debug_name::source_text(source, Span::new(start, end))
+                                .into_owned(),
+                        )
                     };
                     (&call.callee, args)
                 }
@@ -1420,9 +1426,10 @@ fn extract_all_jit_member_decorators(
             } else {
                 // Non-Angular decorator (another module's `@Input` or `@Inject`
                 // too) → goes into __decorate() call
-                let expr_start = decorator.expression.span().start;
-                let expr_end = decorator.expression.span().end;
-                non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());
+                non_angular_texts.push(
+                    signal_debug_name::source_text(source, decorator.expression.span())
+                        .into_owned(),
+                );
             }
         }
 
@@ -1817,6 +1824,66 @@ fn synthesize_signal_api_decorators(
     }
 }
 
+/// The `input()` fields of the jit-forced `@Component`/`@Directive` classes,
+/// which ngtsc's JIT `signalInputsTransform`
+/// (`initializer_api_transforms/input_function.ts`) gives an `@Input`
+/// decorator. It rebuilds the field with `member.name`, a string, before the
+/// signal `debugName` transform runs, so there `node.name.getText()` throws
+/// and the field keeps no `debugName`. `model()` and the query functions
+/// keep the name node, and a field with its own `@Input` is left alone.
+fn jit_signal_input_fields(
+    program: &oxc_ast::ast::Program<'_>,
+    string_consts: &crate::directive::StringConsts<'_>,
+) -> rustc_hash::FxHashSet<Span> {
+    use oxc_ast::ast::ClassElement;
+
+    let mut fields = rustc_hash::FxHashSet::default();
+    for stmt in &program.body {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => class.as_ref(),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        // Upstream's visitor only rewrites a named class.
+        if class.id.is_none()
+            || !matches!(
+                find_jit_forced_decorator(class, string_consts),
+                Some((AngularDecoratorKind::Component | AngularDecoratorKind::Directive, _))
+            )
+        {
+            continue;
+        }
+        for element in &class.body.body {
+            let ClassElement::PropertyDefinition(prop) = element else { continue };
+            // The keys `extract_all_jit_member_decorators` lowers.
+            if !matches!(prop.key, PropertyKey::StaticIdentifier(_) | PropertyKey::StringLiteral(_))
+            {
+                continue;
+            }
+            let Some(Expression::CallExpression(call)) = &prop.value else { continue };
+            let is_signal_input = matches!(
+                classify_initializer_api(&call.callee, string_consts),
+                Some(InitializerApiKind::Input | InitializerApiKind::InputRequired)
+            );
+            let has_input_decorator = prop.decorators.iter().any(|decorator| {
+                crate::directive::angular_member_decorator(decorator, Some(string_consts))
+                    == Some("Input")
+            });
+            if is_signal_input && !has_input_decorator {
+                fields.insert(prop.span);
+            }
+        }
+    }
+    fields
+}
+
 /// Returns `true` when any field of any JIT class has a synthesized decorator
 /// (signal API lowering) that references the `@angular/core` namespace. Used to
 /// gate the emission of `import * as i0 from "@angular/core"`.
@@ -2016,28 +2083,32 @@ fn build_jit_decorator_text<'a>(
     let expr_start = decorator.expression.span().start as usize;
     let expr_end = decorator.expression.span().end as usize;
     let expr_text = &source[expr_start..expr_end];
+    // The signal `debugName`s inside the expression, which it keeps.
+    let mut edits: std::vec::Vec<(usize, usize, String)> =
+        signal_debug_name::source_edits(source, decorator.expression.span())
+            .into_iter()
+            .map(|edit| (edit.start as usize, edit.end as usize, edit.replacement))
+            .collect();
 
     // For non-Component decorators, just return the expression text as-is
     if !matches!(decorator_kind, AngularDecoratorKind::Component) {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     }
 
     // For Component decorators, check for resource properties to replace
     let Expression::CallExpression(call) = &decorator.expression else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
     let Some(config_arg) = call.arguments.first() else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
     let Argument::ObjectExpression(config_obj) = config_arg else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
-    // Collect edits within the expression text
-    let mut edits: std::vec::Vec<(usize, usize, String)> = std::vec::Vec::new();
-
+    // Collect the resource edits within the expression text
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             let key_name = match &prop.key {
@@ -2119,12 +2190,16 @@ fn build_jit_decorator_text<'a>(
         }
     }
 
-    if edits.is_empty() {
-        return expr_text.to_string();
-    }
+    apply_jit_decorator_text_edits(expr_text, edits)
+}
 
+/// `text` with `edits` (offsets into it) applied.
+fn apply_jit_decorator_text_edits(
+    text: &str,
+    mut edits: std::vec::Vec<(usize, usize, String)>,
+) -> String {
     // Apply edits in reverse order to preserve positions
-    let mut result = expr_text.to_string();
+    let mut result = text.to_string();
     edits.sort_by(|a, b| b.0.cmp(&a.0));
     for (start, end, replacement) in edits {
         result.replace_range(start..end, &replacement);
@@ -2592,10 +2667,8 @@ fn collect_jit_class_info<'a>(
             all_class_decorator_texts.push(text);
         } else {
             // Non-Angular decorator: extract expression text from source (without @)
-            let expr_start = dec.expression.span().start;
-            let expr_end = dec.expression.span().end;
             all_class_decorator_texts
-                .push(source[expr_start as usize..expr_end as usize].to_string());
+                .push(signal_debug_name::source_text(source, dec.expression.span()).into_owned());
         }
     }
 
@@ -3275,6 +3348,24 @@ pub fn transform_angular_file(
             }
         }
     }
+
+    // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
+    // other signal APIs get an ngDevMode `debugName` argument named after the
+    // binding they initialize. ngtsc adds it to the `before` emit transforms
+    // in full and partial compilation, for every emitted file, whether or not
+    // it has an Angular decorator. It runs on the emitted nodes, so the
+    // decorator arguments printed again below (`ɵcmp`, `ɵsetClassMetadata`,
+    // a JIT `__decorate`) are named too: their slices of the source take the
+    // edits through this scope.
+    let debug_names_scope = signal_debug_name::FileDebugNames::enter(
+        source,
+        signal_debug_name::collect_signal_debug_names(
+            &parser_ret.program,
+            source,
+            semantic.scoping(),
+            &jit_signal_input_fields(&parser_ret.program, &string_consts),
+        ),
+    );
 
     // The imports a `jit: true` class's downleveled output keeps live, found
     // before any class compiles so `@defer` leaves them alone whichever class
@@ -4782,6 +4873,10 @@ pub fn transform_angular_file(
             &string_consts,
         ));
     }
+
+    // 5f. The signal `debugName` edits of the text the file keeps.
+    let debug_name_edits = debug_names_scope.finish().into_file_edits(&edits);
+    edits.extend(debug_name_edits);
 
     // Members can reference namespace aliases the registry assigned to
     // other modules (e.g. `typeof i1.SomeDirective` for host directives).

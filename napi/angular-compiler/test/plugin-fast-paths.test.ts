@@ -5,6 +5,8 @@
  *   spells `templateUrl`/`styleUrl`, and still compiles a file that names a
  *   resource through an escaped key. Only a missing-resource error sends the
  *   file back through the full resolution; a template syntax error does not.
+ * - A file without an Angular decorator is compiled only when it calls a
+ *   signal API, which ngtsc gives a `debugName`.
  * - JIT `transform` never reads external resources: its output imports them.
  * - The `@ng/component` endpoint compiles with the decorator's
  *   `preserveWhitespaces`, like the full transform.
@@ -274,6 +276,49 @@ describe('transform skips the resource URL parse when no URL is spelled', () => 
     expect(errors.join('\n')).not.toContain('COMPONENT_RESOURCE_NOT_FOUND')
     expect(spies.transformAngularFile).toHaveBeenCalledTimes(1)
     expect(spies.extractComponentUrls).not.toHaveBeenCalled()
+  })
+})
+
+describe('a file without an Angular decorator', () => {
+  const store = `
+    import { signal } from '@angular/core';
+    export const count = signal(0);
+  `
+
+  it('is compiled when it calls a signal API, for its debugName', async () => {
+    const plugin = getAngularPlugin()
+    await setupPlugin(plugin, 'build')
+
+    const { code, errors } = await transform(plugin, store, join(appDir, 'store.ts'))
+
+    expect(errors).toEqual([])
+    expect(code).toContain('signal(0, /* @ts-ignore */ ...(ngDevMode ? [{ debugName: "count" }]')
+    expect(spies.extractComponentUrls).not.toHaveBeenCalled()
+  })
+
+  it('is skipped when it calls no signal API', async () => {
+    const plugin = getAngularPlugin()
+    await setupPlugin(plugin, 'build')
+
+    await transform(
+      plugin,
+      `
+        import { inject } from '@angular/core';
+        export const token = () => inject(Object);
+      `,
+      join(appDir, 'util.ts'),
+    )
+
+    expect(spies.transformAngularFile).not.toHaveBeenCalled()
+  })
+
+  it('is skipped in JIT mode, which names no signals', async () => {
+    const plugin = getAngularPlugin({ jit: true, liveReload: true })
+    await setupPlugin(plugin)
+
+    await transform(plugin, store, join(appDir, 'store-jit.ts'))
+
+    expect(spies.transformAngularFile).not.toHaveBeenCalled()
   })
 })
 

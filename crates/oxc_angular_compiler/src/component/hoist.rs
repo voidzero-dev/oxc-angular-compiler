@@ -41,7 +41,7 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::Visit;
 use oxc_semantic::Semantic;
-use oxc_span::GetSpan;
+use oxc_span::{GetSpan, Span};
 use oxc_syntax::symbol::SymbolId;
 
 use crate::directive::StringConsts;
@@ -94,6 +94,8 @@ struct PlanEntry {
 /// insertion at the same offset pushes earlier text further right — the
 /// hoisted statements end up immediately above the class, with any
 /// constant-pool declarations from the compiler in between.
+///
+/// A hoisted statement keeps the signal `debugName`s inside it.
 pub fn collect_hoist_edits<'a>(
     program: &Program<'a>,
     source: &str,
@@ -649,9 +651,10 @@ pub fn collect_hoist_edits<'a>(
 
     for stmt_start in &order {
         let p = &plan[stmt_start];
-        let text = &source[*stmt_start as usize..p.stmt_end as usize];
+        let text =
+            super::signal_debug_name::source_text(source, Span::new(*stmt_start, p.stmt_end));
         let bucket = per_target.entry(p.insert_at).or_default();
-        bucket.push_str(text);
+        bucket.push_str(&text);
         bucket.push('\n');
         edits.push(Edit::delete(*stmt_start, p.delete_end).with_priority(HOIST_DELETE_PRIORITY));
     }
