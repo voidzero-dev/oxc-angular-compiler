@@ -210,7 +210,44 @@ fn standalone_class_selector<'a>(
         }
         _ => None,
     })?;
+    decorated_class_selector(class, consts, implicit_standalone)
+}
 
+/// The selector of the top-level class `local` declares in `program`,
+/// exported or not, when it is a standalone `@Component` or `@Directive` whose
+/// `selector` and `standalone` are literals: an `imports` entry that names a
+/// class of the file being compiled. `consts` are the program's.
+pub fn local_standalone_class_selector<'a>(
+    program: &'a Program<'a>,
+    consts: &StringConsts<'a>,
+    local: &str,
+    implicit_standalone: bool,
+) -> Option<String> {
+    let is_local = |class: &Class| class.id.as_ref().is_some_and(|id| id.name == local);
+    let class = program.body.iter().find_map(|stmt| match stmt {
+        Statement::ClassDeclaration(class) if is_local(class) => Some(&**class),
+        Statement::ExportDeclaration(decl) => match &decl.declaration {
+            Declaration::ClassDeclaration(class) if is_local(class) => Some(&**class),
+            _ => None,
+        },
+        Statement::ExportDefaultDeclaration(decl) => match &decl.declaration {
+            ExportDefaultDeclarationKind::ClassDeclaration(class) if is_local(class) => {
+                Some(&**class)
+            }
+            _ => None,
+        },
+        _ => None,
+    })?;
+    decorated_class_selector(class, consts, implicit_standalone)
+}
+
+/// The selector of `class` when it is a standalone `@Component` or
+/// `@Directive` whose `selector` and `standalone` are literals.
+fn decorated_class_selector<'a>(
+    class: &Class<'a>,
+    consts: &StringConsts<'a>,
+    implicit_standalone: bool,
+) -> Option<String> {
     let decorator = ["Component", "Directive"].iter().find_map(|name| {
         crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
     })?;

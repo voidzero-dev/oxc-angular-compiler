@@ -34,7 +34,9 @@
 //! OXC does the same unless cross-file analysis can read the imported
 //! class's selector: then [`implicitly_deferred_imports`] picks the
 //! standalone components and directives the template matches only inside
-//! `@defer` blocks, and they join `deferredImports` (#313).
+//! `@defer` blocks, and they join `deferredImports` (#313). Each `@defer`
+//! block then gets its own dependency function, as in ngc's full compilation
+//! ([`defer_block_dependencies`], [`compile_defer_block_resolver`]).
 
 use oxc_allocator::Allocator;
 
@@ -45,9 +47,12 @@ use crate::ast::r3::{
 };
 use crate::class_metadata::{
     R3DeferPerComponentDependency, compile_component_metadata_async_resolver,
+    compile_deferred_dependency_import,
 };
 use crate::i18n::serializer::is_i18n_attribute;
-use crate::output::ast::OutputExpression;
+use crate::output::ast::{
+    ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression, ReadVarExpr,
+};
 use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
 use oxc_str::Ident;
@@ -211,87 +216,7 @@ pub(super) fn implicitly_deferred_imports<'a>(
     nodes: &[R3Node<'a>],
     candidates: &[(Ident<'a>, std::vec::Vec<CssSelector>)],
 ) -> std::vec::Vec<Ident<'a>> {
-    struct Matcher<'c, 'a> {
-        candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)],
-        in_defer: bool,
-        deferred: std::vec::Vec<bool>,
-        eager: std::vec::Vec<bool>,
-        selectorless: bool,
-    }
-
-    impl Matcher<'_, '_> {
-        fn record(&mut self, element: &CssSelector) {
-            for (index, (_, selectors)) in self.candidates.iter().enumerate() {
-                if selectors.iter().any(|selector| selector.matches(element)) {
-                    if self.in_defer {
-                        self.deferred[index] = true;
-                    } else {
-                        self.eager[index] = true;
-                    }
-                }
-            }
-        }
-    }
-
-    impl<'a> R3Visitor<'a> for Matcher<'_, 'a> {
-        fn visit_element(&mut self, element: &R3Element<'a>) {
-            if !element.directives.is_empty() {
-                self.selectorless = true;
-            }
-            self.record(&element_selector(
-                &element.name,
-                &element.attributes,
-                &element.inputs,
-                &element.outputs,
-            ));
-            self.visit_element_children(element);
-        }
-
-        fn visit_template(&mut self, template: &R3Template<'a>) {
-            if !template.directives.is_empty() {
-                self.selectorless = true;
-            }
-            self.record(&template_selector(template));
-            self.visit_template_children(template);
-        }
-
-        fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
-            let outer = self.in_defer;
-            self.in_defer = true;
-            for child in &block.children {
-                child.visit(self);
-            }
-            // `@placeholder`, `@loading` and `@error` render before the chunk
-            // loads, so they are eager unless an outer `@defer` holds them
-            // (`visitDeferredBlock` in t2_binder's `DirectiveBinder`).
-            self.in_defer = outer;
-            if let Some(placeholder) = &block.placeholder {
-                self.visit_deferred_block_placeholder(placeholder);
-            }
-            if let Some(loading) = &block.loading {
-                self.visit_deferred_block_loading(loading);
-            }
-            if let Some(error) = &block.error {
-                self.visit_deferred_block_error(error);
-            }
-        }
-
-        fn visit_component(&mut self, _component: &R3Component<'a>) {
-            self.selectorless = true;
-        }
-
-        fn visit_directive(&mut self, _directive: &R3Directive<'a>) {
-            self.selectorless = true;
-        }
-    }
-
-    let mut matcher = Matcher {
-        candidates,
-        in_defer: false,
-        deferred: vec![false; candidates.len()],
-        eager: vec![false; candidates.len()],
-        selectorless: false,
-    };
+    let mut matcher = CandidateMatcher::new(candidates);
     visit_all(&mut matcher, nodes);
     if matcher.selectorless {
         return std::vec::Vec::new();
@@ -302,6 +227,189 @@ pub(super) fn implicitly_deferred_imports<'a>(
         .filter(|(index, _)| matcher.deferred[*index] && !matcher.eager[*index])
         .map(|(_, (name, _))| *name)
         .collect()
+}
+
+/// The `candidates` each `@defer` block uses, with the block's span, in
+/// [`defer_block_spans`] order. ngc binds the main content of each block on
+/// its own (`resolveDeferBlocks` in its component `handler.ts`) and keeps
+/// what that content uses eagerly: a candidate matched only inside a nested
+/// `@defer` belongs to the nested block, while the nested block's
+/// `@placeholder`, `@loading` and `@error` belong to the outer one. Each list
+/// keeps the order of `candidates`. `None` for a selectorless template.
+pub(super) fn defer_block_dependencies<'a>(
+    nodes: &[R3Node<'a>],
+    candidates: &[(Ident<'a>, std::vec::Vec<CssSelector>)],
+) -> Option<std::vec::Vec<(oxc_span::Span, std::vec::Vec<Ident<'a>>)>> {
+    struct BlockCollector<'c, 'a> {
+        candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)],
+        blocks: std::vec::Vec<(oxc_span::Span, std::vec::Vec<Ident<'a>>)>,
+    }
+
+    impl<'a> R3Visitor<'a> for BlockCollector<'_, 'a> {
+        fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
+            let mut matcher = CandidateMatcher::new(self.candidates);
+            visit_all(&mut matcher, &block.children);
+            let mut dependencies = std::vec::Vec::new();
+            for (index, (name, _)) in self.candidates.iter().enumerate() {
+                if matcher.eager[index] && !dependencies.contains(name) {
+                    dependencies.push(*name);
+                }
+            }
+            self.blocks.push((block.source_span, dependencies));
+
+            visit_all(self, &block.children);
+            if let Some(placeholder) = &block.placeholder {
+                self.visit_deferred_block_placeholder(placeholder);
+            }
+            if let Some(loading) = &block.loading {
+                self.visit_deferred_block_loading(loading);
+            }
+            if let Some(error) = &block.error {
+                self.visit_deferred_block_error(error);
+            }
+        }
+    }
+
+    let mut matcher = CandidateMatcher::new(candidates);
+    visit_all(&mut matcher, nodes);
+    if matcher.selectorless {
+        return None;
+    }
+    let mut collector = BlockCollector { candidates, blocks: std::vec::Vec::new() };
+    visit_all(&mut collector, nodes);
+    Some(collector.blocks)
+}
+
+/// A `@defer` block's dependency function, for `DeferBlockDepsEmitMode`
+/// `PerBlock` (`compileDeferResolverFunction` in Angular's
+/// `render3/view/compiler.ts`): a dynamic `import()` for each of the
+/// `dependencies` that `deferred` lists, and a plain reference to the others.
+/// `None` when the block has no dependencies (`compileDeferBlocks` in ngc's
+/// component `handler.ts`).
+pub(super) fn compile_defer_block_resolver<'a>(
+    allocator: &'a Allocator,
+    dependencies: &[Ident<'a>],
+    deferred: &[Ident<'a>],
+    import_map: &ImportMap<'a>,
+) -> Option<OutputExpression<'a>> {
+    if dependencies.is_empty() {
+        return None;
+    }
+    let mut entries = oxc_allocator::Vec::new_in(&allocator);
+    for name in dependencies {
+        let deferrable = if deferred.contains(name) {
+            build_defer_per_component_deps(allocator, std::slice::from_ref(name), import_map)
+                .first()
+                .map(|dep| compile_deferred_dependency_import(allocator, dep))
+        } else {
+            None
+        };
+        entries.push(deferrable.unwrap_or_else(|| {
+            OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                ReadVarExpr { name: *name, source_span: None },
+                &allocator,
+            ))
+        }));
+    }
+    let array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+        LiteralArrayExpr { entries, source_span: None },
+        &allocator,
+    ));
+    Some(OutputExpression::ArrowFunction(oxc_allocator::Box::new_in(
+        ArrowFunctionExpr {
+            params: oxc_allocator::Vec::new_in(&allocator),
+            body: ArrowFunctionBody::Expression(oxc_allocator::Box::new_in(array, &allocator)),
+            source_span: None,
+        },
+        &allocator,
+    )))
+}
+
+/// Which `candidates` a template matches inside the main content of `@defer`
+/// blocks and which it matches anywhere else, as t2_binder's
+/// `DirectiveBinder` tells eagerly used directives apart.
+struct CandidateMatcher<'c, 'a> {
+    candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)],
+    in_defer: bool,
+    deferred: std::vec::Vec<bool>,
+    eager: std::vec::Vec<bool>,
+    selectorless: bool,
+}
+
+impl<'c, 'a> CandidateMatcher<'c, 'a> {
+    fn new(candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)]) -> Self {
+        Self {
+            candidates,
+            in_defer: false,
+            deferred: vec![false; candidates.len()],
+            eager: vec![false; candidates.len()],
+            selectorless: false,
+        }
+    }
+
+    fn record(&mut self, element: &CssSelector) {
+        for (index, (_, selectors)) in self.candidates.iter().enumerate() {
+            if selectors.iter().any(|selector| selector.matches(element)) {
+                if self.in_defer {
+                    self.deferred[index] = true;
+                } else {
+                    self.eager[index] = true;
+                }
+            }
+        }
+    }
+}
+
+impl<'a> R3Visitor<'a> for CandidateMatcher<'_, 'a> {
+    fn visit_element(&mut self, element: &R3Element<'a>) {
+        if !element.directives.is_empty() {
+            self.selectorless = true;
+        }
+        self.record(&element_selector(
+            &element.name,
+            &element.attributes,
+            &element.inputs,
+            &element.outputs,
+        ));
+        self.visit_element_children(element);
+    }
+
+    fn visit_template(&mut self, template: &R3Template<'a>) {
+        if !template.directives.is_empty() {
+            self.selectorless = true;
+        }
+        self.record(&template_selector(template));
+        self.visit_template_children(template);
+    }
+
+    fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
+        let outer = self.in_defer;
+        self.in_defer = true;
+        for child in &block.children {
+            child.visit(self);
+        }
+        // `@placeholder`, `@loading` and `@error` render before the chunk
+        // loads, so they are eager unless an outer `@defer` holds them
+        // (`visitDeferredBlock` in t2_binder's `DirectiveBinder`).
+        self.in_defer = outer;
+        if let Some(placeholder) = &block.placeholder {
+            self.visit_deferred_block_placeholder(placeholder);
+        }
+        if let Some(loading) = &block.loading {
+            self.visit_deferred_block_loading(loading);
+        }
+        if let Some(error) = &block.error {
+            self.visit_deferred_block_error(error);
+        }
+    }
+
+    fn visit_component(&mut self, _component: &R3Component<'a>) {
+        self.selectorless = true;
+    }
+
+    fn visit_directive(&mut self, _directive: &R3Directive<'a>) {
+        self.selectorless = true;
+    }
 }
 
 /// Whether any element or template anywhere in the template (`@defer` blocks

@@ -329,8 +329,14 @@ impl<'a> ConstantPool<'a> {
             }
         }
 
-        // No equivalent function found, create a new entry
-        let fn_name = self.unique_name(name, use_unique_name);
+        // No equivalent function found, create a new entry. Without
+        // `use_unique_name` the name is taken as is and not claimed, so it
+        // doesn't move the pool's name indices.
+        let fn_name = if use_unique_name {
+            self.unique_name(name, true)
+        } else {
+            Ident::from(self.allocator.alloc_str(name))
+        };
 
         // Add the function to statements (not values) to match Angular TypeScript
         // Arrow functions become DeclareVarStmt, regular functions become DeclareFunctionStmt
@@ -629,6 +635,7 @@ fn output_stmt_is_equivalent(a: &OutputStatement<'_>, b: &OutputStatement<'_>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::ast::{ArrowFunctionBody, ArrowFunctionExpr, LiteralExpr, LiteralValue};
 
     #[test]
     fn test_string_deduplication() {
@@ -642,5 +649,38 @@ mod tests {
         assert_eq!(idx1, idx2);
         assert_ne!(idx1, idx3);
         assert_eq!(pool.len(), 2);
+    }
+
+    #[test]
+    fn test_shared_function_without_unique_name_takes_no_index() {
+        let allocator = &Allocator::default();
+        let mut pool = ConstantPool::with_starting_index(allocator, 2);
+        let arrow = |value: f64| {
+            OutputExpression::ArrowFunction(Box::new_in(
+                ArrowFunctionExpr {
+                    params: Vec::new_in(&allocator),
+                    body: ArrowFunctionBody::Expression(Box::new_in(
+                        OutputExpression::Literal(Box::new_in(
+                            LiteralExpr { value: LiteralValue::Number(value), source_span: None },
+                            &allocator,
+                        )),
+                        &allocator,
+                    )),
+                    source_span: None,
+                },
+                &allocator,
+            ))
+        };
+
+        let first = pool.get_shared_function_reference(arrow(1.0), "Cmp_Defer_1_DepsFn", false);
+        let second = pool.get_shared_function_reference(arrow(2.0), "Cmp_Defer_3_DepsFn", false);
+
+        let name = |expr: &OutputExpression<'_>| match expr {
+            OutputExpression::ReadVar(read) => read.name.to_string(),
+            _ => panic!("expected a variable reference"),
+        };
+        assert_eq!(name(&first), "Cmp_Defer_1_DepsFn");
+        assert_eq!(name(&second), "Cmp_Defer_3_DepsFn");
+        assert_eq!(pool.next_name_index(), 2);
     }
 }

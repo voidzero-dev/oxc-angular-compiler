@@ -92,11 +92,13 @@ export class Parent {}
 
     assert_lazy(code, "./lazy", "LazyCmp");
     assert!(
-        compact.contains("ɵɵdefer(1,0,()=>[import(\"./lazy\")"),
-        "The resolver must be wired into `ɵɵdefer`. Output:\n{code}"
+        compact.contains("constParent_Defer_1_DepsFn=()=>[import(\"./lazy\")")
+            && compact.contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"),
+        "The block's resolver must be wired into `ɵɵdefer`. Output:\n{code}"
     );
+    // Like ngc: nothing is used eagerly, so there is no `dependencies`.
     assert!(
-        compact.contains("ɵɵgetComponentDepsFactory(Parent,[])"),
+        !compact.contains("dependencies:"),
         "The lazy component must leave the eager dependencies. Output:\n{code}"
     );
     assert!(
@@ -252,8 +254,8 @@ export class Parent {{}}
         );
         let code = &result.code;
         assert_lazy(code, "./lazy", "LazyCmp");
-        assert!(compact(code).contains("ɵɵdefer(1,0,()=>[import(\"./lazy\")"), "{code}");
-        assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[])"), "{code}");
+        assert!(compact(code).contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"), "{code}");
+        assert!(!compact(code).contains("dependencies:"), "{code}");
         assert!(!code.contains("import { LazyCmp }"), "{code}");
     }
 }
@@ -822,10 +824,10 @@ export class Parent {}
     let code = &result.code;
     assert_eager(code, "./cmps");
     assert!(code.contains("import { LazyCmp, EagerCmp }"), "{code}");
-    assert!(
-        compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[LazyCmp,EagerCmp])"),
-        "{code}"
-    );
+    // Like ngc: `LazyCmp` stays eager but is used only by the block, whose
+    // function provides it.
+    assert!(compact(code).contains("constParent_Defer_2_DepsFn=()=>[LazyCmp];"), "{code}");
+    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[EagerCmp])"), "{code}");
 }
 
 #[test]
@@ -899,7 +901,7 @@ export class Parent {}
     let code = &result.code;
     assert_lazy(code, "./cmps", "LazyCmp");
     assert_lazy(code, "./cmps", "EagerCmp");
-    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[])"), "{code}");
+    assert!(!compact(code).contains("dependencies:"), "{code}");
     assert!(!code.contains("from \"./cmps\""), "{code}");
 }
 
@@ -952,7 +954,8 @@ export class Parent {
     );
     let code = &result.code;
     assert_eager(code, "./cmps");
-    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[LazyCmp])"), "{code}");
+    assert!(compact(code).contains("constParent_Defer_1_DepsFn=()=>[LazyCmp];"), "{code}");
+    assert!(!compact(code).contains("dependencies:"), "{code}");
 }
 
 #[test]
@@ -1104,4 +1107,395 @@ export class Parent {}
 "#,
     );
     assert_eager(&result.code, "./lazy");
+}
+
+// --- Per-block dependency functions: ngc's full compilation gives each
+// `@defer` block its own `<Cmp>_Defer_<slot>_DepsFn` (`resolveDeferBlocks`,
+// `compileDeferBlocks` and `compileDeferResolverFunction`) ---
+
+/// `app/other.ts`, a standalone component `OtherCmp` with `app-other`.
+fn other_cmp(dir: &TempDir) {
+    create_test_file(
+        dir.path(),
+        "app/other.ts",
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-other', template: 'other' })
+export class OtherCmp {}
+",
+    );
+}
+
+#[test]
+fn each_defer_block_loads_only_its_own_dependencies() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, OtherCmp],
+    template: '@defer { <app-lazy/> } @defer (on viewport) { <app-other/> } @placeholder { <p>x</p> }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(
+        compact.contains(
+            "constParent_Defer_1_DepsFn=()=>[import(\"./lazy\").then((m)=>m.LazyCmp)];\
+             constParent_Defer_5_DepsFn=()=>[import(\"./other\").then((m)=>m.OtherCmp)];"
+        ),
+        "Each block must get its own resolver. Output:\n{code}"
+    );
+    assert!(compact.contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"), "{code}");
+    assert!(compact.contains("ɵɵdefer(5,3,Parent_Defer_5_DepsFn,null,4)"), "{code}");
+    assert!(!compact.contains("dependencies:"), "{code}");
+    assert!(
+        compact.contains(
+            "setClassMetadataAsync(Parent,()=>[import(\"./lazy\").then((m)=>m.LazyCmp),\
+             import(\"./other\").then((m)=>m.OtherCmp)],(LazyCmp,OtherCmp)=>"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn eager_dependency_used_in_a_defer_block_is_listed_by_reference() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp],
+    template: '<app-lazy/> @defer { <app-lazy/> }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert_eager(code, "./lazy");
+    assert!(compact.contains("constParent_Defer_2_DepsFn=()=>[LazyCmp];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(2,1,Parent_Defer_2_DepsFn)"), "{code}");
+    assert!(compact.contains("ɵɵgetComponentDepsFactory(Parent,[LazyCmp])"), "{code}");
+}
+
+#[test]
+fn import_referenced_elsewhere_is_listed_by_reference_next_to_a_lazy_one() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component, ViewChild } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, OtherCmp],
+    template: '@defer { <app-lazy/><app-other/> }',
+})
+export class Parent { @ViewChild(LazyCmp) lazy: any; }
+",
+    );
+    let code = &result.code;
+    assert!(
+        compact(code).contains(
+            "constParent_Defer_1_DepsFn=()=>[LazyCmp,import(\"./other\").then((m)=>m.OtherCmp)];"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn same_file_component_used_in_a_defer_block_is_listed_by_reference() {
+    let dir = TempDir::new().unwrap();
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-local', template: 'local' })
+class LocalCmp {}
+
+@Component({
+    selector: 'app-parent',
+    imports: [LocalCmp],
+    template: '@defer { <app-local/> }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(compact.contains("constParent_Defer_1_DepsFn=()=>[LocalCmp];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"), "{code}");
+    // Like ngc: the block's function provides `LocalCmp`, so it leaves
+    // `dependencies`.
+    assert!(!compact.contains("dependencies:"), "{code}");
+    assert!(!code.contains("setClassMetadataAsync"), "{code}");
+}
+
+#[test]
+fn defer_block_mixes_a_lazy_import_and_a_same_file_component() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({ selector: 'app-local', template: 'local' })
+export class LocalCmp {}
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, LocalCmp],
+    template: '@defer { <app-lazy/><app-local/> }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(
+        compact.contains(
+            "constParent_Defer_1_DepsFn=()=>[import(\"./lazy\").then((m)=>m.LazyCmp),LocalCmp];"
+        ),
+        "{code}"
+    );
+    assert!(!compact.contains("dependencies:"), "{code}");
+}
+
+#[test]
+fn nested_defer_block_placeholder_belongs_to_the_outer_block() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, OtherCmp],
+    template: '@defer { @defer (on viewport) { <app-other/> } @placeholder { <app-lazy/> } }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(
+        compact
+            .contains("constParent_Defer_1_DepsFn=()=>[import(\"./lazy\").then((m)=>m.LazyCmp)];"),
+        "{code}"
+    );
+    assert!(
+        compact.contains(
+            "constParent_Defer_0_Defer_2_DepsFn=()=>[import(\"./other\").then((m)=>m.OtherCmp)];"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn class_metadata_lists_lazy_dependencies_block_by_block() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [OtherCmp, LazyCmp],
+    template: '@defer { <app-lazy/> } @defer (on viewport) { <app-other/> } @placeholder { <p>x</p> }',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    assert!(
+        compact(code).contains(
+            "setClassMetadataAsync(Parent,()=>[import(\"./lazy\").then((m)=>m.LazyCmp),\
+             import(\"./other\").then((m)=>m.OtherCmp)],(LazyCmp,OtherCmp)=>"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn defer_block_without_dependencies_has_no_resolver() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp],
+    template: '@defer { <p>x</p> } <app-lazy/>',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    assert!(compact(code).contains("ɵɵdefer(1,0);"), "{code}");
+    assert!(!code.contains("DepsFn"), "{code}");
+}
+
+#[test]
+fn deps_fn_name_drops_only_the_first_template_suffix() {
+    // ngc names the function after `unit.fnName?.replace('_Template', '')`,
+    // which replaces the first match only.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({ selector: 'app-a', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Foo {}
+
+@Component({ selector: 'app-b', imports: [OtherCmp], template: '@defer { <app-other/> }' })
+export class Foo_Template {}
+
+@Component({
+    selector: 'app-c',
+    imports: [LazyCmp],
+    template: '@if (x) { @defer { <app-lazy/> } }',
+})
+export class My_TemplateCmp {
+    x = true;
+}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(compact.contains("constFoo_Defer_1_DepsFn=()=>[LazyCmp];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(1,0,Foo_Defer_1_DepsFn)"), "{code}");
+    assert!(
+        compact.contains("constFoo_Template_Defer_1_DepsFn=()=>[import(\"./other\")"),
+        "{code}"
+    );
+    assert!(compact.contains("ɵɵdefer(1,0,Foo_Template_Defer_1_DepsFn)"), "{code}");
+    assert!(
+        compact.contains("constMyCmp_Conditional_0_Template_Defer_1_DepsFn=()=>[LazyCmp];"),
+        "{code}"
+    );
+    assert_eq!(code.matches("const Foo_Defer_1_DepsFn").count(), 1, "{code}");
+}
+
+#[test]
+fn deps_fns_do_not_move_the_constant_names_of_later_components() {
+    // ngc pools the function under its own name (`getSharedFunctionReference`
+    // with `useUniqueName` false), which takes no counter value.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let source = |imports: &str| {
+        format!(
+            r#"
+import {{ Component }} from '@angular/core';
+import {{ LazyCmp }} from './lazy';
+
+@Component({{ selector: 'app-local', template: 'local' }})
+export class LocalCmp {{}}
+
+@Component({{
+    selector: 'app-a',
+    imports: [{imports}],
+    template: '<p [title]="[1, x]"></p> @defer {{ <app-lazy [title]="[x]"/> }} @defer {{ <app-local/> }}',
+}})
+export class A1 {{
+    x = 1;
+}}
+
+@Component({{
+    selector: 'app-b',
+    imports: [LocalCmp],
+    template: '<p [title]="[2, x]"></p> @defer {{ <app-local [title]="{{a: x}}"/> }}',
+}})
+export class A2 {{
+    x = 1;
+}}
+"#
+        )
+    };
+    // The name of A2's first pure function.
+    let a2_constant = |code: &str| {
+        let compact = compact(code);
+        let end = compact.find("=(a0)=>[2,a0]").expect(code);
+        let start = compact[..end].rfind("const").expect(code) + "const".len();
+        compact[start..end].to_string()
+    };
+    let with_deps_fns = transform(&dir, &source("LazyCmp, LocalCmp")).code;
+    assert!(with_deps_fns.contains("const A1_Defer_2_DepsFn"), "{with_deps_fns}");
+    assert!(with_deps_fns.contains("const A1_Defer_5_DepsFn"), "{with_deps_fns}");
+    let without = transform(&dir, &source("")).code;
+    assert!(!without.contains("const A1_Defer"), "{without}");
+    assert_eq!(a2_constant(&with_deps_fns), a2_constant(&without), "{with_deps_fns}");
+}
+
+#[test]
+fn block_only_dependencies_leave_dependencies_of_each_component() {
+    // Like ngc, a same-file component used only inside `@defer` is provided
+    // by the block's function, not by `dependencies`.
+    let dir = TempDir::new().unwrap();
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-local', template: 'local' })
+export class LocalCmp {}
+
+@Component({ selector: 'app-a', imports: [LocalCmp], template: '@defer { <app-local/> }' })
+export class App1 {}
+
+@Component({
+    selector: 'app-b',
+    imports: [LocalCmp],
+    template: '<app-local/> @defer { <app-local/> }',
+})
+export class App2 {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(compact.contains("constApp1_Defer_1_DepsFn=()=>[LocalCmp];"), "{code}");
+    assert!(compact.contains("constApp2_Defer_2_DepsFn=()=>[LocalCmp];"), "{code}");
+    assert!(!compact.contains("ɵɵgetComponentDepsFactory(App1"), "{code}");
+    assert!(compact.contains("ɵɵgetComponentDepsFactory(App2,[LocalCmp])"), "{code}");
 }

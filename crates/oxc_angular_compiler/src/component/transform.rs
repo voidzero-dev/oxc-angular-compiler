@@ -3562,43 +3562,52 @@ pub fn transform_angular_file(
                         content_queries.iter().map(|q| q.property_name.to_string()).collect();
 
                     // The selector of the standalone component or directive an
-                    // `imports` entry refers to, when `@defer` may lazy-load it
-                    // (#313): its import is referenced nowhere else in this file
-                    // or in the compiled output, so the static import can go, and
-                    // cross-file analysis can read the selector. Watched files
-                    // are only reported with `resolve_imported_values`, so it is
-                    // required here too.
+                    // `imports` entry refers to, when cross-file analysis can
+                    // read it or the class is declared in this file, and whether
+                    // `@defer` may lazy-load it (#313): its import is referenced
+                    // nowhere else in this file or in the compiled output, so the
+                    // static import can go. Watched files are only reported with
+                    // `resolve_imported_values`, so it is required here too.
                     #[cfg(feature = "cross_file_elision")]
-                    let deferrable_selector = cross_file_analyzer
+                    let import_selector = cross_file_analyzer
                         .as_ref()
                         .filter(|_| options.resolve_imported_values)
                         .map(|analyzer| {
                             let import_map = &import_map;
                             let import_elision = &import_elision_mut;
-                            move |local: &str| -> Option<String> {
-                                if import_elision.value_reference_count(local)? != 1
-                                    || import_elision.is_kept_by_output(local)
-                                {
-                                    return None;
-                                }
-                                let info = import_map.get(&Ident::from(local))?;
+                            let program = &parser_ret.program;
+                            let string_consts = &string_consts;
+                            move |local: &str| -> Option<(String, bool)> {
+                                let Some(info) = import_map.get(&Ident::from(local)) else {
+                                    let selector =
+                                        super::cross_file_elision::local_standalone_class_selector(
+                                            program,
+                                            string_consts,
+                                            local,
+                                            implicit_standalone,
+                                        )?;
+                                    return Some((selector, false));
+                                };
                                 if !info.is_named_import || info.is_type_only {
                                     return None;
                                 }
                                 let export_name = info.imported_name.as_deref().unwrap_or(local);
-                                analyzer.standalone_directive_selector(
+                                let selector = analyzer.standalone_directive_selector(
                                     info.source_module.as_str(),
                                     export_name,
                                     std::path::Path::new(path),
                                     implicit_standalone,
-                                )
+                                )?;
+                                let deferrable = import_elision.value_reference_count(local)
+                                    == Some(1)
+                                    && !import_elision.is_kept_by_output(local);
+                                Some((selector, deferrable))
                             }
                         });
                     #[cfg(feature = "cross_file_elision")]
-                    let deferrable_selector =
-                        deferrable_selector.as_ref().map(|f| f as DeferrableSelector<'_>);
+                    let import_selector = import_selector.as_ref().map(|f| f as ImportSelector<'_>);
                     #[cfg(not(feature = "cross_file_elision"))]
-                    let deferrable_selector = None;
+                    let import_selector = None;
 
                     // 4. Compile the template and generate ɵcmp/ɵfac
                     // Pass the shared pool index to ensure unique constant names
@@ -3616,7 +3625,7 @@ pub fn transform_angular_file(
                         &mut file_namespace_registry,
                         &import_map,
                         resolved_resources,
-                        deferrable_selector,
+                        import_selector,
                         Some(&import_elision_mut),
                         false,
                     ) {
@@ -5442,8 +5451,8 @@ fn html_parse_error_diagnostic(
 }
 
 /// The selector of the standalone component or directive an `imports`
-/// entry refers to, by local name, when `@defer` may lazy-load it.
-type DeferrableSelector<'f> = &'f dyn Fn(&str) -> Option<String>;
+/// entry refers to, by local name, and whether `@defer` may lazy-load it.
+type ImportSelector<'f> = &'f dyn Fn(&str) -> Option<(String, bool)>;
 
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
@@ -5458,7 +5467,7 @@ fn compile_component_full<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
-    deferrable_selector: Option<DeferrableSelector<'_>>,
+    import_selector: Option<ImportSelector<'_>>,
     import_elision: Option<&ImportElisionAnalyzer<'_>>,
     hmr_update: bool,
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
@@ -5632,7 +5641,10 @@ fn compile_component_full<'a>(
     // ngc's full compilation (#313). Needs cross-file analysis for the
     // selectors; skipped under HMR, like ngc.
     let mut implicitly_deferred_imports = Vec::new();
-    if let Some(deferrable_selector) = deferrable_selector
+    // What each `@defer` block uses, keyed by the block's span, when its own
+    // dependency function can be built (see below).
+    let mut defer_block_dependencies = None;
+    if let Some(import_selector) = import_selector
         && let Some(import_elision) = import_elision
         && !options.hmr
         && let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports
@@ -5644,24 +5656,30 @@ fn compile_component_full<'a>(
             .all(|(entry, class)| class.is_some() || matches!(entry, OutputExpression::ReadVar(_)))
         && super::defer_resolver::template_has_defer_block(&r3_result.nodes)
     {
+        let mut deferrable = Vec::new();
         let candidates: Vec<_> = metadata
             .import_entry_classes
             .iter()
             .flatten()
             .copied()
             .filter_map(|name| {
-                let selector = deferrable_selector(name.as_str())?;
+                let (selector, can_defer) = import_selector(name.as_str())?;
+                if can_defer {
+                    deferrable.push(name);
+                }
                 Some((name, crate::pipeline::selector::CssSelector::parse(&selector)))
             })
             .collect();
-        let deferred =
+        let block_only =
             super::defer_resolver::implicitly_deferred_imports(&r3_result.nodes, &candidates);
+        let mut deferred = block_only.clone();
+        deferred.retain(|name| deferrable.contains(name));
         // ngc's `DeferredSymbolTracker.canDefer`: an import declaration goes
         // only when every non-`type` specifier in it is deferred, or the
         // static import would stay and nothing would be split off. An
         // explicit `deferredImports` entry doesn't count: OXC keeps its
         // static import.
-        let deferred: std::vec::Vec<_> = deferred
+        let mut deferred: std::vec::Vec<_> = deferred
             .iter()
             .copied()
             .filter(|name| {
@@ -5671,15 +5689,53 @@ fn compile_component_full<'a>(
                     .all(|specifier| deferred.contains(specifier))
             })
             .collect();
-        if !deferred.is_empty() {
-            let is_deferred = |name: &str| deferred.iter().any(|d| d.as_str() == name);
-            metadata.imports.retain(|name| !is_deferred(name.as_str()));
+        // ngc's full compilation gives each `@defer` block its own dependency
+        // function (`DeferBlockDepsEmitMode.PerBlock`) listing what the
+        // block's main content uses: a dynamic `import()` for a lazy
+        // dependency and a plain reference for an eager one
+        // (`resolveDeferBlocks` and `compileDeferBlocks` in its component
+        // `handler.ts`). An `imports` entry whose selector is unknown is left
+        // out; it stays eager, and `dependencies` already provides it to the
+        // block. An explicit `deferredImports` keeps the shared function: its
+        // selectors aren't read.
+        if metadata.deferred_imports.is_empty() && !options.jit {
+            defer_block_dependencies =
+                super::defer_resolver::defer_block_dependencies(&r3_result.nodes, &candidates);
+        }
+        if let Some(blocks) = &defer_block_dependencies {
+            // `resolveAllDeferredDependencies` lists the lazy dependencies of
+            // `setClassMetadataAsync` block by block.
+            deferred.sort_by_key(|name| {
+                blocks.iter().flat_map(|(_, dependencies)| dependencies).position(|d| d == name)
+            });
+        }
+        // `dependencies` lists only what the template uses eagerly
+        // (`handleDependencyCycles` in ngc's component `handler.ts`). With a
+        // dependency function per block, an entry used only inside `@defer`
+        // blocks leaves it even when it can't be lazy-loaded: the blocks'
+        // functions provide it. Otherwise only the deferred entries leave.
+        let removed = if defer_block_dependencies.is_some() { &block_only } else { &deferred };
+        if !removed.is_empty() {
+            let is_removed = |name: &str| removed.iter().any(|d| d.as_str() == name);
+            metadata.imports.retain(|name| !is_removed(name.as_str()));
             if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
                 let mut classes = metadata.import_entry_classes.iter();
                 raw_imports.entries.retain(|_| {
-                    !classes.next().copied().flatten().is_some_and(|name| is_deferred(&name))
+                    !classes.next().copied().flatten().is_some_and(|name| is_removed(&name))
                 });
+                // Nothing left to resolve at runtime: like a standalone
+                // component without `imports`, it gets no `dependencies`.
+                if raw_imports.entries.is_empty()
+                    && defer_block_dependencies.is_some()
+                    && metadata.standalone
+                {
+                    metadata.raw_imports = None;
+                    metadata.declaration_list_emit_mode =
+                        super::metadata::DeclarationListEmitMode::Direct;
+                }
             }
+        }
+        if !deferred.is_empty() {
             implicitly_deferred_imports = deferred.iter().map(ToString::to_string).collect();
             metadata.deferred_imports.extend(deferred);
         }
@@ -5702,8 +5758,9 @@ fn compile_component_full<'a>(
     // Note: Angular's full compilation mode also derives deferrable symbols
     // from `imports: [...]` by matching template selectors against imported
     // directive classes (`resolveAllDeferredDependencies`). OXC does that
-    // above when cross-file analysis is available (#313) and otherwise
-    // follows Angular's local path, which requires explicit `deferredImports`.
+    // above when cross-file analysis is available (#313), with one dependency
+    // function per block, and otherwise follows Angular's local path, which
+    // requires explicit `deferredImports`.
     // Computed once and reused below: the resolver decision and the eventual
     // `setClassMetadataAsync` gate both depend on whether the template uses
     // `@defer`.
@@ -5713,20 +5770,23 @@ fn compile_component_full<'a>(
     // would resolve against the update module's URL, not the component file.
     // The update keeps a null dependency function instead (PerComponent mode
     // below), as `compile_template_for_hmr` always has.
-    let defer_resolver_fn = if metadata.deferred_imports.is_empty() || hmr_update {
-        None
-    } else if has_defer_block {
-        super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
-    } else {
-        // `deferredImports` declared but no `@defer` block — the resolver
-        // would be unused dead code. Leave it off.
-        None
-    };
+    let defer_resolver_fn =
+        if metadata.deferred_imports.is_empty() || hmr_update || defer_block_dependencies.is_some()
+        {
+            None
+        } else if has_defer_block {
+            super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
+        } else {
+            // `deferredImports` declared but no `@defer` block — the resolver
+            // would be unused dead code. Leave it off.
+            None
+        };
 
     // When we have a resolver, switch to PerComponent emit mode so the
     // ingest stage threads `all_deferrable_deps_fn` into each `DeferOp`.
     // Without a resolver, the existing PerBlock-vs-JIT behavior stays in
-    // place (and `all_deferrable_deps_fn = None`).
+    // place (and `all_deferrable_deps_fn = None`). Per-block dependencies
+    // never come with a resolver, so they get PerBlock.
     let defer_block_deps_emit_mode = if defer_resolver_fn.is_some()
         || (hmr_update && !metadata.deferred_imports.is_empty() && has_defer_block)
     {
@@ -5758,7 +5818,20 @@ fn compile_component_full<'a>(
         // PerComponent mode: pass the shared resolver expression so the
         // ingest stage attaches it to every defer block's create op.
         all_deferrable_deps_fn: defer_resolver_fn,
-        defer_blocks: FxHashMap::default(),
+        // PerBlock mode: each block's own dependency function, if any.
+        defer_blocks: defer_block_dependencies
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(span, dependencies)| {
+                let deps_fn = super::defer_resolver::compile_defer_block_resolver(
+                    allocator,
+                    &dependencies,
+                    &metadata.deferred_imports,
+                    import_map,
+                );
+                (span, deps_fn)
+            })
+            .collect(),
         // Use the shared pool starting index to avoid duplicate constant names
         // when compiling multiple components in the same file
         pool_starting_index,

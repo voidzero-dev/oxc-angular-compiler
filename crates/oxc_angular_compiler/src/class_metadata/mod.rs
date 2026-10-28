@@ -21,6 +21,7 @@ pub use builders::{
 pub(crate) use builders::{entity_path, param_type_reference, type_param_names_of};
 pub use compiler::{
     compile_class_metadata, compile_component_class_metadata,
-    compile_component_metadata_async_resolver, compile_opaque_async_class_metadata,
+    compile_component_metadata_async_resolver, compile_deferred_dependency_import,
+    compile_opaque_async_class_metadata,
 };
 pub use metadata::{R3ClassMetadata, R3DeferPerComponentDependency};
