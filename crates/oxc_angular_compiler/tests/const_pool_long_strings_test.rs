@@ -180,3 +180,20 @@ export class C { @ViewChild('x') q: any; @ViewChild('y') r: any; }
     assert!(code.contains(r#"const_c1=["y"];"#), "{code}");
     assert!(code.contains("i0.ɵɵviewQuery(_c0,5)(_c1,5)"), "{code}");
 }
+
+#[test]
+fn literals_whose_strings_join_alike_stay_apart() {
+    // `["a", "b,str:c,str:d"]` and `["a", "b", "c", "d"]` are different arrays, so B must not
+    // read A's `attrs` constant.
+    let code = squash(&transform(
+        "import {Component} from '@angular/core';
+@Component({selector: '[a=\"b,str:c,str:d\"]', template: 'x', standalone: true})
+export class A {}
+@Component({selector: '[a=b][c=d]', template: 'y', standalone: true})
+export class B {}
+",
+    ));
+    assert!(code.contains(r#"const_c0=["a","b,str:c,str:d"];"#), "{code}");
+    assert!(code.contains(r#"const_c1=["a","b","c","d"];"#), "{code}");
+    assert!(code.contains("type:B,selectors:[[\"\",\"a\",\"b\",\"c\",\"d\"]],attrs:_c1"), "{code}");
+}

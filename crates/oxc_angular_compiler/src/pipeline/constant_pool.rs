@@ -589,7 +589,8 @@ fn expression_to_key(expr: &OutputExpression<'_>) -> String {
             LiteralValue::Undefined => "undefined".to_string(),
             LiteralValue::Boolean(b) => format!("bool:{}", b),
             LiteralValue::Number(n) => format!("num:{}", n),
-            LiteralValue::String(s) => format!("str:{}", s),
+            // Quoted and escaped, so no string can read as several entries.
+            LiteralValue::String(s) => format!("str:{s:?}"),
         },
         OutputExpression::LiteralArray(arr) => {
             let entries: std::vec::Vec<String> =
