@@ -56,7 +56,8 @@ export class C {
 }
 
 /// Same repro with `emit_class_metadata` off: the decorators are stripped and
-/// their imports are elided, as before.
+/// their imports are elided, as before. TOKEN stays: like ngtsc, the factory
+/// names it as written (`ɵɵdirectiveInject(TOKEN, 8)`).
 #[test]
 fn ctor_param_decorators_elided_without_class_metadata() {
     let source = r#"
@@ -76,7 +77,7 @@ export class C {
         .find(|l| l.starts_with("import") && l.contains("@angular/core") && !l.contains("* as"))
         .unwrap();
     assert_eq!(core_import, "import { Component } from \"@angular/core\";");
-    assert!(!code.contains("import {TOKEN}"), "TOKEN should be elided: {code}");
+    assert!(code.contains("import {TOKEN} from './tokens'"), "TOKEN import must survive: {code}");
 }
 
 /// `@Inject(TOKEN)` must also keep the decorator imports for @Directive,
@@ -235,5 +236,5 @@ export class C {
         .unwrap();
     assert!(!core_import.contains("Inject"), "Inject should be elided: {code}");
     assert!(!core_import.contains("Optional"), "Optional should be elided: {code}");
-    assert!(!code.contains("import {TOKEN}"), "TOKEN should be elided: {code}");
+    assert!(code.contains("import {TOKEN} from './tokens'"), "TOKEN import must survive: {code}");
 }

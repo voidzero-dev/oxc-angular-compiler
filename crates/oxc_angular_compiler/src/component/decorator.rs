@@ -784,6 +784,7 @@ fn extract_param_dependency<'a>(
     // Determine the token:
     // 1. If @Inject(TOKEN) is present, use TOKEN
     // 2. Otherwise, use the type annotation
+    let from_inject = inject_token.is_some();
     let (token, member_path) = inject_token
         .or_else(|| extract_param_token(allocator, param))
         .map_or((None, &[][..]), |(t, m)| (Some(t), m));
@@ -823,10 +824,10 @@ fn extract_param_dependency<'a>(
                     // Carry the exported name so namespaced refs (`i1.X`) use the export
                     // name, not the local alias, for aliased imports.
                     d.token_imported_name = import_info.imported_name.clone();
-                    // Always use namespace imports for DI tokens (has_named_import = false).
-                    // Import elision removes @Inject(TOKEN) argument imports since they're
-                    // only used in decorator positions that get compiled away.
-                    // Using bare TOKEN would fail at runtime because the import is gone.
+                    // Type-annotation tokens use namespace imports (`i1.X`). Like ngtsc,
+                    // an `@Inject(TOKEN)` token keeps the expression as written and a
+                    // default import keeps its local name; import elision keeps both.
+                    d.has_named_import = from_inject || import_info.is_default_import;
                     d
                 }
             } else {

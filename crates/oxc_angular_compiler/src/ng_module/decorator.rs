@@ -167,14 +167,10 @@ impl<'a> NgModuleMetadata<'a> {
             builder = builder.add_bootstrap(R3Reference::value_only(bootstrap_expr));
         }
 
-        // Add schemas
-        for schema in &self.schemas {
-            let schema_expr = OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: schema.clone(), source_span: None },
-                &allocator,
-            ));
-            builder = builder.add_schema(R3Reference::value_only(schema_expr));
-        }
+        // Schemas are left out: ngtsc always passes `schemas: []` here (the
+        // "TODO: to be implemented as a part of FW-1004" in the NgModule
+        // handler), so `ɵmod` never lists them. They stay in the class metadata.
+        // See: packages/compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts
 
         // Set module ID if present
         if let Some(id) = &self.id {

@@ -149,6 +149,17 @@ impl<'a> R3DependencyMetadata<'a> {
         }
     }
 
+    /// Whether this dependency makes the whole factory invalid.
+    ///
+    /// ngtsc never emits `ɵɵinvalidFactoryDep` in AOT: a parameter without a
+    /// usable token turns the constructor deps into `'invalid'`, which becomes
+    /// `ɵɵinvalidFactory()`.
+    /// See: `packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts`
+    /// (`unwrapConstructorDependencies`).
+    pub fn is_invalid(&self) -> bool {
+        self.type_only_invalid || (self.token.is_none() && self.attribute_name.is_none())
+    }
+
     /// Create a dependency with `@Optional()` decorator.
     pub fn with_optional(mut self) -> Self {
         self.optional = true;
@@ -692,6 +703,11 @@ mod tests {
         let allocator = Allocator::default();
         let dep = R3DependencyMetadata::invalid();
         let mut registry = NamespaceRegistry::new(&allocator);
+
+        // A dep without a token makes the whole factory `ɵɵinvalidFactory()`,
+        // so factory compilation never reaches the per-dep call below.
+        assert!(dep.is_invalid());
+        assert!(!R3DependencyMetadata::attribute(Ident::from("title")).is_invalid());
 
         let result =
             compile_inject_dependency(&allocator, &dep, FactoryTarget::Component, 2, &mut registry);

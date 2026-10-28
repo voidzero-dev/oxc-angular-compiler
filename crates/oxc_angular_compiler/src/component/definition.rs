@@ -632,11 +632,11 @@ fn generate_constructor_factory<'a>(
         &allocator,
     ));
 
-    // If any constructor parameter resolved to a type-only import, the whole
-    // factory cannot be formed at runtime. Emit `i0.ɵɵinvalidFactory()` instead
-    // of a `new ClassCtor(...)` expression — matching Angular's
-    // `ValueUnavailableKind.TYPE_ONLY_IMPORT` behaviour. See issue #288.
-    if deps.iter().any(|d| d.type_only_invalid) {
+    // If any constructor parameter has no usable token (or resolved to a
+    // type-only import), the whole factory cannot be formed at runtime. Emit
+    // `i0.ɵɵinvalidFactory()` instead of a `new ClassCtor(...)` expression —
+    // matching ngtsc's `'invalid'` constructor deps. See issue #288.
+    if deps.iter().any(R3DependencyMetadata::is_invalid) {
         statements.push(OutputStatement::Expression(Box::new_in(
             crate::output::ast::ExpressionStatement {
                 expr: create_invalid_factory_call(

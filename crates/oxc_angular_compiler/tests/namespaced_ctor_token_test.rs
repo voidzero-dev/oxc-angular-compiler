@@ -153,7 +153,7 @@ export class ACmp {{
     }
 }
 
-/// A component's `@Inject(TOKEN.sub)` is injected, not the parameter type.
+/// A component's `@Inject(TOKEN.sub)` is injected as written, not the parameter type.
 #[test]
 fn component_inject_member_chain_wins_over_the_type() {
     let code = compile(
@@ -167,5 +167,5 @@ export class ACmp {
 }
 ",
     );
-    assert_contains(&code, "(i0.ɵɵdirectiveInject(i1.TOKEN.a.b),i0.ɵɵdirectiveInject(i2.TOKEN))");
+    assert_contains(&code, "(i0.ɵɵdirectiveInject(TOKEN.a.b),i0.ɵɵdirectiveInject(ns.TOKEN))");
 }

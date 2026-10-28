@@ -724,14 +724,34 @@ fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str>
 /// qualified type `ns.one.One` reads off the namespace import (`i1.one.One`), and
 /// `mod.Foo` off the named import (`i1.mod.Foo`).
 /// This ensures the factory works correctly even after import elision.
+///
+/// Only type-annotation tokens are rewritten. Like ngtsc's `getConstructorDependencies`
+/// (`annotations/common/src/di.ts`), an `@Inject(TOKEN)` token is the expression as
+/// written, and a default import (`import Foo from './foo'`) stays `Foo`
+/// (`typeToValue`'s LOCAL reference with a `defaultImportStatement`). Import elision
+/// keeps both imports.
 fn resolve_factory_dep_namespaces<'a>(
     allocator: &'a Allocator,
     deps: &mut oxc_allocator::Vec<'a, crate::factory::R3DependencyMetadata<'a>>,
+    class: &oxc_ast::ast::Class<'a>,
+    string_consts: &crate::directive::StringConsts<'a>,
     import_map: &ImportMap<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) {
-    for dep in deps.iter_mut() {
+    // One dep per constructor parameter, in order.
+    let params = crate::util::find_constructor(class).map(|ctor| &ctor.value.params.items);
+    let is_inject_with_token = |decorator: &oxc_ast::ast::Decorator<'a>| {
+        crate::directive::angular_param_decorator(decorator, Some(string_consts)) == Some("Inject")
+            && matches!(
+                &decorator.expression,
+                Expression::CallExpression(call) if !call.arguments.is_empty()
+            )
+    };
+    for (index, dep) in deps.iter_mut().enumerate() {
         let Some(token) = dep.token.as_mut() else { continue };
+        let from_inject = params
+            .and_then(|params| params.get(index))
+            .is_some_and(|param| param.decorators.iter().any(is_inject_with_token));
         let is_member_chain = matches!(token, OutputExpression::ReadProp(_));
         let root = member_chain_root(token);
         // Only process bare variable references (ReadVar)
@@ -747,6 +767,9 @@ fn resolve_factory_dep_namespaces<'a>(
             // See issue #288.
             dep.token = None;
             dep.type_only_invalid = true;
+            continue;
+        }
+        if from_inject || import_info.is_default_import {
             continue;
         }
         // Replace with namespace-prefixed reference: i1.Store instead of Store
@@ -3423,6 +3446,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4003,6 +4028,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4152,6 +4179,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4267,6 +4296,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4497,6 +4528,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -8604,13 +8637,15 @@ export class CustomElementsModule {}
         let result =
             transform_angular_file(&allocator, "custom-elements.module.ts", source, None, None);
 
-        // ɵmod should be generated with schemas
+        // ɵmod should be generated without schemas: like ngtsc, they are only
+        // kept in the class metadata.
+        let mod_line = result.code.lines().find(|l| l.contains("static ɵmod = ")).unwrap();
+        assert!(!mod_line.contains("schemas"), "ɵmod should not list schemas: {mod_line}");
         assert!(
-            result.code.contains("static ɵmod = "),
-            "Code should contain .ɵmod = , but got:\n{}",
+            result.code.contains("schemas:[CUSTOM_ELEMENTS_SCHEMA]"),
+            "Class metadata should keep schemas, but got:\n{}",
             result.code
         );
-        assert!(result.code.contains("schemas"), "Code should contain schemas property");
     }
 
     #[test]
@@ -9024,29 +9059,34 @@ export class TestComponent {
         let result =
             transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
-        // @Inject(DARK_THEME) now uses namespace imports (i1 for @app/theme),
-        // so rxjs gets i2 for Observable.
+        // Like ngtsc, the factory names @Inject(DARK_THEME) as written, so only
+        // rxjs gets a namespace import (i1 for Observable).
         assert!(
-            result.code.contains("import * as i1 from '@app/theme'"),
-            "Should generate namespace import for @app/theme, but got:\n{}",
-            result.code
-        );
-        assert!(
-            result.code.contains("import * as i2 from 'rxjs'"),
+            result.code.contains("import * as i1 from 'rxjs'"),
             "Should generate namespace import for rxjs, but got:\n{}",
             result.code
         );
-
-        // The factory should use namespace-prefixed DARK_THEME
         assert!(
-            result.code.contains("i1.DARK_THEME"),
-            "Factory should use namespace-prefixed DARK_THEME, but got:\n{}",
+            !result.code.contains("import * as i2"),
+            "@app/theme should not get a namespace import, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("import { DARK_THEME } from '@app/theme'"),
+            "The DARK_THEME import should be kept, but got:\n{}",
             result.code
         );
 
-        // The setClassMetadata ctor params should reference i2.Observable
+        // The factory should use DARK_THEME as written
         assert!(
-            result.code.contains("i2.Observable"),
+            result.code.contains("ɵɵdirectiveInject(DARK_THEME)"),
+            "Factory should use DARK_THEME as written, but got:\n{}",
+            result.code
+        );
+
+        // The setClassMetadata ctor params should reference i1.Observable
+        assert!(
+            result.code.contains("i1.Observable"),
             "setClassMetadata should use namespace-prefixed Observable, but got:\n{}",
             result.code
         );

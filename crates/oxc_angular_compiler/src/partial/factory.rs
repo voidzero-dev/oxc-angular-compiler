@@ -13,7 +13,7 @@ use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
 use super::{MIN_VERSION_FACTORY, PLACEHOLDER_VERSION};
-use crate::factory::{FactoryTarget, R3FactoryDeps, R3FactoryMetadata};
+use crate::factory::{FactoryTarget, R3DependencyMetadata, R3FactoryDeps, R3FactoryMetadata};
 use crate::output::ast::{
     InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
     LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
@@ -94,9 +94,9 @@ pub fn compile_declare_factory_function<'a>(
 ///   `ɵɵinvalidFactory()`).
 /// - `R3FactoryDeps::None` → `null` (linker emits the inherited-factory
 ///   pattern).
-/// - `R3FactoryDeps::Valid(deps)` where any dep has `type_only_invalid` →
-///   coerced to `"invalid"`, matching full-mode behavior (see #288 and
-///   `factory/compiler.rs:143`).
+/// - `R3FactoryDeps::Valid(deps)` where any dep is invalid (no token, or a
+///   type-only import) → coerced to `"invalid"`, matching full-mode behavior
+///   (see #288 and `factory/compiler.rs:143`).
 /// - Otherwise → array literal of per-dep maps.
 fn compile_dependencies<'a>(
     allocator: &'a Allocator,
@@ -108,7 +108,7 @@ fn compile_dependencies<'a>(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
             &allocator,
         )),
-        R3FactoryDeps::Valid(deps) if deps.iter().any(|d| d.type_only_invalid) => {
+        R3FactoryDeps::Valid(deps) if deps.iter().any(R3DependencyMetadata::is_invalid) => {
             string_literal(allocator, "invalid")
         }
         R3FactoryDeps::Valid(deps) => {

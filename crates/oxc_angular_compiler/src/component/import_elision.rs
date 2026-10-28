@@ -17,14 +17,15 @@
 //! - `import { type X }` - explicit type-only specifiers
 //! - Types only used in type annotations (e.g., `userId?: UserId`)
 //! - Interfaces only used in `implements` clause
-//! - Constructor parameter types (DI tokens are provided via namespace imports)
+//! - Constructor parameter types (DI tokens are provided via namespace imports),
+//!   except default imports, which the factory names by their local name
 //! - Constructor parameter decorators (`@Inject`, `@Optional`, etc.) - Angular removes these
-//! - DI tokens used only in `@Inject(TOKEN)` arguments
 //!
-//! The last two apply only when no `ɵsetClassMetadata` is emitted: the
-//! metadata's `ctorParameters` callback names the param decorators and
-//! `@Inject` tokens as bare identifiers, so their imports must survive
-//! (matching ngtsc, which keeps them).
+//! The last one applies only when no `ɵsetClassMetadata` is emitted: the
+//! metadata's `ctorParameters` callback names the param decorators as bare
+//! identifiers, so their imports must survive (matching ngtsc, which keeps
+//! them). `@Inject(TOKEN)` tokens are always kept: the factory names them as
+//! written, like ngtsc.
 //!
 //! ## What gets preserved
 //!
@@ -78,11 +79,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// `emit_metadata` must mirror whether the transform will emit
     /// `ɵsetClassMetadata` for this file (`emit_class_metadata &&
     /// !advanced_optimizations`). The metadata callback names constructor
-    /// parameter decorators (`{type: Optional}`), `@Inject(TOKEN)` argument
-    /// tokens (`args: [TOKEN]`), and member decorators (`{type: Input}`) by
-    /// their local (imported) name, so those imports must survive elision —
-    /// like ngtsc, which keeps them. When no metadata is emitted, the
-    /// decorators are stripped outright and the imports can be dropped.
+    /// parameter decorators (`{type: Optional}`) and member decorators
+    /// (`{type: Input}`) by their local (imported) name, so those imports must
+    /// survive elision — like ngtsc, which keeps them. When no metadata is
+    /// emitted, the decorators are stripped outright and the imports can be
+    /// dropped.
     pub fn analyze(program: &'a Program<'a>, emit_metadata: bool) -> Self {
         let semantic_ret = SemanticBuilder::new().build(program);
         Self::analyze_with_semantic(program, &semantic_ret.semantic, emit_metadata)
@@ -197,19 +198,18 @@ impl<'a> ImportElisionAnalyzer<'a> {
         }
         let mut kept_by_output = computed_key_idents;
 
-        // Post-pass: when class metadata is emitted, a default import used as a
-        // bare ctor-param type reference is emitted into the metadata's
-        // `ctorParameters` `type:` by its local name — ngtsc keeps the import
-        // via `defaultImportStatement` (`type_to_value.ts` +
+        // Post-pass: a default import used as a bare ctor-param type reference
+        // is emitted by its local name, in the factory (`ɵɵinject(Foo)`) and in
+        // the metadata's `ctorParameters` `type:` — ngtsc keeps the import via
+        // `defaultImportStatement` (`type_to_value.ts` +
         // `attachDefaultImportDeclaration`). Keep it here too, or the emitted
-        // `type: Foo` would dangle.
-        if emit_metadata {
-            let ctor_type_names = Self::collect_ctor_param_type_leftmost_names(program, &consts);
-            for name in &ctor_type_names {
-                type_only_specifiers.remove(name);
-            }
-            kept_by_output.extend(ctor_type_names);
+        // `Foo` would dangle.
+        let ctor_type_names =
+            Self::collect_ctor_param_type_leftmost_names(program, &consts, emit_metadata);
+        for name in &ctor_type_names {
+            type_only_specifiers.remove(name);
         }
+        kept_by_output.extend(ctor_type_names);
 
         Self {
             type_only_specifiers,
@@ -228,9 +228,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Only default imports need this: named/namespace imports emit
     /// `i{reg}.Export`, which re-anchors the module import, while a default
     /// import emits its local name (upstream's LOCAL + defaultImportStatement).
+    ///
+    /// Without metadata, only the factory names the type, and only for a
+    /// param whose token is not overridden by `@Inject` / `@Attribute`.
     fn collect_ctor_param_type_leftmost_names(
         program: &'a Program<'a>,
         consts: &crate::directive::StringConsts<'a>,
+        emit_metadata: bool,
     ) -> FxHashSet<Ident<'a>> {
         let mut default_imports: FxHashSet<&'a str> = FxHashSet::default();
         for stmt in &program.body {
@@ -261,6 +265,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         class,
                         &default_imports,
                         consts,
+                        emit_metadata,
                         &mut names,
                     );
                 }
@@ -272,6 +277,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                             class,
                             &default_imports,
                             consts,
+                            emit_metadata,
                             &mut names,
                         );
                     }
@@ -283,6 +289,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                             class,
                             &default_imports,
                             consts,
+                            emit_metadata,
                             &mut names,
                         );
                     }
@@ -301,6 +308,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
         class: &'a oxc_ast::ast::Class<'a>,
         default_imports: &FxHashSet<&'a str>,
         consts: &crate::directive::StringConsts<'a>,
+        emit_metadata: bool,
         names: &mut FxHashSet<Ident<'a>>,
     ) {
         let has_angular_decorator = class
@@ -313,6 +321,20 @@ impl<'a> ImportElisionAnalyzer<'a> {
         let type_params = crate::class_metadata::type_param_names_of(class);
         if let Some(method) = crate::util::find_constructor(class) {
             for param in &method.value.params.items {
+                // `@Inject(TOKEN)` / `@Attribute('x')` replace the type as the
+                // factory's token (`getConstructorDependencies` in
+                // `annotations/common/src/di.ts`), so only the metadata's
+                // `type:` still names it.
+                if !emit_metadata
+                    && param.decorators.iter().any(|d| {
+                        matches!(
+                            crate::directive::angular_param_decorator(d, Some(consts)),
+                            Some("Inject" | "Attribute")
+                        )
+                    })
+                {
+                    continue;
+                }
                 let Some(annotation) = &param.type_annotation else {
                     continue;
                 };
@@ -550,9 +572,8 @@ impl<'a> ImportElisionAnalyzer<'a> {
     ///
     /// - an Angular constructor parameter decorator of the constructor implementation (the one
     ///   `collect_constructor_decorator_spans` strips and the factory reads, see
-    ///   [`crate::util::find_constructor`]), with the root of `@Inject(X)` /
-    ///   `@Inject(X.sub)`: the factory names `X` through a namespace import (`i1.X.sub`), while any other
-    ///   argument (`TOKEN['sub']`, `forwardRef(() => TOKEN)`) is copied as written
+    ///   [`crate::util::find_constructor`]), but not its arguments: the factory names an `@Inject(X)`
+    ///   token as written, like ngtsc
     /// - the Angular member decorator itself on a `declare` property, not its arguments: a query predicate
     ///   (`viewQuery(Foo)`) or an input `transform` is compiled into the definition by its local name
     ///
@@ -581,23 +602,6 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 }
             }
         }
-        /// The name a token resolves through: `TOKEN` in `TOKEN` or `TOKEN.a?.b`, like
-        /// `resolve_factory_dep_namespaces` does. `(TOKEN).a` or `TOKEN['a']` is copied as written.
-        fn member_chain_root<'b, 'a>(
-            expression: &'b Expression<'a>,
-        ) -> Option<&'b oxc_ast::ast::IdentifierReference<'a>> {
-            match expression {
-                Expression::Identifier(id) => Some(id),
-                Expression::StaticMemberExpression(member) => member_chain_root(&member.object),
-                Expression::ChainExpression(chain) => match &chain.expression {
-                    oxc_ast::ast::ChainElement::StaticMemberExpression(member) => {
-                        member_chain_root(&member.object)
-                    }
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
         let mut references = References::default();
         for stmt in &program.body {
             let class = match stmt {
@@ -621,22 +625,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
             for param in constructor.into_iter().flat_map(|ctor| &ctor.value.params.items) {
                 for decorator in &param.decorators {
                     // by what it resolves to: `@I(TOKEN)` for `import { Inject as I }` is removed too
-                    let Some(name) =
-                        crate::directive::angular_param_decorator(decorator, Some(consts))
-                    else {
-                        continue;
-                    };
-                    references.visit_callee(decorator);
-                    if name == "Inject"
-                        && let Expression::CallExpression(call) = &decorator.expression
-                        && let Some(token) = call
-                            .arguments
-                            .first()
-                            .and_then(oxc_ast::ast::Argument::as_expression)
-                            .and_then(member_chain_root)
+                    if crate::directive::angular_param_decorator(decorator, Some(consts)).is_none()
                     {
-                        references.visit_identifier_reference(token);
+                        continue;
                     }
+                    references.visit_callee(decorator);
                 }
             }
             for element in &class.body.body {
@@ -1616,8 +1609,8 @@ export class BitLabelComponent {
 
     #[test]
     fn test_inject_token_used_elsewhere_in_the_file_is_kept() {
-        // `@Inject(TOKEN)` is removed, but TOKEN is also a value elsewhere in the file: an exported const, a
-        // function, a nested scope. Each needs the import.
+        // `@Inject(TOKEN)` is removed and TOKEN is also a value elsewhere in the file: an exported const, a
+        // function, a nested scope. The import is kept (the factory names TOKEN too).
         for elsewhere in [
             "export const providers = [{ provide: TOKEN, useValue: 1 }];",
             "export function token() { return TOKEN; }",
@@ -1649,7 +1642,8 @@ export class TestService {{
 
     #[test]
     fn test_aliased_inject_counts_as_removed() {
-        // `@I(TOKEN)` is Angular's Inject under an alias, which compilation removes like `@Inject(TOKEN)`
+        // `@I(TOKEN)` is Angular's Inject under an alias, which compilation removes like `@Inject(TOKEN)`.
+        // TOKEN stays: the factory names it as written.
         let source = r#"
 import { Injectable, Inject } from "@angular/core";
 import { Inject as I } from "@angular/core";
@@ -1665,12 +1659,15 @@ export class B {
     constructor(@Inject(TOKEN) private value: unknown) {}
 }
 "#;
-        assert!(analyze_source(source).contains("TOKEN"));
+        let type_only = analyze_source(source);
+        assert!(type_only.contains("I"), "the aliased Inject should be elided");
+        assert!(!type_only.contains("TOKEN"), "TOKEN should be kept");
     }
 
     #[test]
-    fn test_inject_decorator_and_token_elided() {
-        // @Inject(TOKEN) - both the decorator and the token should be elided
+    fn test_inject_decorator_elided_and_token_kept() {
+        // @Inject(TOKEN) - the decorator is elided, but the factory names the
+        // token as written (`ɵɵdirectiveInject(DOCUMENT)`), like ngtsc
         let source = r#"
 import { Component, Inject } from "@angular/core";
 import { DOCUMENT } from "@angular/common";
@@ -1687,10 +1684,10 @@ export class TestComponent {
         // Inject should be elided (ctor param decorator)
         assert!(type_only.contains("Inject"), "Inject decorator should be elided");
 
-        // DOCUMENT token should be elided (only used in @Inject argument)
+        // DOCUMENT token should be kept (the factory uses it)
         assert!(
-            type_only.contains("DOCUMENT"),
-            "DOCUMENT token should be elided (only used in @Inject)"
+            !type_only.contains("DOCUMENT"),
+            "DOCUMENT token should be kept (the factory uses it)"
         );
 
         // Component should be preserved
@@ -1721,8 +1718,8 @@ export class TestComponent {
             assert!(type_only.contains(decorator), "{} decorator should be elided", decorator);
         }
 
-        // LOCALE_ID token should be elided
-        assert!(type_only.contains("LOCALE_ID"), "LOCALE_ID token should be elided");
+        // LOCALE_ID token should be kept (the factory uses it)
+        assert!(!type_only.contains("LOCALE_ID"), "LOCALE_ID token should be kept");
 
         // Component should be preserved
         assert!(!type_only.contains("Component"), "Component should be preserved");
