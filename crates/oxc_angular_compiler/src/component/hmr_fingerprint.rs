@@ -78,13 +78,17 @@ pub(super) fn hmr_fingerprint_of_program(
     let mut components = Vec::new();
     let mut excluded = Vec::new();
     // Every class the transform compiles, nested ones too. A name two classes
-    // declare compiles without HMR, so neither is read.
+    // declare compiles without HMR, so neither is read, nor is a `namespace`
+    // member.
     let declared_classes = crate::util::declared_classes(program);
     let ambiguous = super::transform::ambiguous_class_names(&declared_classes);
     for declared in &declared_classes {
         let class = declared.class;
         let Some(id) = &class.id else { continue };
-        if ambiguous.contains(id.name.as_str()) || !is_compiled(id.name.as_str()) {
+        if declared.namespace.is_some()
+            || ambiguous.contains(id.name.as_str())
+            || !is_compiled(id.name.as_str())
+        {
             continue;
         }
         if collect_excluded_ranges(class, consts, &mut excluded) {

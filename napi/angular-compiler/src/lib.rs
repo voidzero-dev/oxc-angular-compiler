@@ -366,7 +366,7 @@ pub struct TemplateCompileResult {
 #[derive(Default)]
 #[napi(object)]
 pub struct DtsDeclaration {
-    /// The name of the class.
+    /// The name of the class; dotted (`NS.App`) for a `namespace` member.
     pub class_name: String,
     /// The static member declarations to add to the class body in `.d.ts`.
     /// Newline-separated `static` property declarations.
@@ -453,7 +453,8 @@ pub struct TransformResult {
 #[derive(Default)]
 #[napi(object)]
 pub struct DtsInjectDeclaration {
-    /// The class the members belong to.
+    /// The class the members belong to; dotted (`NS.App`) for a class of a
+    /// `namespace`.
     pub class_name: String,
     /// Newline-separated `static …;` member declarations.
     pub members: String,

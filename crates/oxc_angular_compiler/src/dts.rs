@@ -33,7 +33,7 @@ use std::collections::HashMap;
 /// that should be injected into the corresponding `.d.ts` class.
 #[derive(Debug, Clone, Default)]
 pub struct DtsDeclaration {
-    /// The name of the class.
+    /// The name of the class; dotted (`NS.App`) for a `namespace` member.
     pub class_name: String,
     /// The static member declarations to add to the class body in `.d.ts`.
     /// This is a newline-separated string of `static` property declarations.

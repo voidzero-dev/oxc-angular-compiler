@@ -370,7 +370,7 @@ export interface DependencyMetadata {
  * that should be injected into the corresponding `.d.ts` class body.
  */
 export interface DtsDeclaration {
-  /** The name of the class. */
+  /** The name of the class; dotted (`NS.App`) for a `namespace` member. */
   className: string
   /**
    * The static member declarations to add to the class body in `.d.ts`.
@@ -388,7 +388,10 @@ export interface DtsDeclaration {
 
 /** One class's `.d.ts` declarations for [`inject_dts_declarations`]. */
 export interface DtsInjectDeclaration {
-  /** The class the members belong to. */
+  /**
+   * The class the members belong to; dotted (`NS.App`) for a class of a
+   * `namespace`.
+   */
   className: string
   /** Newline-separated `static …;` member declarations. */
   members: string

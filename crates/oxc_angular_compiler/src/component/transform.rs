@@ -3329,6 +3329,9 @@ pub fn transform_angular_file(
     // The compiled classes nested in a function or block, by span: the
     // file-level declarations of their compile go after the imports.
     let mut nested_compiled: rustc_hash::FxHashSet<Span> = rustc_hash::FxHashSet::default();
+    // The compiled classes of a `namespace` body: ngtsc adds no statement
+    // after them there.
+    let mut namespace_compiled: rustc_hash::FxHashSet<Span> = rustc_hash::FxHashSet::default();
 
     // Classes that opted out of AOT via `jit: true` in their decorator
     // metadata: downleveled like JIT-mode classes (no Ivy definitions) while
@@ -3610,9 +3613,22 @@ pub fn transform_angular_file(
         let keeps_decorators = site.nested
             && (find_jit_forced_decorator(class, &string_consts).is_some()
                 || names_enclosing_binding(class, &semantic, &string_consts));
+        // A class in a function or block is not in the `.d.ts`; a `namespace`
+        // member is, under its dotted name: another class of the file may
+        // have its name.
+        let in_dts = !site.nested || site.namespace.is_some();
+        let dts_entry = |mut declaration: dts::DtsDeclaration| {
+            if let Some(namespace) = &site.namespace {
+                declaration.class_name = format!("{namespace}.{}", declaration.class_name);
+            }
+            declaration
+        };
         if !keeps_decorators {
             if site.nested {
                 nested_compiled.insert(class.span);
+            }
+            if site.namespace.is_some() {
+                namespace_compiled.insert(class.span);
             }
 
             // Pre-flight: catch @Service co-located with another Angular
@@ -3913,8 +3929,14 @@ pub fn transform_angular_file(
                     #[cfg(not(feature = "cross_file_elision"))]
                     let (import_selector, can_defer) = (None, None);
 
+                    // A `namespace` member has nowhere to put its HMR code.
                     let options = match &hmr_options {
-                        Some(no_hmr) if ambiguous_names.contains(class_name.as_str()) => no_hmr,
+                        Some(no_hmr)
+                            if site.namespace.is_some()
+                                || ambiguous_names.contains(class_name.as_str()) =>
+                        {
+                            no_hmr
+                        }
                         _ => options,
                     };
 
@@ -4260,16 +4282,17 @@ pub fn transform_angular_file(
                                 &parser_ret.program.comments,
                                 dts_core_namespace.as_str(),
                             );
-                            // A nested class is not in the `.d.ts`.
-                            if !site.nested {
-                                result.dts_declarations.push(dts::generate_component_dts(
-                                    dts_core_namespace.as_str(),
-                                    &metadata,
-                                    type_argument_count,
-                                    &content_query_names,
-                                    has_injectable,
-                                    &compilation_result.ng_content_selectors,
-                                    &accept_types,
+                            if in_dts {
+                                result.dts_declarations.push(dts_entry(
+                                    dts::generate_component_dts(
+                                        dts_core_namespace.as_str(),
+                                        &metadata,
+                                        type_argument_count,
+                                        &content_query_names,
+                                        has_injectable,
+                                        &compilation_result.ng_content_selectors,
+                                        &accept_types,
+                                    ),
                                 ));
                             }
 
@@ -4423,13 +4446,13 @@ pub fn transform_angular_file(
                         &parser_ret.program.comments,
                         dts_core_namespace.as_str(),
                     );
-                    if !site.nested {
-                        result.dts_declarations.push(dts::generate_directive_dts(
+                    if in_dts {
+                        result.dts_declarations.push(dts_entry(dts::generate_directive_dts(
                             dts_core_namespace.as_str(),
                             &directive_metadata,
                             has_injectable,
                             &accept_types,
-                        ));
+                        )));
                     }
 
                     // Emit setClassMetadata for TestBed support (overrideDirective +
@@ -4550,13 +4573,13 @@ pub fn transform_angular_file(
                         // Generate .d.ts type declaration for this pipe
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
-                        if !site.nested {
-                            result.dts_declarations.push(dts::generate_pipe_dts(
+                        if in_dts {
+                            result.dts_declarations.push(dts_entry(dts::generate_pipe_dts(
                                 dts_core_namespace.as_str(),
                                 &pipe_metadata,
                                 type_argument_count,
                                 has_injectable,
-                            ));
+                            )));
                         }
 
                         // Emit setClassMetadata for TestBed support (overridePipe).
@@ -4680,13 +4703,13 @@ pub fn transform_angular_file(
                         // Generate .d.ts type declaration for this NgModule
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
-                        if !site.nested {
-                            result.dts_declarations.push(dts::generate_ng_module_dts(
+                        if in_dts {
+                            result.dts_declarations.push(dts_entry(dts::generate_ng_module_dts(
                                 dts_core_namespace.as_str(),
                                 &ng_module_metadata,
                                 type_argument_count,
                                 has_injectable,
-                            ));
+                            )));
                         }
 
                         // Emit setClassMetadata for TestBed support (overrideModule).
@@ -4790,12 +4813,12 @@ pub fn transform_angular_file(
                             emitter.emit_expression(&definition.prov_definition)
                         );
 
-                        if !site.nested {
-                            result.dts_declarations.push(dts::generate_service_dts(
+                        if in_dts {
+                            result.dts_declarations.push(dts_entry(dts::generate_service_dts(
                                 dts_core_namespace.as_str(),
                                 &service_metadata,
                                 type_argument_count,
-                            ));
+                            )));
                         }
 
                         let decls_after_class = build_set_class_metadata_decls(
@@ -4876,12 +4899,12 @@ pub fn transform_angular_file(
                         // Generate .d.ts type declaration for this injectable
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
-                        if !site.nested {
-                            result.dts_declarations.push(dts::generate_injectable_dts(
+                        if in_dts {
+                            result.dts_declarations.push(dts_entry(dts::generate_injectable_dts(
                                 dts_core_namespace.as_str(),
                                 &injectable_metadata,
                                 type_argument_count,
-                            ));
+                            )));
                         }
 
                         // Emit setClassMetadata for TestBed support.
@@ -5113,7 +5136,7 @@ pub fn transform_angular_file(
             }
 
             // Debug info/class metadata/HMR after the class
-            if !decls_after_class.is_empty() {
+            if !decls_after_class.is_empty() && !namespace_compiled.contains(class_span) {
                 edits.push(Edit::insert(*class_body_end, format!("\n{}", decls_after_class)));
             }
         }
@@ -5542,14 +5565,16 @@ pub fn compile_component_hmr_update(
     update.fingerprint = Some(fingerprint);
 
     // A nested class too: the transform compiles those, with an HMR
-    // initializer like ngtsc's, unless another class has its name.
+    // initializer like ngtsc's, unless another class has its name or it is a
+    // `namespace` member.
     let declared_classes = crate::util::declared_classes(program);
     if ambiguous_class_names(&declared_classes).contains(class_name) {
         return update;
     }
     let Some(class) = declared_classes.into_iter().find_map(|declared| {
         let class = declared.class;
-        class.id.as_ref().is_some_and(|id| id.name == class_name).then_some(class)
+        (declared.namespace.is_none() && class.id.as_ref().is_some_and(|id| id.name == class_name))
+            .then_some(class)
     }) else {
         return update;
     };
@@ -5873,13 +5898,18 @@ fn implicit_defer_candidates<'a>(
 }
 
 /// The class names two or more classes of the file declare (in different
-/// functions or blocks).
+/// functions or blocks). A `namespace` member never gets HMR code, so it
+/// does not count.
 pub(super) fn ambiguous_class_names<'a>(
     declared_classes: &[crate::util::DeclaredClass<'_, 'a>],
 ) -> rustc_hash::FxHashSet<&'a str> {
     let mut seen = rustc_hash::FxHashSet::default();
     let mut ambiguous = rustc_hash::FxHashSet::default();
-    for name in declared_classes.iter().filter_map(|declared| declared.class.id.as_ref()) {
+    for name in declared_classes
+        .iter()
+        .filter(|declared| declared.namespace.is_none())
+        .filter_map(|declared| declared.class.id.as_ref())
+    {
         if !seen.insert(name.name.as_str()) {
             ambiguous.insert(name.name.as_str());
         }

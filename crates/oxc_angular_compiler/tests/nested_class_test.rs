@@ -6,8 +6,9 @@
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    CompilationMode, ComponentHmrUpdateInput, ResolvedResources, TransformOptions, TransformResult,
-    compile_component_hmr_update, extract_component_resource_urls, transform_angular_file,
+    CompilationMode, ComponentHmrUpdateInput, DtsInjectDeclaration, ResolvedResources,
+    TransformOptions, TransformResult, compile_component_hmr_update,
+    extract_component_resource_urls, inject_dts_declarations, transform_angular_file,
 };
 
 fn transform_with(source: &str, options: &TransformOptions) -> TransformResult {
@@ -410,4 +411,158 @@ export class D { v = input(1); }
     assert!(code.contains("@Component({ selector: 'c-c'"), "{code}");
     assert!(!squashed.contains("inputs:{value:"), "{code}");
     assert!(squashed.contains("type:D,selectors:[[\"d-d\"]],inputs:{v:[1,\"v\"]}"), "{code}");
+}
+
+const NAMESPACES: &str = r"
+import { Component, Injectable, NgModule } from '@angular/core';
+export namespace NS {
+  @Component({ selector: 'n-n', template: '<ng-content select=x></ng-content>' })
+  export class N {}
+  @Component({ selector: 'm-m', template: '<i></i>' })
+  class M {}
+  export const used = M;
+}
+namespace Inner.Deep {
+  @Injectable()
+  export class S {}
+  @NgModule({ imports: [] })
+  export class Mod {}
+}
+namespace WithFn {
+  export function make() {
+    @Component({ selector: 'q-q', template: '<q></q>' })
+    class Q {}
+    return Q;
+  }
+}
+declare namespace Ambient {
+  @Component({ selector: 'z-z', template: '' })
+  class Z {}
+}
+";
+
+#[test]
+fn compiles_a_namespace_member_without_statements_after_it() {
+    // ngtsc compiles a `namespace` member and hoists its constants, but only
+    // adds statements after a class in a block or the file: no metadata or
+    // debug info for `N`, `M`, `S` and `Mod`, while `Q`, in a function, gets
+    // them. An ambient namespace is left alone.
+    let result = transform_with(NAMESPACES, &TransformOptions::default());
+    let code = &result.code;
+    let squashed = squash(code);
+    assert_eq!(constants(code), ["_c0", "_c1"], "{code}");
+    assert!(offset(code, "const _c0") < offset(code, "export namespace NS"), "{code}");
+    for name in ["N", "M", "S", "Mod", "Q"] {
+        assert!(squashed.contains(&format!("{name}_Factory")), "{name}: {code}");
+    }
+    assert!(squashed.contains("ɵɵdefineNgModule({type:Mod"), "{code}");
+    assert!(code.contains("@Component({ selector: 'z-z'"), "{code}");
+    assert_eq!(code.matches("ɵsetClassMetadata(").count(), 1, "{code}");
+    assert!(code.contains("ɵsetClassMetadata(Q,"), "{code}");
+    assert_eq!(code.matches("ɵsetClassDebugInfo(").count(), 1, "{code}");
+    assert!(!code.contains("ɵɵsetNgModuleScope"), "{code}");
+    // A namespace member is in the `.d.ts`, under its dotted name; a class in
+    // a function is not.
+    let dts: Vec<_> = result.dts_declarations.iter().map(|d| d.class_name.as_str()).collect();
+    assert_eq!(dts, ["NS.N", "NS.M", "Inner.Deep.S", "Inner.Deep.Mod"]);
+
+    let partial = TransformOptions {
+        compilation_mode: CompilationMode::Partial,
+        ..TransformOptions::default()
+    };
+    let code = transform_with(NAMESPACES, &partial).code;
+    assert_eq!(code.matches("ɵɵngDeclareClassMetadata(").count(), 1, "{code}");
+    assert!(squash(&code).contains("ɵɵngDeclareClassMetadata({minVersion"), "{code}");
+}
+
+#[test]
+fn compiles_a_namespace_member_without_hmr() {
+    // Its HMR initializer would go after the class, where ngtsc adds nothing.
+    let result = transform_with(NAMESPACES, &TransformOptions { hmr: true, ..Default::default() });
+    let code = &result.code;
+    assert!(!code.contains("N_HmrLoad") && !code.contains("M_HmrLoad"), "{code}");
+    assert!(code.contains("Q_HmrLoad"), "{code}");
+    assert_eq!(result.template_updates.keys().collect::<Vec<_>>(), ["test.ts@Q"]);
+
+    let allocator = Allocator::default();
+    let input = ComponentHmrUpdateInput { class_name: "N", ..Default::default() };
+    let update =
+        compile_component_hmr_update(&allocator, "test.ts", NAMESPACES, &input, None, None);
+    assert!(update.module.is_none());
+}
+
+const NAMESPACE_SHADOWS: &str = r"
+import { Component, Pipe } from '@angular/core';
+export namespace NS {
+  @Pipe({ name: 'p' })
+  export class App { transform(v: any) { return v; } }
+}
+@Component({ selector: 'app', template: 'top' })
+export class App {}
+export namespace A {
+  @Component({ selector: 'a-x', template: 'a' })
+  export class X {}
+}
+export namespace B.C {
+  @Component({ selector: 'c-x', template: 'c' })
+  export class X {}
+}
+";
+
+#[test]
+fn injects_a_namespace_member_into_its_own_dts_class() {
+    // ngtsc's `.d.ts` gives each class its own members, though `App` and `X`
+    // name two classes each.
+    let partial =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result = transform_with(NAMESPACE_SHADOWS, &partial);
+    let dts = "export declare namespace NS {
+    class App {
+        transform(v: any): any;
+    }
+}
+export declare class App {
+}
+export declare namespace A {
+    class X {
+    }
+}
+export declare namespace B.C {
+    class X {
+    }
+}
+";
+    let declarations: Vec<_> = result
+        .dts_declarations
+        .into_iter()
+        .map(|d| DtsInjectDeclaration {
+            class_name: d.class_name,
+            members: d.members,
+            namespace_imports: d.namespace_imports.into_iter().collect(),
+            source_file: None,
+        })
+        .collect();
+    let out = inject_dts_declarations(dts, &declarations);
+    // Each top-level declaration of `out`, by its head.
+    let section = |head: &str| {
+        let section = out.split("export declare ").find(|s| s.starts_with(head));
+        squash(section.unwrap_or_else(|| panic!("no {head:?} in\n{out}")))
+    };
+    assert_eq!(out.matches("static ɵfac").count(), 4, "{out}");
+    let ns = section("namespace NS");
+    assert!(ns.contains("ɵpipe") && !ns.contains("ɵcmp"), "{out}");
+    let app = section("class App");
+    assert!(app.contains("\"app\"") && !app.contains("ɵpipe"), "{out}");
+    assert!(section("namespace A ").contains("\"a-x\""), "{out}");
+    assert!(section("namespace B.C").contains("\"c-x\""), "{out}");
+}
+
+#[test]
+fn keeps_hmr_for_a_component_a_namespace_member_shadows() {
+    // A namespace member gets no HMR code, so a top-level class of its name
+    // does, as in ngtsc.
+    let result =
+        transform_with(NAMESPACE_SHADOWS, &TransformOptions { hmr: true, ..Default::default() });
+    assert!(result.code.contains("App_HmrLoad"), "{}", result.code);
+    assert_eq!(result.template_updates.keys().collect::<Vec<_>>(), ["test.ts@App"]);
 }
