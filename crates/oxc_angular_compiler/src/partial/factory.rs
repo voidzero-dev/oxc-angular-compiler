@@ -181,7 +181,8 @@ fn factory_target_expr<'a>(
         FactoryTarget::Directive => "Directive",
         FactoryTarget::Pipe => "Pipe",
         FactoryTarget::NgModule => "NgModule",
-        FactoryTarget::Injectable | FactoryTarget::Service => "Injectable",
+        FactoryTarget::Injectable => "Injectable",
+        FactoryTarget::Service => "Service",
     };
 
     let factory_target_ref = OutputExpression::ReadProp(Box::new_in(

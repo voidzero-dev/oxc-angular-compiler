@@ -7,17 +7,22 @@
 //!   `compiler-cli/src/ngtsc/annotations/src/service.ts:178`, which calls
 //!   `toFactoryMetadata({...meta, deps: []}, FactoryTarget.Service)`.
 //! - `ɵprov`: the `ɵɵdefineService({...})` initializer.
+//!
+//! Partial compilation emits `ɵɵngDeclareFactory` (target `Service`) and
+//! `ɵɵngDeclareService` instead, as upstream's `compilePartial` does.
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 
 use super::compiler::compile_service;
 use super::decorator::ServiceMetadata;
 use super::metadata::R3ServiceMetadata;
+use crate::CompilationMode;
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3FactoryDeps, R3FactoryMetadata,
     compile_factory_function,
 };
 use crate::output::ast::OutputExpression;
+use crate::partial::{compile_declare_factory_function, compile_declare_service_from_metadata};
 
 /// Both static field initializers for a `@Service` class.
 pub struct ServiceDefinition<'a> {
@@ -32,13 +37,27 @@ pub fn generate_service_definition<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     metadata: &R3ServiceMetadata<'a>,
+    compilation_mode: CompilationMode,
 ) -> ServiceDefinition<'a> {
     // Generate ɵfac BEFORE ɵprov so namespace-index assignment order matches
     // upstream's [fac, prov, ...] ordering.
-    let fac_definition = generate_fac_definition(allocator, core_namespace, metadata);
-    let prov_result = compile_service(allocator, core_namespace, metadata);
-
-    ServiceDefinition { prov_definition: prov_result.expression, fac_definition }
+    match compilation_mode {
+        CompilationMode::Full => {
+            let fac_definition = generate_fac_definition(allocator, core_namespace, metadata);
+            let prov_result = compile_service(allocator, core_namespace, metadata);
+            ServiceDefinition { prov_definition: prov_result.expression, fac_definition }
+        }
+        CompilationMode::Partial => {
+            let fac_definition = compile_declare_factory_function(
+                allocator,
+                core_namespace,
+                &service_factory_metadata(allocator, metadata),
+            );
+            let prov_definition =
+                compile_declare_service_from_metadata(allocator, core_namespace, metadata);
+            ServiceDefinition { prov_definition, fac_definition }
+        }
+    }
 }
 
 /// Convenience: extract `R3ServiceMetadata` from `ServiceMetadata` and emit.
@@ -47,9 +66,10 @@ pub fn generate_service_definition_from_decorator<'a>(
     core_namespace: &'a str,
     metadata: &ServiceMetadata<'a>,
     type_argument_count: u32,
+    compilation_mode: CompilationMode,
 ) -> ServiceDefinition<'a> {
     let r3_metadata = metadata.to_r3_metadata(allocator, type_argument_count);
-    generate_service_definition(allocator, core_namespace, &r3_metadata)
+    generate_service_definition(allocator, core_namespace, &r3_metadata, compilation_mode)
 }
 
 /// Emit the ɵfac factory function. `@Service` factories never inject ctor
@@ -61,18 +81,24 @@ fn generate_fac_definition<'a>(
     metadata: &R3ServiceMetadata<'a>,
 ) -> OutputExpression<'a> {
     let factory_name = allocator.alloc_str(&format!("{}_Factory", metadata.name));
+    let factory_meta = service_factory_metadata(allocator, metadata);
+    let result = compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
+    result.expression
+}
 
-    let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
+/// The ɵfac metadata of a `@Service`: no ctor deps, target `Service`.
+fn service_factory_metadata<'a>(
+    allocator: &'a Allocator,
+    metadata: &R3ServiceMetadata<'a>,
+) -> R3FactoryMetadata<'a> {
+    R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
         name: metadata.name,
         type_expr: metadata.r#type.clone_in(allocator),
         type_decl: metadata.r#type.clone_in(allocator),
         type_argument_count: metadata.type_argument_count,
         deps: R3FactoryDeps::Valid(OxcVec::new_in(&allocator)),
         target: FactoryTarget::Service,
-    });
-
-    let result = compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
-    result.expression
+    })
 }
 
 #[cfg(test)]
@@ -98,7 +124,7 @@ mod tests {
             factory: None,
         };
 
-        let def = generate_service_definition(&allocator, "i0", &metadata);
+        let def = generate_service_definition(&allocator, "i0", &metadata, CompilationMode::Full);
         let emitter = JsEmitter::new();
         let fac_js = emitter.emit_expression(&def.fac_definition);
         let prov_js = emitter.emit_expression(&def.prov_definition);

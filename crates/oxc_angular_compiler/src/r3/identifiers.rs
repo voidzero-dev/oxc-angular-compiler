@@ -688,6 +688,9 @@ impl Identifiers {
     /// only the initializer call changes.
     pub const DEFINE_SERVICE: &'static str = "ɵɵdefineService";
 
+    /// Declare a service (partial compilation of `@Service`).
+    pub const DECLARE_SERVICE: &'static str = "ɵɵngDeclareService";
+
     // ========================================================================
     // Resolution Instructions
     // ========================================================================

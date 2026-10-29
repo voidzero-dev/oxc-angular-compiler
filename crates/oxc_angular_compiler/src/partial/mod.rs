@@ -9,6 +9,7 @@
 //! Implemented:
 //! - `factory` — `ɵɵngDeclareFactory`
 //! - `injectable` — `ɵɵngDeclareInjectable`
+//! - `service` — `ɵɵngDeclareService` (Angular v22+ `@Service`)
 //! - `pipe` — `ɵɵngDeclarePipe`
 //! - `ng_module` + `injector` — `ɵɵngDeclareNgModule` and
 //!   `ɵɵngDeclareInjector`. Partial mode banishes `setNgModuleScope`
@@ -45,6 +46,7 @@ pub mod injectable;
 pub mod injector;
 pub mod ng_module;
 pub mod pipe;
+pub mod service;
 
 pub use class_metadata::{
     compile_component_declare_class_metadata, compile_declare_class_metadata,
@@ -57,6 +59,7 @@ pub use injectable::compile_declare_injectable_from_metadata;
 pub use injector::compile_declare_injector_from_metadata;
 pub use ng_module::compile_declare_ng_module_from_metadata;
 pub use pipe::compile_declare_pipe_from_metadata;
+pub use service::compile_declare_service_from_metadata;
 
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
@@ -148,3 +151,4 @@ pub(crate) const MIN_VERSION_CLASS_METADATA: &str = "12.0.0";
 pub(crate) const MIN_VERSION_PIPE: &str = "14.0.0";
 pub(crate) const MIN_VERSION_NG_MODULE: &str = "14.0.0";
 pub(crate) const MIN_VERSION_CLASS_METADATA_ASYNC: &str = "18.0.0";
+pub(crate) const MIN_VERSION_SERVICE: &str = "22.0.0";

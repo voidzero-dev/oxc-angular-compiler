@@ -4778,6 +4778,7 @@ pub fn transform_angular_file(
                             file_namespace_registry.angular_core_ns().as_str(),
                             &service_metadata,
                             type_argument_count,
+                            options.compilation_mode,
                         );
 
                         let emitter = JsEmitter::new();

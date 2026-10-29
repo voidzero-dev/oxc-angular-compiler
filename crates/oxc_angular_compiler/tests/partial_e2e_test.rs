@@ -239,6 +239,45 @@ export class F1 {}
 }
 
 #[test]
+fn partial_service_declares_service_and_factory() {
+    // ngtsc: ɵɵngDeclareFactory({..., deps: [], target: i0.ɵɵFactoryTarget.Service })
+    // and ɵɵngDeclareService({ minVersion: "22.0.0", ..., type: S2,
+    // autoProvided: false }) / ({..., type: S3, factory: make }).
+    let (partial, linked) = partial_and_linked(
+        "import { Service } from '@angular/core';
+function make() { return new S3(); }
+@Service({ autoProvided: false })
+export class S2 {}
+@Service({ factory: make })
+export class S3 {}
+",
+    );
+    assert!(
+        partial.contains("type:S2,deps:[],target:i0.ɵɵFactoryTarget.Service})"),
+        "service factory should be a partial declaration, got:\n{partial}"
+    );
+    assert!(
+        partial.contains(
+            "i0.ɵɵngDeclareService({minVersion:\"22.0.0\",version:\"0.0.0-PLACEHOLDER\",ngImport:i0,type:S2,autoProvided:false})"
+        ),
+        "autoProvided: false should be declared, got:\n{partial}"
+    );
+    assert!(
+        partial.contains("ngImport:i0,type:S3,factory:make})"),
+        "the factory should be kept as written, got:\n{partial}"
+    );
+    assert!(!partial.contains("ɵɵdefineService"), "no full definition expected:\n{partial}");
+    assert!(
+        linked.contains("i0.ɵɵdefineService({token:S2,factory:S2.ɵfac,autoProvided:false})"),
+        "linked S2 should delegate to its ɵfac, got:\n{linked}"
+    );
+    assert!(
+        linked.contains("i0.ɵɵdefineService({token:S3,factory:()=>(make)()})"),
+        "linked S3 should call the factory, got:\n{linked}"
+    );
+}
+
+#[test]
 fn partial_injectable_factory_inherits_constructor() {
     // ngtsc: ɵɵngDeclareFactory({..., type: S, deps: null,
     // target: i0.ɵɵFactoryTarget.Injectable })
