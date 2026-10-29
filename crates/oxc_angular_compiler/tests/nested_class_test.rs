@@ -388,3 +388,26 @@ export class Other {}
     let update = compile_component_hmr_update(&allocator, "test.ts", source, &input, None, None);
     assert!(update.module.is_none());
 }
+
+#[test]
+fn keeps_the_decorators_of_a_nested_class_calling_a_shadowing_initializer() {
+    // `make`'s `input` shadows the imported one: ngtsc sees no signal input on
+    // `C` (only on `D`). The evaluator only sees top-level bindings, so `C`
+    // keeps its decorators, like a class reading any enclosing binding.
+    let code = transform(
+        r"
+import { Component, input } from '@angular/core';
+export function make(input: (n: number) => number) {
+  @Component({ selector: 'c-c', template: '' })
+  class C { value = input(0); other = input.required(); }
+  return C;
+}
+@Component({ selector: 'd-d', template: '' })
+export class D { v = input(1); }
+",
+    );
+    let squashed = squash(&code);
+    assert!(code.contains("@Component({ selector: 'c-c'"), "{code}");
+    assert!(!squashed.contains("inputs:{value:"), "{code}");
+    assert!(squashed.contains("type:D,selectors:[[\"d-d\"]],inputs:{v:[1,\"v\"]}"), "{code}");
+}

@@ -1732,6 +1732,9 @@ fn names_enclosing_binding(
                     property.value.as_ref().map(unwrap_jit_initializer)
                     && classify_initializer_api(&call.callee, string_consts).is_some()
                 {
+                    // The callee too: an enclosing `input` shadows the
+                    // imported one, and the field is no input then.
+                    reads.visit_expression(&call.callee);
                     reads.visit_arguments(&call.arguments);
                 }
             }
