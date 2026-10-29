@@ -29,7 +29,7 @@ use crate::output::ast::{
     ReadVarExpr, StmtModifier,
 };
 use crate::parser::expression::BindingParser;
-use crate::pipeline::constant_pool::{ConstantPool, SharedLiterals};
+use crate::pipeline::constant_pool::{ConstantPool, SharedPool};
 use crate::pipeline::emit::{
     HostBindingCompilationResult, compile_host_bindings, emit_pooled_constant_value,
 };
@@ -72,21 +72,21 @@ pub fn compile_directive<'a>(
         core_namespace,
         metadata,
         pool_starting_index,
-        &mut SharedLiterals::default(),
+        &mut SharedPool::default(),
         angular_version,
     )
 }
 
 /// Internal implementation of directive compilation.
 ///
-/// `shared_literals` holds the literals pooled by the earlier classes of the file. The
-/// directive's query predicates reuse them and add to them, as ngtsc has one pool per file.
+/// `shared_pool` holds what the earlier classes of the file pooled. The directive's query
+/// predicates reuse those literals and add to them, as ngtsc has one pool per file.
 pub fn compile_directive_from_metadata<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
-    shared_literals: &mut SharedLiterals<'a>,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveCompileResult<'a> {
     // Build the base directive fields, passing pool_starting_index for host bindings
@@ -95,7 +95,7 @@ pub fn compile_directive_from_metadata<'a>(
         core_namespace,
         metadata,
         pool_starting_index,
-        shared_literals,
+        shared_pool,
         angular_version,
     );
 
@@ -127,7 +127,7 @@ fn build_base_directive_fields<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
-    shared_literals: &mut SharedLiterals<'a>,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<crate::AngularVersion>,
 ) -> (Vec<'a, LiteralMapEntry<'a>>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
     let mut entries = Vec::new_in(&allocator);
@@ -150,7 +150,7 @@ fn build_base_directive_fields<'a>(
     // Query predicates go to the constant pool, content queries first, like
     // `baseDirectiveFields` in Angular's `render3/view/compiler.ts`.
     let mut query_pool = ConstantPool::with_starting_index(allocator, pool_starting_index);
-    query_pool.inherit_literals(std::mem::take(shared_literals));
+    query_pool.inherit_shared(std::mem::take(shared_pool));
 
     // contentQueries: (rf, ctx, dirIndex) => { ... }
     if !metadata.queries.is_empty() {
@@ -185,7 +185,7 @@ fn build_base_directive_fields<'a>(
     // Emit the pooled predicates before the host binding constants, which continue
     // from the query pool's next index so `_cN` names don't clash.
     let mut next_pool_index = query_pool.next_name_index();
-    *shared_literals = query_pool.take_literals();
+    *shared_pool = query_pool.take_shared();
     for constant in query_pool.constants_mut() {
         let value = emit_pooled_constant_value(allocator, &mut constant.kind);
         host_declarations.push(OutputStatement::DeclareVar(Box::new_in(

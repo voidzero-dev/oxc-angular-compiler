@@ -25,7 +25,7 @@ use crate::output::ast::{OutputExpression, OutputStatement};
 use crate::partial::directive::{
     compile_declare_directive_from_metadata, compile_declare_factory_for_directive,
 };
-use crate::pipeline::constant_pool::SharedLiterals;
+use crate::pipeline::constant_pool::SharedPool;
 
 /// Result of generating directive definitions.
 pub struct DirectiveDefinitions<'a> {
@@ -81,7 +81,7 @@ pub fn generate_directive_definitions<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
-    shared_literals: &mut SharedLiterals<'a>,
+    shared_pool: &mut SharedPool<'a>,
     compilation_mode: CompilationMode,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveDefinitions<'a> {
@@ -98,7 +98,7 @@ pub fn generate_directive_definitions<'a>(
                 core_namespace,
                 metadata,
                 pool_starting_index,
-                shared_literals,
+                shared_pool,
                 angular_version,
             );
             DirectiveDefinitions { dir_definition, fac_definition, next_pool_index, statements }
@@ -143,7 +143,7 @@ fn generate_dir_definition<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
-    shared_literals: &mut SharedLiterals<'a>,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<crate::AngularVersion>,
 ) -> (OutputExpression<'a>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
     let result = compile_directive_from_metadata(
@@ -151,7 +151,7 @@ fn generate_dir_definition<'a>(
         core_namespace,
         metadata,
         pool_starting_index,
-        shared_literals,
+        shared_pool,
         angular_version,
     );
     (result.expression, result.next_pool_index, result.statements)
@@ -282,7 +282,7 @@ mod tests {
             "i0",
             &metadata,
             0,
-            &mut SharedLiterals::default(),
+            &mut SharedPool::default(),
             CompilationMode::Full,
             None,
         );
@@ -460,7 +460,7 @@ mod tests {
             "i0",
             &metadata,
             0,
-            &mut SharedLiterals::default(),
+            &mut SharedPool::default(),
             None,
         );
 
@@ -517,7 +517,7 @@ mod tests {
             "i0",
             &metadata1,
             0,
-            &mut SharedLiterals::default(),
+            &mut SharedPool::default(),
             CompilationMode::Full,
             None,
         );
@@ -562,7 +562,7 @@ mod tests {
             "i0",
             &metadata2,
             next_index,
-            &mut SharedLiterals::default(),
+            &mut SharedPool::default(),
             CompilationMode::Full,
             None,
         );

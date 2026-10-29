@@ -216,3 +216,20 @@ export class B { @ViewChild('y') q: any; }
     assert!(code.contains(r#"const_c0=["x"];"#), "{code}");
     assert!(code.contains("i0.ɵɵcontentQuery(dirIndex,_c0,5)"), "{code}");
 }
+
+#[test]
+fn view_functions_of_classes_with_the_same_sanitized_name_stay_apart() {
+    // `$A` and `_A` both sanitize to `_A`. ngtsc's one pool per file numbers the second
+    // class's view functions, so the top-level declarations don't clash.
+    let code = squash(&transform(
+        "import {Component} from '@angular/core';
+@Component({selector: 'a', template: '@if (x) {<i></i>}', standalone: true})
+export class $A { x = 1; }
+@Component({selector: 'b', template: '@if (x) {<b></b>}', standalone: true})
+export class _A { x = 1; }
+",
+    ));
+    assert_eq!(code.matches("function_A_Conditional_0_Template(").count(), 1, "{code}");
+    assert_eq!(code.matches("function_A_Conditional_0_Template1(").count(), 1, "{code}");
+    assert!(code.contains("template:function_A_Template1("), "{code}");
+}

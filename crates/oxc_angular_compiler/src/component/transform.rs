@@ -69,7 +69,7 @@ use crate::pipe::{
 };
 use crate::pipeline::compilation::{DeferBlockDepsEmitMode, TemplateCompilationMode};
 use crate::pipeline::constant_pool::{
-    ConstantPool, InheritedFixup, PooledConstantKind, SharedLiterals, is_long_string_literal,
+    ConstantPool, InheritedFixup, PooledConstantKind, SharedPool, is_long_string_literal,
 };
 use crate::pipeline::emit::{
     HostBindingCompilationResult, compile_host_bindings, compile_template,
@@ -3276,7 +3276,7 @@ pub fn transform_angular_file(
     // Likewise, the literals the file's components pooled so far, and the
     // components whose ɵcmp has a long style inline that a later component
     // may share: (class name, ɵcmp, its emitted text).
-    let mut shared_literals = SharedLiterals::default();
+    let mut shared_pool = SharedPool::default();
     let mut inline_style_cmps: Vec<(String, OutputExpression<'_>, String)> = Vec::new();
 
     // The components compiled for HMR, whose inline template and styles the
@@ -3747,7 +3747,7 @@ pub fn transform_angular_file(
                         view_queries,
                         content_queries,
                         shared_pool_index,
-                        &mut shared_literals,
+                        &mut shared_pool,
                         &mut file_namespace_registry,
                         &import_map,
                         resolved_resources,
@@ -4177,7 +4177,7 @@ pub fn transform_angular_file(
                         file_namespace_registry.angular_core_ns().as_str(),
                         &directive_metadata,
                         shared_pool_index,
-                        &mut shared_literals,
+                        &mut shared_pool,
                         options.compilation_mode,
                         options.angular_version,
                     );
@@ -5411,7 +5411,7 @@ pub fn compile_component_hmr_update(
         view_queries,
         content_queries,
         0,
-        &mut SharedLiterals::default(),
+        &mut SharedPool::default(),
         &mut namespace_registry,
         &import_map,
         Some(resources),
@@ -5629,7 +5629,7 @@ fn compile_component_full<'a>(
     view_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     content_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     pool_starting_index: u32,
-    shared_literals: &mut SharedLiterals<'a>,
+    shared_pool: &mut SharedPool<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
@@ -6013,10 +6013,10 @@ fn compile_component_full<'a>(
         ingest_options,
     );
     job.core_namespace = namespace_registry.angular_core_ns();
-    // Reuse the literals the file's earlier components pooled: ngtsc compiles
-    // the whole file with one constant pool. They are handed on only once this
+    // Reuse the literals the file's earlier classes pooled, and avoid the names
+    // they claimed: ngtsc compiles the whole file with one constant pool. They are handed on only once this
     // component compiled, as a failed one does not move `shared_pool_index`.
-    job.pool.inherit_literals(shared_literals.clone());
+    job.pool.inherit_shared(shared_pool.clone());
 
     // BEFORE template compilation: Pool attrs const if first selector has attributes.
     // This matches TypeScript Angular which adds attrs to the pool BEFORE template ingestion.
@@ -6181,7 +6181,7 @@ fn compile_component_full<'a>(
     } else {
         None
     };
-    *shared_literals = job.pool.take_literals();
+    *shared_pool = job.pool.take_shared();
 
     let cmp_js = emitter.emit_expression(&definitions.cmp_definition);
     let fac_js = emitter.emit_expression(&definitions.fac_definition);

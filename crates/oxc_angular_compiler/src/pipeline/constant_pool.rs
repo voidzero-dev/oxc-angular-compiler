@@ -21,15 +21,23 @@ use crate::output::ast::{
 /// Ported from Angular's `POOL_INCLUSION_LENGTH_THRESHOLD_FOR_STRINGS`.
 const POOL_INCLUSION_LENGTH_THRESHOLD_FOR_STRINGS: usize = 50;
 
-/// The literals pooled so far in a file, handed from one class's pool to the
-/// next.
+/// What one class's pool hands to the next class's pool in a file.
 ///
 /// ngtsc compiles every class of a file with one `ConstantPool`, so a literal
-/// pooled by one class is reused by the next. Oxc gives each class its own
-/// pool (with names chained by the starting index), so the file transform
-/// carries the literals over with [`ConstantPool::take_literals`] and
-/// [`ConstantPool::inherit_literals`].
-pub type SharedLiterals<'a> = FxHashMap<String, PooledLiteral<'a>>;
+/// pooled by one class is reused by the next, and a name one class claims is
+/// not claimed again by another. Oxc gives each class its own pool (with `_c`
+/// names chained by the starting index), so the file transform carries these
+/// over with [`ConstantPool::take_shared`] and [`ConstantPool::inherit_shared`].
+#[derive(Debug, Default, Clone)]
+pub struct SharedPool<'a> {
+    /// Literals pooled by `get_const_literal`, by key.
+    literals: FxHashMap<String, PooledLiteral<'a>>,
+    /// Names claimed by `unique_name` that are not numbered by the file
+    /// offset (`Cmp_Template`, `Cmp_Conditional_0_Template`, ...). Two classes
+    /// can sanitize to the same prefix (`$A` and `_A`), and their view
+    /// functions are declared side by side.
+    claimed_names: FxHashMap<String, u32>,
+}
 
 /// A pool for deduplicating constant values.
 ///
@@ -50,11 +58,12 @@ pub struct ConstantPool<'a> {
     /// This is used to ensure unique names don't conflict when compiling
     /// multiple components in the same file.
     unique_name_offset: u32,
-    /// Claimed names for unique_name deduplication within a single component.
-    /// Maps base name to usage count.
+    /// Claimed names for unique_name deduplication, including the
+    /// class-specific names of the earlier classes of the file. Maps base name
+    /// to usage count.
     claimed_names: FxHashMap<String, u32>,
     /// Literals pooled by `get_const_literal`, by key.
-    literals: SharedLiterals<'a>,
+    literals: FxHashMap<String, PooledLiteral<'a>>,
     /// Long strings an earlier class of the file used inline once, shared by
     /// this pool. Their declaration and first use belong to that earlier class.
     inherited_fixups: std::vec::Vec<InheritedFixup<'a>>,
@@ -435,8 +444,9 @@ impl<'a> ConstantPool<'a> {
     /// "generic" names like `_forTrack` that don't include a component name.
     ///
     /// For component-specific names (like `ComponentName_Template`), the offset
-    /// is NOT applied because these names are already unique by virtue of
-    /// containing the component class name.
+    /// is NOT applied: they contain the class name, and the names claimed by
+    /// the earlier classes of the file come in through
+    /// [`ConstantPool::inherit_shared`].
     ///
     /// # Arguments
     ///
@@ -528,18 +538,27 @@ impl<'a> ConstantPool<'a> {
         Some(self.read_var(name))
     }
 
-    /// Takes the literals this pool and the ones before it pooled, to hand
-    /// them to the next class's pool.
-    pub fn take_literals(&mut self) -> SharedLiterals<'a> {
-        std::mem::take(&mut self.literals)
+    /// Takes the literals and class-specific names this pool and the ones
+    /// before it pooled and claimed, to hand them to the next class's pool.
+    pub fn take_shared(&mut self) -> SharedPool<'a> {
+        let claimed_names = self
+            .claimed_names
+            .iter()
+            .filter(|(base, _)| !is_generic_name(base))
+            .map(|(base, count)| (base.clone(), *count))
+            .collect();
+        SharedPool { literals: std::mem::take(&mut self.literals), claimed_names }
     }
 
-    /// Reuses the literals pooled by the earlier classes of the file.
-    pub fn inherit_literals(&mut self, mut literals: SharedLiterals<'a>) {
+    /// Reuses the literals pooled, and avoids the names claimed, by the
+    /// earlier classes of the file.
+    pub fn inherit_shared(&mut self, shared: SharedPool<'a>) {
+        let SharedPool { mut literals, claimed_names } = shared;
         for pooled in literals.values_mut() {
             pooled.inherited = true;
         }
         self.literals = literals;
+        self.claimed_names.extend(claimed_names);
     }
 
     /// Takes the long strings an earlier class used inline once and this pool
@@ -830,7 +849,7 @@ mod tests {
         first_pool.get_const_literal(string(&allocator, &long), false);
 
         let mut pool = ConstantPool::with_starting_index(&allocator, 3);
-        pool.inherit_literals(first_pool.take_literals());
+        pool.inherit_shared(first_pool.take_shared());
         let second = pool.get_const_literal(string(&allocator, &long), false);
         assert_eq!(read_var_name(&second), Some("_c3"));
         // Declared before the earlier class, not with this pool's constants.
