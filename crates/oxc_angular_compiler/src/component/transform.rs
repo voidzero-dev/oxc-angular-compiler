@@ -5095,12 +5095,30 @@ pub fn transform_angular_file(
         // ngtsc moves the imports above the rest of the file. Imports load
         // before the module body runs anyway, so a statement ahead of the
         // last import only needs the declarations before it.
+        // A decorator a class keeps comes before `export`, outside the
+        // statement's span.
         let first_statement = parser_ret
             .program
             .body
             .iter()
             .find(|stmt| !matches!(stmt, Statement::ImportDeclaration(_)))
-            .map(|stmt| stmt.span().start);
+            .map(|stmt| {
+                let class = match stmt {
+                    Statement::ClassDeclaration(class) => Some(&**class),
+                    Statement::ExportDeclaration(export) => match &export.declaration {
+                        Declaration::ClassDeclaration(class) => Some(&**class),
+                        _ => None,
+                    },
+                    Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                        ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(&**class),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                class
+                    .and_then(|class| class.decorators.first())
+                    .map_or(stmt.span().start, |first| first.span.start.min(stmt.span().start))
+            });
         let start = first_statement.map_or(after_imports, |start| start.min(after_imports));
         edits.push(Edit::insert(start, decls_after_imports));
     }

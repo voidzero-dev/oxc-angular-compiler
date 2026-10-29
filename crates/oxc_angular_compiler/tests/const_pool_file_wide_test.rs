@@ -388,3 +388,29 @@ export const h = helper;
     let at = |needle: &str| code.find(needle).expect(&code);
     assert!(at("const _c1") < at("export class A"), "{code}");
 }
+
+#[test]
+fn pool_goes_before_the_decorators_a_class_keeps() {
+    // `@Other()` stays on `Plain`, ahead of `export`: the pool goes before
+    // it, not between it and its class.
+    for source in [
+        r#"
+import { Component } from '@angular/core';
+@Other() export class Plain {}
+import { Other } from './other';
+@Component({ selector: 'a-x', template: '@for (i of l; track i.id) {<i>{{i}}</i>}' })
+export class AX { l: any[] = []; }
+"#,
+        r#"
+import { Component } from '@angular/core';
+@Other() @Component({ selector: 'a-x', template: '@for (i of l; track i.id) {<i>{{i}}</i>}' })
+export class AX { l: any[] = []; }
+import { Other } from './other';
+"#,
+    ] {
+        let code = transform(source);
+        let at = |needle: &str| code.find(needle).expect(&code);
+        assert!(at("const _forTrack0") < at("@Other()"), "{code}");
+        assert!(!squash(&code).contains("@Other()const"), "{code}");
+    }
+}
