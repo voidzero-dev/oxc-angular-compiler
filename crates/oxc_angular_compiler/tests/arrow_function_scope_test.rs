@@ -226,6 +226,19 @@ fn hoisted_arrow_in_an_embedded_view_restores_the_view() {
     );
 }
 
+/// Angular's `reify` pools a `@for`'s `_forTrack` with its create operation, before the
+/// arrow functions of the update operations, so ngtsc declares `_forTrack0` first.
+#[test]
+fn track_function_is_pooled_before_hoisted_arrows() {
+    let code = compile_tpl(
+        r#"<div [title]="run((a) => a + n)"></div>@for (item of items; track item.id + n) {<i [title]="run((b) => b + item.id)"></i>}"#,
+    );
+    let track = code.find("function_forTrack0").expect(&code);
+    let arrow = code.find("constarrowFn0=").expect(&code);
+    assert!(track < arrow, "expected `_forTrack0` before `arrowFn0`, got:\n{code}");
+    assert!(code.find("constarrowFn1=").is_some_and(|i| arrow < i), "got:\n{code}");
+}
+
 #[test]
 fn hoisted_arrow_reads_template_variables_that_are_not_parameters() {
     assert_hoists(

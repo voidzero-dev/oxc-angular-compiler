@@ -339,6 +339,28 @@ impl<'a> ArrowFunctionReifier<'a, '_> {
     }
 }
 
+/// An `ArrowFunctionReifier` for the operations of a view.
+fn arrow_reifier<'a, 'b>(
+    allocator: &'a oxc_allocator::Allocator,
+    expressions: &'b ExpressionStore<'a>,
+    root_xref: XrefId,
+    ctx: &ReifyContext<'a>,
+    pool: &'b mut ConstantPool<'a>,
+    diagnostics: &'b mut Vec<OxcDiagnostic>,
+) -> ArrowFunctionReifier<'a, 'b> {
+    ArrowFunctionReifier {
+        allocator,
+        core_namespace: ctx.core_namespace,
+        expressions,
+        root_xref,
+        mode: ctx.mode,
+        supports_value_interpolation: ctx.supports_value_interpolation,
+        supports_dom_property: ctx.supports_dom_property,
+        pool: RefCell::new(pool),
+        diagnostics: RefCell::new(diagnostics),
+    }
+}
+
 /// Reify a single view's operations to statements (without modifying the view).
 fn reify_view_to_stmts<'a>(
     allocator: &'a oxc_allocator::Allocator,
@@ -353,46 +375,25 @@ fn reify_view_to_stmts<'a>(
     let mut update_stmts = std::vec::Vec::new();
     let core_namespace = ctx.core_namespace;
 
-    // Hoist arrow functions before the operations that contain them are reified.
-    {
-        let reifier = ArrowFunctionReifier {
-            allocator,
-            core_namespace,
-            expressions,
-            root_xref,
-            mode: ctx.mode,
-            supports_value_interpolation: ctx.supports_value_interpolation,
-            supports_dom_property: ctx.supports_dom_property,
-            pool: RefCell::new(&mut *pool),
-            diagnostics: RefCell::new(&mut *diagnostics),
-        };
-        for op in view.create.iter_mut() {
-            if !matches!(
-                op,
-                CreateOp::Listener(_)
-                    | CreateOp::TwoWayListener(_)
-                    | CreateOp::Animation(_)
-                    | CreateOp::AnimationListener(_)
-            ) {
-                transform_expressions_in_create_op(
-                    op,
-                    &|expr, _flags| reifier.reify(expr),
-                    VisitorContextFlag::NONE,
-                );
-            }
-        }
-        for op in view.update.iter_mut() {
-            transform_expressions_in_update_op(
+    // Each operation's arrow functions are hoisted just before it is reified, and the update
+    // operations' after every create operation, as in Angular's `reify`: a `_forTrack` pooled
+    // with its `repeaterCreate` comes before the arrow functions of the update operations.
+    // Use iter_mut() so we can take ownership of expressions that can't be cloned
+    for op in view.create.iter_mut() {
+        if !matches!(
+            op,
+            CreateOp::Listener(_)
+                | CreateOp::TwoWayListener(_)
+                | CreateOp::Animation(_)
+                | CreateOp::AnimationListener(_)
+        ) {
+            let reifier = arrow_reifier(allocator, expressions, root_xref, ctx, pool, diagnostics);
+            transform_expressions_in_create_op(
                 op,
                 &|expr, _flags| reifier.reify(expr),
                 VisitorContextFlag::NONE,
             );
         }
-    }
-
-    // Reify create operations
-    // Use iter_mut() so we can take ownership of expressions that can't be cloned
-    for op in view.create.iter_mut() {
         let stmt = reify_create_op(
             allocator,
             core_namespace,
@@ -405,6 +406,17 @@ fn reify_view_to_stmts<'a>(
         );
         if let Some(s) = stmt {
             create_stmts.push(s);
+        }
+    }
+
+    {
+        let reifier = arrow_reifier(allocator, expressions, root_xref, ctx, pool, diagnostics);
+        for op in view.update.iter_mut() {
+            transform_expressions_in_update_op(
+                op,
+                &|expr, _flags| reifier.reify(expr),
+                VisitorContextFlag::NONE,
+            );
         }
     }
 
