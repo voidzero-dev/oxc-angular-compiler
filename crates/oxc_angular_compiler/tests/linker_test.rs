@@ -722,8 +722,84 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", n
     let result = link(&allocator, code, "test.mjs");
     assert!(result.linked);
     let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
-    assert!(linked.contains(r#"ɵɵcontentQuery(dirIndex,["y","z"],4)"#), "{}", result.code);
-    assert!(linked.contains(r#"ɵɵviewQuery(["x",""],5)"#), "{}", result.code);
+    assert!(linked.contains(r#"const_c0=["y","z"];const_c1=["x",""];"#), "{}", result.code);
+    assert!(linked.contains("ɵɵcontentQuery(dirIndex,_c0,4)"), "{}", result.code);
+    assert!(linked.contains("ɵɵviewQuery(_c1,5)"), "{}", result.code);
+}
+
+#[test]
+fn test_link_component_pools_query_predicates() {
+    // Angular's linker pools string predicates like ngtsc, with the
+    // component's one pool: content queries, then view queries, then the host
+    // bindings' constants, then the template's, which reuses `["*"]`.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.2.0", version: "22.2.2", type: C, isStandalone: true, selector: "c", host: { properties: { "attr.a": "[1, 2]" } }, queries: [{ propertyName: "c", first: true, predicate: ["y"], descendants: true }], viewQueries: [{ propertyName: "s", first: true, predicate: ["z"], descendants: true, isSignal: true }, { propertyName: "q", first: true, predicate: ["*"], descendants: true }, { propertyName: "t", first: true, predicate: TemplateRef, descendants: true }, { propertyName: "r", first: true, predicate: ["z"], descendants: true }], ngImport: i0, template: '<ng-content></ng-content>', isInline: true });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    // Fragments of the TS linker's output.
+    for expected in [
+        r#"const_c0=["y"];const_c1=["z"];const_c2=["*"];const_c3=()=>[1,2];"#,
+        "i0.ɵɵcontentQuery(dirIndex,_c0,5);",
+        "i0.ɵɵviewQuerySignal(ctx.s,_c1,5);",
+        "i0.ɵɵviewQuery(_c2,5);",
+        "i0.ɵɵviewQuery(TemplateRef,5);",
+        "i0.ɵɵviewQuery(_c1,5);",
+        "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c3));",
+        "ngContentSelectors:_c2,",
+    ] {
+        assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
+}
+
+#[test]
+fn test_link_directive_pools_query_predicates() {
+    // As in a component, the predicates are pooled before the host bindings'
+    // constants.
+    let code = r#"import * as i0 from "@angular/core";
+export class D {}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", host: { properties: { "attr.a": "[1, 2]" } }, queries: [{ propertyName: "c", first: true, predicate: ["y"], descendants: true }, { propertyName: "cs", predicate: ["y, z"] }], viewQueries: [{ propertyName: "q", first: true, predicate: ["y"], descendants: true }], ngImport: i0 });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    // Fragments of the TS linker's output.
+    for expected in [
+        r#"const_c0=["y"];const_c1=["y","z"];const_c2=()=>[1,2];"#,
+        "i0.ɵɵcontentQuery(dirIndex,_c0,5);",
+        "i0.ɵɵcontentQuery(dirIndex,_c1,4);",
+        "i0.ɵɵviewQuery(_c0,5);",
+        "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c2));",
+    ] {
+        assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
+}
+
+#[test]
+fn test_link_query_predicate_pools_lone_surrogates() {
+    // A predicate with a lone surrogate is split and pooled like any other, as
+    // Angular 22.2.3's linker shows, so the later constants keep their names.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", type: C, isStandalone: true, selector: "c", host: { properties: { "attr.a": "[1, 2]" } }, viewQueries: [{ propertyName: "q", first: true, predicate: ["\uD800"], descendants: true }, { propertyName: "r", first: true, predicate: ["y"], descendants: true }, { propertyName: "s", first: true, predicate: ["\uD800, z"], descendants: true }], ngImport: i0, template: "", isInline: true });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    for expected in [
+        r#"const_c0=["\uD800"];const_c1=["y"];const_c2=["\uD800","z"];const_c3=()=>[1,2];"#,
+        "i0.ɵɵviewQuery(_c0,5);",
+        "i0.ɵɵviewQuery(_c1,5);",
+        "i0.ɵɵviewQuery(_c2,5);",
+        "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c3));",
+    ] {
+        assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
 }
 
 #[test]

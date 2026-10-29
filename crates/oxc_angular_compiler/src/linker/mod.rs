@@ -33,6 +33,8 @@
 //! println!("{}", result.code);
 //! ```
 
+use std::borrow::Cow;
+
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, CallExpression, Decorator,
@@ -46,10 +48,14 @@ use oxc_span::{GetSpan, SourceType, Span};
 use crate::AngularVersion;
 use crate::directive::split_query_predicate;
 use crate::optimizer::Edit;
+use crate::output::ast::{LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression};
+use crate::output::emitter::JsEmitter;
 use crate::output::emitter::escape_string;
-use crate::pipeline::constant_pool::SharedPool;
+use crate::pipeline::constant_pool::{ConstantPool, SharedPool};
+use crate::pipeline::emit::declare_pooled_constants_from;
 use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
+use crate::util::lone_surrogate::js_str_to_str;
 
 /// Check if an object property key needs quoting because it contains unsafe characters.
 ///
@@ -1392,17 +1398,19 @@ fn link_directive(
         parts.push(format!("selectors: {}", parse_selector(selector)));
     }
 
-    // Content queries — convert queries array to contentQueries function
-    if let Some(queries_arr) = get_array_property(meta, "queries")
-        && let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true)
-    {
+    // Content queries, then view queries — pooled before the host bindings
+    let allocator = Allocator::default();
+    let LinkedQueries {
+        content_queries,
+        view_query,
+        mut declarations_js,
+        next_pool_index,
+        mut shared_pool,
+    } = link_queries(&allocator, meta, source, ns, type_name);
+    if let Some(cq_fn) = content_queries {
         parts.push(format!("contentQueries: {cq_fn}"));
     }
-
-    // View queries — convert viewQueries array to viewQuery function
-    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries")
-        && let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false)
-    {
+    if let Some(vq_fn) = view_query {
         parts.push(format!("viewQuery: {vq_fn}"));
     }
 
@@ -1431,7 +1439,6 @@ fn link_directive(
     }
 
     // Host bindings (hostAttrs, hostVars, hostBindings)
-    let mut host_binding_declarations_js = String::new();
     if let Some(host_obj) = get_object_property(meta, "host") {
         // Static attributes → hostAttrs
         let host_attrs = build_host_attrs(host_obj, source);
@@ -1443,12 +1450,12 @@ fn link_directive(
         let host_input = extract_host_metadata_input(host_obj);
         let selector = get_string_property(meta, "selector");
         if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
-            &Allocator::default(),
+            &allocator,
             &host_input,
             type_name,
             selector,
-            0, // directives have no template, so pool starts at 0
-            &mut SharedPool::default(),
+            next_pool_index,
+            &mut shared_pool,
             ns,
             options.angular_version,
         ) {
@@ -1456,24 +1463,21 @@ fn link_directive(
                 parts.push(format!("hostVars: {}", host_output.host_vars));
             }
             parts.push(format!("hostBindings: {}", host_output.fn_js));
-            if !host_output.declarations_js.is_empty() {
-                host_binding_declarations_js = host_output.declarations_js;
-            }
+            declarations_js.push_str(&host_output.declarations_js);
         }
     }
 
     let define_call =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", "));
-    if host_binding_declarations_js.is_empty() {
+    if declarations_js.is_empty() {
         Some(define_call)
     } else {
-        // The IIFE only declares the host binding functions and constants before
-        // returning the pure define call, so it is pure too. Without the annotation
-        // bundlers keep unused directives (Angular's linker hoists the
-        // declarations and leaves the define call itself at the top level).
-        Some(format!(
-            "/*@__PURE__*/ (() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"
-        ))
+        // The IIFE only declares the query predicates and the host binding
+        // functions and constants before returning the pure define call, so it
+        // is pure too. Without the annotation bundlers keep unused directives
+        // (Angular's linker hoists the declarations and leaves the define call
+        // itself at the top level).
+        Some(format!("/*@__PURE__*/ (() => {{\n{declarations_js}\nreturn {define_call};\n}})()"))
     }
 }
 
@@ -1569,6 +1573,7 @@ fn build_queries(
     ns: &str,
     type_name: &str,
     is_content_query: bool,
+    pool: &mut ConstantPool<'_>,
 ) -> Option<String> {
     if queries.elements.is_empty() {
         return None;
@@ -1598,13 +1603,13 @@ fn build_queries(
         let predicate = if let Some(expr) = get_property_expression(query_obj.as_ref(), "predicate")
         {
             if let Expression::ArrayExpression(selectors) = expr {
-                // String array predicate — split into its refs, or pass through as-is
+                // String array predicate — split into its refs and pooled as a
+                // constant (Angular's `getConstLiteral(..., true)`), or passed
+                // through as-is
                 query_selectors(selectors).map_or_else(
                     || source[expr.span().start as usize..expr.span().end as usize].to_string(),
                     |selectors| {
-                        let selectors: Vec<String> =
-                            selectors.iter().map(|s| escape_string(s, false)).collect();
-                        format!("[{}]", selectors.join(", "))
+                        JsEmitter::new().emit_expression(&pool_query_selectors(pool, &selectors))
                     },
                 )
             } else {
@@ -1698,14 +1703,104 @@ fn build_queries(
 ///
 /// Each entry may hold comma-separated refs (`"a, b"`), split and trimmed with
 /// the empty parts kept (`"x, "` gives `x` and an empty ref), as Angular's
-/// `getQueryPredicate` does (see [`split_query_predicate`]).
-fn query_selectors<'a>(selectors: &'a oxc_ast::ast::ArrayExpression<'a>) -> Option<Vec<&'a str>> {
+/// `getQueryPredicate` does (see [`split_query_predicate`]). An entry with a
+/// lone surrogate (`"\uD800"`) is kept as described in
+/// [`crate::util::lone_surrogate`], so that it is pooled like any other.
+fn query_selectors<'a>(
+    selectors: &'a oxc_ast::ast::ArrayExpression<'a>,
+) -> Option<Vec<Cow<'a, str>>> {
     let mut refs = Vec::new();
     for el in &selectors.elements {
-        let selector = as_static_string(el.as_expression()?)?;
-        refs.extend(split_query_predicate(selector));
+        let selector = match el.as_expression()? {
+            Expression::StringLiteral(lit) => lit.value,
+            Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+                tl.quasis.first()?.value.cooked?
+            }
+            _ => return None,
+        };
+        match js_str_to_str(selector) {
+            Cow::Borrowed(selector) => {
+                refs.extend(split_query_predicate(selector).map(Cow::Borrowed));
+            }
+            Cow::Owned(selector) => refs.extend(
+                split_query_predicate(&selector).map(|selector| Cow::Owned(selector.to_string())),
+            ),
+        }
     }
     Some(refs)
+}
+
+/// Pool the refs of a string array query predicate as one constant, as
+/// Angular's `getQueryPredicate` does with `getConstLiteral(..., true)`.
+fn pool_query_selectors<'a>(
+    pool: &mut ConstantPool<'a>,
+    selectors: &[impl AsRef<str>],
+) -> OutputExpression<'a> {
+    use oxc_allocator::FromIn;
+    use oxc_str::Ident;
+
+    let allocator = pool.allocator();
+    let mut entries = oxc_allocator::Vec::with_capacity_in(selectors.len(), &allocator);
+    for selector in selectors {
+        entries.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
+            LiteralExpr {
+                value: LiteralValue::String(Ident::from_in(selector.as_ref(), &allocator)),
+                source_span: None,
+            },
+            &allocator,
+        )));
+    }
+    let predicate = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+        LiteralArrayExpr { entries, source_span: None },
+        &allocator,
+    ));
+    pool.get_const_literal(predicate, true)
+}
+
+/// The `contentQueries` and `viewQuery` functions of a directive or component.
+struct LinkedQueries<'a> {
+    /// The `contentQueries` function as JS, if any.
+    content_queries: Option<String>,
+    /// The `viewQuery` function as JS, if any.
+    view_query: Option<String>,
+    /// The pooled predicates' declarations as JS.
+    declarations_js: String,
+    /// The next constant index after the predicates.
+    next_pool_index: u32,
+    /// The pooled predicates, for the host bindings and the template to reuse.
+    shared_pool: SharedPool<'a>,
+}
+
+/// Build the query functions of a declaration, pooling their string
+/// predicates first: Angular's `baseDirectiveFields` compiles content queries,
+/// then view queries, before the host bindings, all with one pool.
+fn link_queries<'a>(
+    allocator: &'a Allocator,
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    ns: &str,
+    type_name: &str,
+) -> LinkedQueries<'a> {
+    let mut pool = ConstantPool::new(allocator);
+    let content_queries = get_array_property(meta, "queries")
+        .and_then(|queries| build_queries(queries, source, ns, type_name, true, &mut pool));
+    let view_query = get_array_property(meta, "viewQueries")
+        .and_then(|queries| build_queries(queries, source, ns, type_name, false, &mut pool));
+
+    let emitter = JsEmitter::with_core_namespace(ns);
+    let mut declarations_js = String::new();
+    for decl in &declare_pooled_constants_from(&mut pool, 0) {
+        declarations_js.push_str(&emitter.emit_statement(decl));
+        declarations_js.push('\n');
+    }
+
+    LinkedQueries {
+        content_queries,
+        view_query,
+        declarations_js,
+        next_pool_index: pool.next_name_index(),
+        shared_pool: pool.take_shared(),
+    }
 }
 
 /// Build the features array from component metadata.
@@ -1816,11 +1911,18 @@ fn link_component(
         })
         .unwrap_or_default();
 
-    // Angular's `compileComponentFromMetadata` compiles the host bindings (in
-    // `baseDirectiveFields`) before the template, with one pool: the host
-    // bindings' constants come first, and the template reuses equal ones.
+    // Angular's `compileComponentFromMetadata` compiles the queries and the
+    // host bindings (in `baseDirectiveFields`) before the template, with one
+    // pool: the query predicates come first, then the host bindings'
+    // constants, and the template reuses equal ones.
+    let LinkedQueries {
+        content_queries,
+        view_query,
+        declarations_js: query_declarations_js,
+        next_pool_index: query_next_pool_index,
+        mut shared_pool,
+    } = link_queries(&template_allocator, meta, source, ns, type_name);
     let host_obj = get_object_property(meta, "host");
-    let mut shared_pool = SharedPool::default();
     let host_output = host_obj.and_then(|host_obj| {
         // Extract host properties and listeners as HostMetadataInput and compile
         // through the full Angular expression parser for correct output.
@@ -1829,7 +1931,7 @@ fn link_component(
             &extract_host_metadata_input(host_obj),
             type_name,
             get_string_property(meta, "selector"),
-            0,
+            query_next_pool_index,
             &mut shared_pool,
             ns,
             options.angular_version,
@@ -1845,7 +1947,9 @@ fn link_component(
         ns,
         options.angular_version,
         &defer_block_deps,
-        host_output.as_ref().map_or(0, |host_output| host_output.next_pool_index),
+        host_output
+            .as_ref()
+            .map_or(query_next_pool_index, |host_output| host_output.next_pool_index),
         shared_pool,
     )
     .ok()?;
@@ -1863,16 +1967,12 @@ fn link_component(
     }
 
     // 3. contentQueries
-    if let Some(queries_arr) = get_array_property(meta, "queries")
-        && let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true)
-    {
+    if let Some(cq_fn) = content_queries {
         parts.push(format!("contentQueries: {cq_fn}"));
     }
 
     // 4. viewQuery
-    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries")
-        && let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false)
-    {
+    if let Some(vq_fn) = view_query {
         parts.push(format!("viewQuery: {vq_fn}"));
     }
 
@@ -2131,9 +2231,10 @@ fn link_component(
     let define_component =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
-    // Wrap in IIFE with host binding and template declarations, in the order
-    // they were pooled
-    let mut declarations = host_binding_declarations_js;
+    // Wrap in IIFE with query, host binding and template declarations, in the
+    // order they were pooled
+    let mut declarations = query_declarations_js;
+    declarations.push_str(&host_binding_declarations_js);
     declarations.push_str(&template_output.declarations_js);
     if declarations.trim().is_empty() {
         Some(define_component)
