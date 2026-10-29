@@ -5534,6 +5534,7 @@ fn compile_component_partial<'a>(
     metadata: &ComponentMetadata<'a>,
     view_queries: &[R3QueryMetadata<'a>],
     content_queries: &[R3QueryMetadata<'a>],
+    defer_block_dependencies: &[Option<OutputExpression<'a>>],
     pool_starting_index: u32,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> FullCompilationResult<'a> {
@@ -5542,6 +5543,7 @@ fn compile_component_partial<'a>(
         is_inline: metadata.template.is_some(),
         content_queries,
         view_queries,
+        defer_block_dependencies,
     };
     let cmp_expr = crate::partial::compile_declare_component_from_metadata(
         allocator,
@@ -5828,6 +5830,97 @@ fn component_deferrable_marks<'a>(
         .map_or_else(std::vec::Vec::new, |candidates| candidates.marked)
 }
 
+/// What each `@defer` block uses, with the block's span.
+type DeferBlockDependencies<'a> = std::vec::Vec<(Span, std::vec::Vec<Ident<'a>>)>;
+
+/// Moves the `imports` entries a component's template matches only inside
+/// `@defer` blocks out of its eager dependencies, as ngc does in both its full
+/// and partial compilations (#313). Returns what each block uses, keyed by the
+/// block's span, when the blocks get their own dependency functions, and the
+/// names now lazy-loaded, which join `metadata.deferred_imports`. Needs
+/// cross-file analysis for the selectors; skipped under HMR, like ngc.
+fn resolve_implicit_defer<'a>(
+    metadata: &mut ComponentMetadata<'a>,
+    nodes: &[crate::ast::r3::R3Node<'a>],
+    options: &TransformOptions,
+    import_selector: Option<ImportSelector<'_>>,
+    can_defer: Option<CanDefer<'_>>,
+) -> (Option<DeferBlockDependencies<'a>>, Vec<String>) {
+    let mut implicitly_deferred_imports = Vec::new();
+    // What each `@defer` block uses, keyed by the block's span, when its own
+    // dependency function can be built (see below).
+    let mut defer_block_dependencies = None;
+    if let Some(import_selector) = import_selector
+        && let Some(can_defer) = can_defer
+        && !options.hmr
+        && let Some(DeferCandidates { candidates, block_only, marked }) =
+            implicit_defer_candidates(metadata, nodes, import_selector)
+    {
+        // ngc's `DeferredSymbolTracker.canDefer`, over the whole file: the
+        // `imports` entries this component marks are handed over with the
+        // name, and the ones other components mark are counted there. A
+        // class two entries name is listed once (`seenDeps` in
+        // `resolveAllDeferredDependencies`).
+        let mut deferred = std::vec::Vec::new();
+        for &name in &block_only {
+            if !deferred.contains(&name) && marked.contains(&name) && can_defer(&name, &marked) {
+                deferred.push(name);
+            }
+        }
+        // ngc's full compilation gives each `@defer` block its own dependency
+        // function (`DeferBlockDepsEmitMode.PerBlock`) listing what the
+        // block's main content uses: a dynamic `import()` for a lazy
+        // dependency and a plain reference for an eager one
+        // (`resolveDeferBlocks` and `compileDeferBlocks` in its component
+        // `handler.ts`). An `imports` entry whose selector is unknown is left
+        // out; it stays eager, and `dependencies` already provides it to the
+        // block. An explicit `deferredImports` keeps the shared function: its
+        // selectors aren't read.
+        if metadata.deferred_imports.is_empty() && !options.jit {
+            defer_block_dependencies =
+                super::defer_resolver::defer_block_dependencies(nodes, &candidates);
+        }
+        if let Some(blocks) = &defer_block_dependencies {
+            // `resolveAllDeferredDependencies` lists the lazy dependencies of
+            // `setClassMetadataAsync` block by block.
+            deferred.sort_by_key(|name| {
+                blocks.iter().flat_map(|(_, dependencies)| dependencies).position(|d| d == name)
+            });
+        }
+        // `dependencies` lists only what the template uses eagerly
+        // (`handleDependencyCycles` in ngc's component `handler.ts`). With a
+        // dependency function per block, an entry used only inside `@defer`
+        // blocks leaves it even when it can't be lazy-loaded: the blocks'
+        // functions provide it. Otherwise only the deferred entries leave.
+        let removed = if defer_block_dependencies.is_some() { &block_only } else { &deferred };
+        if !removed.is_empty() {
+            let is_removed = |name: &str| removed.iter().any(|d| d.as_str() == name);
+            metadata.imports.retain(|name| !is_removed(name.as_str()));
+            if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
+                let mut classes = metadata.import_entry_classes.iter();
+                raw_imports.entries.retain(|_| {
+                    !classes.next().copied().flatten().is_some_and(|(name, _)| is_removed(&name))
+                });
+                // Nothing left to resolve at runtime: like a standalone
+                // component without `imports`, it gets no `dependencies`.
+                if raw_imports.entries.is_empty()
+                    && defer_block_dependencies.is_some()
+                    && metadata.standalone
+                {
+                    metadata.raw_imports = None;
+                    metadata.declaration_list_emit_mode =
+                        super::metadata::DeclarationListEmitMode::Direct;
+                }
+            }
+        }
+        if !deferred.is_empty() {
+            implicitly_deferred_imports = deferred.iter().map(ToString::to_string).collect();
+            metadata.deferred_imports.extend(deferred);
+        }
+    }
+    (defer_block_dependencies, implicitly_deferred_imports)
+}
+
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -5915,18 +6008,38 @@ fn compile_component_full<'a>(
     // Partial mode stops here. Its declaration carries the template as a
     // verbatim string for the linker to compile at consumer build time, but
     // ngtsc still parses it first: its template errors are reported and
-    // `compilePartial` emits nothing for the class (handler.ts).
+    // `compilePartial` emits nothing for the class (handler.ts). Its `@defer`
+    // blocks are resolved as in a full compilation, and the declaration
+    // carries their dependency functions (`deferBlockDependencies`).
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
-        return Ok(compile_component_partial(
+        let (defer_block_dependencies, implicitly_deferred_imports) =
+            resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
+        let defer_block_dependencies: std::vec::Vec<_> = defer_block_dependencies
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, dependencies)| {
+                super::defer_resolver::compile_defer_block_resolver(
+                    allocator,
+                    &dependencies,
+                    &metadata.deferred_imports,
+                    &metadata.import_entry_classes,
+                    import_map,
+                )
+            })
+            .collect();
+        let mut result = compile_component_partial(
             allocator,
             namespace_registry.angular_core_ns().as_str(),
             template,
             metadata,
             &view_queries,
             &content_queries,
+            &defer_block_dependencies,
             pool_starting_index,
             namespace_registry,
-        ));
+        );
+        result.implicitly_deferred_imports = implicitly_deferred_imports;
+        return Ok(result);
     }
 
     // Capture ng-content selectors from the R3 AST for .d.ts generation
@@ -6013,80 +6126,9 @@ fn compile_component_full<'a>(
     }
 
     // `imports` entries matched only inside `@defer` are lazy-loaded, as in
-    // ngc's full compilation (#313). Needs cross-file analysis for the
-    // selectors; skipped under HMR, like ngc.
-    let mut implicitly_deferred_imports = Vec::new();
-    // What each `@defer` block uses, keyed by the block's span, when its own
-    // dependency function can be built (see below).
-    let mut defer_block_dependencies = None;
-    if let Some(import_selector) = import_selector
-        && let Some(can_defer) = can_defer
-        && !options.hmr
-        && let Some(DeferCandidates { candidates, block_only, marked }) =
-            implicit_defer_candidates(metadata, &r3_result.nodes, import_selector)
-    {
-        // ngc's `DeferredSymbolTracker.canDefer`, over the whole file: the
-        // `imports` entries this component marks are handed over with the
-        // name, and the ones other components mark are counted there. A
-        // class two entries name is listed once (`seenDeps` in
-        // `resolveAllDeferredDependencies`).
-        let mut deferred = std::vec::Vec::new();
-        for &name in &block_only {
-            if !deferred.contains(&name) && marked.contains(&name) && can_defer(&name, &marked) {
-                deferred.push(name);
-            }
-        }
-        // ngc's full compilation gives each `@defer` block its own dependency
-        // function (`DeferBlockDepsEmitMode.PerBlock`) listing what the
-        // block's main content uses: a dynamic `import()` for a lazy
-        // dependency and a plain reference for an eager one
-        // (`resolveDeferBlocks` and `compileDeferBlocks` in its component
-        // `handler.ts`). An `imports` entry whose selector is unknown is left
-        // out; it stays eager, and `dependencies` already provides it to the
-        // block. An explicit `deferredImports` keeps the shared function: its
-        // selectors aren't read.
-        if metadata.deferred_imports.is_empty() && !options.jit {
-            defer_block_dependencies =
-                super::defer_resolver::defer_block_dependencies(&r3_result.nodes, &candidates);
-        }
-        if let Some(blocks) = &defer_block_dependencies {
-            // `resolveAllDeferredDependencies` lists the lazy dependencies of
-            // `setClassMetadataAsync` block by block.
-            deferred.sort_by_key(|name| {
-                blocks.iter().flat_map(|(_, dependencies)| dependencies).position(|d| d == name)
-            });
-        }
-        // `dependencies` lists only what the template uses eagerly
-        // (`handleDependencyCycles` in ngc's component `handler.ts`). With a
-        // dependency function per block, an entry used only inside `@defer`
-        // blocks leaves it even when it can't be lazy-loaded: the blocks'
-        // functions provide it. Otherwise only the deferred entries leave.
-        let removed = if defer_block_dependencies.is_some() { &block_only } else { &deferred };
-        if !removed.is_empty() {
-            let is_removed = |name: &str| removed.iter().any(|d| d.as_str() == name);
-            metadata.imports.retain(|name| !is_removed(name.as_str()));
-            if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
-                let mut classes = metadata.import_entry_classes.iter();
-                raw_imports.entries.retain(|_| {
-                    !classes.next().copied().flatten().is_some_and(|(name, _)| is_removed(&name))
-                });
-                // Nothing left to resolve at runtime: like a standalone
-                // component without `imports`, it gets no `dependencies`.
-                if raw_imports.entries.is_empty()
-                    && defer_block_dependencies.is_some()
-                    && metadata.standalone
-                {
-                    metadata.raw_imports = None;
-                    metadata.declaration_list_emit_mode =
-                        super::metadata::DeclarationListEmitMode::Direct;
-                }
-            }
-        }
-        if !deferred.is_empty() {
-            implicitly_deferred_imports = deferred.iter().map(ToString::to_string).collect();
-            metadata.deferred_imports.extend(deferred);
-        }
-    }
+    // ngc's full compilation (#313).
+    let (defer_block_dependencies, implicitly_deferred_imports) =
+        resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
 
     // Build the deferrable-dependencies resolver from
     // `@Component.deferredImports`.

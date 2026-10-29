@@ -69,6 +69,10 @@ pub struct PartialComponentInputs<'a, 'm> {
     /// View queries (`@ViewChild*` / `viewChild*` signal queries /
     /// `queries:` view entries), emitted as `viewQueries`.
     pub view_queries: &'m [R3QueryMetadata<'a>],
+    /// Each `@defer` block's dependency function, `None` for a block with no
+    /// dependencies, in the order Angular's binder lists the blocks. Empty
+    /// when the blocks weren't resolved.
+    pub defer_block_dependencies: &'m [Option<OutputExpression<'a>>],
 }
 
 /// Emits the `ɵɵngDeclareComponent` call for a component's `ɵcmp` static.
@@ -345,19 +349,28 @@ pub fn compile_declare_component_from_metadata<'a>(
         ));
     }
 
-    // NOTE: `deferBlockDependencies` (upstream component.ts:132-153) is not
-    // emitted here. Upstream walks `meta.defer.blocks` and writes one
-    // resolver entry per `@defer` block, gated on
-    // `DeferBlockDepsEmitMode::PerBlock`. OXC's `ComponentMetadata`
-    // doesn't carry the per-block resolver map — only
-    // `deferred_imports: Vec<Ident>` for the *class-level* async metadata
-    // resolver (which DOES land via `compile_declare_class_metadata_async`).
-    // The functional gap: components that use `@defer` blocks with
-    // deferrable imports get the async class metadata declaration but no
-    // per-block resolvers in `ɵcmp`, so the linker can't reconstruct the
-    // lazy-loading wiring. Closing this needs a metadata-pipeline change
-    // to populate per-block resolvers — out of scope for the partial
-    // emitter slice.
+    // One entry per `@defer` block, `null` for a block with no dependencies,
+    // and none at all when no block has any (upstream component.ts:132-153).
+    if inputs.defer_block_dependencies.iter().any(Option::is_some) {
+        let mut resolvers = Vec::new_in(&allocator);
+        for resolver in inputs.defer_block_dependencies {
+            resolvers.push(match resolver {
+                Some(resolver) => resolver.clone_in(allocator),
+                None => OutputExpression::Literal(Box::new_in(
+                    LiteralExpr { value: LiteralValue::Null, source_span: None },
+                    &allocator,
+                )),
+            });
+        }
+        entries.push(LiteralMapEntry::new(
+            Ident::from("deferBlockDependencies"),
+            OutputExpression::LiteralArray(Box::new_in(
+                LiteralArrayExpr { entries: resolvers, source_span: None },
+                &allocator,
+            )),
+            false,
+        ));
+    }
 
     invoke_declare(allocator, core_namespace, Identifiers::DECLARE_COMPONENT, entries)
 }

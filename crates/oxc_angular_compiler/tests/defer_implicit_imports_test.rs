@@ -1720,3 +1720,91 @@ export class A { k = 1; xs: any[] = []; }
         "{code}"
     );
 }
+
+fn partial_options() -> TransformOptions {
+    TransformOptions {
+        compilation_mode: oxc_angular_compiler::CompilationMode::Partial,
+        ..options()
+    }
+}
+
+#[test]
+fn partial_declaration_lazy_loads_a_component_used_only_inside_defer() {
+    // Like ngc's `compilePartial`: the blocks are resolved as in a full
+    // compilation, and the declaration carries their dependency functions.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform_with(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp],
+    template: '@defer { <app-lazy/> }',
+})
+export class Parent {}
+",
+        &partial_options(),
+    );
+    let code = &result.code;
+    let compact = compact(code);
+
+    assert!(
+        compact.contains("deferBlockDependencies:[()=>[import(\"./lazy\").then((m)=>m.LazyCmp)]]"),
+        "The block's resolver must be in the declaration. Output:\n{code}"
+    );
+    assert!(!compact.contains("dependencies:[{"), "Output:\n{code}");
+    assert!(!code.contains("import { LazyCmp }"), "Output:\n{code}");
+    assert!(
+        compact.contains(
+            "ɵɵngDeclareClassMetadataAsync({minVersion:\"18.0.0\",version:\"0.0.0-PLACEHOLDER\",ngImport:i0,type:Parent,resolveDeferredDeps:()=>[import(\"./lazy\").then((m)=>m.LazyCmp)],resolveMetadata:(LazyCmp)=>"
+        ),
+        "Output:\n{code}"
+    );
+
+    // The linker wires the resolver into `ɵɵdefer`, as Angular's does.
+    let allocator = Allocator::default();
+    let linked = oxc_angular_compiler::linker::link(&allocator, code, "parent.component.js");
+    let linked = linked.code.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    assert!(
+        linked.contains("constParent_Defer_1_DepsFn=()=>[import(\"./lazy\")")
+            && linked.contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"),
+        "Linked:\n{linked}"
+    );
+}
+
+#[test]
+fn partial_declaration_lists_a_null_resolver_for_a_block_without_dependencies() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let result = transform_with(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, OtherCmp],
+    template: '<app-other/> @defer { nothing } @defer { <app-lazy/> <app-other/> }',
+})
+export class Parent {}
+",
+        &partial_options(),
+    );
+    let code = &result.code;
+    let compact = compact(code);
+
+    assert!(
+        compact.contains(
+            "deferBlockDependencies:[null,()=>[import(\"./lazy\").then((m)=>m.LazyCmp),OtherCmp]]"
+        ),
+        "Output:\n{code}"
+    );
+    assert!(compact.contains("dependencies:[{kind:\"directive\",type:OtherCmp"), "Output:\n{code}");
+}
