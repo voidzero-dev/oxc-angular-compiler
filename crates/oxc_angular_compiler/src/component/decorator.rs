@@ -66,6 +66,9 @@ pub fn extract_component_metadata<'a>(
     // Create metadata with defaults (standalone uses implicit_standalone when not explicitly set)
     let mut metadata =
         ComponentMetadata::new(allocator, class_name, class_span, implicit_standalone);
+    if let Some(source) = source_text {
+        metadata.class_name_pos = crate::class_debug_info::class_name_pos(source, class);
+    }
 
     // Whether `imports` and `deferredImports` are provably empty; a spread or
     // accessor this loop skips could add them.

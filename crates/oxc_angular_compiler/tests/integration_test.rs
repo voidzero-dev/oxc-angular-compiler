@@ -16910,6 +16910,62 @@ fn test_component_class_metadata_precedes_debug_info() {
 }
 
 #[test]
+fn test_component_debug_info_line_is_the_class_keyword() {
+    // ngtsc takes the line of `clazz.name.pos`, the end of the `class`
+    // keyword, not of a decorator above it. Lines checked against ngtsc.
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+
+@Component({ selector: 'a', template: '' })
+class A {}
+
+@Component({
+  selector: 'b',
+  template: '',
+})
+export class B {}
+
+@Component({ selector: 'c', template: '' }) export class C {}
+
+@Component({ selector: 'd', template: '' })
+export
+abstract class /* x
+ */
+  D {}
+
+export function f() {
+  @Component({ selector: 'e', template: '' })
+  class E {}
+  return E;
+}
+export { A };
+";
+    let result = transform_angular_file(&allocator, "a.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    // The emitter wraps long lines.
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    for (name, line) in [("A", 4), ("B", 10), ("C", 12), ("D", 16), ("E", 22)] {
+        assert!(
+            code.contains(&format!(
+                "className:\"{name}\",filePath:\"a.component.ts\",lineNumber:{line}}}"
+            )),
+            "{name} is on line {line}. Got:\n{}",
+            result.code
+        );
+    }
+
+    let source = "import { Component } from '@angular/core';
+@Component({ selector: 'h', template: '' })
+export default class
+// c
+H {}
+";
+    let result = transform_angular_file(&allocator, "h.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(result.code.contains("lineNumber:3"), "H is on line 3. Got:\n{}", result.code);
+}
+
+#[test]
 fn test_jit_true_ng_module_skips_aot() {
     let allocator = Allocator::default();
     let source = r"

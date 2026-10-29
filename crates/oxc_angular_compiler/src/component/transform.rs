@@ -6600,7 +6600,7 @@ fn compile_component_full<'a>(
 
         // The 1-indexed line of the `class` keyword (ngtsc uses `clazz.name.pos`,
         // which sits right after it), with TypeScript's line-break rules.
-        let class_line_number = line_number_at(source, metadata.class_span.start as usize);
+        let class_line_number = line_number_at(source, metadata.class_name_pos as usize);
 
         // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())

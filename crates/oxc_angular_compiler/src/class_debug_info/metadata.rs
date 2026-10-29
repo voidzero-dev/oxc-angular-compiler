@@ -97,6 +97,34 @@ pub fn line_number_at(source: &str, offset: usize) -> u32 {
     line
 }
 
+/// TypeScript's `pos` of `class`'s name: the end of the `class` keyword.
+///
+/// The class span starts at the decorators of a class with no `export`, so
+/// ngtsc's `lineNumber` is not the span start's line. Only modifiers, the
+/// keyword, whitespace and comments sit between the last decorator and the
+/// name.
+pub fn class_name_pos(source: &str, class: &oxc_ast::ast::Class<'_>) -> u32 {
+    let Some(name) = &class.id else { return class.span.start };
+    let start = class.decorators.last().map_or(class.span.start, |d| d.span.end) as usize;
+    let text = &source[..name.span.start as usize];
+    let mut pos = start;
+    let mut i = start;
+    while i < text.len() {
+        let rest = &text[i..];
+        if rest.starts_with("//") {
+            i += rest.find(['\n', '\r', '\u{2028}', '\u{2029}']).unwrap_or(rest.len());
+        } else if let Some(comment) = rest.strip_prefix("/*") {
+            i += comment.find("*/").map_or(rest.len(), |end| end + 4);
+        } else if rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            i += rest.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(rest.len());
+            pos = i;
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    u32::try_from(pos).unwrap_or(name.span.start)
+}
+
 #[cfg(test)]
 mod tests {
     use super::line_number_at;

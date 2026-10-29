@@ -501,6 +501,10 @@ pub struct ComponentMetadata<'a> {
     /// The span of the class declaration.
     pub class_span: Span,
 
+    /// Where TypeScript puts the class name's `pos`: the end of the `class`
+    /// keyword. `setClassDebugInfo`'s `lineNumber` is its line.
+    pub class_name_pos: u32,
+
     /// The CSS selector for this component.
     pub selector: Option<Ident<'a>>,
 
@@ -966,6 +970,7 @@ impl<'a> ComponentMetadata<'a> {
         Self {
             class_name,
             class_span,
+            class_name_pos: class_span.start,
             selector: None,
             template: None,
             template_span: None,
