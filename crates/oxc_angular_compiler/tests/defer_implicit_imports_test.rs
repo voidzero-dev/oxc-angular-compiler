@@ -1942,3 +1942,118 @@ export class Parent {}
     );
     assert!(compact.contains("dependencies:[{kind:\"directive\",type:OtherCmp"), "Output:\n{code}");
 }
+
+// --- Classes nested in a function count with the file's other components ---
+
+#[test]
+fn import_deferred_by_a_nested_and_a_top_level_component_is_lazy_in_both() {
+    // ngc's `DeferredSymbolTracker` sees every component of the file, nested
+    // ones too: both lazy-load `LazyCmp`, and its static import goes.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+export function make() {
+  @Component({ selector: 'app-inner', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+  class Inner {}
+  return Inner;
+}
+
+@Component({ selector: 'app-top', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Top {}
+"#,
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+    assert!(compact.contains("setClassMetadataAsync(Inner,()=>[import(\"./lazy\")"), "{code}");
+    assert!(compact.contains("setClassMetadataAsync(Top,()=>[import(\"./lazy\")"), "{code}");
+    assert!(!compact.contains("=()=>[LazyCmp]"), "{code}");
+}
+
+#[test]
+fn import_deferred_by_two_nested_components_is_lazy_loaded() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+export function one() {
+  @Component({ selector: 'app-one', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+  class One {}
+  return One;
+}
+
+export function two() {
+  @Component({ selector: 'app-two', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+  class Two {}
+  return Two;
+}
+"#,
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+    assert!(compact.contains("setClassMetadataAsync(One,()=>[import(\"./lazy\")"), "{code}");
+    assert!(compact.contains("setClassMetadataAsync(Two,()=>[import(\"./lazy\")"), "{code}");
+}
+
+#[test]
+fn specifiers_deferred_by_a_top_level_and_a_nested_component_remove_the_declaration() {
+    let dir = TempDir::new().unwrap();
+    two_cmps(&dir);
+    let result = transform(
+        &dir,
+        r#"
+import { Component } from '@angular/core';
+import { LazyCmp, EagerCmp } from './cmps';
+
+@Component({ selector: 'app-top', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Top {}
+
+export function make() {
+  @Component({ selector: 'app-inner', imports: [EagerCmp], template: '@defer { <app-eager/> }' })
+  class Inner {}
+  return Inner;
+}
+"#,
+    );
+    let code = &result.code;
+    assert_lazy(code, "./cmps", "LazyCmp");
+    assert_lazy(code, "./cmps", "EagerCmp");
+    assert!(!code.contains("from './cmps'") && !code.contains("from \"./cmps\""), "{code}");
+}
+
+#[test]
+fn nested_component_keeping_its_decorators_keeps_the_import() {
+    // `Inner` reads a binding of `make`, so it keeps its decorators and JIT
+    // compiles: its `imports` entry stays a reference to `LazyCmp`.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+export function make(selector: string) {
+  @Component({ selector, imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+  class Inner {}
+  return Inner;
+}
+
+@Component({ selector: 'app-top', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Top {}
+"#,
+    );
+    let code = &result.code;
+    assert_eager(code, "./lazy");
+    assert!(code.contains("import { LazyCmp }"), "{code}");
+}

@@ -3862,10 +3862,20 @@ pub fn transform_angular_file(
                                 && let Some(import_selector) = &import_selector
                             {
                                 let mut deferrable_marks = deferrable_marks.borrow_mut();
-                                for other in
-                                    parser_ret.program.body.iter().filter_map(statement_class)
-                                {
-                                    if other.span == class.span {
+                                // Every class the transform compiles, nested
+                                // ones too. A nested class keeping its
+                                // decorators keeps its `imports` entry.
+                                for other in &declared_classes {
+                                    let other_nested = other.nested;
+                                    let other = other.class;
+                                    if other.span == class.span
+                                        || (other_nested
+                                            && names_enclosing_binding(
+                                                other,
+                                                &semantic,
+                                                &string_consts,
+                                            ))
+                                    {
                                         continue;
                                     }
                                     marks += marks_of(
@@ -5843,23 +5853,6 @@ fn implicit_defer_candidates<'a>(
         .filter(|name| block_only.contains(name) && imported.contains(name))
         .collect();
     Some(DeferCandidates { candidates, block_only, marked })
-}
-
-/// The class a top-level statement declares, exported or not.
-#[cfg(feature = "cross_file_elision")]
-fn statement_class<'a>(stmt: &'a Statement<'a>) -> Option<&'a oxc_ast::ast::Class<'a>> {
-    match stmt {
-        Statement::ClassDeclaration(class) => Some(class),
-        Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-            ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class),
-            _ => None,
-        },
-        Statement::ExportDeclaration(export) => match &export.declaration {
-            Declaration::ClassDeclaration(class) => Some(class),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 /// The `imports` entries another component of the file marks as deferrable
