@@ -745,9 +745,7 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.2.0", version: "22.2.2", t
         r#"const_c0=["y"];const_c1=["z"];const_c2=["*"];const_c3=()=>[1,2];"#,
         "i0.ɵɵcontentQuery(dirIndex,_c0,5);",
         "i0.ɵɵviewQuerySignal(ctx.s,_c1,5);",
-        "i0.ɵɵviewQuery(_c2,5);",
-        "i0.ɵɵviewQuery(TemplateRef,5);",
-        "i0.ɵɵviewQuery(_c1,5);",
+        "i0.ɵɵviewQuery(_c2,5)(TemplateRef,5)(_c1,5);",
         "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c3));",
         "ngContentSelectors:_c2,",
     ] {
@@ -770,8 +768,7 @@ D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", t
     // Fragments of the TS linker's output.
     for expected in [
         r#"const_c0=["y"];const_c1=["y","z"];const_c2=()=>[1,2];"#,
-        "i0.ɵɵcontentQuery(dirIndex,_c0,5);",
-        "i0.ɵɵcontentQuery(dirIndex,_c1,4);",
+        "i0.ɵɵcontentQuery(dirIndex,_c0,5)(dirIndex,_c1,4);",
         "i0.ɵɵviewQuery(_c0,5);",
         "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c2));",
     ] {
@@ -793,9 +790,7 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", t
     let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
     for expected in [
         r#"const_c0=["\uD800"];const_c1=["y"];const_c2=["\uD800","z"];const_c3=()=>[1,2];"#,
-        "i0.ɵɵviewQuery(_c0,5);",
-        "i0.ɵɵviewQuery(_c1,5);",
-        "i0.ɵɵviewQuery(_c2,5);",
+        "i0.ɵɵviewQuery(_c0,5)(_c1,5)(_c2,5);",
         "i0.ɵɵattribute(\"a\",i0.ɵɵpureFunction0(1,_c3));",
     ] {
         assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
@@ -815,6 +810,37 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", n
     assert!(result.linked);
     assert!(result.code.contains(r#"["x"]"#), "{}", result.code);
     assert!(result.code.contains("[\"y\u{85}\"]"), "{}", result.code);
+}
+
+/// `ɵɵngDeclareDirective` of ngtsc 22.2.3 for two signal and two decorator
+/// view queries, and one signal and two decorator content queries.
+const CHAINED_QUERIES_DIRECTIVE: &str = r#"import * as i0 from "@angular/core";
+export class D {}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "17.2.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", queries: [{ propertyName: "cs", predicate: ["a"], isSignal: true }, { propertyName: "b", predicate: ["b"] }, { propertyName: "c", predicate: ["c"] }], viewQueries: [{ propertyName: "s", first: true, predicate: ["s"], descendants: true, isSignal: true }, { propertyName: "r", first: true, predicate: ["r"], descendants: true, isSignal: true }, { propertyName: "q", first: true, predicate: ["q"], descendants: true }, { propertyName: "p", first: true, predicate: ["p"], descendants: true }], ngImport: i0 });
+"#;
+
+/// Consecutive query creation calls of one instruction are chained, as Angular
+/// 22.2.3's linker does, except for runtimes before v21.0.4, whose query
+/// instructions return nothing. Consecutive signal queries advance once.
+#[test]
+fn test_link_chains_query_creation() {
+    for version in [None, Some(AngularVersion::new(21, 0, 4))] {
+        let code = link_for_version(CHAINED_QUERIES_DIRECTIVE, version);
+        let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        for expected in [
+            "{i0.ɵɵcontentQuerySignal(dirIndex,ctx.cs,_c0,4);i0.ɵɵcontentQuery(dirIndex,_c1,4)(dirIndex,_c2,4);}",
+            "{i0.ɵɵviewQuerySignal(ctx.s,_c3,5)(ctx.r,_c4,5);i0.ɵɵviewQuery(_c5,5)(_c6,5);}",
+            "{i0.ɵɵqueryAdvance();let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.b=_t);",
+            "{i0.ɵɵqueryAdvance(2);let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);",
+        ] {
+            assert!(linked.contains(expected), "{version:?}: missing `{expected}` in\n{code}");
+        }
+    }
+
+    let code = link_for_version(CHAINED_QUERIES_DIRECTIVE, Some(AngularVersion::new(21, 0, 3)));
+    let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(linked.contains("i0.ɵɵviewQuery(_c5,5);i0.ɵɵviewQuery(_c6,5);"), "{code}");
+    assert!(!linked.contains(",4)(") && !linked.contains(",5)("), "{code}");
 }
 
 /// `ɵɵngDeclareComponent` of ngtsc 21.2.25 for

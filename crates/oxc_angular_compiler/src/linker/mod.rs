@@ -1424,7 +1424,7 @@ fn link_directive(
         mut declarations_js,
         next_pool_index,
         mut shared_pool,
-    } = link_queries(&allocator, meta, source, ns, type_name);
+    } = link_queries(&allocator, meta, source, ns, type_name, options.angular_version);
     if let Some(cq_fn) = content_queries {
         parts.push(format!("contentQueries: {cq_fn}"));
     }
@@ -1592,6 +1592,7 @@ fn build_queries(
     type_name: &str,
     is_content_query: bool,
     pool: &mut ConstantPool<'_>,
+    angular_version: Option<AngularVersion>,
 ) -> Option<String> {
     if queries.elements.is_empty() {
         return None;
@@ -1600,6 +1601,21 @@ fn build_queries(
     let mut create_stmts: Vec<String> = Vec::new();
     let mut update_stmts: Vec<String> = Vec::new();
     let mut t_declared = false;
+    // Like `create_view_queries_function`, consecutive creation calls of the
+    // same instruction are chained (`ɵɵviewQuery(a, 5)(b, 5)`) on runtimes
+    // whose query instructions return themselves. `Some(is_signal)` while the
+    // last statement can take another call.
+    let chain_emit = angular_version.is_none_or(|v| v.supports_chained_queries());
+    let mut chain_is_signal: Option<bool> = None;
+    // Consecutive signal queries advance once, by their count, as with
+    // Angular's `collapseAdvanceStatements`
+    let mut advances = 0u32;
+    let flush_advances =
+        |update_stmts: &mut Vec<String>, advances: &mut u32| match std::mem::take(advances) {
+            0 => {}
+            1 => update_stmts.push(format!("{ns}.\u{0275}\u{0275}queryAdvance()")),
+            count => update_stmts.push(format!("{ns}.\u{0275}\u{0275}queryAdvance({count})")),
+        };
 
     for el in &queries.elements {
         let expr = match el {
@@ -1657,38 +1673,32 @@ fn build_queries(
         }
 
         // Create block — signal queries use different instructions with ctx.propertyName
-        if is_content_query {
-            if is_signal {
-                let mut args = format!("dirIndex, ctx.{prop_name}, {predicate}, {flags}");
-                if let Some(read_expr) = read {
-                    args = format!("{args}, {read_expr}");
-                }
-                create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuerySignal({args})"));
-            } else {
-                let mut args = format!("dirIndex, {predicate}, {flags}");
-                if let Some(read_expr) = read {
-                    args = format!("{args}, {read_expr}");
-                }
-                create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuery({args})"));
+        let (instruction, mut args) = match (is_content_query, is_signal) {
+            (true, true) => {
+                ("contentQuerySignal", format!("dirIndex, ctx.{prop_name}, {predicate}, {flags}"))
             }
-        } else if is_signal {
-            let mut args = format!("ctx.{prop_name}, {predicate}, {flags}");
-            if let Some(read_expr) = read {
-                args = format!("{args}, {read_expr}");
-            }
-            create_stmts.push(format!("{ns}.\u{0275}\u{0275}viewQuerySignal({args})"));
-        } else {
-            let mut args = format!("{predicate}, {flags}");
-            if let Some(read_expr) = read {
-                args = format!("{args}, {read_expr}");
-            }
-            create_stmts.push(format!("{ns}.\u{0275}\u{0275}viewQuery({args})"));
+            (true, false) => ("contentQuery", format!("dirIndex, {predicate}, {flags}")),
+            (false, true) => ("viewQuerySignal", format!("ctx.{prop_name}, {predicate}, {flags}")),
+            (false, false) => ("viewQuery", format!("{predicate}, {flags}")),
+        };
+        if let Some(read_expr) = read {
+            args = format!("{args}, {read_expr}");
         }
+        match create_stmts.last_mut() {
+            Some(chain) if chain_is_signal == Some(is_signal) => {
+                chain.push('(');
+                chain.push_str(&args);
+                chain.push(')');
+            }
+            _ => create_stmts.push(format!("{ns}.\u{0275}\u{0275}{instruction}({args})")),
+        }
+        chain_is_signal = chain_emit.then_some(is_signal);
 
         // Update block — signal queries just advance; regular queries refresh+assign
         if is_signal {
-            update_stmts.push(format!("{ns}.\u{0275}\u{0275}queryAdvance()"));
+            advances += 1;
         } else {
+            flush_advances(&mut update_stmts, &mut advances);
             let t_var = if t_declared {
                 ""
             } else {
@@ -1701,6 +1711,8 @@ fn build_queries(
             ));
         }
     }
+
+    flush_advances(&mut update_stmts, &mut advances);
 
     let create_block = create_stmts.join(";\n");
     let update_block = update_stmts.join(";\n");
@@ -1800,12 +1812,15 @@ fn link_queries<'a>(
     source: &str,
     ns: &str,
     type_name: &str,
+    angular_version: Option<AngularVersion>,
 ) -> LinkedQueries<'a> {
     let mut pool = ConstantPool::new(allocator);
-    let content_queries = get_array_property(meta, "queries")
-        .and_then(|queries| build_queries(queries, source, ns, type_name, true, &mut pool));
-    let view_query = get_array_property(meta, "viewQueries")
-        .and_then(|queries| build_queries(queries, source, ns, type_name, false, &mut pool));
+    let content_queries = get_array_property(meta, "queries").and_then(|queries| {
+        build_queries(queries, source, ns, type_name, true, &mut pool, angular_version)
+    });
+    let view_query = get_array_property(meta, "viewQueries").and_then(|queries| {
+        build_queries(queries, source, ns, type_name, false, &mut pool, angular_version)
+    });
 
     LinkedQueries {
         content_queries,
@@ -1945,7 +1960,7 @@ fn link_component(
         declarations_js: query_declarations_js,
         next_pool_index: query_next_pool_index,
         mut shared_pool,
-    } = link_queries(&template_allocator, meta, source, ns, type_name);
+    } = link_queries(&template_allocator, meta, source, ns, type_name, options.angular_version);
     let host_obj = get_object_property(meta, "host");
     let host_output = host_obj.and_then(|host_obj| {
         // Extract host properties and listeners as HostMetadataInput and compile
