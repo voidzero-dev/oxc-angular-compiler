@@ -303,11 +303,11 @@ fn test_link_sanitizes_img_video_src_before_22_2_2() {
     for version in [AngularVersion::new(21, 2, 0), AngularVersion::new(22, 2, 1)] {
         let code = link_for_version(SRC_BINDINGS_COMPONENT, Some(version));
         assert_eq!(
-            code.matches(r#"ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)"#).count(),
+            code.matches(r#"ɵɵdomProperty("src",ctx.url,i0.ɵɵsanitizeUrl)"#).count(),
             2,
             "{version:?}: img and video src must be sanitized:\n{code}"
         );
-        assert!(code.contains(r#"ɵɵproperty("href",ctx.url,i0.ɵɵsanitizeUrl)"#), "{code}");
+        assert!(code.contains(r#"ɵɵdomProperty("href",ctx.url,i0.ɵɵsanitizeUrl)"#), "{code}");
     }
 }
 
@@ -318,11 +318,11 @@ fn test_link_does_not_sanitize_img_video_src_from_22_2_2() {
     for version in [Some(AngularVersion::new(22, 2, 2)), None] {
         let code = link_for_version(SRC_BINDINGS_COMPONENT, version);
         assert_eq!(
-            code.matches(r#"ɵɵproperty("src",ctx.url)"#).count(),
+            code.matches(r#"ɵɵdomProperty("src",ctx.url)"#).count(),
             2,
             "{version:?}: img and video src must not be sanitized:\n{code}"
         );
-        assert!(code.contains(r#"ɵɵproperty("href",ctx.url,i0.ɵɵsanitizeUrl)"#), "{code}");
+        assert!(code.contains(r#"ɵɵdomProperty("href",ctx.url,i0.ɵɵsanitizeUrl)"#), "{code}");
     }
 
     let allocator = Allocator::default();
@@ -810,6 +810,57 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", n
     assert!(result.linked);
     assert!(result.code.contains(r#"["x"]"#), "{}", result.code);
     assert!(result.code.contains("[\"y\u{85}\"]"), "{}", result.code);
+}
+
+/// A component (standalone by default at version 22) with the given extra metadata.
+fn dom_only_component(extra: &str) -> String {
+    format!(
+        r#"import * as i0 from "@angular/core";
+export class A {{}}
+A.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "22.2.2", type: A, selector: "a", ngImport: i0, template: '<div [title]="t" (click)="go()"></div>@defer {{<i></i>}}', isInline: true{extra} }});
+"#
+    )
+}
+
+/// Angular's linker compiles a standalone template in DomOnly mode unless it has a
+/// directive, component or NgModule dependency, or a `@defer` block with dependencies,
+/// as Angular 22.2.3's linker shows. DomOnly needs Angular 20.1.
+#[test]
+fn test_link_dom_only_template() {
+    let dom_only = [
+        r#"ɵɵdomElementStart(0,"div",0);"#,
+        r#"ɵɵdomListener("click",functionA_Template_div_click_0_listener()"#,
+        r#"ɵɵdomProperty("title",ctx.t);"#,
+        r#"ɵɵdomElement(0,"i");"#,
+    ];
+    let full = [
+        r#"ɵɵelementStart(0,"div",0);"#,
+        r#"ɵɵlistener("click",functionA_Template_div_click_0_listener()"#,
+        r#"ɵɵproperty("title",ctx.t);"#,
+        r#"ɵɵelement(0,"i");"#,
+    ];
+    let cases = [
+        ("", None, &dom_only),
+        (r#", dependencies: [{ kind: "pipe", type: P, name: "p" }]"#, None, &dom_only),
+        (", deferBlockDependencies: [null]", None, &dom_only),
+        ("", Some(AngularVersion::new(20, 1, 0)), &dom_only),
+        (r#", dependencies: [{ kind: "directive", type: D, selector: "d" }]"#, None, &full),
+        (r#", dependencies: [{ kind: "component", type: D, selector: "d" }]"#, None, &full),
+        (r#", dependencies: [{ kind: "ngmodule", type: M }]"#, None, &full),
+        (r#", deferBlockDependencies: [() => [import("./x").then(m => m.X)]]"#, None, &full),
+        (", isStandalone: false", None, &full),
+        ("", Some(AngularVersion::new(20, 0, 0)), &full),
+    ];
+    for (extra, version, expected) in cases {
+        let code = link_for_version(&dom_only_component(extra), version);
+        let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        for expected in expected {
+            assert!(
+                linked.contains(expected),
+                "{extra} {version:?}: missing `{expected}` in\n{code}"
+            );
+        }
+    }
 }
 
 /// `ɵɵngDeclareDirective` of ngtsc 22.2.3 for two signal and two decorator

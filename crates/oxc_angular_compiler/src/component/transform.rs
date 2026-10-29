@@ -7963,6 +7963,10 @@ pub struct LinkerTemplateOutput {
 /// Angular's `compileComponentFromMetadata` compiles the host bindings first, so the
 /// template's pool continues from `pool_starting_index` and reuses what the host bindings
 /// pooled, from `shared_pool` (see [`compile_host_bindings_for_linker`]).
+///
+/// `has_directive_dependencies` is Angular's linker's `!isStandalone` or a directive,
+/// component or NgModule dependency. A `@defer` block with a dependency function counts too,
+/// and without any the template is compiled in DomOnly mode.
 pub fn compile_template_for_linker<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -7972,6 +7976,7 @@ pub fn compile_template_for_linker<'a>(
     core_namespace: &str,
     angular_version: Option<crate::AngularVersion>,
     defer_block_deps: &[Option<&str>],
+    has_directive_dependencies: bool,
     pool_starting_index: u32,
     shared_pool: SharedPool<'a>,
 ) -> Result<LinkerTemplateOutput, std::vec::Vec<OxcDiagnostic>> {
@@ -8038,11 +8043,19 @@ pub fn compile_template_for_linker<'a>(
             });
             (span, deps_fn)
         })
-        .collect();
+        .collect::<FxHashMap<_, _>>();
+    let mode = if has_directive_dependencies
+        || defer_blocks.values().any(Option::is_some)
+        || angular_version.is_some_and(|v| !v.supports_dom_only_templates())
+    {
+        TemplateCompilationMode::Full
+    } else {
+        TemplateCompilationMode::DomOnly
+    };
 
     // Stage 3-5: Ingest and compile
     let ingest_options = IngestOptions {
-        mode: TemplateCompilationMode::Full,
+        mode,
         relative_context_file_path: None,
         i18n_use_external_ids: true,
         defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,

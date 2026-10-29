@@ -295,12 +295,12 @@ describe('linker: angularVersion', () => {
       angularVersion: { major: 22, minor: 2, patch: 1 },
     })
 
-    expect(result.code).toContain('ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
+    expect(result.code).toContain('ɵɵdomProperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
   })
 
   it('assumes the latest Angular when no version is given', () => {
     expect(linkAngularPackageSync(IMG_SRC_COMPONENT, id).code).toContain(
-      'ɵɵproperty("src",ctx.url)',
+      'ɵɵdomProperty("src",ctx.url)',
     )
   })
 
@@ -310,7 +310,7 @@ describe('linker: angularVersion', () => {
     }) as any
     const result = await plugin.transform.handler.call({}, IMG_SRC_COMPONENT, id)
 
-    expect(result?.code).toContain('ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
+    expect(result?.code).toContain('ɵɵdomProperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
   })
 
   it('forwards the plugin angularVersion through the dependency optimizer', async () => {
@@ -325,7 +325,7 @@ describe('linker: angularVersion', () => {
       id,
     )
 
-    expect(code).toContain('ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
+    expect(code).toContain('ɵɵdomProperty("src",ctx.url,i0.ɵɵsanitizeUrl)')
   })
 
   it('keys the dependency optimizer cache on angularVersion', () => {
@@ -356,9 +356,9 @@ describe('linker: angularVersion', () => {
     }
 
     expect(await link({ major: 22, minor: 2, patch: 1 })).toContain(
-      'ɵɵproperty("src",ctx.url,i0.ɵɵsanitizeUrl)',
+      'ɵɵdomProperty("src",ctx.url,i0.ɵɵsanitizeUrl)',
     )
-    expect(await link({ major: 22, minor: 2, patch: 2 })).toContain('ɵɵproperty("src",ctx.url)')
+    expect(await link({ major: 22, minor: 2, patch: 2 })).toContain('ɵɵdomProperty("src",ctx.url)')
   })
 })
 

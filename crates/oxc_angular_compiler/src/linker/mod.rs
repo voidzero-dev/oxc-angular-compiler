@@ -1900,6 +1900,24 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
 }
 
+/// Whether a component is not standalone or has a directive, component or NgModule
+/// dependency, as Angular's linker sets `hasDirectiveDependencies` (before the `@defer`
+/// blocks' dependencies, which [`crate::component::compile_template_for_linker`] adds).
+fn has_directive_dependencies(meta: &ObjectExpression<'_>) -> bool {
+    let standalone = get_bool_property(meta, "isStandalone")
+        .unwrap_or_else(|| get_default_standalone_value(meta));
+    !standalone
+        || get_array_property(meta, "dependencies").is_some_and(|deps| {
+            deps.elements.iter().any(|dep| match dep.as_expression() {
+                Some(Expression::ObjectExpression(dep)) => matches!(
+                    get_string_property(dep, "kind"),
+                    Some("directive" | "component" | "ngmodule")
+                ),
+                _ => false,
+            })
+        })
+}
+
 /// Link ɵɵngDeclareComponent → ɵɵdefineComponent.
 ///
 /// A component extends a directive with template compilation and additional
@@ -2008,6 +2026,7 @@ fn link_component(
         ns,
         options.angular_version,
         &defer_block_deps,
+        has_directive_dependencies(meta),
         attrs_pool.next_name_index(),
         attrs_pool.take_shared(),
     )
@@ -2901,7 +2920,7 @@ C.ɵcmp = e.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ng
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked, "Component should be linked");
-        assert!(result.code.contains("e.\u{0275}\u{0275}elementStart"), "got:\n{}", result.code);
+        assert!(result.code.contains("e.\u{0275}\u{0275}domElementStart"), "got:\n{}", result.code);
         assert!(!result.code.contains("i0"), "Should not reference i0, got:\n{}", result.code);
     }
 
