@@ -263,10 +263,6 @@ pub struct TemplateCompilationResult<'a> {
 pub fn compile_template<'a>(
     job: &mut ComponentCompilationJob<'a>,
 ) -> TemplateCompilationResult<'a> {
-    use crate::output::ast::DeclareVarStmt;
-
-    let allocator = job.allocator;
-
     // Run all transformation phases (populates job.pool with constants)
     transform(job);
 
@@ -274,13 +270,29 @@ pub fn compile_template<'a>(
     let template_fn = emit_template_fn(job);
 
     // Collect declarations from job.pool constants and statements
+    let declarations = take_pool_declarations(&mut job.pool);
+
+    TemplateCompilationResult { template_fn, declarations }
+}
+
+/// Declares the pooled constants and moves the statements (shared and child
+/// view functions) out of `pool`, in the order they were pooled, as Angular's
+/// `ConstantPool.statements` is one list.
+fn take_pool_declarations<'a>(pool: &mut ConstantPool<'a>) -> OxcVec<'a, OutputStatement<'a>> {
+    use crate::output::ast::DeclareVarStmt;
+
+    let allocator = pool.allocator();
+    let mut statements = take_statements(allocator, &mut pool.statements).into_iter();
     let mut declarations = OxcVec::new_in(&allocator);
+    let mut taken = 0;
+    for index in 0..pool.len() {
+        let before = pool.statements_before(index);
+        declarations.extend(statements.by_ref().take(before.saturating_sub(taken)));
+        taken = taken.max(before);
 
-    // Generate const declarations from pooled constants
-    // Use mutable access to allow taking ownership of expressions that can't be cloned
-    for constant in job.pool.constants_mut() {
+        // Use mutable access to allow taking ownership of expressions that can't be cloned
+        let constant = &mut pool.constants_mut()[index];
         let value = emit_pooled_constant_value(allocator, &mut constant.kind);
-
         declarations.push(OutputStatement::DeclareVar(Box::new_in(
             DeclareVarStmt {
                 name: constant.name.clone(),
@@ -292,11 +304,8 @@ pub fn compile_template<'a>(
             &allocator,
         )));
     }
-
-    // Move the child view function declarations out of job.pool
-    declarations.extend(take_statements(allocator, &mut job.pool.statements));
-
-    TemplateCompilationResult { template_fn, declarations }
+    declarations.extend(statements);
+    declarations
 }
 
 /// Declares the constants pooled from index `start` on.
@@ -1628,10 +1637,6 @@ pub struct HostBindingCompilationResult<'a> {
 pub fn compile_host_bindings<'a>(
     job: &mut HostBindingCompilationJob<'a>,
 ) -> HostBindingCompilationResult<'a> {
-    use crate::output::ast::DeclareVarStmt;
-
-    let allocator = job.allocator;
-
     // Run all transformation phases for host bindings
     transform_host(job);
 
@@ -1650,21 +1655,7 @@ pub fn compile_host_bindings<'a>(
     // Collect declarations from host binding pool constants.
     // In Angular TS, template and host binding share the same ConstantPool,
     // so host binding pure functions get emitted alongside template constants.
-    let mut declarations = OxcVec::new_in(&allocator);
-    for constant in job.pool.constants_mut() {
-        let value = emit_pooled_constant_value(allocator, &mut constant.kind);
-        declarations.push(OutputStatement::DeclareVar(Box::new_in(
-            DeclareVarStmt {
-                name: constant.name.clone(),
-                value: Some(value),
-                modifiers: StmtModifier::FINAL,
-                leading_comment: None,
-                source_span: None,
-            },
-            &allocator,
-        )));
-    }
-    declarations.extend(take_statements(allocator, &mut job.pool.statements));
+    let declarations = take_pool_declarations(&mut job.pool);
 
     HostBindingCompilationResult { host_binding_fn, host_attrs, host_vars, declarations }
 }

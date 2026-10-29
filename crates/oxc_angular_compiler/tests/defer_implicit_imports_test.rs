@@ -1690,3 +1690,33 @@ export class Parent {}
         "{code}"
     );
 }
+
+#[test]
+fn deps_fns_are_declared_in_pool_order_with_the_constants() {
+    // ngtsc's pool keeps one list of statements: the DepsFn is pooled before
+    // the pure function and the track function, and declared first.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let source = r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-a',
+    imports: [LazyCmp],
+    template: '@defer {<app-lazy/>}<i [title]="[k, 1]"></i>@for (x of xs; track x.id) {}',
+})
+export class A { k = 1; xs: any[] = []; }
+"#;
+    let code = transform(&dir, source).code;
+    let declared: Vec<&str> = code
+        .lines()
+        .filter_map(|line| line.strip_prefix("const ").or_else(|| line.strip_prefix("function ")))
+        .filter_map(|rest| rest.split([' ', '=', '(']).next())
+        .collect();
+    assert_eq!(
+        declared,
+        ["A_Defer_1_DepsFn", "_c0", "_forTrack0", "A_Defer_0_Template", "A_For_5_Template"],
+        "{code}"
+    );
+}

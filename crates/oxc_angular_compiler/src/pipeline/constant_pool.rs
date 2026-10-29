@@ -55,6 +55,8 @@ pub struct ConstantPool<'a> {
     arrays: FxHashMap<u64, PooledValue>,
     /// All pooled values in order.
     values: Vec<'a, PooledConstant<'a>>,
+    /// For each of `values`, how many `statements` were pooled before it.
+    statements_before_values: std::vec::Vec<usize>,
     /// Counter for generating unique names (_c0, _c1, etc.).
     next_name_index: u32,
     /// Claimed names for unique_name deduplication, including the names of
@@ -84,6 +86,7 @@ impl<'a> ConstantPool<'a> {
             strings: FxHashMap::default(),
             arrays: FxHashMap::default(),
             values: Vec::new_in(&allocator),
+            statements_before_values: std::vec::Vec::new(),
             next_name_index: 0,
             claimed_names: FxHashMap::default(),
             literals: FxHashMap::default(),
@@ -115,6 +118,7 @@ impl<'a> ConstantPool<'a> {
             strings: FxHashMap::default(),
             arrays: FxHashMap::default(),
             values: Vec::new_in(&allocator),
+            statements_before_values: std::vec::Vec::new(),
             next_name_index: starting_index,
             claimed_names: FxHashMap::default(),
             literals: FxHashMap::default(),
@@ -148,7 +152,7 @@ impl<'a> ConstantPool<'a> {
         let name = self.generate_name("_c");
         let atom = Ident::from(self.allocator.alloc_str(value));
 
-        self.values.push(PooledConstant {
+        self.push_value(PooledConstant {
             name: name.clone(),
             value: PooledValue { index },
             kind: PooledConstantKind::String(atom),
@@ -167,7 +171,7 @@ impl<'a> ConstantPool<'a> {
         let index = self.values.len() as u32;
         let name = self.generate_name("_c");
 
-        self.values.push(PooledConstant {
+        self.push_value(PooledConstant {
             name,
             value: PooledValue { index },
             kind: PooledConstantKind::ArrayPlaceholder,
@@ -212,6 +216,20 @@ impl<'a> ConstantPool<'a> {
         Ident::from(self.allocator.alloc_str(&name))
     }
 
+    /// Adds a value, after the statements pooled so far.
+    fn push_value(&mut self, constant: PooledConstant<'a>) {
+        self.statements_before_values.push(self.statements.len());
+        self.values.push(constant);
+    }
+
+    /// Returns how many `statements` were pooled before the value at `index`.
+    ///
+    /// Angular's `ConstantPool.statements` is one list, so a value is declared
+    /// after the shared functions pooled before it, and before the later ones.
+    pub fn statements_before(&self, index: usize) -> usize {
+        self.statements_before_values.get(index).copied().unwrap_or(0)
+    }
+
     /// Gets the constant at the given index.
     pub fn get(&self, index: u32) -> Option<&PooledConstant<'a>> {
         self.values.get(index as usize)
@@ -234,7 +252,7 @@ impl<'a> ConstantPool<'a> {
         let body_atom = Ident::from(self.allocator.alloc_str(body));
         let flags_atom = flags.map(|f| Ident::from(self.allocator.alloc_str(f)));
 
-        self.values.push(PooledConstant {
+        self.push_value(PooledConstant {
             name: name.clone(),
             value: PooledValue { index },
             kind: PooledConstantKind::RegularExpression(RegexConstant {
@@ -288,7 +306,7 @@ impl<'a> ConstantPool<'a> {
         }
 
         // Store the actual body expression
-        self.values.push(PooledConstant {
+        self.push_value(PooledConstant {
             name: name.clone(),
             value: PooledValue { index },
             kind: PooledConstantKind::PureFunction(Box::new_in(
@@ -502,7 +520,7 @@ impl<'a> ConstantPool<'a> {
             self.inherited_fixups.push(InheritedFixup { name, value: literal });
         } else {
             let index = self.values.len() as u32;
-            self.values.push(PooledConstant {
+            self.push_value(PooledConstant {
                 name,
                 value: PooledValue { index },
                 kind: PooledConstantKind::Literal(Box::new_in(literal, &self.allocator)),
