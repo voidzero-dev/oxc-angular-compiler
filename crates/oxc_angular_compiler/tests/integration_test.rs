@@ -16080,6 +16080,39 @@ export class CounterService {}
 }
 
 #[test]
+fn test_raw_arrow_factory_is_parenthesized_when_called() {
+    // A block-body arrow the converter keeps as raw source (it declares a
+    // `const`) is called inside the factory wrapper. ngtsc emits
+    // `(() => {...})()`; a bare `() => {...}()` is a SyntaxError.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable, InjectionToken, Service } from '@angular/core';
+export const DEP = new InjectionToken<number>('DEP');
+@Service({ factory: () => { const q = 1; return { v: q }; } })
+export class S1 {}
+@Service({ factory: async () => ({ v: 2 }) })
+export class S2 {}
+@Injectable({ providedIn: 'root', useFactory: () => { const q = 3; return { v: q }; } })
+export class I1 {}
+@Injectable({ providedIn: 'root', useFactory: (d) => { const q = d + 4; return { v: q }; }, deps: [DEP] })
+export class I2 {}
+@Injectable({ providedIn: 'root', useFactory: function () { const q = 5; return { v: q }; } })
+export class I3 {}
+",
+    );
+    for expected in [
+        "return (() => { const q = 1; return { v: q }; })();",
+        "return (async () => ({ v: 2 }))();",
+        "factory:() =>(() => { const q = 3; return { v: q }; })()",
+        "((d) => { const q = d + 4; return { v: q }; })(i0.ɵɵinject(DEP))",
+        // ngtsc leaves a called function expression bare.
+        "factory:() =>function () { const q = 5; return { v: q }; }()",
+    ] {
+        assert!(code.contains(expected), "Missing `{expected}` in:\n{code}");
+    }
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).
