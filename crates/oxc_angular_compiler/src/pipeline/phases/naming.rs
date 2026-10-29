@@ -1180,9 +1180,12 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
     // Sanitize the base name once
     let sanitized_base = sanitize_identifier(component_name);
 
-    // Generate the function name for the host binding function
-    let fn_name = format!("{}_{}", component_name, job.fn_suffix);
-    job.root.fn_name = Some(Ident::from(allocator.alloc_str(&fn_name)));
+    // Generate the function name for the host binding function, unless the
+    // caller named it (as Angular's `addNamesToView` keeps a set `fnName`)
+    if job.root.fn_name.is_none() {
+        let fn_name = format!("{}_{}", component_name, job.fn_suffix);
+        job.root.fn_name = Some(Ident::from(allocator.alloc_str(&fn_name)));
+    }
 
     // Name listener handlers in create ops
     // Host listeners need names like: ComponentName_click_HostBindingHandler

@@ -7857,6 +7857,10 @@ fn compile_host_bindings_from_input<'a>(
     );
     job.core_namespace = Ident::from(core_namespace);
     job.pool.inherit_shared(std::mem::take(shared_pool));
+    // Unique in the pool, like the template functions: the linker shares it
+    // across the declarations of a scope (Angular's `addNamesToView`)
+    let fn_name = format!("{component_name}_{}", job.fn_suffix);
+    job.root.fn_name = Some(job.pool.unique_name(&fn_name, false));
     let result = compile_host_bindings(&mut job);
     *shared_pool = job.pool.take_shared();
 
@@ -7934,12 +7938,16 @@ pub fn compile_host_bindings_for_linker<'a>(
 /// from `ɵɵngDeclareComponent` partial declarations.
 #[derive(Debug)]
 pub struct LinkerTemplateOutput {
-    /// All declarations (child view functions, pooled constants, main template function)
-    /// as JavaScript code. These need to be emitted before the `defineComponent` call.
+    /// The declarations (child view functions, pooled constants) as JavaScript code.
+    /// These need to be emitted before the `defineComponent` call.
     pub declarations_js: String,
 
-    /// The name of the main template function (e.g., "ComponentName_Template").
-    pub template_fn_name: String,
+    /// The main template function as a JavaScript expression
+    /// (`function ComponentName_Template(rf, ctx) { ... }`).
+    pub template_fn_js: String,
+
+    /// The next available pool index after template compilation.
+    pub next_pool_index: u32,
 
     /// Number of element/text/container declarations in the root view.
     pub decls: u32,
@@ -7962,7 +7970,8 @@ pub struct LinkerTemplateOutput {
 ///
 /// Angular's `compileComponentFromMetadata` compiles the host bindings first, so the
 /// template's pool continues from `pool_starting_index` and reuses what the host bindings
-/// pooled, from `shared_pool` (see [`compile_host_bindings_for_linker`]).
+/// (and the earlier declarations of the scope) pooled, from `shared_pool` (see
+/// [`compile_host_bindings_for_linker`]), which gets what the template pools.
 ///
 /// `has_directive_dependencies` is Angular's linker's `!isStandalone` or a directive,
 /// component or NgModule dependency. A `@defer` block with a dependency function counts too,
@@ -7978,7 +7987,7 @@ pub fn compile_template_for_linker<'a>(
     defer_block_deps: &[Option<&str>],
     has_directive_dependencies: bool,
     pool_starting_index: u32,
-    shared_pool: SharedPool<'a>,
+    shared_pool: &mut SharedPool<'a>,
 ) -> Result<LinkerTemplateOutput, std::vec::Vec<OxcDiagnostic>> {
     use crate::pipeline::ingest::{IngestOptions, ingest_component_with_options};
     use oxc_allocator::FromIn;
@@ -8082,9 +8091,12 @@ pub fn compile_template_for_linker<'a>(
         ingest_options,
     );
     job.core_namespace = Ident::from_in(core_namespace, &allocator);
-    job.pool.inherit_shared(shared_pool);
+    // The caller drops what a failed template pooled.
+    job.pool.inherit_shared(std::mem::take(shared_pool));
 
     let compiled = compile_template(&mut job);
+    *shared_pool = job.pool.take_shared();
+    let next_pool_index = job.pool.next_name_index();
 
     // Collect diagnostics
     diagnostics.extend(job.diagnostics.into_iter());
@@ -8154,40 +8166,16 @@ pub fn compile_template_for_linker<'a>(
     let ng_content_selectors_js =
         job.content_selectors.take().map(|expr| emitter.emit_expression(&expr));
 
-    // Get template function name
-    let template_fn_name = compiled
-        .template_fn
-        .name
-        .as_ref()
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| format!("{component_name}_Template"));
-
-    // Emit all declarations + main template function as JS code
-    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
-
-    for decl in compiled.declarations {
-        all_statements.push(decl);
-    }
-
-    if let Some(fn_name) = compiled.template_fn.name.clone() {
-        let main_fn_stmt = OutputStatement::DeclareFunction(oxc_allocator::Box::new_in(
-            DeclareFunctionStmt {
-                name: fn_name,
-                params: compiled.template_fn.params,
-                statements: compiled.template_fn.statements,
-                modifiers: StmtModifier::NONE,
-                source_span: compiled.template_fn.source_span,
-            },
-            &allocator,
-        ));
-        all_statements.push(main_fn_stmt);
-    }
-
-    let declarations_js = emitter.emit_statements(&all_statements);
+    // The main template function goes inline in the definition, as in Angular's output
+    let template_fn_js = emitter.emit_expression(&OutputExpression::Function(
+        oxc_allocator::Box::new_in(compiled.template_fn, &allocator),
+    ));
+    let declarations_js = emitter.emit_statements(&compiled.declarations);
 
     Ok(LinkerTemplateOutput {
         declarations_js,
-        template_fn_name,
+        template_fn_js,
+        next_pool_index,
         decls,
         vars,
         consts_js,

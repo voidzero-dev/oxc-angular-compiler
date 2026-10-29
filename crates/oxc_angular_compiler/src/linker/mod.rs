@@ -38,17 +38,24 @@ use std::borrow::Cow;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, CallExpression, Decorator,
-    ExportDefaultDeclaration, Expression, ExpressionStatement, ObjectExpression,
-    ObjectPropertyKind, Program, PropertyKey, Statement,
+    ExportDefaultDeclaration, Expression, ExpressionStatement, Function, MethodDefinition,
+    ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
+    Statement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
+use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, SourceType, Span};
+use oxc_syntax::scope::{ScopeFlags, ScopeId};
+use rustc_hash::FxHashMap;
 
 use crate::AngularVersion;
 use crate::directive::split_query_predicate;
 use crate::optimizer::Edit;
-use crate::output::ast::{LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression};
+use crate::output::ast::{
+    DeclareVarStmt, LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression, OutputStatement,
+    StmtModifier,
+};
 use crate::output::emitter::JsEmitter;
 use crate::output::emitter::escape_string;
 use crate::output::emitter::is_left_hand_side_source;
@@ -140,7 +147,7 @@ pub fn link_with_options(
     let mut edits: Vec<Edit> = Vec::new();
 
     // Walk all statements looking for ɵɵngDeclare* calls
-    collect_declaration_edits(&program, code, filename, options, &mut edits);
+    collect_declaration_edits(allocator, &program, code, filename, options, &mut edits);
 
     if edits.is_empty() {
         return LinkResult { code: code.to_string(), map: None, linked: false };
@@ -159,25 +166,80 @@ pub fn link_with_options(
 ///
 /// Like Babel's linker, which visits every `CallExpression`, this visits every call wherever it sits
 /// (class members, array and object literals, IIFE callees, conditions, decorators, ...).
-fn collect_declaration_edits(
-    program: &Program<'_>,
+fn collect_declaration_edits<'a>(
+    allocator: &'a Allocator,
+    program: &Program<'a>,
     source: &str,
     filename: &str,
     options: &LinkOptions,
     edits: &mut Vec<Edit>,
 ) {
-    DeclarationCollector {
+    let scoping = SemanticBuilder::new().build(program).semantic.into_scoping();
+    let mut collector = DeclarationCollector {
+        allocator,
         source,
         filename,
         options,
         edits,
         statement_start: None,
         decorator: None,
+        scoping,
+        constant_scopes: FxHashMap::default(),
+        method: None,
+        emit_scopes: FxHashMap::default(),
+    };
+    collector.visit_program(program);
+    // Like Angular's linker plugin when it leaves the file: each scope's
+    // constants go once at its top
+    for scope in collector.emit_scopes.into_values() {
+        if !scope.statements_js.is_empty() {
+            // After a declaration starting at the same place, so before its text
+            let mut edit = Edit::insert(scope.insert_at, scope.statements_js);
+            edit.priority = 1;
+            collector.edits.push(edit);
+        }
     }
-    .visit_program(program);
 }
 
-struct DeclarationCollector<'s> {
+/// The state of a constant pool carried from one declaration to the next, and
+/// between the steps of one declaration.
+#[derive(Default, Clone)]
+struct LinkPool<'a> {
+    /// The next `_c` constant index.
+    next_index: u32,
+    /// What the earlier declarations pooled and claimed.
+    shared: SharedPool<'a>,
+}
+
+impl<'a> LinkPool<'a> {
+    /// A pool continuing this one.
+    fn open(&mut self, allocator: &'a Allocator) -> ConstantPool<'a> {
+        let mut pool = ConstantPool::with_starting_index(allocator, self.next_index);
+        pool.inherit_shared(std::mem::take(&mut self.shared));
+        pool
+    }
+
+    /// Carries what `pool` pooled on to the next one.
+    fn close(&mut self, pool: &mut ConstantPool<'a>) {
+        self.next_index = pool.next_name_index();
+        self.shared = pool.take_shared();
+    }
+}
+
+/// The declarations whose `ngImport` is bound in one module or function scope,
+/// like an `EmitScope` of Angular's `FileLinker`: they share one constant pool,
+/// whose statements go once at the top of that scope.
+struct EmitScope<'a> {
+    /// Where the statements go (see [`DeclarationCollector::constant_scopes`]).
+    insert_at: u32,
+    /// The scope's pool.
+    pool: LinkPool<'a>,
+    /// The pooled constants and child template functions, as JS.
+    statements_js: String,
+}
+
+struct DeclarationCollector<'s, 'a> {
+    allocator: &'a Allocator,
     source: &'s str,
     filename: &'s str,
     options: &'s LinkOptions,
@@ -187,17 +249,153 @@ struct DeclarationCollector<'s> {
     statement_start: Option<(Span, bool)>,
     /// The expression of the decorator being visited
     decorator: Option<Span>,
+    scoping: Scoping,
+    /// The scopes that can hold shared constants, as Angular's `BabelDeclarationScope` allows them: a module, where
+    /// they go before the first statement that is not an import, and a function declaration or expression (not a
+    /// method or an arrow function), where they go at the start of its body
+    constant_scopes: FxHashMap<ScopeId, u32>,
+    /// The function of the method being visited
+    method: Option<Span>,
+    emit_scopes: FxHashMap<ScopeId, EmitScope<'a>>,
 }
 
-impl DeclarationCollector<'_> {
-    fn visit_statement_expression<'a>(&mut self, expr: &Expression<'a>, is_statement: bool) {
+impl<'a> DeclarationCollector<'_, 'a> {
+    fn visit_statement_expression(&mut self, expr: &Expression<'a>, is_statement: bool) {
         let outer = self.statement_start.replace((expr.span(), is_statement));
         self.visit_expression(expr);
         self.statement_start = outer;
     }
+
+    /// The scope whose constant pool a declaration with `ng_import` uses, like
+    /// `BabelDeclarationScope.getConstantScopeRef`: the scope binding the
+    /// namespace, if it can hold constants. `None` keeps the constants local.
+    fn constant_scope(&self, ng_import: &Expression<'a>) -> Option<ScopeId> {
+        let mut expr = ng_import.without_parentheses();
+        while let Some(member) = expr.as_member_expression() {
+            expr = member.object().without_parentheses();
+        }
+        let Expression::Identifier(ident) = expr else { return None };
+        let symbol = self.scoping.get_reference(ident.reference_id.get()?).symbol_id()?;
+        let scope = self.scoping.symbol_scope_id(symbol);
+        self.constant_scopes.contains_key(&scope).then_some(scope)
+    }
+
+    /// Links a declaration, with the pool of its constant scope or one of its own.
+    fn link(&mut self, name: &str, call: &CallExpression<'a>) -> Option<Edit> {
+        let meta = get_metadata_object(call)?;
+        let ng_import = get_property_expression(meta, "ngImport").or(match &call.callee {
+            Expression::StaticMemberExpression(member) => Some(&member.object),
+            _ => None,
+        });
+        let Some(scope) = ng_import.and_then(|ng_import| self.constant_scope(ng_import)) else {
+            // Angular's `LocalEmitScope`: the constants go in an IIFE with the definition
+            let mut pool = LinkPool::default();
+            let (definition, statements) = link_declaration(
+                name,
+                call,
+                self.source,
+                self.filename,
+                self.options,
+                self.allocator,
+                &mut pool,
+            )?;
+            let replacement = if statements.is_empty() {
+                definition
+            } else {
+                // The IIFE only declares the constants and child template functions
+                // of the pure define call, so it is pure too: without the annotation
+                // bundlers would keep unused classes
+                format!("/*@__PURE__*/ (() => {{\n{statements}\nreturn {definition};\n}})()")
+            };
+            return Some(Edit::replace(call.span.start, call.span.end, replacement));
+        };
+        let insert_at = self.constant_scopes[&scope];
+        let emit_scope = self.emit_scopes.entry(scope).or_insert_with(|| EmitScope {
+            insert_at,
+            pool: LinkPool::default(),
+            statements_js: String::new(),
+        });
+        // A declaration that fails to link pools nothing
+        let saved = emit_scope.pool.clone();
+        let Some((definition, statements)) = link_declaration(
+            name,
+            call,
+            self.source,
+            self.filename,
+            self.options,
+            self.allocator,
+            &mut emit_scope.pool,
+        ) else {
+            emit_scope.pool = saved;
+            return None;
+        };
+        emit_scope.statements_js.push_str(&statements);
+        Some(Edit::replace(call.span.start, call.span.end, definition))
+    }
 }
 
-impl<'a> Visit<'a> for DeclarationCollector<'_> {
+impl<'a> Visit<'a> for DeclarationCollector<'_, 'a> {
+    fn visit_program(&mut self, program: &Program<'a>) {
+        // Babel parses a file as a module unless told otherwise, so Angular's
+        // linker shares the top level of any file
+        if let Some(scope) = program.scope_id.get() {
+            let first = program
+                .body
+                .iter()
+                .position(|stmt| !matches!(stmt, Statement::ImportDeclaration(_)))
+                .unwrap_or(0);
+            let insert_at = program.body.get(first).map_or(program.span.end, |stmt| {
+                let start = stmt.span().start;
+                if first > 0 || !program.directives.is_empty() {
+                    // Babel prints the comments in between after the node before
+                    start
+                } else {
+                    // Before the leading comments, which Babel prints with the statement
+                    program
+                        .comments
+                        .iter()
+                        .filter(|comment| comment.is_leading() && comment.attached_to == start)
+                        .map(|comment| comment.span.start)
+                        .fold(start, u32::min)
+                }
+            });
+            self.constant_scopes.insert(scope, insert_at);
+        }
+        walk::walk_program(self, program);
+    }
+
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        let outer = self.method.replace(method.value.span);
+        walk::walk_method_definition(self, method);
+        self.method = outer;
+    }
+
+    fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
+        if prop.method || prop.kind != PropertyKind::Init {
+            let outer = self.method.replace(prop.value.span());
+            walk::walk_object_property(self, prop);
+            self.method = outer;
+        } else {
+            walk::walk_object_property(self, prop);
+        }
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        if self.method != Some(func.span)
+            && let Some(body) = &func.body
+            && let Some(scope) = func.scope_id.get()
+        {
+            // Babel prints the comments after a directive with it
+            let insert_at = match (body.directives.last(), body.statements.first()) {
+                (Some(_), Some(stmt)) => stmt.span().start,
+                (Some(directive), None) => directive.span.end,
+                (None, _) => body.span.start + 1,
+            };
+            self.constant_scopes.insert(scope, insert_at);
+        }
+        walk::walk_function(self, func, flags);
+    }
+
     fn visit_statements(&mut self, stmts: &oxc_allocator::Vec<'a, Statement<'a>>) {
         for stmt in stmts {
             match stmt {
@@ -229,8 +427,7 @@ impl<'a> Visit<'a> for DeclarationCollector<'_> {
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if let Some(name) = get_declare_name(call)
-            && let Some(mut edit) =
-                link_declaration(name, call, self.source, self.filename, self.options)
+            && let Some(mut edit) = self.link(name, call)
         {
             // A linked factory is a `function` expression: where it starts a longer statement, such as
             // `ɵɵngDeclareFactory(…).name;`, it would be read as a declaration, so it gets parentheses (and, in a
@@ -839,14 +1036,17 @@ fn get_factory_target(obj: &ObjectExpression<'_>, source: &str) -> &'static str 
     "Injectable"
 }
 
-/// Link a single ɵɵngDeclare* call, generating the replacement code.
-fn link_declaration(
+/// Link a single ɵɵngDeclare* call, generating the definition and the
+/// statements its constants and child template functions need, with `pool`.
+fn link_declaration<'a>(
     name: &str,
     call: &CallExpression<'_>,
     source: &str,
     filename: &str,
     options: &LinkOptions,
-) -> Option<Edit> {
+    allocator: &'a Allocator,
+    pool: &mut LinkPool<'a>,
+) -> Option<(String, String)> {
     let meta = get_metadata_object(call)?;
     let ns = get_ng_import_namespace(call);
     let type_name = get_property_source(meta, "type", source)?;
@@ -860,13 +1060,16 @@ fn link_declaration(
         DECLARE_PIPE => link_pipe(meta, source, ns, type_name),
         DECLARE_CLASS_METADATA => link_class_metadata(meta, source, ns, type_name),
         DECLARE_CLASS_METADATA_ASYNC => link_class_metadata_async(meta, source, ns, type_name),
-        DECLARE_DIRECTIVE => link_directive(meta, source, ns, type_name, options),
-        DECLARE_COMPONENT => link_component(meta, source, filename, ns, type_name, options),
+        DECLARE_DIRECTIVE => {
+            return Some(link_directive(meta, source, ns, type_name, options, allocator, pool));
+        }
+        DECLARE_COMPONENT => {
+            return link_component(meta, source, filename, ns, type_name, options, allocator, pool);
+        }
         _ => return None,
     };
 
-    let replacement = replacement?;
-    Some(Edit::replace(call.span.start, call.span.end, replacement))
+    Some((replacement?, String::new()))
 }
 
 /// Link ɵɵngDeclareFactory → factory function.
@@ -1403,13 +1606,15 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
 }
 
 /// Link ɵɵngDeclareDirective → ɵɵdefineDirective.
-fn link_directive(
+fn link_directive<'a>(
     meta: &ObjectExpression<'_>,
     source: &str,
     ns: &str,
     type_name: &str,
     options: &LinkOptions,
-) -> Option<String> {
+    allocator: &'a Allocator,
+    pool: &mut LinkPool<'a>,
+) -> (String, String) {
     let mut parts = vec![format!("type: {type_name}")];
 
     if let Some(selector) = get_string_property(meta, "selector") {
@@ -1417,14 +1622,8 @@ fn link_directive(
     }
 
     // Content queries, then view queries — pooled before the host bindings
-    let allocator = Allocator::default();
-    let LinkedQueries {
-        content_queries,
-        view_query,
-        mut declarations_js,
-        next_pool_index,
-        mut shared_pool,
-    } = link_queries(&allocator, meta, source, ns, type_name, options.angular_version);
+    let LinkedQueries { content_queries, view_query, mut declarations_js } =
+        link_queries(allocator, pool, meta, source, ns, type_name, options.angular_version);
     if let Some(cq_fn) = content_queries {
         parts.push(format!("contentQueries: {cq_fn}"));
     }
@@ -1468,15 +1667,16 @@ fn link_directive(
         let host_input = extract_host_metadata_input(host_obj);
         let selector = get_string_property(meta, "selector");
         if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
-            &allocator,
+            allocator,
             &host_input,
             type_name,
             selector,
-            next_pool_index,
-            &mut shared_pool,
+            pool.next_index,
+            &mut pool.shared,
             ns,
             options.angular_version,
         ) {
+            pool.next_index = host_output.next_pool_index;
             if host_output.host_vars > 0 {
                 parts.push(format!("hostVars: {}", host_output.host_vars));
             }
@@ -1487,16 +1687,7 @@ fn link_directive(
 
     let define_call =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", "));
-    if declarations_js.is_empty() {
-        Some(define_call)
-    } else {
-        // The IIFE only declares the query predicates and the host binding
-        // functions and constants before returning the pure define call, so it
-        // is pure too. Without the annotation bundlers keep unused directives
-        // (Angular's linker hoists the declarations and leaves the define call
-        // itself at the top level).
-        Some(format!("/*@__PURE__*/ (() => {{\n{declarations_js}\nreturn {define_call};\n}})()"))
-    }
+    (define_call, declarations_js)
 }
 
 /// Extract an array expression property value from an object expression.
@@ -1790,17 +1981,13 @@ fn pool_string_array<'a>(
 }
 
 /// The `contentQueries` and `viewQuery` functions of a directive or component.
-struct LinkedQueries<'a> {
+struct LinkedQueries {
     /// The `contentQueries` function as JS, if any.
     content_queries: Option<String>,
     /// The `viewQuery` function as JS, if any.
     view_query: Option<String>,
     /// The pooled predicates' declarations as JS.
     declarations_js: String,
-    /// The next constant index after the predicates.
-    next_pool_index: u32,
-    /// The pooled predicates, for the host bindings and the template to reuse.
-    shared_pool: SharedPool<'a>,
 }
 
 /// Build the query functions of a declaration, pooling their string
@@ -1808,13 +1995,14 @@ struct LinkedQueries<'a> {
 /// then view queries, before the host bindings, all with one pool.
 fn link_queries<'a>(
     allocator: &'a Allocator,
+    link_pool: &mut LinkPool<'a>,
     meta: &ObjectExpression<'_>,
     source: &str,
     ns: &str,
     type_name: &str,
     angular_version: Option<AngularVersion>,
-) -> LinkedQueries<'a> {
-    let mut pool = ConstantPool::new(allocator);
+) -> LinkedQueries {
+    let mut pool = link_pool.open(allocator);
     let content_queries = get_array_property(meta, "queries").and_then(|queries| {
         build_queries(queries, source, ns, type_name, true, &mut pool, angular_version)
     });
@@ -1822,13 +2010,9 @@ fn link_queries<'a>(
         build_queries(queries, source, ns, type_name, false, &mut pool, angular_version)
     });
 
-    LinkedQueries {
-        content_queries,
-        view_query,
-        declarations_js: declare_pooled_constants_js(&mut pool, ns),
-        next_pool_index: pool.next_name_index(),
-        shared_pool: pool.take_shared(),
-    }
+    let declarations_js = declare_pooled_constants_js(&mut pool, ns);
+    link_pool.close(&mut pool);
+    LinkedQueries { content_queries, view_query, declarations_js }
 }
 
 /// The declarations of the constants in `pool` as JS.
@@ -1931,24 +2115,23 @@ fn has_directive_dependencies(meta: &ObjectExpression<'_>) -> bool {
 ///   return i0.ɵɵdefineComponent({ ... template: Component_Template, ... });
 /// })()
 /// ```
-fn link_component(
+#[expect(clippy::too_many_arguments)]
+fn link_component<'a>(
     meta: &ObjectExpression<'_>,
     source: &str,
     filename: &str,
     ns: &str,
     type_name: &str,
     options: &LinkOptions,
-) -> Option<String> {
+    allocator: &'a Allocator,
+    pool: &mut LinkPool<'a>,
+) -> Option<(String, String)> {
     // Extract template string - required for component linking
     let template = get_string_property(meta, "template")?;
     let preserve_whitespaces = get_bool_property(meta, "preserveWhitespaces").unwrap_or(false);
 
     // Compile the template using the full template compilation pipeline.
-    let template_allocator = Allocator::default();
-
-    // We need to leak the template string into the template allocator's lifetime
-    let template_owned: String = template.to_string();
-    let template_ref: &str = template_allocator.alloc_str(&template_owned);
+    let template_ref: &str = allocator.alloc_str(template);
 
     // `deferBlockDependencies: [() => [import("./a").then(m => m.A)], null]`,
     // one entry per `@defer` block, emitted as written. Parentheses are not part
@@ -1972,40 +2155,32 @@ fn link_component(
     // host bindings (in `baseDirectiveFields`) before the template, with one
     // pool: the query predicates come first, then the host bindings'
     // constants, and the template reuses equal ones.
-    let LinkedQueries {
-        content_queries,
-        view_query,
-        declarations_js: query_declarations_js,
-        next_pool_index: query_next_pool_index,
-        mut shared_pool,
-    } = link_queries(&template_allocator, meta, source, ns, type_name, options.angular_version);
+    let LinkedQueries { content_queries, view_query, declarations_js: query_declarations_js } =
+        link_queries(allocator, pool, meta, source, ns, type_name, options.angular_version);
     let host_obj = get_object_property(meta, "host");
     let host_output = host_obj.and_then(|host_obj| {
         // Extract host properties and listeners as HostMetadataInput and compile
         // through the full Angular expression parser for correct output.
         crate::component::compile_host_bindings_for_linker(
-            &template_allocator,
+            allocator,
             &extract_host_metadata_input(host_obj),
             type_name,
             get_string_property(meta, "selector"),
-            query_next_pool_index,
-            &mut shared_pool,
+            pool.next_index,
+            &mut pool.shared,
             ns,
             options.angular_version,
         )
     });
+    if let Some(host_output) = &host_output {
+        pool.next_index = host_output.next_pool_index;
+    }
 
     // Pool the `attrs` const when the first selector has attributes, after the
     // host bindings and before the template. Only Angular before
     // v22.0.0-next.4 adds it, in `compileComponentFromMetadata` after
     // `baseDirectiveFields`.
-    let mut attrs_pool = ConstantPool::with_starting_index(
-        &template_allocator,
-        host_output
-            .as_ref()
-            .map_or(query_next_pool_index, |host_output| host_output.next_pool_index),
-    );
-    attrs_pool.inherit_shared(shared_pool);
+    let mut attrs_pool = pool.open(allocator);
     let attrs = get_string_property(meta, "selector")
         .filter(|_| options.angular_version.is_some_and(|v| v.emits_selector_attrs()))
         .and_then(|selector| CssSelector::parse(selector).into_iter().next())
@@ -2016,9 +2191,10 @@ fn link_component(
             JsEmitter::new().emit_expression(&pool_string_array(&mut attrs_pool, &attrs))
         });
     let attrs_declarations_js = declare_pooled_constants_js(&mut attrs_pool, ns);
+    pool.close(&mut attrs_pool);
 
     let template_output = crate::component::compile_template_for_linker(
-        &template_allocator,
+        allocator,
         template_ref,
         type_name,
         filename,
@@ -2027,10 +2203,11 @@ fn link_component(
         options.angular_version,
         &defer_block_deps,
         has_directive_dependencies(meta),
-        attrs_pool.next_name_index(),
-        attrs_pool.take_shared(),
+        pool.next_index,
+        &mut pool.shared,
     )
     .ok()?;
+    pool.next_index = template_output.next_pool_index;
 
     // Build the defineComponent properties
     let mut parts: Vec<String> = Vec::new();
@@ -2128,8 +2305,8 @@ fn link_component(
         parts.push(format!("consts: {consts}"));
     }
 
-    // 17. template (reference to the compiled function)
-    parts.push(format!("template: {}", template_output.template_fn_name));
+    // 17. template
+    parts.push(format!("template: {}", template_output.template_fn_js));
 
     // 18. dependencies — support both new-style (v14+) and old-style (v12-v13) fields
     // Aligns with TS linker's `extractDeclarationTypeExpr` which calls `extractForwardRef`
@@ -2240,30 +2417,80 @@ fn link_component(
 
     // Process styles: apply CSS scoping for Emulated encapsulation
     let mut has_styles = false;
+    let mut styles_declarations_js = String::new();
     if let Some(styles_arr) = get_array_property(meta, "styles") {
-        let mut scoped_styles: Vec<String> = Vec::new();
+        // A long style is shared once the scope uses it twice (Angular's
+        // `constantPool.getConstLiteral(literal(style))`, after the template)
+        let mut styles_pool = pool.open(allocator);
+        let emitter = JsEmitter::with_core_namespace(ns);
+        let mut scoped_styles: Vec<OutputExpression<'a>> = Vec::new();
         for el in &styles_arr.elements {
             // `as_expression` returns None for spreads and elisions (e.g. `[, "a"]`),
             // where `to_expression` would panic.
             let Some(expr) = el.as_expression() else { continue };
-            if let Some(style) = as_static_string(expr) {
-                if is_emulated {
-                    let scoped = crate::styles::shim_css_text_for_version(
-                        style,
-                        "_ngcontent-%COMP%",
-                        "_nghost-%COMP%",
-                        options.angular_version,
-                    );
-                    if !scoped.trim().is_empty() {
-                        scoped_styles.push(crate::output::emitter::escape_string(&scoped, false));
-                    }
-                } else if !style.trim().is_empty() {
-                    scoped_styles.push(crate::output::emitter::escape_string(style, false));
-                }
+            let Some(style) = as_static_string(expr) else { continue };
+            let style = if is_emulated {
+                Cow::Owned(crate::styles::shim_css_text_for_version(
+                    style,
+                    "_ngcontent-%COMP%",
+                    "_nghost-%COMP%",
+                    options.angular_version,
+                ))
+            } else {
+                Cow::Borrowed(style)
+            };
+            if style.trim().is_empty() {
+                continue;
+            }
+            let pooled_before = styles_pool.len();
+            scoped_styles.push(styles_pool.get_const_literal(
+                OutputExpression::Literal(oxc_allocator::Box::new_in(
+                    LiteralExpr {
+                        value: LiteralValue::String(oxc_allocator::FromIn::from_in(
+                            style.as_ref(),
+                            allocator,
+                        )),
+                        source_span: None,
+                    },
+                    &allocator,
+                )),
+                false,
+            ));
+            // Declared in the order they are pooled. A style an earlier
+            // declaration used inline keeps it there: Angular's linker has
+            // emitted that declaration already.
+            for decl in &declare_pooled_constants_from(&mut styles_pool, pooled_before) {
+                styles_declarations_js.push_str(&emitter.emit_statement(decl));
+                styles_declarations_js.push('\n');
+            }
+            for fixup in styles_pool.take_inherited_fixups() {
+                styles_declarations_js.push_str(&emitter.emit_statement(
+                    &OutputStatement::DeclareVar(oxc_allocator::Box::new_in(
+                        DeclareVarStmt {
+                            name: fixup.name,
+                            value: Some(fixup.value),
+                            modifiers: StmtModifier::FINAL,
+                            leading_comment: None,
+                            source_span: None,
+                        },
+                        &allocator,
+                    )),
+                ));
+                styles_declarations_js.push('\n');
             }
         }
+        // A style used twice here was inline on its first use; point that use
+        // at the constant too, like Angular's `FixupExpression` does.
+        for entry in &mut scoped_styles {
+            if let Some(shared) = styles_pool.shared_literal(entry) {
+                *entry = shared;
+            }
+        }
+        pool.close(&mut styles_pool);
         if !scoped_styles.is_empty() {
             has_styles = true;
+            let scoped_styles: Vec<String> =
+                scoped_styles.iter().map(|style| emitter.emit_expression(style)).collect();
             parts.push(format!("styles: [{}]", scoped_styles.join(", ")));
         }
     }
@@ -2314,19 +2541,17 @@ fn link_component(
     let define_component =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
-    // Wrap in IIFE with query, host binding, attrs and template declarations,
-    // in the order they were pooled
+    // The query, host binding, attrs, template and style declarations, in the
+    // order they were pooled
     let mut declarations = query_declarations_js;
     declarations.push_str(&host_binding_declarations_js);
     declarations.push_str(&attrs_declarations_js);
     declarations.push_str(&template_output.declarations_js);
-    if declarations.trim().is_empty() {
-        Some(define_component)
-    } else {
-        // Pure for the same reason as in `link_directive`: it only declares the
-        // template functions and pooled constants used by the define call.
-        Some(format!("/*@__PURE__*/ (() => {{\n{declarations}\nreturn {define_component};\n}})()"))
+    if !declarations.is_empty() && !declarations.ends_with('\n') {
+        declarations.push('\n');
     }
+    declarations.push_str(&styles_declarations_js);
+    Some((define_component, declarations))
 }
 
 #[cfg(test)]
