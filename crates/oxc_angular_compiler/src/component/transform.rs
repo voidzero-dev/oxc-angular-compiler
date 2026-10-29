@@ -32,7 +32,7 @@ use super::decorator::{
 use super::definition::{const_value_to_expression, generate_component_definitions};
 use super::hoist::{collect_hoist_edits, program_has_angular_decorated_class};
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
-use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
+use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata, ImportRef};
 use super::namespace_registry::NamespaceRegistry;
 use super::signal_debug_name;
 use crate::ast::expression::{BindingType, ParsedEventType};
@@ -3564,43 +3564,38 @@ pub fn transform_angular_file(
             let program = &parser_ret.program;
             let string_consts = &string_consts;
             let implicit_standalone = options.implicit_standalone();
-            move |local: &str| -> Option<(String, bool)> {
-                let Some(info) = import_map.get(&Ident::from(local)) else {
-                    let selector = super::defer_resolver::local_standalone_class_selector(
-                        program,
-                        string_consts,
-                        local,
-                        implicit_standalone,
-                    )?;
-                    return Some((selector, false));
+            move |import: &ImportRef<'_>| -> Option<ImportedClass> {
+                let local = import.namespace.unwrap_or(import.name);
+                let Some(info) = import_map.get(&local) else {
+                    return local_class(program, string_consts, import, implicit_standalone);
                 };
-                if !info.is_named_import || info.is_type_only {
+                // `ns.Cmp` reads the module's export; ngtsc never lazy-loads it.
+                let (export_name, is_imported) = match import.namespace {
+                    Some(_) if info.is_named_import => return None,
+                    Some(_) => (import.name.as_str(), false),
+                    None if !info.is_named_import => return None,
+                    None => (info.imported_name.as_deref().unwrap_or(&local), true),
+                };
+                if info.is_type_only {
                     return None;
                 }
-                let export_name = info.imported_name.as_deref().unwrap_or(local);
-                let selector = analyzer.standalone_directive_selector(
+                let (selector, declaration) = analyzer.standalone_directive_selector(
                     info.source_module.as_str(),
                     export_name,
                     std::path::Path::new(path),
                     implicit_standalone,
                 )?;
-                Some((selector, true))
+                Some(ImportedClass { selector, is_imported, declaration })
             }
         });
     // Without cross-file analysis, only the classes declared in this file
     // have a selector to read: they need no other file, and are never
     // lazy-loaded.
-    let local_selector = |local: &str| -> Option<(String, bool)> {
-        if import_map.contains_key(&Ident::from(local)) {
+    let local_selector = |import: &ImportRef<'_>| -> Option<ImportedClass> {
+        if import_map.contains_key(&import.namespace.unwrap_or(import.name)) {
             return None;
         }
-        let selector = super::defer_resolver::local_standalone_class_selector(
-            &parser_ret.program,
-            &string_consts,
-            local,
-            options.implicit_standalone(),
-        )?;
-        Some((selector, false))
+        local_class(&parser_ret.program, &string_consts, import, options.implicit_standalone())
     };
     // ngc's `DeferredSymbolTracker` sees every component of the file before
     // any compiles. The `imports` entries another component marks are found
@@ -5852,10 +5847,44 @@ fn html_parse_error_diagnostic(
     }
 }
 
-/// The selector of the standalone component or directive an `imports`
-/// entry refers to, by local name, and whether a named import brings it in,
-/// which `@defer` may then replace with a dynamic `import()`.
-type ImportSelector<'f> = &'f dyn Fn(&str) -> Option<(String, bool)>;
+/// The standalone component or directive a class an `imports` entry names
+/// refers to (see [`ImportedClass`]).
+type ImportSelector<'f> = &'f dyn Fn(&ImportRef<'_>) -> Option<ImportedClass>;
+
+/// What `@defer` reads of the standalone component or directive an `imports`
+/// entry refers to.
+struct ImportedClass {
+    selector: String,
+    /// Whether a named import brings it in, which `@defer` may then replace
+    /// with a dynamic `import()`.
+    is_imported: bool,
+    /// The file that declares the class (empty for this file) and its name
+    /// there: two references to one class are listed once.
+    declaration: (String, String),
+}
+
+/// The [`ImportedClass`] a class of the file being compiled is.
+fn local_class<'p>(
+    program: &'p oxc_ast::ast::Program<'p>,
+    consts: &crate::directive::StringConsts<'p>,
+    import: &ImportRef<'_>,
+    implicit_standalone: bool,
+) -> Option<ImportedClass> {
+    if import.namespace.is_some() {
+        return None;
+    }
+    let selector = super::defer_resolver::local_standalone_class_selector(
+        program,
+        consts,
+        &import.name,
+        implicit_standalone,
+    )?;
+    Some(ImportedClass {
+        selector,
+        is_imported: false,
+        declaration: (String::new(), import.name.to_string()),
+    })
+}
 
 /// ngc's `DeferredSymbolTracker.canDefer` for the import declaration that
 /// binds a name, given the `imports` entries the component being compiled
@@ -5896,18 +5925,30 @@ fn implicit_defer_candidates<'a>(
         return None;
     }
     let mut imported = std::vec::Vec::new();
-    let candidates: std::vec::Vec<_> = metadata
-        .import_refs
-        .iter()
-        .map(|import| import.name)
-        .filter_map(|name| {
-            let (selector, is_imported) = import_selector(name.as_str())?;
-            if is_imported {
-                imported.push(name);
+    // Each class is listed once, where `imports` first names it, as ngc's
+    // scope does; an identifier naming it may still lazy-load it.
+    let mut candidates: std::vec::Vec<(Ident<'a>, _)> = std::vec::Vec::new();
+    let mut declarations = std::vec::Vec::new();
+    for import in &metadata.import_refs {
+        let Some(class) = import_selector(import) else { continue };
+        if class.is_imported {
+            imported.push(import.key);
+        }
+        match declarations.iter().position(|declaration| *declaration == class.declaration) {
+            Some(index) => {
+                if class.is_imported && !imported.contains(&candidates[index].0) {
+                    candidates[index].0 = import.key;
+                }
             }
-            Some((name, crate::pipeline::selector::CssSelector::parse(&selector)))
-        })
-        .collect();
+            None => {
+                declarations.push(class.declaration);
+                candidates.push((
+                    import.key,
+                    crate::pipeline::selector::CssSelector::parse(&class.selector),
+                ));
+            }
+        }
+    }
     let block_only = super::defer_resolver::implicitly_deferred_imports(nodes, &candidates);
     let marked = metadata
         .import_entry_classes

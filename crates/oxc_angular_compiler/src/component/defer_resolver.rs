@@ -56,8 +56,8 @@ use crate::class_metadata::{
 use crate::directive::StringConsts;
 use crate::i18n::serializer::is_i18n_attribute;
 use crate::output::ast::{
-    ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression, ReadVarExpr,
-    WrappedNodeExpr,
+    ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression, ReadPropExpr,
+    ReadVarExpr, WrappedNodeExpr,
 };
 use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
@@ -381,17 +381,33 @@ pub(super) fn compile_defer_block_resolver<'a>(
         } else {
             None
         };
-        let imports_identifier =
-            import_refs.iter().find(|import| import.name == *name && import_map.contains_key(name));
-        entries.push(deferrable.unwrap_or_else(|| match imports_identifier {
-            Some(import) => OutputExpression::WrappedNode(oxc_allocator::Box::new_in(
-                WrappedNodeExpr { node_id: *name, source_span: Some(import.span) },
+        let import = import_refs.iter().find(|import| import.key == *name);
+        let read_var = |name: Ident<'a>| {
+            OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                ReadVarExpr { name, source_span: None },
                 &allocator,
-            )),
-            None => OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                ReadVarExpr { name: *name, source_span: None },
-                &allocator,
-            )),
+            ))
+        };
+        entries.push(deferrable.unwrap_or_else(|| match import {
+            // ngc emits `ns.Cmp` through an import of its own (`i1.Cmp`).
+            Some(&ImportRef { namespace: Some(namespace), name, .. }) => {
+                OutputExpression::ReadProp(oxc_allocator::Box::new_in(
+                    ReadPropExpr {
+                        receiver: oxc_allocator::Box::new_in(read_var(namespace), &allocator),
+                        name,
+                        optional: false,
+                        source_span: None,
+                    },
+                    &allocator,
+                ))
+            }
+            Some(import) if import_map.contains_key(name) => {
+                OutputExpression::WrappedNode(oxc_allocator::Box::new_in(
+                    WrappedNodeExpr { node_id: *name, source_span: Some(import.span) },
+                    &allocator,
+                ))
+            }
+            _ => read_var(*name),
         }));
     }
     let array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(

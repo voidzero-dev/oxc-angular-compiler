@@ -296,7 +296,9 @@ impl CrossFileAnalyzer {
     /// The selector of the standalone `@Component` or `@Directive` class that
     /// `import_name` is exported as from `import_source`, as `import_source`
     /// is written in `from_file`, following named re-exports. Used to tell
-    /// whether a template matches the class, for `@defer` (#313).
+    /// whether a template matches the class, for `@defer` (#313). It comes
+    /// with the file that declares the class and the class's name there,
+    /// which tell two references to one class apart from two classes.
     ///
     /// `None` when the import can't be followed to a class declared in a
     /// source file (packages, `export *`, unresolvable paths), the class isn't
@@ -309,7 +311,7 @@ impl CrossFileAnalyzer {
         import_name: &str,
         from_file: &Path,
         implicit_standalone: bool,
-    ) -> Option<String> {
+    ) -> Option<(String, (String, String))> {
         self.inner.standalone_directive_selector(
             import_source,
             import_name,
@@ -478,7 +480,7 @@ impl Inner {
         import_name: &str,
         from_file: &Path,
         implicit_standalone: bool,
-    ) -> Option<String> {
+    ) -> Option<(String, (String, String))> {
         let mut file = self.resolve_module_spec(from_file.parent()?, import_source)?;
         let mut name = import_name.to_string();
         for _ in 0..MAX_EXPORT_CHAIN {
@@ -495,12 +497,10 @@ impl Inner {
             let info = self.cache.borrow().get(&file)?.get(&name).cloned()?;
             match info.re_export_source {
                 None => {
-                    return self.class_selector(
-                        &file,
-                        &name,
-                        info.value_local.as_deref()?,
-                        implicit_standalone,
-                    );
+                    let local = info.value_local?;
+                    let selector =
+                        self.class_selector(&file, &name, &local, implicit_standalone)?;
+                    return Some((selector, (file, local)));
                 }
                 Some((source, original)) => {
                     if original == "*" {
@@ -2028,7 +2028,9 @@ export { doSomething } from './utils';
         let main_file = dir.path().join("main.ts");
         let mut analyzer = CrossFileAnalyzer::new(dir.path(), None, true);
         let selector = |analyzer: &CrossFileAnalyzer| {
-            analyzer.standalone_directive_selector("./lazy", "LazyCmp", &main_file, true)
+            analyzer
+                .standalone_directive_selector("./lazy", "LazyCmp", &main_file, true)
+                .map(|(selector, _)| selector)
         };
 
         assert_eq!(selector(&analyzer).as_deref(), Some("app-a"));

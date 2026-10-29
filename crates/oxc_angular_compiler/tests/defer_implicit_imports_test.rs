@@ -430,6 +430,59 @@ export class Parent {}
 }
 
 #[test]
+fn deps_fns_list_classes_of_entries_that_are_not_identifiers() {
+    // ngc's scope flattens nested arrays and spreads and resolves `ns.Cmp`, so
+    // a block's function lists what they bring in, eagerly, once per class:
+    // `other.LazyCmp` is `LazyCmp`, which its identifier entry lazy-loads.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    create_test_file(
+        dir.path(),
+        "app/third.ts",
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-third', template: 'third' })
+export class ThirdCmp {}
+
+export { LazyCmp } from './lazy';
+",
+    );
+    let source = r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+import * as third from './third';
+
+const SHARED = [third.ThirdCmp];
+
+@Component({
+    selector: 'app-parent',
+    imports: [third.LazyCmp, LazyCmp, [OtherCmp], ...SHARED],
+    template: '@defer { <app-third/><app-other/><app-lazy/> }',
+})
+export class Parent {}
+";
+    let code = &transform(&dir, source).code;
+    assert!(
+        compact(code).contains(
+            "constParent_Defer_1_DepsFn=()=>[import(\"./lazy\").then((m)=>m.LazyCmp),OtherCmp,third.ThirdCmp];"
+        ),
+        "{code}"
+    );
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+
+    let code = &transform_with(&dir, source, &partial_options()).code;
+    assert!(
+        compact(code).contains(
+            "deferBlockDependencies:[()=>[import(\"./lazy\").then((m)=>m.LazyCmp),OtherCmp,third.ThirdCmp]]"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
 fn forward_ref_not_from_angular_core_stays_eager() {
     let dir = TempDir::new().unwrap();
     lazy_cmp(&dir);

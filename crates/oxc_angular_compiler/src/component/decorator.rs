@@ -518,29 +518,67 @@ fn extract_import_entry_classes<'a>(
     result
 }
 
-/// The classes an `imports` value names: the entries of an array literal
-/// that [`extract_import_entry_classes`] reads, or of the array a same-file
-/// `const` holds when `imports` names one (`imports: IMPORTS`). The spans are
-/// those of the identifiers in the `const`'s array, which every component
-/// naming it shares.
+/// The classes an `imports` value names, as ngtsc's partial evaluator
+/// flattens it: the classes [`extract_import_entry_classes`] reads from an
+/// array literal, through nested arrays, spreads and same-file `const` arrays
+/// (`imports: IMPORTS`), and `ns.Cmp` members. The spans are those of the
+/// identifiers where they are written: in a `const`'s array, every component
+/// naming it shares them. Anything else is left out.
 fn extract_import_refs<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
     consts: &StringConsts<'a>,
 ) -> Vec<'a, ImportRef<'a>> {
-    let expr = match expr {
-        Expression::Identifier(id) => match top_level_const_init(consts, &id.name) {
-            Some(init @ Expression::ArrayExpression(_)) => init,
-            _ => return Vec::new_in(&allocator),
-        },
-        _ => expr,
-    };
     let mut refs = Vec::new_in(&allocator);
-    for (name, span) in extract_import_entry_classes(allocator, expr, consts).into_iter().flatten()
-    {
-        refs.push(ImportRef { name, span });
-    }
+    collect_import_refs(allocator, expr, consts, &mut refs, 0);
     refs
+}
+
+fn collect_import_refs<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+    refs: &mut Vec<'a, ImportRef<'a>>,
+    depth: usize,
+) {
+    // `const A = [...B]; const B = [...A];` never ends.
+    if depth > 16 {
+        return;
+    }
+    match try_unwrap_forward_ref(expr, Some(consts)).unwrap_or(expr) {
+        Expression::ArrayExpression(arr) => {
+            for element in &arr.elements {
+                let element = match element {
+                    ArrayExpressionElement::SpreadElement(spread) => &spread.argument,
+                    element => match element.as_expression() {
+                        Some(element) => element,
+                        None => continue,
+                    },
+                };
+                collect_import_refs(allocator, element, consts, refs, depth + 1);
+            }
+        }
+        Expression::Identifier(id) => match top_level_const_init(consts, &id.name) {
+            Some(init @ Expression::ArrayExpression(_)) => {
+                collect_import_refs(allocator, init, consts, refs, depth + 1);
+            }
+            _ => {
+                refs.push(ImportRef { key: id.name, namespace: None, name: id.name, span: id.span })
+            }
+        },
+        Expression::StaticMemberExpression(member) => {
+            if let Expression::Identifier(namespace) = &member.object {
+                let key = format!("{}.{}", namespace.name, member.property.name);
+                refs.push(ImportRef {
+                    key: Ident::from(allocator.alloc_str(&key)),
+                    namespace: Some(namespace.name),
+                    name: member.property.name,
+                    span: member.property.span,
+                });
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The initializer of the top-level variable (`const`, `let` or `var`,

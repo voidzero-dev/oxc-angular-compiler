@@ -554,11 +554,13 @@ pub struct ComponentMetadata<'a> {
     /// comes with the span of its identifier in the array.
     pub import_entry_classes: Vec<'a, Option<(Ident<'a>, Span)>>,
 
-    /// The classes `imports` names, read through a same-file `const` array
-    /// (`imports: IMPORTS`) the way ngtsc's partial evaluator resolves it.
-    /// Unlike [`Self::import_entry_classes`], these may come from outside the
-    /// array literal, so `@defer` lists them in its blocks' dependency
-    /// functions but never lazy-loads them.
+    /// The classes `imports` names, flattened the way ngtsc's partial
+    /// evaluator resolves it without type information: through nested arrays,
+    /// spreads and same-file `const` arrays (`imports: IMPORTS`), and with
+    /// `ns.Cmp` members. Unlike [`Self::import_entry_classes`], these may come
+    /// from outside the array literal, so `@defer` lists them in its blocks'
+    /// dependency functions but lazy-loads only the classes that one of
+    /// those entries names.
     pub import_refs: Vec<'a, ImportRef<'a>>,
 
     /// Exported names for template references.
@@ -722,6 +724,10 @@ pub struct ComponentMetadata<'a> {
 /// [`ComponentMetadata::import_refs`]).
 #[derive(Debug, Clone, Copy)]
 pub struct ImportRef<'a> {
+    /// The name `@defer` knows the reference by: `name`, or `ns.name`.
+    pub key: Ident<'a>,
+    /// The `import * as ns` binding of an `ns.name` member.
+    pub namespace: Option<Ident<'a>>,
     /// The identifier that names the class.
     pub name: Ident<'a>,
     /// The span of that identifier. ngtsc emits a reference to an imported
