@@ -704,6 +704,39 @@ export class Parent {}
     );
 }
 
+/// A component declared in the file needs no cross-file analysis for its
+/// selector: each `@defer` block that uses it gets its own dependency
+/// function, as in ngc's full compilation, and the second component reuses
+/// the first one's, which ngc's single pool finds equivalent.
+#[test]
+fn test_defer_block_using_a_same_file_component_gets_its_own_resolver() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-dep', template: 'dep' })
+export class Dep {}
+
+@Component({ selector: 'app-a', imports: [Dep], template: '<app-dep/> @defer { <app-dep/> }' })
+export class A {}
+
+@Component({ selector: 'app-b', imports: [Dep], template: '@defer { <app-dep/> }' })
+export class B {}
+";
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let collapsed: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(collapsed.contains("constA_Defer_2_DepsFn=()=>[Dep];"), "{code}");
+    assert!(collapsed.contains("ɵɵdefer(2,1,A_Defer_2_DepsFn);"), "{code}");
+    assert!(collapsed.contains("ɵɵdefer(1,0,A_Defer_2_DepsFn);"), "{code}");
+    assert!(collapsed.contains("ɵɵgetComponentDepsFactory(A,[Dep])"), "{code}");
+    // Used only inside `@defer`, the class leaves `dependencies`.
+    assert!(!collapsed.contains("ɵɵgetComponentDepsFactory(B"), "{code}");
+}
+
 /// Aliased imports must use the original exported name in `m.X`, not the
 /// local alias.
 #[test]

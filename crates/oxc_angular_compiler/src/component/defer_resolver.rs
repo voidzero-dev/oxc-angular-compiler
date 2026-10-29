@@ -39,6 +39,10 @@
 //! ([`defer_block_dependencies`], [`compile_defer_block_resolver`]).
 
 use oxc_allocator::Allocator;
+use oxc_ast::ast::{
+    Class, Declaration, ExportDefaultDeclarationKind, Expression, ObjectPropertyKind, Program,
+    Statement,
+};
 
 use crate::ast::expression::BindingType;
 use crate::ast::r3::{
@@ -49,6 +53,7 @@ use crate::class_metadata::{
     R3DeferPerComponentDependency, compile_component_metadata_async_resolver,
     compile_deferred_dependency_import,
 };
+use crate::directive::StringConsts;
 use crate::i18n::serializer::is_i18n_attribute;
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression, ReadVarExpr,
@@ -208,6 +213,68 @@ pub fn build_defer_resolver_expression<'a>(
     }
 
     Some(compile_component_metadata_async_resolver(allocator, &deps))
+}
+
+/// The selector of the top-level class `local` declares in `program`,
+/// exported or not, when it is a standalone `@Component` or `@Directive` whose
+/// `selector` and `standalone` are literals: an `imports` entry that names a
+/// class of the file being compiled. `consts` are the program's.
+pub(super) fn local_standalone_class_selector<'a>(
+    program: &'a Program<'a>,
+    consts: &StringConsts<'a>,
+    local: &str,
+    implicit_standalone: bool,
+) -> Option<String> {
+    let is_local = |class: &Class| class.id.as_ref().is_some_and(|id| id.name == local);
+    let class = program.body.iter().find_map(|stmt| match stmt {
+        Statement::ClassDeclaration(class) if is_local(class) => Some(&**class),
+        Statement::ExportDeclaration(decl) => match &decl.declaration {
+            Declaration::ClassDeclaration(class) if is_local(class) => Some(&**class),
+            _ => None,
+        },
+        Statement::ExportDefaultDeclaration(decl) => match &decl.declaration {
+            ExportDefaultDeclarationKind::ClassDeclaration(class) if is_local(class) => {
+                Some(&**class)
+            }
+            _ => None,
+        },
+        _ => None,
+    })?;
+    decorated_class_selector(class, consts, implicit_standalone)
+}
+
+/// The selector of `class` when it is a standalone `@Component` or
+/// `@Directive` whose `selector` and `standalone` are literals.
+pub(super) fn decorated_class_selector<'a>(
+    class: &Class<'a>,
+    consts: &StringConsts<'a>,
+    implicit_standalone: bool,
+) -> Option<String> {
+    let decorator = ["Component", "Directive"].iter().find_map(|name| {
+        crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
+    })?;
+    let Expression::CallExpression(call) = &decorator.expression else { return None };
+    let Some(Expression::ObjectExpression(object)) =
+        call.arguments.first().and_then(|arg| arg.as_expression())
+    else {
+        return None;
+    };
+
+    let mut selector = None;
+    let mut standalone = implicit_standalone;
+    for property in &object.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
+        // A computed key can override `selector` or `standalone`.
+        let key = property.key.static_name()?;
+        if key == "selector" {
+            let Expression::StringLiteral(value) = &property.value else { return None };
+            selector = Some(value.value.as_str()?.to_string());
+        } else if key == "standalone" {
+            let Expression::BooleanLiteral(value) = &property.value else { return None };
+            standalone = value.value;
+        }
+    }
+    selector.filter(|selector| standalone && !selector.trim().is_empty())
 }
 
 /// The `candidates` matched only inside the main content of `@defer` blocks

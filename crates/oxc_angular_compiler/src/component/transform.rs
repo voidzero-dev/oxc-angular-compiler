@@ -3566,7 +3566,7 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
             move |local: &str| -> Option<(String, bool)> {
                 let Some(info) = import_map.get(&Ident::from(local)) else {
-                    let selector = super::cross_file_elision::local_standalone_class_selector(
+                    let selector = super::defer_resolver::local_standalone_class_selector(
                         program,
                         string_consts,
                         local,
@@ -3587,6 +3587,21 @@ pub fn transform_angular_file(
                 Some((selector, true))
             }
         });
+    // Without cross-file analysis, only the classes declared in this file
+    // have a selector to read: they need no other file, and are never
+    // lazy-loaded.
+    let local_selector = |local: &str| -> Option<(String, bool)> {
+        if import_map.contains_key(&Ident::from(local)) {
+            return None;
+        }
+        let selector = super::defer_resolver::local_standalone_class_selector(
+            &parser_ret.program,
+            &string_consts,
+            local,
+            options.implicit_standalone(),
+        )?;
+        Some((selector, false))
+    };
     // ngc's `DeferredSymbolTracker` sees every component of the file before
     // any compiles. The `imports` entries another component marks are found
     // the first time a decision needs them, by class span.
@@ -3923,11 +3938,17 @@ pub fn transform_angular_file(
                     };
                     #[cfg(feature = "cross_file_elision")]
                     let (import_selector, can_defer) = (
-                        import_selector.as_ref().map(|f| f as ImportSelector<'_>),
-                        Some(&can_defer as CanDefer<'_>),
+                        import_selector
+                            .as_ref()
+                            .map_or(&local_selector as ImportSelector<'_>, |f| f),
+                        &can_defer as CanDefer<'_>,
                     );
                     #[cfg(not(feature = "cross_file_elision"))]
-                    let (import_selector, can_defer) = (None, None);
+                    let can_defer = |_: &str, _: &[Ident<'_>]| false;
+                    #[cfg(not(feature = "cross_file_elision"))]
+                    let (import_selector, can_defer) =
+                        (&local_selector as ImportSelector<'_>, &can_defer as CanDefer<'_>);
+                    let (import_selector, can_defer) = (Some(import_selector), Some(can_defer));
 
                     // A `namespace` member has nowhere to put its HMR code.
                     let options = match &hmr_options {
