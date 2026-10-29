@@ -197,6 +197,27 @@ export class P extends Base { transform(v: any) { return v; } }
 }
 
 #[test]
+fn partial_use_class_keeps_empty_deps() {
+    // ngtsc: ɵɵngDeclareInjectable({..., useClass: Holder.cls(), deps: [] }),
+    // which links to `new (Holder.cls())()` rather than `Holder.cls().ɵfac`.
+    let (partial, linked) = partial_and_linked(
+        "import { Injectable } from '@angular/core';
+export const Holder: any = { cls: () => class {} };
+@Injectable({ providedIn: 'root', useClass: Holder.cls(), deps: [] })
+export class F1 {}
+",
+    );
+    assert!(
+        partial.contains("providedIn:\"root\",useClass:Holder.cls(),deps:[]})"),
+        "useClass should keep its empty deps, got:\n{partial}"
+    );
+    assert!(
+        linked.contains("new(Holder.cls())()"),
+        "linked useClass should be instantiated, got:\n{linked}"
+    );
+}
+
+#[test]
 fn partial_injectable_factory_inherits_constructor() {
     // ngtsc: ɵɵngDeclareFactory({..., type: S, deps: null,
     // target: i0.ɵɵFactoryTarget.Injectable })

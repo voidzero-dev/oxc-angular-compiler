@@ -99,7 +99,8 @@ fn build_factory_expression<'a>(
 
         InjectableProvider::UseClass { class_expr, deps, .. } => {
             match deps {
-                Some(deps) if !deps.is_empty() => {
+                // Even an empty `deps: []` builds `new useClass()`, like ngtsc.
+                Some(deps) => {
                     // useClass with deps: use delegated factory with conditional pattern
                     // This generates the proper __ngConditionalFactory__ pattern.
                     // See: injectable_compiler_2.ts:69-75

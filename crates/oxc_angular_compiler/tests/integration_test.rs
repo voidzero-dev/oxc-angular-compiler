@@ -16255,6 +16255,29 @@ export class C2 {}
 }
 
 #[test]
+fn test_use_class_with_empty_deps_is_instantiated() {
+    // `deps: []` is still deps: ngtsc builds `new useClass()` instead of
+    // delegating to `useClass.ɵfac`, which a plain class does not have.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable } from '@angular/core';
+export const Holder = { cls: () => class {} };
+@Injectable({ providedIn: 'root', useClass: Holder.cls(), deps: [] })
+export class F1 {}
+@Injectable({ providedIn: 'root', useClass: Holder.cls, deps: [] })
+export class F2 {}
+",
+    );
+    for expected in [
+        "(__ngConditionalFactory__ = new (Holder.cls())());",
+        "(__ngConditionalFactory__ = new Holder.cls());",
+    ] {
+        assert!(code.contains(expected), "Missing `{expected}` in:\n{code}");
+    }
+    assert!(!code.contains("ɵfac(__ngFactoryType__)"), "Unexpected delegation in:\n{code}");
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).
