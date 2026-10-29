@@ -257,45 +257,16 @@ impl<'a> ImportElisionAnalyzer<'a> {
             return FxHashSet::default();
         }
 
+        // Classes nested in a function body or block compile too.
         let mut names = FxHashSet::default();
-        for stmt in &program.body {
-            match stmt {
-                Statement::ClassDeclaration(class) => {
-                    Self::collect_ctor_type_uses_from_class(
-                        class,
-                        &default_imports,
-                        consts,
-                        emit_metadata,
-                        &mut names,
-                    );
-                }
-                Statement::ExportDefaultDeclaration(export) => {
-                    if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
-                        &export.declaration
-                    {
-                        Self::collect_ctor_type_uses_from_class(
-                            class,
-                            &default_imports,
-                            consts,
-                            emit_metadata,
-                            &mut names,
-                        );
-                    }
-                }
-                Statement::ExportDeclaration(export) => {
-                    if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration
-                    {
-                        Self::collect_ctor_type_uses_from_class(
-                            class,
-                            &default_imports,
-                            consts,
-                            emit_metadata,
-                            &mut names,
-                        );
-                    }
-                }
-                _ => {}
-            }
+        for declared in crate::util::declared_classes(program) {
+            Self::collect_ctor_type_uses_from_class(
+                declared.class,
+                &default_imports,
+                consts,
+                emit_metadata,
+                &mut names,
+            );
         }
         names
     }
@@ -603,19 +574,9 @@ impl<'a> ImportElisionAnalyzer<'a> {
             }
         }
         let mut references = References::default();
-        for stmt in &program.body {
-            let class = match stmt {
-                Statement::ClassDeclaration(class) => class,
-                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                    oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) => class,
-                    _ => continue,
-                },
-                Statement::ExportDeclaration(export) => match &export.declaration {
-                    oxc_ast::ast::Declaration::ClassDeclaration(class) => class,
-                    _ => continue,
-                },
-                _ => continue,
-            };
+        // Classes nested in a function body or block compile too.
+        for declared in crate::util::declared_classes(program) {
+            let class = declared.class;
             if !class.decorators.iter().any(|decorator| {
                 crate::directive::angular_class_decorator(decorator, consts).is_some()
             }) {
