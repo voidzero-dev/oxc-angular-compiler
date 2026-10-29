@@ -352,6 +352,84 @@ export class FooComponent {
     );
 }
 
+/// ngtsc flattens and resolves `imports` before it lists `dependencies`: a
+/// nested array, a namespace member, a spread and a `const` array named by
+/// `imports` all reach it, once per class. `forwardRef` stays a forward
+/// reference.
+#[test]
+fn partial_dependencies_list_classes_of_every_imports_entry() {
+    let allocator = Allocator::default();
+    let source = "import { Component, forwardRef } from '@angular/core';
+import { ChildA, OtherB } from './children';
+import * as ns from './more';
+
+const SHARED = [OtherB];
+const IMPORTS = [ChildA, [OtherB]];
+
+@Component({
+  selector: 'app-x',
+  template: '<child-a/><other-b/><child-b/><child-c/>',
+  imports: [ChildA, [OtherB], ns.ChildB, ...SHARED, forwardRef(() => ChildC)],
+})
+export class X {}
+
+@Component({ selector: 'app-y', template: '<child-a/><other-b/>', imports: IMPORTS })
+export class Y {}
+
+@Component({ selector: 'child-c', template: 'c' })
+export class ChildC {}
+";
+    let code = compile_partial(&allocator, "x.component.ts", source);
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains(
+            "dependencies:[{kind:\"directive\",type:ChildA,selector:\"*\"},\
+             {kind:\"directive\",type:OtherB,selector:\"*\"},\
+             {kind:\"directive\",type:ns.ChildB,selector:\"*\"},\
+             {kind:\"directive\",type:i0.forwardRef(function(){returnChildC;}),selector:\"*\"}]"
+        ),
+        "got:\n{code}"
+    );
+    assert!(
+        compact.contains(
+            "dependencies:[{kind:\"directive\",type:ChildA,selector:\"*\"},\
+             {kind:\"directive\",type:OtherB,selector:\"*\"}]"
+        ),
+        "got:\n{code}"
+    );
+
+    let linked = link(&allocator, &code, "x.component.mjs");
+    assert!(linked.linked, "linker should accept the partial output, emitted:\n{code}");
+    let linked: String = linked.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(linked.contains("dependencies:()=>[ChildA,OtherB,ns.ChildB,ChildC]"), "got:\n{linked}");
+    assert!(linked.contains("dependencies:[ChildA,OtherB]"), "got:\n{linked}");
+}
+
+/// `ns.ChildA` reads the export `ChildA` of the module `ChildA` is imported
+/// from: ngtsc lists the class once, and a component matched twice on one
+/// element throws NG0300 at runtime.
+#[test]
+fn partial_dependencies_list_a_named_and_a_namespace_import_of_one_export_once() {
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+import { ChildA } from './a';
+import * as ns from './a';
+import * as other from './other';
+
+@Component({ selector: 'app-x', template: '<child-a/>', imports: [ChildA, ns.ChildA, other.ChildA] })
+export class X {}
+";
+    let code = compile_partial(&allocator, "x.component.ts", source);
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains(
+            "dependencies:[{kind:\"directive\",type:ChildA,selector:\"*\"},\
+             {kind:\"directive\",type:other.ChildA,selector:\"*\"}]"
+        ),
+        "got:\n{code}"
+    );
+}
+
 /// Sanity: a non-standalone component or a standalone component with no
 /// imports should NOT get a synthetic `dependencies` field.
 #[test]

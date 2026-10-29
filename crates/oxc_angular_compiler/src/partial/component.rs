@@ -39,7 +39,8 @@ use super::{PLACEHOLDER_VERSION, wrap_forward_ref};
 use crate::component::R3DependencyMetadata as ComponentDep;
 use crate::component::{
     ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode, HostDirectiveMetadata,
-    HostMetadata, NamespaceRegistry, TemplateDependency, TemplateDependencyKind, ViewEncapsulation,
+    HostMetadata, ImportRef, NamespaceRegistry, TemplateDependency, TemplateDependencyKind,
+    ViewEncapsulation,
 };
 use crate::directive::{R3InputMetadata, R3QueryMetadata};
 use crate::factory::{
@@ -268,8 +269,8 @@ pub fn compile_declare_component_from_metadata<'a>(
     // each entry (see `linker/mod.rs:1844`), so the placeholder kind/
     // selector is harmless — the emitted full ɵcmp ends up with
     // `dependencies: [Import1, Import2, …]` regardless.
-    let synthetic_declarations = if meta.declarations.is_empty() && !meta.imports.is_empty() {
-        Some(lower_imports_to_declarations(allocator, &meta.imports))
+    let synthetic_declarations = if meta.declarations.is_empty() && !meta.import_refs.is_empty() {
+        Some(lower_imports_to_declarations(allocator, &meta.import_refs))
     } else {
         None
     };
@@ -713,27 +714,39 @@ fn host_directives_mapping_array<'a>(
 
 // ---- dependencies --------------------------------------------------------
 
-/// Constructs a synthetic `TemplateDependency` per identifier in
-/// `imports` for partial-mode lowering when the analyzer left
-/// `metadata.declarations` empty (`RuntimeResolved` mode — see callsite
-/// for the why). Each entry gets `kind: directive` + placeholder
-/// `selector: "*"` matching what
+/// Constructs a synthetic `TemplateDependency` per class `imports` names
+/// (see `ComponentMetadata::import_refs`) for partial-mode lowering when the
+/// analyzer left `metadata.declarations` empty (`RuntimeResolved` mode —
+/// see callsite for the why). ngtsc flattens and resolves `imports` the
+/// same way, with the type information to also leave out what the template
+/// doesn't use; a reference listed twice is listed once. Each entry gets
+/// `kind: directive` + placeholder `selector: "*"` matching what
 /// `component/decorator.rs::populate_declarations_from_imports` produces
 /// for Direct mode. The linker reads only the `type` from each entry, so
 /// the placeholder fields are harmless and the linked output is
 /// `dependencies: [Import1, Import2, …]`.
 fn lower_imports_to_declarations<'a>(
     allocator: &'a Allocator,
-    imports: &Vec<'a, Ident<'a>>,
+    imports: &[ImportRef<'a>],
 ) -> Vec<'a, TemplateDependency<'a>> {
-    let mut out = Vec::with_capacity_in(imports.len(), &allocator);
-    for name in imports {
-        out.push(TemplateDependency::directive(
+    let mut out: Vec<'a, TemplateDependency<'a>> = Vec::with_capacity_in(imports.len(), &allocator);
+    for (index, import) in imports.iter().enumerate() {
+        if imports[..index].iter().any(|seen| seen.key == import.key) {
+            continue;
+        }
+        let mut dependency = TemplateDependency::directive(
             &allocator,
-            name.clone(),
+            import.name,
             Ident::from("*"),
             false, // is_component — unknown at this point
-        ));
+        );
+        if let Some(namespace) = import.namespace {
+            dependency = dependency.with_type_namespace(namespace);
+        }
+        if import.is_forward_reference {
+            dependency = dependency.with_forward_reference();
+        }
+        out.push(dependency);
     }
     out
 }
@@ -769,10 +782,24 @@ fn create_dependencies_array_from_slice<'a>(
             false,
         ));
 
-        let mut type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: dep.type_name.clone(), source_span: None },
-            &allocator,
-        ));
+        let read_var = |name: &Ident<'a>| {
+            OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: *name, source_span: None },
+                &allocator,
+            ))
+        };
+        let mut type_expr = match &dep.type_namespace {
+            Some(namespace) => OutputExpression::ReadProp(Box::new_in(
+                ReadPropExpr {
+                    receiver: Box::new_in(read_var(namespace), &allocator),
+                    name: dep.type_name,
+                    optional: false,
+                    source_span: None,
+                },
+                &allocator,
+            )),
+            None => read_var(&dep.type_name),
+        };
         if wrap_in_forward_ref || dep.is_forward_reference {
             type_expr = wrap_forward_ref(allocator, core_namespace, type_expr);
         }

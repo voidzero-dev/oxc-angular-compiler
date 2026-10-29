@@ -545,7 +545,9 @@ fn collect_import_refs<'a>(
     if depth > 16 {
         return;
     }
-    match try_unwrap_forward_ref(expr, Some(consts)).unwrap_or(expr) {
+    let unwrapped = try_unwrap_forward_ref(expr, Some(consts));
+    let is_forward_reference = unwrapped.is_some();
+    match unwrapped.unwrap_or(expr) {
         Expression::ArrayExpression(arr) => {
             for element in &arr.elements {
                 let element = match element {
@@ -562,9 +564,13 @@ fn collect_import_refs<'a>(
             Some(init @ Expression::ArrayExpression(_)) => {
                 collect_import_refs(allocator, init, consts, refs, depth + 1);
             }
-            _ => {
-                refs.push(ImportRef { key: id.name, namespace: None, name: id.name, span: id.span })
-            }
+            _ => refs.push(ImportRef {
+                key: id.name,
+                namespace: None,
+                name: id.name,
+                span: id.span,
+                is_forward_reference,
+            }),
         },
         Expression::StaticMemberExpression(member) => {
             if let Expression::Identifier(namespace) = &member.object {
@@ -574,6 +580,7 @@ fn collect_import_refs<'a>(
                     namespace: Some(namespace.name),
                     name: member.property.name,
                     span: member.property.span,
+                    is_forward_reference,
                 });
             }
         }

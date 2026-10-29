@@ -557,7 +557,7 @@ pub struct ComponentMetadata<'a> {
     /// The classes `imports` names, flattened the way ngtsc's partial
     /// evaluator resolves it without type information: through nested arrays,
     /// spreads and same-file `const` arrays (`imports: IMPORTS`), and with
-    /// `ns.Cmp` members. Unlike [`Self::import_entry_classes`], these may come
+    /// `ns.Cmp` members. Partial compilation lists them in `dependencies`. Unlike [`Self::import_entry_classes`], these may come
     /// from outside the array literal, so `@defer` lists them in its blocks'
     /// dependency functions but lazy-loads only the classes that one of
     /// those entries names.
@@ -734,6 +734,8 @@ pub struct ImportRef<'a> {
     /// class as a `WrappedNodeExpr` of the identifier it was read from, so
     /// two references are equivalent only when they come from the same node.
     pub span: Span,
+    /// Whether it is written as `forwardRef(() => name)`.
+    pub is_forward_reference: bool,
 }
 
 /// Metadata for a host directive.
@@ -883,6 +885,9 @@ pub struct TemplateDependency<'a> {
 
     /// Whether this is a forward reference.
     pub is_forward_reference: bool,
+
+    /// The `import * as ns` binding the type is read through (`ns.Cmp`).
+    pub type_namespace: Option<Ident<'a>>,
 }
 
 impl<'a> TemplateDependency<'a> {
@@ -904,6 +909,7 @@ impl<'a> TemplateDependency<'a> {
             is_component,
             pipe_name: None,
             is_forward_reference: false,
+            type_namespace: None,
         }
     }
 
@@ -924,12 +930,20 @@ impl<'a> TemplateDependency<'a> {
             is_component: false,
             pipe_name: Some(pipe_name),
             is_forward_reference: false,
+            type_namespace: None,
         }
     }
 
     /// Mark this dependency as a forward reference.
     pub fn with_forward_reference(mut self) -> Self {
         self.is_forward_reference = true;
+        self
+    }
+
+    /// Read the type through the `import * as ns` binding `namespace`.
+    #[must_use]
+    pub fn with_type_namespace(mut self, namespace: Ident<'a>) -> Self {
+        self.type_namespace = Some(namespace);
         self
     }
 

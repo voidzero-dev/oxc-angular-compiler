@@ -483,6 +483,78 @@ export class Parent {}
 }
 
 #[test]
+fn partial_dependencies_list_a_class_two_entries_name_once() {
+    // `more.LazyCmp` is `LazyCmp`: ngc's scope lists it once, and a component
+    // matched twice on one element is an error at runtime.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    create_test_file(
+        dir.path(),
+        "app/more.ts",
+        "export { LazyCmp } from './lazy';\nexport { OtherCmp } from './other';\n",
+    );
+    let source = r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import * as more from './more';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, more.LazyCmp, more.OtherCmp],
+    template: '<app-lazy/><app-other/>',
+})
+export class Parent {}
+";
+    let code = &transform_with(&dir, source, &partial_options()).code;
+    assert!(
+        compact(code).contains(
+            "dependencies:[{kind:\"directive\",type:LazyCmp,selector:\"*\"},{kind:\"directive\",type:more.OtherCmp,selector:\"*\"}]"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn partial_dependencies_leave_out_a_lazy_loaded_class_another_entry_names() {
+    // `@defer` lazy-loads `LazyCmp`, which `more.LazyCmp` names too: ngc's
+    // `dependencies` leaves it out, in whichever order the entries come.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    create_test_file(
+        dir.path(),
+        "app/more.ts",
+        "export { LazyCmp } from './lazy';\nexport { OtherCmp } from './other';\n",
+    );
+    for imports in
+        ["[LazyCmp, more.LazyCmp, more.OtherCmp]", "[more.LazyCmp, LazyCmp, more.OtherCmp]"]
+    {
+        let source = format!(
+            r"
+import {{ Component }} from '@angular/core';
+import {{ LazyCmp }} from './lazy';
+import * as more from './more';
+
+@Component({{
+    selector: 'app-parent',
+    imports: {imports},
+    template: '<app-other/> @defer {{ <app-lazy/> }}',
+}})
+export class Parent {{}}
+"
+        );
+        let code = &transform_with(&dir, &source, &partial_options()).code;
+        assert!(
+            compact(code)
+                .contains("dependencies:[{kind:\"directive\",type:more.OtherCmp,selector:\"*\"}]"),
+            "{code}"
+        );
+        assert_lazy(code, "./lazy", "LazyCmp");
+    }
+}
+
+#[test]
 fn forward_ref_not_from_angular_core_stays_eager() {
     let dir = TempDir::new().unwrap();
     lazy_cmp(&dir);

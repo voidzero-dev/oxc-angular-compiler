@@ -5863,6 +5863,26 @@ struct ImportedClass {
     declaration: (String, String),
 }
 
+/// The module and the name of the export an imported `imports` entry reads:
+/// `Cmp` of `import { Cmp }` and `ns.Cmp` of `import * as ns` read the same
+/// one from the same module.
+fn imported_export<'a>(
+    import_map: &ImportMap<'a>,
+    import: &ImportRef<'a>,
+) -> Option<(Ident<'a>, Ident<'a>)> {
+    let info = import_map.get(&import.namespace.unwrap_or(import.name))?;
+    if info.is_type_only {
+        return None;
+    }
+    match import.namespace {
+        Some(_) if !info.is_named_import => Some((info.source_module, import.name)),
+        None if info.is_named_import => {
+            Some((info.source_module, info.imported_name.unwrap_or(import.name)))
+        }
+        _ => None,
+    }
+}
+
 /// The [`ImportedClass`] a class of the file being compiled is.
 fn local_class<'p>(
     program: &'p oxc_ast::ast::Program<'p>,
@@ -6119,6 +6139,7 @@ fn resolve_implicit_defer<'a>(
         if !removed.is_empty() {
             let is_removed = |name: &str| removed.iter().any(|d| d.as_str() == name);
             metadata.imports.retain(|name| !is_removed(name.as_str()));
+            metadata.import_refs.retain(|import| !is_removed(import.key.as_str()));
             if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
                 let mut classes = metadata.import_entry_classes.iter();
                 raw_imports.entries.retain(|_| {
@@ -6235,8 +6256,39 @@ fn compile_component_full<'a>(
     // blocks are resolved as in a full compilation, and the declaration
     // carries their dependency functions (`deferBlockDependencies`).
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
+        // Read before `resolve_implicit_defer` leaves out what `@defer` provides.
+        let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
         let (defer_block_dependencies, implicitly_deferred_imports) =
             resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
+        // `dependencies` lists each class once, like ngc's scope, which
+        // `[Cmp, ns.Cmp]` would otherwise give twice, and leaves out a class
+        // `@defer` lazy-loads however else `imports` names it. Two names are
+        // one class when they read one export of one module, or when
+        // cross-file analysis finds one declaration.
+        if let Some(import_selector) = import_selector
+            && metadata.import_refs.iter().any(|import| import.namespace.is_some())
+        {
+            let class_of = |import: &ImportRef<'a>| {
+                (
+                    import_selector(import).map(|class| class.declaration),
+                    imported_export(import_map, import),
+                )
+            };
+            let mut seen: std::vec::Vec<_> = import_refs
+                .iter()
+                .filter(|import| !metadata.import_refs.iter().any(|kept| kept.key == import.key))
+                .map(class_of)
+                .collect();
+            metadata.import_refs.retain(|import| {
+                let (declaration, export) = class_of(import);
+                let is_seen = seen.iter().any(|(seen_declaration, seen_export)| {
+                    (declaration.is_some() && *seen_declaration == declaration)
+                        || (export.is_some() && *seen_export == export)
+                });
+                seen.push((declaration, export));
+                !is_seen
+            });
+        }
         let defer_block_dependencies: std::vec::Vec<_> = defer_block_dependencies
             .unwrap_or_default()
             .into_iter()
@@ -6245,7 +6297,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &metadata.import_refs,
+                    &import_refs,
                     import_map,
                 )
             })
@@ -6350,6 +6402,7 @@ fn compile_component_full<'a>(
 
     // `imports` entries matched only inside `@defer` are lazy-loaded, as in
     // ngc's full compilation (#313).
+    let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
     let (defer_block_dependencies, implicitly_deferred_imports) =
         resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
 
@@ -6439,7 +6492,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &metadata.import_refs,
+                    &import_refs,
                     import_map,
                 );
                 (span, deps_fn)
