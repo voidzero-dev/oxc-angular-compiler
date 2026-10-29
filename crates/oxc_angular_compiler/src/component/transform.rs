@@ -3441,6 +3441,48 @@ pub fn transform_angular_file(
         }
     }
 
+    // The selector of the standalone component or directive an `imports`
+    // entry refers to, when cross-file analysis can read it or the class is
+    // declared in this file, and whether a named import brings it in, so
+    // `@defer` may lazy-load it (#313). Watched files are only reported with
+    // `resolve_imported_values`, so it is required here too.
+    #[cfg(feature = "cross_file_elision")]
+    let import_selector =
+        cross_file_analyzer.as_ref().filter(|_| options.resolve_imported_values).map(|analyzer| {
+            let import_map = &import_map;
+            let program = &parser_ret.program;
+            let string_consts = &string_consts;
+            let implicit_standalone = options.implicit_standalone();
+            move |local: &str| -> Option<(String, bool)> {
+                let Some(info) = import_map.get(&Ident::from(local)) else {
+                    let selector = super::cross_file_elision::local_standalone_class_selector(
+                        program,
+                        string_consts,
+                        local,
+                        implicit_standalone,
+                    )?;
+                    return Some((selector, false));
+                };
+                if !info.is_named_import || info.is_type_only {
+                    return None;
+                }
+                let export_name = info.imported_name.as_deref().unwrap_or(local);
+                let selector = analyzer.standalone_directive_selector(
+                    info.source_module.as_str(),
+                    export_name,
+                    std::path::Path::new(path),
+                    implicit_standalone,
+                )?;
+                Some((selector, true))
+            }
+        });
+    // ngc's `DeferredSymbolTracker` sees every component of the file before
+    // any compiles. The `imports` entries another component marks are found
+    // the first time a decision needs them, by class span.
+    #[cfg(feature = "cross_file_elision")]
+    let deferrable_marks: std::cell::RefCell<FxHashMap<Span, std::vec::Vec<Ident<'_>>>> =
+        std::cell::RefCell::default();
+
     // 2. Walk AST to find @Component decorated classes and extract metadata
     for stmt in &parser_ret.program.body {
         let (class, stmt_start) = match stmt {
@@ -3686,53 +3728,66 @@ pub fn transform_angular_file(
                     let content_query_names: Vec<String> =
                         content_queries.iter().map(|q| q.property_name.to_string()).collect();
 
-                    // The selector of the standalone component or directive an
-                    // `imports` entry refers to, when cross-file analysis can
-                    // read it or the class is declared in this file, and whether
-                    // `@defer` may lazy-load it (#313): its import is referenced
-                    // nowhere else in this file or in the compiled output, so the
-                    // static import can go. Watched files are only reported with
-                    // `resolve_imported_values`, so it is required here too.
+                    // ngc's `DeferredSymbolTracker.canDefer` (#313): `@defer`
+                    // may replace an import declaration with dynamic `import()`s
+                    // when no specifier in it is referenced in the compiled
+                    // output or anywhere in this file except the `imports`
+                    // entries the file's components mark as deferrable
+                    // candidates. An explicit `deferredImports` entry is such a
+                    // reference: OXC keeps its static import.
                     #[cfg(feature = "cross_file_elision")]
-                    let import_selector = cross_file_analyzer
-                        .as_ref()
-                        .filter(|_| options.resolve_imported_values)
-                        .map(|analyzer| {
-                            let import_map = &import_map;
-                            let import_elision = &import_elision_mut;
-                            let program = &parser_ret.program;
-                            let string_consts = &string_consts;
-                            move |local: &str| -> Option<(String, bool)> {
-                                let Some(info) = import_map.get(&Ident::from(local)) else {
-                                    let selector =
-                                        super::cross_file_elision::local_standalone_class_selector(
-                                            program,
-                                            string_consts,
-                                            local,
-                                            implicit_standalone,
-                                        )?;
-                                    return Some((selector, false));
-                                };
-                                if !info.is_named_import || info.is_type_only {
-                                    return None;
-                                }
-                                let export_name = info.imported_name.as_deref().unwrap_or(local);
-                                let selector = analyzer.standalone_directive_selector(
-                                    info.source_module.as_str(),
-                                    export_name,
-                                    std::path::Path::new(path),
-                                    implicit_standalone,
-                                )?;
-                                let deferrable = import_elision.value_reference_count(local)
-                                    == Some(1)
-                                    && !import_elision.is_kept_by_output(local);
-                                Some((selector, deferrable))
+                    let can_defer = |name: &str, marked: &[Ident<'_>]| -> bool {
+                        let import_elision = &import_elision_mut;
+                        import_elision.declaration_specifiers(name).iter().all(|specifier| {
+                            let Some(references) = import_elision.value_reference_count(specifier)
+                            else {
+                                return false;
+                            };
+                            if import_elision.is_kept_by_output(specifier) {
+                                return false;
                             }
-                        });
+                            let marks_of = |marked: &[Ident<'_>]| {
+                                marked.iter().filter(|m| m.as_str() == specifier.as_str()).count()
+                            };
+                            let mut marks = marks_of(marked);
+                            if marks < references
+                                && references != usize::MAX
+                                && let Some(import_selector) = &import_selector
+                            {
+                                let mut deferrable_marks = deferrable_marks.borrow_mut();
+                                for other in
+                                    parser_ret.program.body.iter().filter_map(statement_class)
+                                {
+                                    if other.span == class.span {
+                                        continue;
+                                    }
+                                    marks += marks_of(
+                                        deferrable_marks.entry(other.span).or_insert_with(|| {
+                                            component_deferrable_marks(
+                                                allocator,
+                                                other,
+                                                path,
+                                                source,
+                                                options,
+                                                &import_map,
+                                                &string_consts,
+                                                resolved_resources,
+                                                import_selector,
+                                            )
+                                        }),
+                                    );
+                                }
+                            }
+                            marks > 0 && marks >= references
+                        })
+                    };
                     #[cfg(feature = "cross_file_elision")]
-                    let import_selector = import_selector.as_ref().map(|f| f as ImportSelector<'_>);
+                    let (import_selector, can_defer) = (
+                        import_selector.as_ref().map(|f| f as ImportSelector<'_>),
+                        Some(&can_defer as CanDefer<'_>),
+                    );
                     #[cfg(not(feature = "cross_file_elision"))]
-                    let import_selector = None;
+                    let (import_selector, can_defer) = (None, None);
 
                     // 4. Compile the template and generate ɵcmp/ɵfac
                     // Pass the shared pool index to ensure unique constant names
@@ -3752,7 +3807,7 @@ pub fn transform_angular_file(
                         &import_map,
                         resolved_resources,
                         import_selector,
-                        Some(&import_elision_mut),
+                        can_defer,
                         false,
                     ) {
                         Ok(mut compilation_result) => {
@@ -5616,8 +5671,162 @@ fn html_parse_error_diagnostic(
 }
 
 /// The selector of the standalone component or directive an `imports`
-/// entry refers to, by local name, and whether `@defer` may lazy-load it.
+/// entry refers to, by local name, and whether a named import brings it in,
+/// which `@defer` may then replace with a dynamic `import()`.
 type ImportSelector<'f> = &'f dyn Fn(&str) -> Option<(String, bool)>;
+
+/// ngc's `DeferredSymbolTracker.canDefer` for the import declaration that
+/// binds a name, given the `imports` entries the component being compiled
+/// marks as deferrable candidates.
+type CanDefer<'f> = &'f dyn Fn(&str, &[Ident<'_>]) -> bool;
+
+/// What `@defer` may lazy-load among a component's `imports`, as ngc's
+/// `resolveDeferBlocks` finds it.
+struct DeferCandidates<'a> {
+    /// Each `imports` class with a known selector.
+    candidates: std::vec::Vec<(Ident<'a>, std::vec::Vec<crate::pipeline::selector::CssSelector>)>,
+    /// The candidates the template matches only inside `@defer` blocks.
+    block_only: std::vec::Vec<Ident<'a>>,
+    /// The `imports` entries naming a `block_only` candidate a named import
+    /// brings in, one per entry: the identifiers ngc's
+    /// `registerDeferrableCandidate` marks.
+    marked: std::vec::Vec<Ident<'a>>,
+}
+
+/// The [`DeferCandidates`] of a component, or `None` when its template has
+/// no `@defer` block or an `imports` entry can't be read.
+fn implicit_defer_candidates<'a>(
+    metadata: &ComponentMetadata<'a>,
+    nodes: &[crate::ast::r3::R3Node<'a>],
+    import_selector: ImportSelector<'_>,
+) -> Option<DeferCandidates<'a>> {
+    let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports else {
+        return None;
+    };
+    if raw_imports.entries.len() != metadata.import_entry_classes.len()
+        || !raw_imports
+            .entries
+            .iter()
+            .zip(&metadata.import_entry_classes)
+            .all(|(entry, class)| class.is_some() || matches!(entry, OutputExpression::ReadVar(_)))
+        || !super::defer_resolver::template_has_defer_block(nodes)
+    {
+        return None;
+    }
+    let mut imported = std::vec::Vec::new();
+    let candidates: std::vec::Vec<_> = metadata
+        .import_entry_classes
+        .iter()
+        .flatten()
+        .map(|(name, _)| *name)
+        .filter_map(|name| {
+            let (selector, is_imported) = import_selector(name.as_str())?;
+            if is_imported {
+                imported.push(name);
+            }
+            Some((name, crate::pipeline::selector::CssSelector::parse(&selector)))
+        })
+        .collect();
+    let block_only = super::defer_resolver::implicitly_deferred_imports(nodes, &candidates);
+    let marked = metadata
+        .import_entry_classes
+        .iter()
+        .flatten()
+        .map(|(name, _)| *name)
+        .filter(|name| block_only.contains(name) && imported.contains(name))
+        .collect();
+    Some(DeferCandidates { candidates, block_only, marked })
+}
+
+/// The class a top-level statement declares, exported or not.
+#[cfg(feature = "cross_file_elision")]
+fn statement_class<'a>(stmt: &'a Statement<'a>) -> Option<&'a oxc_ast::ast::Class<'a>> {
+    match stmt {
+        Statement::ClassDeclaration(class) => Some(class),
+        Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class),
+            _ => None,
+        },
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::ClassDeclaration(class) => Some(class),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The `imports` entries another component of the file marks as deferrable
+/// candidates ([`DeferCandidates::marked`]); empty for any other class. Its
+/// template is parsed, as `compile_component_full` does, only when it may
+/// hold a `@defer` block. One that fails to parse fails to compile too.
+#[cfg(feature = "cross_file_elision")]
+#[expect(clippy::too_many_arguments)]
+fn component_deferrable_marks<'a>(
+    allocator: &'a Allocator,
+    class: &'a oxc_ast::ast::Class<'a>,
+    path: &str,
+    source: &'a str,
+    options: &TransformOptions,
+    import_map: &ImportMap<'a>,
+    string_consts: &crate::directive::StringConsts<'a>,
+    resolved_resources: Option<&ResolvedResources>,
+    import_selector: ImportSelector<'_>,
+) -> std::vec::Vec<Ident<'a>> {
+    if find_jit_forced_decorator(class, string_consts).is_some() {
+        return std::vec::Vec::new();
+    }
+    let Some(metadata) = extract_component_metadata(
+        allocator,
+        class,
+        options.implicit_standalone(),
+        import_map,
+        Some(source),
+        string_consts,
+    ) else {
+        return std::vec::Vec::new();
+    };
+    let (Some(template), _) = resolve_template(&metadata, resolved_resources) else {
+        return std::vec::Vec::new();
+    };
+    if metadata.import_entry_classes.is_empty() || !template.contains("@defer") {
+        return std::vec::Vec::new();
+    }
+    let template = allocator.alloc_str(&template);
+
+    let parse_options = ParseTemplateOptions {
+        preserve_whitespaces: metadata
+            .preserve_whitespaces
+            .or(options.preserve_whitespaces)
+            .unwrap_or(false),
+        enable_block_syntax: true,
+        enable_let_syntax: true,
+        tokenize_expansion_forms: true,
+        ..Default::default()
+    };
+    let html_result = HtmlParser::with_options(allocator, template, path, &parse_options).parse();
+    if !html_result.errors.is_empty() {
+        return std::vec::Vec::new();
+    }
+    let untrimmed: &'a [crate::ast::html::HtmlNode<'a>] = allocator.alloc(html_result.nodes);
+    let nodes = if parse_options.preserve_whitespaces {
+        untrimmed
+    } else {
+        allocator.alloc(remove_whitespaces(allocator, untrimmed, true)) as &_
+    };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: options.angular_version,
+        enable_i18n_legacy_message_id_format: options.enable_i18n_legacy_message_id_format,
+    };
+    let r3_result = HtmlToR3Transform::new(allocator, template, r3_transform_options)
+        .with_untrimmed_nodes(untrimmed)
+        .transform(nodes);
+    if !r3_result.errors.is_empty() {
+        return std::vec::Vec::new();
+    }
+    implicit_defer_candidates(&metadata, &r3_result.nodes, import_selector)
+        .map_or_else(std::vec::Vec::new, |candidates| candidates.marked)
+}
 
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
@@ -5634,7 +5843,7 @@ fn compile_component_full<'a>(
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
     import_selector: Option<ImportSelector<'_>>,
-    import_elision: Option<&ImportElisionAnalyzer<'_>>,
+    can_defer: Option<CanDefer<'_>>,
     hmr_update: bool,
 ) -> Result<FullCompilationResult<'a>, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
@@ -5811,50 +6020,22 @@ fn compile_component_full<'a>(
     // dependency function can be built (see below).
     let mut defer_block_dependencies = None;
     if let Some(import_selector) = import_selector
-        && let Some(import_elision) = import_elision
+        && let Some(can_defer) = can_defer
         && !options.hmr
-        && let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports
-        && raw_imports.entries.len() == metadata.import_entry_classes.len()
-        && raw_imports
-            .entries
-            .iter()
-            .zip(&metadata.import_entry_classes)
-            .all(|(entry, class)| class.is_some() || matches!(entry, OutputExpression::ReadVar(_)))
-        && super::defer_resolver::template_has_defer_block(&r3_result.nodes)
+        && let Some(DeferCandidates { candidates, block_only, marked }) =
+            implicit_defer_candidates(metadata, &r3_result.nodes, import_selector)
     {
-        let mut deferrable = Vec::new();
-        let candidates: Vec<_> = metadata
-            .import_entry_classes
-            .iter()
-            .flatten()
-            .map(|(name, _)| *name)
-            .filter_map(|name| {
-                let (selector, can_defer) = import_selector(name.as_str())?;
-                if can_defer {
-                    deferrable.push(name);
-                }
-                Some((name, crate::pipeline::selector::CssSelector::parse(&selector)))
-            })
-            .collect();
-        let block_only =
-            super::defer_resolver::implicitly_deferred_imports(&r3_result.nodes, &candidates);
-        let mut deferred = block_only.clone();
-        deferred.retain(|name| deferrable.contains(name));
-        // ngc's `DeferredSymbolTracker.canDefer`: an import declaration goes
-        // only when every non-`type` specifier in it is deferred, or the
-        // static import would stay and nothing would be split off. An
-        // explicit `deferredImports` entry doesn't count: OXC keeps its
-        // static import.
-        let mut deferred: std::vec::Vec<_> = deferred
-            .iter()
-            .copied()
-            .filter(|name| {
-                import_elision
-                    .declaration_specifiers(name)
-                    .iter()
-                    .all(|specifier| deferred.contains(specifier))
-            })
-            .collect();
+        // ngc's `DeferredSymbolTracker.canDefer`, over the whole file: the
+        // `imports` entries this component marks are handed over with the
+        // name, and the ones other components mark are counted there. A
+        // class two entries name is listed once (`seenDeps` in
+        // `resolveAllDeferredDependencies`).
+        let mut deferred = std::vec::Vec::new();
+        for &name in &block_only {
+            if !deferred.contains(&name) && marked.contains(&name) && can_defer(&name, &marked) {
+                deferred.push(name);
+            }
+        }
         // ngc's full compilation gives each `@defer` block its own dependency
         // function (`DeferBlockDepsEmitMode.PerBlock`) listing what the
         // block's main content uses: a dynamic `import()` for a lazy
