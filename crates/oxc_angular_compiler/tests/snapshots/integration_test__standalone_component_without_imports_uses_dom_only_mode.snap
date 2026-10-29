@@ -5,7 +5,6 @@ expression: result.code
 
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
-
 function ExternalComponent_For_5_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵdomElementStart(0,"li");
@@ -18,6 +17,7 @@ function ExternalComponent_For_5_Template(rf,ctx) {
     i0.ɵɵtextInterpolate(item_r1);
   }
 }
+
 
 export class ExternalComponent {
     title = 'External Component';

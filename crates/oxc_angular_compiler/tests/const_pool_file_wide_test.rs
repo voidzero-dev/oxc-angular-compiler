@@ -341,3 +341,50 @@ export class B {}
         ["i18n_0=MSG_TEST_TS_0", "i18n_1=MSG_TEST_TS_1", "i18n_2=MSG_TEST_TS_2"]
     );
 }
+
+#[test]
+fn every_class_declares_its_pool_after_the_imports() {
+    // ngtsc declares the whole constant pool, child view functions included,
+    // after the imports and in pool order, not each class's part before it.
+    let code = transform(
+        r#"
+import { Component } from '@angular/core';
+const helper = 1;
+@Component({ selector: 'cmp-a', template: '<p [title]="[k, 1]"></p>@if (k) {<b></b>}' })
+export class A { k = helper; }
+export function f() { return helper; }
+@Component({ selector: 'cmp-b', template: '<p [title]="[k, 2]"></p>@if (k) {<i></i>}' })
+export class B { k = 1; }
+"#,
+    );
+    let at = |needle: &str| code.find(needle).expect(&code);
+    let order = [
+        "import * as i0",
+        "const _c0",
+        "function A_Conditional_1_Template",
+        "const _c1",
+        "function B_Conditional_1_Template",
+        "const helper",
+        "export class A",
+        "export function f",
+        "export class B",
+    ];
+    assert!(order.windows(2).all(|pair| at(pair[0]) < at(pair[1])), "{code}");
+}
+
+#[test]
+fn pool_goes_before_a_class_that_an_import_follows() {
+    // ngtsc moves the imports up and declares the pool before the class. The
+    // class's static fields read `_c1`, so it can't come after the class.
+    let code = transform(
+        r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'cmp-a', template: '<ng-content select="x"></ng-content><ng-content></ng-content>' })
+export class A {}
+import { helper } from './other';
+export const h = helper;
+"#,
+    );
+    let at = |needle: &str| code.find(needle).expect(&code);
+    assert!(at("const _c1") < at("export class A"), "{code}");
+}

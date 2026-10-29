@@ -113,6 +113,31 @@ fn long_styles_are_named_after_the_constants_pooled_before_them() {
 }
 
 #[test]
+fn shared_long_style_is_declared_after_the_sharing_component_constants() {
+    // ngtsc pools the style while B compiles, after B's template: `_c0`,
+    // A's view, `_c1`, B's view, then `_c2`, not `_c2` next to A's part.
+    let source = format!(
+        "import {{Component}} from '@angular/core';\n\
+         @Component({{selector: 'a', template: '<p [title]=\"[v]\"></p>@if (v) {{<b></b>}}', \
+         styles: ['{LONG}'], standalone: true}})\nexport class A {{ v = 1; }}\n\
+         @Component({{selector: 'b', template: '<p [title]=\"[v, 2]\"></p>@if (v) {{<i></i>}}', \
+         styles: ['{LONG}'], standalone: true}})\nexport class B {{ v = 1; }}\n",
+    );
+    let code = transform(&source);
+    let at = |needle: &str| code.find(needle).expect(&code);
+    let order = [
+        "const _c0",
+        "function A_Conditional_1_Template",
+        "const _c1",
+        "function B_Conditional_1_Template",
+        "const _c2",
+        "export class A",
+    ];
+    assert!(order.windows(2).all(|pair| at(pair[0]) < at(pair[1])), "{code}");
+    assert_eq!(squash(&code).matches("styles:[_c2]").count(), 2, "{code}");
+}
+
+#[test]
 fn query_predicate_of_two_components_is_one_constant() {
     let source = "import {Component, ViewChild} from '@angular/core';
 @Component({selector: 'a', template: '', standalone: true})

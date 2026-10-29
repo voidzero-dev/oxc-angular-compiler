@@ -5,8 +5,8 @@ expression: result.code
 
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
-
 const _c0 = ["*"];
+
 
 export class BadgeComponent {
 static ɵfac = function BadgeComponent_Factory(__ngFactoryType__) {

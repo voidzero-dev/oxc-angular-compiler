@@ -849,25 +849,6 @@ fn resolve_host_directive_namespaces<'a>(
     }
 }
 
-/// Compute the effective start position for a class statement in the original source.
-///
-/// This accounts for non-Angular decorators that remain on the class after Angular
-/// decorator removal. The effective start is the minimum of `stmt_start` and the
-/// earliest remaining (non-removed) decorator's start position.
-fn compute_effective_start(
-    class: &oxc_ast::ast::Class,
-    decorator_spans_to_remove: &[Span],
-    stmt_start: u32,
-) -> u32 {
-    class
-        .decorators
-        .iter()
-        .filter(|d| !decorator_spans_to_remove.contains(&d.span))
-        .map(|d| d.span.start)
-        .min()
-        .map_or(stmt_start, |dec_start| dec_start.min(stmt_start))
-}
-
 /// This is used to determine where to insert namespace imports so they appear
 /// AFTER existing imports but BEFORE other code (like class declarations).
 ///
@@ -3324,11 +3305,8 @@ pub fn transform_angular_file(
     let mut class_definitions: HashMap<Span, (String, String, String)> = HashMap::new();
     let mut decorator_spans_to_remove: Vec<Span> = Vec::new();
     // Collect class positions from original AST for edit-based output.
-    // (class span, effective_start, class_body_end)
-    let mut class_positions: Vec<(Span, u32, u32)> = Vec::new();
-    // The compiled classes nested in a function or block, by span: the
-    // file-level declarations of their compile go after the imports.
-    let mut nested_compiled: rustc_hash::FxHashSet<Span> = rustc_hash::FxHashSet::default();
+    // (class span, class_body_end)
+    let mut class_positions: Vec<(Span, u32)> = Vec::new();
     // The compiled classes of a `namespace` body: ngtsc adds no statement
     // after them there.
     let mut namespace_compiled: rustc_hash::FxHashSet<Span> = rustc_hash::FxHashSet::default();
@@ -3634,9 +3612,6 @@ pub fn transform_angular_file(
             declaration
         };
         if !keeps_decorators {
-            if site.nested {
-                nested_compiled.insert(class.span);
-            }
             if site.namespace.is_some() {
                 namespace_compiled.insert(class.span);
             }
@@ -4276,15 +4251,7 @@ pub fn transform_angular_file(
                                     compilation_result.cmp_js.clone(),
                                 ));
                             }
-                            class_positions.push((
-                                class.span,
-                                compute_effective_start(
-                                    class,
-                                    &decorator_spans_to_remove,
-                                    stmt_start,
-                                ),
-                                class.body.span.end,
-                            ));
+                            class_positions.push((class.span, class.body.span.end));
 
                             // Generate .d.ts type declaration for this component
                             let type_argument_count = class
@@ -4484,11 +4451,7 @@ pub fn transform_angular_file(
                         &mut file_namespace_registry,
                     );
 
-                    class_positions.push((
-                        class.span,
-                        compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
-                        class.body.span.end,
-                    ));
+                    class_positions.push((class.span, class.body.span.end));
                     // Constants pooled by the host bindings are declared before the class.
                     let mut decls_before_class = String::new();
                     for stmt in &definitions.statements {
@@ -4610,11 +4573,7 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
 
-                        class_positions.push((
-                            class.span,
-                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
-                            class.body.span.end,
-                        ));
+                        class_positions.push((class.span, class.body.span.end));
                         class_definitions.insert(
                             class.span,
                             (property_assignments, String::new(), decls_after_class),
@@ -4750,11 +4709,7 @@ pub fn transform_angular_file(
                         }
 
                         // NgModule: external_decls go AFTER the class (they reference the class name)
-                        class_positions.push((
-                            class.span,
-                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
-                            class.body.span.end,
-                        ));
+                        class_positions.push((class.span, class.body.span.end));
                         class_definitions.insert(
                             class.span,
                             (property_assignments, String::new(), external_decls),
@@ -4848,11 +4803,7 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
 
-                        class_positions.push((
-                            class.span,
-                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
-                            class.body.span.end,
-                        ));
+                        class_positions.push((class.span, class.body.span.end));
                         class_definitions.insert(
                             class.span,
                             (property_assignments, String::new(), decls_after_class),
@@ -4935,11 +4886,7 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
 
-                        class_positions.push((
-                            class.span,
-                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
-                            class.body.span.end,
-                        ));
+                        class_positions.push((class.span, class.body.span.end));
                         class_definitions.insert(
                             class.span,
                             (property_assignments, String::new(), decls_after_class),
@@ -5056,7 +5003,7 @@ pub fn transform_angular_file(
         additional_imports.push_str(&file_namespace_registry.generate_import_statements());
     }
     // Past the imports: where the added imports go, and the file-level
-    // declarations of a nested class.
+    // declarations of every class.
     let after_imports = find_last_import_end(&parser_ret.program.body).map_or(0, |insert_pos| {
         let bytes = source.as_bytes();
         let mut actual_pos = insert_pos;
@@ -5116,16 +5063,11 @@ pub fn transform_angular_file(
         edits.push(edit);
     }
 
-    // 5d. Class definition insertion edits. A nested class's constants go
-    // after the imports, like ngtsc's (a function declared later in the file
-    // may run before its statement), so the declarations of each position are
-    // joined into one edit, in the order the classes compiled. So do those of
-    // every class compiled before the last nested one: the nested class may
-    // reuse a constant one of them pooled.
-    let last_nested = class_positions.iter().rposition(|(span, ..)| nested_compiled.contains(span));
-    let mut decls_by_start: Vec<(u32, String)> = Vec::new();
-    for (index, (class_span, effective_start, class_body_end)) in class_positions.iter().enumerate()
-    {
+    // 5d. Class definition insertion edits. Every class's constants and child
+    // view functions go after the imports, joined into one edit in the order
+    // the classes compiled, as ngtsc declares its constant pool's statements.
+    let mut decls_after_imports = String::new();
+    for (class_span, class_body_end) in &class_positions {
         if let Some((property_assignments, decls_before_class, decls_after_class)) =
             class_definitions.get(class_span)
         {
@@ -5137,18 +5079,10 @@ pub fn transform_angular_file(
                 ));
             }
 
-            // Constants/child views before the class
+            // Constants/child views after the imports
             if !decls_before_class.is_empty() {
-                let start = if last_nested.is_some_and(|last| index <= last) {
-                    after_imports
-                } else {
-                    *effective_start
-                };
-                let decls = format!("{decls_before_class}\n");
-                match decls_by_start.iter_mut().find(|(other, _)| *other == start) {
-                    Some((_, joined)) => joined.push_str(&decls),
-                    None => decls_by_start.push((start, decls)),
-                }
+                decls_after_imports.push_str(decls_before_class);
+                decls_after_imports.push('\n');
             }
 
             // Debug info/class metadata/HMR after the class
@@ -5157,7 +5091,19 @@ pub fn transform_angular_file(
             }
         }
     }
-    edits.extend(decls_by_start.into_iter().map(|(start, decls)| Edit::insert(start, decls)));
+    if !decls_after_imports.is_empty() {
+        // ngtsc moves the imports above the rest of the file. Imports load
+        // before the module body runs anyway, so a statement ahead of the
+        // last import only needs the declarations before it.
+        let first_statement = parser_ret
+            .program
+            .body
+            .iter()
+            .find(|stmt| !matches!(stmt, Statement::ImportDeclaration(_)))
+            .map(|stmt| stmt.span().start);
+        let start = first_statement.map_or(after_imports, |start| start.min(after_imports));
+        edits.push(Edit::insert(start, decls_after_imports));
+    }
 
     // 5e. TDZ-safe hoisting of top-level bindings referenced by decorator
     // metadata but declared after the decorated class. Without this, the
@@ -6873,12 +6819,13 @@ fn cmp_definition_has_inline_long_style(cmp_definition: &OutputExpression<'_>) -
 }
 
 /// Points the earlier component's inline first use of a long style that a
-/// later component shared at the shared constant, and declares it before that
-/// component, like the `FixupExpression` ngtsc's single file pool resolves.
+/// later component shared at the shared constant, like the `FixupExpression`
+/// ngtsc's single file pool resolves. The constant is declared with the
+/// current component's declarations, where ngtsc pools it: all of them go
+/// after the imports, before the earlier component.
 ///
 /// `inline_style_cmps` holds the components whose ɵcmp has a long style inline,
-/// with the ɵcmp text in their `class_definitions` entry. Without one (that
-/// component failed to compile), the constant goes before the current class.
+/// with the ɵcmp text in their `class_definitions` entry.
 fn apply_inherited_fixups<'a>(
     allocator: &'a Allocator,
     fixups: Vec<InheritedFixup<'a>>,
@@ -6916,15 +6863,12 @@ fn apply_inherited_fixups<'a>(
         let first_use = first_use.and_then(|(class_span, new_cmp_js, cmp_js)| {
             Some((class_definitions.get_mut(class_span)?, new_cmp_js, cmp_js))
         });
-        let Some(((property_assignments, decls_before_class, _), new_cmp_js, cmp_js)) = first_use
-        else {
-            current_declarations_js.push_str(&declaration);
-            current_declarations_js.push('\n');
+        current_declarations_js.push_str(&declaration);
+        current_declarations_js.push('\n');
+        let Some(((property_assignments, ..), new_cmp_js, cmp_js)) = first_use else {
             continue;
         };
         *property_assignments = property_assignments.replacen(cmp_js.as_str(), &new_cmp_js, 1);
-        decls_before_class.push_str(&declaration);
-        decls_before_class.push('\n');
         *cmp_js = new_cmp_js;
     }
 }
