@@ -863,6 +863,28 @@ fn test_link_dom_only_template() {
     }
 }
 
+/// Angular's linker names Closure messages after the linked file's path, without external
+/// ids even for a custom id, as Angular 22.2.3's linker shows for `/x/lib/a.component.mjs`.
+#[test]
+fn test_link_i18n_closure_names_use_file_path() {
+    let code = r#"import * as i0 from "@angular/core";
+export class A {}
+A.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", type: A, selector: "a", ngImport: i0, template: '<p i18n>Hello</p><p i18n="@@custom">Bye</p>', isInline: true });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "/x/lib/a.component.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    for expected in [
+        r#"constMSG__X_LIB_A_COMPONENT_MJS_0=goog.getMsg("Hello");"#,
+        "i18n_0=MSG__X_LIB_A_COMPONENT_MJS_0",
+        r#"constMSG__X_LIB_A_COMPONENT_MJS_1=goog.getMsg("Bye");"#,
+        "i18n_1=MSG__X_LIB_A_COMPONENT_MJS_1",
+    ] {
+        assert!(linked.contains(expected), "missing `{expected}` in\n{}", result.code);
+    }
+}
+
 /// `ɵɵngDeclareDirective` of ngtsc 22.2.3 for two signal and two decorator
 /// view queries, and one signal and two decorator content queries.
 const CHAINED_QUERIES_DIRECTIVE: &str = r#"import * as i0 from "@angular/core";

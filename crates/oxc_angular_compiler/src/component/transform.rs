@@ -8056,8 +8056,10 @@ pub fn compile_template_for_linker<'a>(
     // Stage 3-5: Ingest and compile
     let ingest_options = IngestOptions {
         mode,
-        relative_context_file_path: None,
-        i18n_use_external_ids: true,
+        // Angular's linker names Closure messages after the file it links
+        // (`MSG__X_MAIN_JS_0` for `/x/main.js`), without external ids.
+        relative_context_file_path: Some(Ident::from_in(file_path, allocator)),
+        i18n_use_external_ids: false,
         defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,
         relative_template_path: None,
         enable_debug_locations: false,
