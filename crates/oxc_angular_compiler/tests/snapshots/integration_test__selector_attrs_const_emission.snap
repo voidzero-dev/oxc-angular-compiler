@@ -6,15 +6,14 @@ expression: result.code
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
 
-const _c0 = ["bitBadge",""];
-const _c1 = ["*"];
+const _c0 = ["*"];
 
 export class BadgeComponent {
 static ɵfac = function BadgeComponent_Factory(__ngFactoryType__) {
   return new (__ngFactoryType__ || BadgeComponent)();
 };
 static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:BadgeComponent,selectors:[["span","bitBadge",
-    ""]],attrs:_c0,ngContentSelectors:_c1,decls:1,vars:0,template:function BadgeComponent_Template(rf,
+    ""]],ngContentSelectors:_c0,decls:1,vars:0,template:function BadgeComponent_Template(rf,
     ctx) {
   if ((rf & 1)) {
     i0.ɵɵprojectionDef();

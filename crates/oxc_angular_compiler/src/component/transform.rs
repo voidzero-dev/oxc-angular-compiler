@@ -6275,10 +6275,16 @@ fn compile_component_full<'a>(
         job.pool.continue_from(index);
     }
 
-    // Pool attrs const if first selector has attributes, after the host
-    // bindings and before the template.
-    // See: packages/compiler/src/render3/view/compiler.ts lines 192-212
-    let attrs_ref = pool_selector_attrs(allocator, &mut job, metadata);
+    // Pool the `attrs` const when the first selector has attributes, after
+    // the host bindings and before the template. Only Angular before
+    // v22.0.0-next.4 adds it, in `compileComponentFromMetadata` after
+    // `baseDirectiveFields`.
+    // See: packages/compiler/src/render3/view/compiler.ts (v21.2.x)
+    let attrs_ref = if options.angular_version.is_some_and(|v| v.emits_selector_attrs()) {
+        pool_selector_attrs(allocator, &mut job, metadata)
+    } else {
+        None
+    };
 
     let compiled = compile_template(&mut job);
 
@@ -7543,11 +7549,11 @@ fn convert_host_metadata_input_to_host_metadata<'a>(
 /// Pool selector attrs constant BEFORE template compilation.
 ///
 /// This matches TypeScript Angular's behavior where the attrs constant is added to
-/// the constant pool BEFORE template ingestion and compilation. By pooling it first,
-/// attrs gets the first available constant index (_c0), ensuring the correct constant
-/// ordering in the output.
+/// the constant pool after the host bindings' constants and BEFORE template ingestion and
+/// compilation, ensuring the correct constant ordering in the output. Only Angular
+/// before v22.0.0-next.4 emits it (see [`crate::AngularVersion::emits_selector_attrs`]).
 ///
-/// See: packages/compiler/src/render3/view/compiler.ts lines 192-212
+/// See: packages/compiler/src/render3/view/compiler.ts (v21.2.x)
 fn pool_selector_attrs<'a>(
     allocator: &'a Allocator,
     job: &mut crate::pipeline::compilation::ComponentCompilationJob<'a>,

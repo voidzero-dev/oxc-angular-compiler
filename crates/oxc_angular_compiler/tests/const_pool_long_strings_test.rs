@@ -5,7 +5,8 @@
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    ComponentHmrUpdateInput, TransformOptions, compile_component_hmr_update, transform_angular_file,
+    AngularVersion, ComponentHmrUpdateInput, TransformOptions, compile_component_hmr_update,
+    transform_angular_file,
 };
 
 /// 76 chars, over the 50-char threshold.
@@ -184,15 +185,26 @@ export class C { @ViewChild('x') q: any; @ViewChild('y') r: any; }
 #[test]
 fn literals_whose_strings_join_alike_stay_apart() {
     // `["a", "b,str:c,str:d"]` and `["a", "b", "c", "d"]` are different arrays, so B must not
-    // read A's `attrs` constant.
-    let code = squash(&transform(
+    // read A's `attrs` constant. Only Angular before v22.0.0-next.4 emits `attrs`.
+    let allocator = Allocator::default();
+    let options = TransformOptions {
+        angular_version: Some(AngularVersion::new(21, 2, 0)),
+        ..Default::default()
+    };
+    let result = transform_angular_file(
+        &allocator,
+        "test.ts",
         "import {Component} from '@angular/core';
 @Component({selector: '[a=\"b,str:c,str:d\"]', template: 'x', standalone: true})
 export class A {}
 @Component({selector: '[a=b][c=d]', template: 'y', standalone: true})
 export class B {}
 ",
-    ));
+        Some(&options),
+        None,
+    );
+    assert!(!result.has_errors(), "{:?}", result.diagnostics);
+    let code = squash(&result.code);
     assert!(code.contains(r#"const_c0=["a","b,str:c,str:d"];"#), "{code}");
     assert!(code.contains(r#"const_c1=["a","b","c","d"];"#), "{code}");
     assert!(code.contains("type:B,selectors:[[\"\",\"a\",\"b\",\"c\",\"d\"]],attrs:_c1"), "{code}");
