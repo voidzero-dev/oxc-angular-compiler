@@ -748,7 +748,8 @@ fn convert_oxc_binary_operator(op: oxc_ast::ast::BinaryOperator) -> Option<Binar
 ///
 /// The source text is the original TypeScript source, so this function
 /// strips TypeScript type annotations by parsing, transforming, and
-/// re-generating the expression as JavaScript.
+/// re-generating the expression as JavaScript. Signal calls inside it get
+/// their `debugName` like the file's own text (ngtsc prints the same node).
 ///
 /// Returns `None` if `source_text` is not available.
 pub(crate) fn make_raw_source<'a>(
@@ -757,8 +758,8 @@ pub(crate) fn make_raw_source<'a>(
     span: Span,
 ) -> Option<OutputExpression<'a>> {
     let source = source_text?;
-    let raw = &source[span.start as usize..span.end as usize];
-    let js = strip_expression_types(raw);
+    let raw = crate::component::signal_debug_name::source_text(source, span);
+    let js = strip_expression_types(&raw);
     Some(OutputExpression::RawSource(Box::new_in(
         RawSourceExpr { source: Ident::from(allocator.alloc_str(&js)), source_span: None },
         &allocator,

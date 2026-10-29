@@ -26,8 +26,7 @@ export class TestComponent {
     ) {}
 
 static ɵfac = function TestComponent_Factory(__ngFactoryType__) {
-  return new (__ngFactoryType__ || TestComponent)(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵinvalidFactoryDep(1),
-      i0.ɵɵinvalidFactoryDep(2));
+  i0.ɵɵinvalidFactory();
 };
 static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selectors:[["app-test"]],decls:0,
     vars:0,template:function TestComponent_Template(rf,ctx) {

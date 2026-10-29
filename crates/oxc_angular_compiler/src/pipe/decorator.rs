@@ -8,7 +8,7 @@ use oxc_ast::ast::{Argument, Class, Decorator, Expression, ObjectPropertyKind, P
 use oxc_span::Span;
 use oxc_str::Ident;
 
-use super::metadata::R3PipeMetadata;
+use super::metadata::{R3DependencyMetadata as PipeDependencyMetadata, R3PipeMetadata};
 use crate::directive::StringConsts;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
@@ -71,12 +71,37 @@ impl<'a> PipeMetadata<'a> {
             &allocator,
         ));
 
+        // Constructor dependencies feed the pipe's factory. `None` (no
+        // constructor, but a superclass) stays `None` so the factory is
+        // inherited, like ngtsc's `ctorDeps` in `PipeDecoratorHandler.analyze`.
+        let deps = self.deps.as_ref().map(|deps| {
+            let mut out = Vec::with_capacity_in(deps.len(), &allocator);
+            for dep in deps {
+                out.push(PipeDependencyMetadata {
+                    token: dep
+                        .token
+                        .as_ref()
+                        .map(|t| Box::new_in(t.clone_in(allocator), &allocator)),
+                    attribute_name_type: dep
+                        .attribute_name_type
+                        .as_ref()
+                        .map(|a| Box::new_in(a.clone_in(allocator), &allocator)),
+                    host: dep.host,
+                    optional: dep.optional,
+                    self_: dep.self_,
+                    skip_self: dep.skip_self,
+                    type_only_invalid: dep.type_only_invalid,
+                });
+            }
+            out
+        });
+
         Some(R3PipeMetadata {
             name: self.class_name.clone(),
             pipe_name: self.pipe_name.clone(),
             r#type: type_expr,
             type_argument_count: 0,
-            deps: None,
+            deps,
             pure: self.pure,
             is_standalone: self.standalone,
         })

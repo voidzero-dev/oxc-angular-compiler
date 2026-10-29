@@ -119,73 +119,7 @@ pub fn compile_component_metadata_async_resolver<'a>(
     let mut dynamic_imports = Vec::new_in(&allocator);
 
     for dep in dependencies {
-        // Create: (m) => m.CmpA  (or m.default for default imports)
-        let mut inner_params = Vec::new_in(&allocator);
-        inner_params.push(FnParam { name: Ident::from("m") });
-
-        let prop_name =
-            if dep.is_default_import { Ident::from("default") } else { dep.export_name.clone() };
-
-        let inner_body = OutputExpression::ReadProp(Box::new_in(
-            ReadPropExpr {
-                receiver: Box::new_in(
-                    OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("m"), source_span: None },
-                        &allocator,
-                    )),
-                    &allocator,
-                ),
-                name: prop_name,
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
-
-        let inner_fn = OutputExpression::ArrowFunction(Box::new_in(
-            ArrowFunctionExpr {
-                params: inner_params,
-                body: ArrowFunctionBody::Expression(Box::new_in(inner_body, &allocator)),
-                source_span: None,
-            },
-            &allocator,
-        ));
-
-        // Create: import('./cmp-a').then((m) => m.CmpA)
-        let dynamic_import = OutputExpression::DynamicImport(Box::new_in(
-            DynamicImportExpr {
-                url: DynamicImportUrl::String(dep.import_path.clone()),
-                url_comment: None,
-                source_span: None,
-            },
-            &allocator,
-        ));
-
-        let then_prop = OutputExpression::ReadProp(Box::new_in(
-            ReadPropExpr {
-                receiver: Box::new_in(dynamic_import, &allocator),
-                name: Ident::from("then"),
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
-
-        let mut then_args = Vec::new_in(&allocator);
-        then_args.push(inner_fn);
-
-        let then_call = OutputExpression::InvokeFunction(Box::new_in(
-            InvokeFunctionExpr {
-                fn_expr: Box::new_in(then_prop, &allocator),
-                args: then_args,
-                pure: false,
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
-
-        dynamic_imports.push(then_call);
+        dynamic_imports.push(compile_deferred_dependency_import(allocator, dep));
     }
 
     // Create: () => [...]
@@ -199,6 +133,80 @@ pub fn compile_component_metadata_async_resolver<'a>(
         ArrowFunctionExpr {
             params: empty_params,
             body: ArrowFunctionBody::Expression(Box::new_in(array, &allocator)),
+            source_span: None,
+        },
+        &allocator,
+    ))
+}
+
+/// One entry of a dependency resolver function:
+/// `import('./cmp-a').then((m) => m.CmpA)`, or `m.default` for a default
+/// import (the `isDeferrable` branch of Angular's
+/// `compileDeferResolverFunction`).
+pub fn compile_deferred_dependency_import<'a>(
+    allocator: &'a Allocator,
+    dep: &R3DeferPerComponentDependency<'a>,
+) -> OutputExpression<'a> {
+    // Create: (m) => m.CmpA  (or m.default for default imports)
+    let mut inner_params = Vec::new_in(&allocator);
+    inner_params.push(FnParam { name: Ident::from("m") });
+
+    let prop_name = if dep.is_default_import { Ident::from("default") } else { dep.export_name };
+
+    let inner_body = OutputExpression::ReadProp(Box::new_in(
+        ReadPropExpr {
+            receiver: Box::new_in(
+                OutputExpression::ReadVar(Box::new_in(
+                    ReadVarExpr { name: Ident::from("m"), source_span: None },
+                    &allocator,
+                )),
+                &allocator,
+            ),
+            name: prop_name,
+            optional: false,
+            source_span: None,
+        },
+        &allocator,
+    ));
+
+    let inner_fn = OutputExpression::ArrowFunction(Box::new_in(
+        ArrowFunctionExpr {
+            params: inner_params,
+            body: ArrowFunctionBody::Expression(Box::new_in(inner_body, &allocator)),
+            source_span: None,
+        },
+        &allocator,
+    ));
+
+    // Create: import('./cmp-a').then((m) => m.CmpA)
+    let dynamic_import = OutputExpression::DynamicImport(Box::new_in(
+        DynamicImportExpr {
+            url: DynamicImportUrl::String(dep.import_path),
+            url_comment: None,
+            source_span: None,
+        },
+        &allocator,
+    ));
+
+    let then_prop = OutputExpression::ReadProp(Box::new_in(
+        ReadPropExpr {
+            receiver: Box::new_in(dynamic_import, &allocator),
+            name: Ident::from("then"),
+            optional: false,
+            source_span: None,
+        },
+        &allocator,
+    ));
+
+    let mut then_args = Vec::new_in(&allocator);
+    then_args.push(inner_fn);
+
+    OutputExpression::InvokeFunction(Box::new_in(
+        InvokeFunctionExpr {
+            fn_expr: Box::new_in(then_prop, &allocator),
+            args: then_args,
+            pure: false,
+            optional: false,
             source_span: None,
         },
         &allocator,

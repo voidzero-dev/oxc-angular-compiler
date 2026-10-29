@@ -34,6 +34,7 @@ use super::hoist::{collect_hoist_edits, program_has_angular_decorated_class};
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
+use super::signal_debug_name;
 use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
@@ -728,14 +729,34 @@ fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str>
 /// qualified type `ns.one.One` reads off the namespace import (`i1.one.One`), and
 /// `mod.Foo` off the named import (`i1.mod.Foo`).
 /// This ensures the factory works correctly even after import elision.
+///
+/// Only type-annotation tokens are rewritten. Like ngtsc's `getConstructorDependencies`
+/// (`annotations/common/src/di.ts`), an `@Inject(TOKEN)` token is the expression as
+/// written, and a default import (`import Foo from './foo'`) stays `Foo`
+/// (`typeToValue`'s LOCAL reference with a `defaultImportStatement`). Import elision
+/// keeps both imports.
 fn resolve_factory_dep_namespaces<'a>(
     allocator: &'a Allocator,
     deps: &mut oxc_allocator::Vec<'a, crate::factory::R3DependencyMetadata<'a>>,
+    class: &oxc_ast::ast::Class<'a>,
+    string_consts: &crate::directive::StringConsts<'a>,
     import_map: &ImportMap<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) {
-    for dep in deps.iter_mut() {
+    // One dep per constructor parameter, in order.
+    let params = crate::util::find_constructor(class).map(|ctor| &ctor.value.params.items);
+    let is_inject_with_token = |decorator: &oxc_ast::ast::Decorator<'a>| {
+        crate::directive::angular_param_decorator(decorator, Some(string_consts)) == Some("Inject")
+            && matches!(
+                &decorator.expression,
+                Expression::CallExpression(call) if !call.arguments.is_empty()
+            )
+    };
+    for (index, dep) in deps.iter_mut().enumerate() {
         let Some(token) = dep.token.as_mut() else { continue };
+        let from_inject = params
+            .and_then(|params| params.get(index))
+            .is_some_and(|param| param.decorators.iter().any(is_inject_with_token));
         let is_member_chain = matches!(token, OutputExpression::ReadProp(_));
         let root = member_chain_root(token);
         // Only process bare variable references (ReadVar)
@@ -751,6 +772,9 @@ fn resolve_factory_dep_namespaces<'a>(
             // See issue #288.
             dep.token = None;
             dep.type_only_invalid = true;
+            continue;
+        }
+        if from_inject || import_info.is_default_import {
             continue;
         }
         // Replace with namespace-prefixed reference: i1.Store instead of Store
@@ -1293,10 +1317,9 @@ fn extract_jit_ctor_params(
         let mut decorators = std::vec::Vec::new();
         for decorator in &param.decorators {
             if !crate::directive::is_angular_core_decorator(decorator, Some(consts)) {
-                let expr = decorator.expression.span();
                 other_decorators.push(format!(
                     "__param({index}, {})",
-                    &source[expr.start as usize..expr.end as usize]
+                    signal_debug_name::source_text(source, decorator.expression.span())
                 ));
                 continue;
             }
@@ -1304,8 +1327,11 @@ fn extract_jit_ctor_params(
                 Expression::CallExpression(call) => {
                     let args = match (call.arguments.first(), call.arguments.last()) {
                         (Some(first), Some(last)) => Some(
-                            source[first.span().start as usize..last.span().end as usize]
-                                .to_string(),
+                            signal_debug_name::source_text(
+                                source,
+                                Span::new(first.span().start, last.span().end),
+                            )
+                            .into_owned(),
                         ),
                         _ => None,
                     };
@@ -1393,7 +1419,10 @@ fn extract_all_jit_member_decorators(
                     } else {
                         let start = call.arguments.first().unwrap().span().start;
                         let end = call.arguments.last().unwrap().span().end;
-                        Some(source[start as usize..end as usize].to_string())
+                        Some(
+                            signal_debug_name::source_text(source, Span::new(start, end))
+                                .into_owned(),
+                        )
                     };
                     (&call.callee, args)
                 }
@@ -1424,9 +1453,10 @@ fn extract_all_jit_member_decorators(
             } else {
                 // Non-Angular decorator (another module's `@Input` or `@Inject`
                 // too) → goes into __decorate() call
-                let expr_start = decorator.expression.span().start;
-                let expr_end = decorator.expression.span().end;
-                non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());
+                non_angular_texts.push(
+                    signal_debug_name::source_text(source, decorator.expression.span())
+                        .into_owned(),
+                );
             }
         }
 
@@ -1821,6 +1851,66 @@ fn synthesize_signal_api_decorators(
     }
 }
 
+/// The `input()` fields of the jit-forced `@Component`/`@Directive` classes,
+/// which ngtsc's JIT `signalInputsTransform`
+/// (`initializer_api_transforms/input_function.ts`) gives an `@Input`
+/// decorator. It rebuilds the field with `member.name`, a string, before the
+/// signal `debugName` transform runs, so there `node.name.getText()` throws
+/// and the field keeps no `debugName`. `model()` and the query functions
+/// keep the name node, and a field with its own `@Input` is left alone.
+fn jit_signal_input_fields(
+    program: &oxc_ast::ast::Program<'_>,
+    string_consts: &crate::directive::StringConsts<'_>,
+) -> rustc_hash::FxHashSet<Span> {
+    use oxc_ast::ast::ClassElement;
+
+    let mut fields = rustc_hash::FxHashSet::default();
+    for stmt in &program.body {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => class.as_ref(),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => class.as_ref(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        // Upstream's visitor only rewrites a named class.
+        if class.id.is_none()
+            || !matches!(
+                find_jit_forced_decorator(class, string_consts),
+                Some((AngularDecoratorKind::Component | AngularDecoratorKind::Directive, _))
+            )
+        {
+            continue;
+        }
+        for element in &class.body.body {
+            let ClassElement::PropertyDefinition(prop) = element else { continue };
+            // The keys `extract_all_jit_member_decorators` lowers.
+            if !matches!(prop.key, PropertyKey::StaticIdentifier(_) | PropertyKey::StringLiteral(_))
+            {
+                continue;
+            }
+            let Some(Expression::CallExpression(call)) = &prop.value else { continue };
+            let is_signal_input = matches!(
+                classify_initializer_api(&call.callee, string_consts),
+                Some(InitializerApiKind::Input | InitializerApiKind::InputRequired)
+            );
+            let has_input_decorator = prop.decorators.iter().any(|decorator| {
+                crate::directive::angular_member_decorator(decorator, Some(string_consts))
+                    == Some("Input")
+            });
+            if is_signal_input && !has_input_decorator {
+                fields.insert(prop.span);
+            }
+        }
+    }
+    fields
+}
+
 /// Returns `true` when any field of any JIT class has a synthesized decorator
 /// (signal API lowering) that references the `@angular/core` namespace. Used to
 /// gate the emission of `import * as i0 from "@angular/core"`.
@@ -2020,28 +2110,32 @@ fn build_jit_decorator_text<'a>(
     let expr_start = decorator.expression.span().start as usize;
     let expr_end = decorator.expression.span().end as usize;
     let expr_text = &source[expr_start..expr_end];
+    // The signal `debugName`s inside the expression, which it keeps.
+    let mut edits: std::vec::Vec<(usize, usize, String)> =
+        signal_debug_name::source_edits(source, decorator.expression.span())
+            .into_iter()
+            .map(|edit| (edit.start as usize, edit.end as usize, edit.replacement))
+            .collect();
 
     // For non-Component decorators, just return the expression text as-is
     if !matches!(decorator_kind, AngularDecoratorKind::Component) {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     }
 
     // For Component decorators, check for resource properties to replace
     let Expression::CallExpression(call) = &decorator.expression else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
     let Some(config_arg) = call.arguments.first() else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
     let Argument::ObjectExpression(config_obj) = config_arg else {
-        return expr_text.to_string();
+        return apply_jit_decorator_text_edits(expr_text, edits);
     };
 
-    // Collect edits within the expression text
-    let mut edits: std::vec::Vec<(usize, usize, String)> = std::vec::Vec::new();
-
+    // Collect the resource edits within the expression text
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             let key_name = match &prop.key {
@@ -2123,12 +2217,16 @@ fn build_jit_decorator_text<'a>(
         }
     }
 
-    if edits.is_empty() {
-        return expr_text.to_string();
-    }
+    apply_jit_decorator_text_edits(expr_text, edits)
+}
 
+/// `text` with `edits` (offsets into it) applied.
+fn apply_jit_decorator_text_edits(
+    text: &str,
+    mut edits: std::vec::Vec<(usize, usize, String)>,
+) -> String {
     // Apply edits in reverse order to preserve positions
-    let mut result = expr_text.to_string();
+    let mut result = text.to_string();
     edits.sort_by(|a, b| b.0.cmp(&a.0));
     for (start, end, replacement) in edits {
         result.replace_range(start..end, &replacement);
@@ -2596,10 +2694,8 @@ fn collect_jit_class_info<'a>(
             all_class_decorator_texts.push(text);
         } else {
             // Non-Angular decorator: extract expression text from source (without @)
-            let expr_start = dec.expression.span().start;
-            let expr_end = dec.expression.span().end;
             all_class_decorator_texts
-                .push(source[expr_start as usize..expr_end as usize].to_string());
+                .push(signal_debug_name::source_text(source, dec.expression.span()).into_owned());
         }
     }
 
@@ -3285,6 +3381,24 @@ pub fn transform_angular_file(
         }
     }
 
+    // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
+    // other signal APIs get an ngDevMode `debugName` argument named after the
+    // binding they initialize. ngtsc adds it to the `before` emit transforms
+    // in full and partial compilation, for every emitted file, whether or not
+    // it has an Angular decorator. It runs on the emitted nodes, so the
+    // decorator arguments printed again below (`ɵcmp`, `ɵsetClassMetadata`,
+    // a JIT `__decorate`) are named too: their slices of the source take the
+    // edits through this scope.
+    let debug_names_scope = signal_debug_name::FileDebugNames::enter(
+        source,
+        signal_debug_name::collect_signal_debug_names(
+            &parser_ret.program,
+            source,
+            semantic.scoping(),
+            &jit_signal_input_fields(&parser_ret.program, &string_consts),
+        ),
+    );
+
     // The imports a `jit: true` class's downleveled output keeps live, found
     // before any class compiles so `@defer` leaves them alone whichever class
     // comes first (#313).
@@ -3432,6 +3546,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -3571,43 +3687,52 @@ pub fn transform_angular_file(
                         content_queries.iter().map(|q| q.property_name.to_string()).collect();
 
                     // The selector of the standalone component or directive an
-                    // `imports` entry refers to, when `@defer` may lazy-load it
-                    // (#313): its import is referenced nowhere else in this file
-                    // or in the compiled output, so the static import can go, and
-                    // cross-file analysis can read the selector. Watched files
-                    // are only reported with `resolve_imported_values`, so it is
-                    // required here too.
+                    // `imports` entry refers to, when cross-file analysis can
+                    // read it or the class is declared in this file, and whether
+                    // `@defer` may lazy-load it (#313): its import is referenced
+                    // nowhere else in this file or in the compiled output, so the
+                    // static import can go. Watched files are only reported with
+                    // `resolve_imported_values`, so it is required here too.
                     #[cfg(feature = "cross_file_elision")]
-                    let deferrable_selector = cross_file_analyzer
+                    let import_selector = cross_file_analyzer
                         .as_ref()
                         .filter(|_| options.resolve_imported_values)
                         .map(|analyzer| {
                             let import_map = &import_map;
                             let import_elision = &import_elision_mut;
-                            move |local: &str| -> Option<String> {
-                                if import_elision.value_reference_count(local)? != 1
-                                    || import_elision.is_kept_by_output(local)
-                                {
-                                    return None;
-                                }
-                                let info = import_map.get(&Ident::from(local))?;
+                            let program = &parser_ret.program;
+                            let string_consts = &string_consts;
+                            move |local: &str| -> Option<(String, bool)> {
+                                let Some(info) = import_map.get(&Ident::from(local)) else {
+                                    let selector =
+                                        super::cross_file_elision::local_standalone_class_selector(
+                                            program,
+                                            string_consts,
+                                            local,
+                                            implicit_standalone,
+                                        )?;
+                                    return Some((selector, false));
+                                };
                                 if !info.is_named_import || info.is_type_only {
                                     return None;
                                 }
                                 let export_name = info.imported_name.as_deref().unwrap_or(local);
-                                analyzer.standalone_directive_selector(
+                                let selector = analyzer.standalone_directive_selector(
                                     info.source_module.as_str(),
                                     export_name,
                                     std::path::Path::new(path),
                                     implicit_standalone,
-                                )
+                                )?;
+                                let deferrable = import_elision.value_reference_count(local)
+                                    == Some(1)
+                                    && !import_elision.is_kept_by_output(local);
+                                Some((selector, deferrable))
                             }
                         });
                     #[cfg(feature = "cross_file_elision")]
-                    let deferrable_selector =
-                        deferrable_selector.as_ref().map(|f| f as DeferrableSelector<'_>);
+                    let import_selector = import_selector.as_ref().map(|f| f as ImportSelector<'_>);
                     #[cfg(not(feature = "cross_file_elision"))]
-                    let deferrable_selector = None;
+                    let import_selector = None;
 
                     // 4. Compile the template and generate ɵcmp/ɵfac
                     // Pass the shared pool index to ensure unique constant names
@@ -3626,7 +3751,7 @@ pub fn transform_angular_file(
                         &mut file_namespace_registry,
                         &import_map,
                         resolved_resources,
-                        deferrable_selector,
+                        import_selector,
                         Some(&import_elision_mut),
                         false,
                     ) {
@@ -4027,6 +4152,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4176,6 +4303,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4291,6 +4420,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4521,6 +4652,8 @@ pub fn transform_angular_file(
                         resolve_factory_dep_namespaces(
                             &allocator,
                             deps,
+                            class,
+                            &string_consts,
                             &import_map,
                             &mut file_namespace_registry,
                         );
@@ -4806,6 +4939,10 @@ pub fn transform_angular_file(
             &string_consts,
         ));
     }
+
+    // 5f. The signal `debugName` edits of the text the file keeps.
+    let debug_name_edits = debug_names_scope.finish().into_file_edits(&edits);
+    edits.extend(debug_name_edits);
 
     // Members can reference namespace aliases the registry assigned to
     // other modules (e.g. `typeof i1.SomeDirective` for host directives).
@@ -5478,8 +5615,8 @@ fn html_parse_error_diagnostic(
 }
 
 /// The selector of the standalone component or directive an `imports`
-/// entry refers to, by local name, when `@defer` may lazy-load it.
-type DeferrableSelector<'f> = &'f dyn Fn(&str) -> Option<String>;
+/// entry refers to, by local name, and whether `@defer` may lazy-load it.
+type ImportSelector<'f> = &'f dyn Fn(&str) -> Option<(String, bool)>;
 
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
@@ -5495,7 +5632,7 @@ fn compile_component_full<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
     resolved_resources: Option<&ResolvedResources>,
-    deferrable_selector: Option<DeferrableSelector<'_>>,
+    import_selector: Option<ImportSelector<'_>>,
     import_elision: Option<&ImportElisionAnalyzer<'_>>,
     hmr_update: bool,
 ) -> Result<FullCompilationResult<'a>, Vec<OxcDiagnostic>> {
@@ -5669,7 +5806,10 @@ fn compile_component_full<'a>(
     // ngc's full compilation (#313). Needs cross-file analysis for the
     // selectors; skipped under HMR, like ngc.
     let mut implicitly_deferred_imports = Vec::new();
-    if let Some(deferrable_selector) = deferrable_selector
+    // What each `@defer` block uses, keyed by the block's span, when its own
+    // dependency function can be built (see below).
+    let mut defer_block_dependencies = None;
+    if let Some(import_selector) = import_selector
         && let Some(import_elision) = import_elision
         && !options.hmr
         && let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports
@@ -5681,24 +5821,30 @@ fn compile_component_full<'a>(
             .all(|(entry, class)| class.is_some() || matches!(entry, OutputExpression::ReadVar(_)))
         && super::defer_resolver::template_has_defer_block(&r3_result.nodes)
     {
+        let mut deferrable = Vec::new();
         let candidates: Vec<_> = metadata
             .import_entry_classes
             .iter()
             .flatten()
             .copied()
             .filter_map(|name| {
-                let selector = deferrable_selector(name.as_str())?;
+                let (selector, can_defer) = import_selector(name.as_str())?;
+                if can_defer {
+                    deferrable.push(name);
+                }
                 Some((name, crate::pipeline::selector::CssSelector::parse(&selector)))
             })
             .collect();
-        let deferred =
+        let block_only =
             super::defer_resolver::implicitly_deferred_imports(&r3_result.nodes, &candidates);
+        let mut deferred = block_only.clone();
+        deferred.retain(|name| deferrable.contains(name));
         // ngc's `DeferredSymbolTracker.canDefer`: an import declaration goes
         // only when every non-`type` specifier in it is deferred, or the
         // static import would stay and nothing would be split off. An
         // explicit `deferredImports` entry doesn't count: OXC keeps its
         // static import.
-        let deferred: std::vec::Vec<_> = deferred
+        let mut deferred: std::vec::Vec<_> = deferred
             .iter()
             .copied()
             .filter(|name| {
@@ -5708,15 +5854,53 @@ fn compile_component_full<'a>(
                     .all(|specifier| deferred.contains(specifier))
             })
             .collect();
-        if !deferred.is_empty() {
-            let is_deferred = |name: &str| deferred.iter().any(|d| d.as_str() == name);
-            metadata.imports.retain(|name| !is_deferred(name.as_str()));
+        // ngc's full compilation gives each `@defer` block its own dependency
+        // function (`DeferBlockDepsEmitMode.PerBlock`) listing what the
+        // block's main content uses: a dynamic `import()` for a lazy
+        // dependency and a plain reference for an eager one
+        // (`resolveDeferBlocks` and `compileDeferBlocks` in its component
+        // `handler.ts`). An `imports` entry whose selector is unknown is left
+        // out; it stays eager, and `dependencies` already provides it to the
+        // block. An explicit `deferredImports` keeps the shared function: its
+        // selectors aren't read.
+        if metadata.deferred_imports.is_empty() && !options.jit {
+            defer_block_dependencies =
+                super::defer_resolver::defer_block_dependencies(&r3_result.nodes, &candidates);
+        }
+        if let Some(blocks) = &defer_block_dependencies {
+            // `resolveAllDeferredDependencies` lists the lazy dependencies of
+            // `setClassMetadataAsync` block by block.
+            deferred.sort_by_key(|name| {
+                blocks.iter().flat_map(|(_, dependencies)| dependencies).position(|d| d == name)
+            });
+        }
+        // `dependencies` lists only what the template uses eagerly
+        // (`handleDependencyCycles` in ngc's component `handler.ts`). With a
+        // dependency function per block, an entry used only inside `@defer`
+        // blocks leaves it even when it can't be lazy-loaded: the blocks'
+        // functions provide it. Otherwise only the deferred entries leave.
+        let removed = if defer_block_dependencies.is_some() { &block_only } else { &deferred };
+        if !removed.is_empty() {
+            let is_removed = |name: &str| removed.iter().any(|d| d.as_str() == name);
+            metadata.imports.retain(|name| !is_removed(name.as_str()));
             if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
                 let mut classes = metadata.import_entry_classes.iter();
                 raw_imports.entries.retain(|_| {
-                    !classes.next().copied().flatten().is_some_and(|name| is_deferred(&name))
+                    !classes.next().copied().flatten().is_some_and(|name| is_removed(&name))
                 });
+                // Nothing left to resolve at runtime: like a standalone
+                // component without `imports`, it gets no `dependencies`.
+                if raw_imports.entries.is_empty()
+                    && defer_block_dependencies.is_some()
+                    && metadata.standalone
+                {
+                    metadata.raw_imports = None;
+                    metadata.declaration_list_emit_mode =
+                        super::metadata::DeclarationListEmitMode::Direct;
+                }
             }
+        }
+        if !deferred.is_empty() {
             implicitly_deferred_imports = deferred.iter().map(ToString::to_string).collect();
             metadata.deferred_imports.extend(deferred);
         }
@@ -5739,8 +5923,9 @@ fn compile_component_full<'a>(
     // Note: Angular's full compilation mode also derives deferrable symbols
     // from `imports: [...]` by matching template selectors against imported
     // directive classes (`resolveAllDeferredDependencies`). OXC does that
-    // above when cross-file analysis is available (#313) and otherwise
-    // follows Angular's local path, which requires explicit `deferredImports`.
+    // above when cross-file analysis is available (#313), with one dependency
+    // function per block, and otherwise follows Angular's local path, which
+    // requires explicit `deferredImports`.
     // Computed once and reused below: the resolver decision and the eventual
     // `setClassMetadataAsync` gate both depend on whether the template uses
     // `@defer`.
@@ -5750,20 +5935,23 @@ fn compile_component_full<'a>(
     // would resolve against the update module's URL, not the component file.
     // The update keeps a null dependency function instead (PerComponent mode
     // below), as `compile_template_for_hmr` always has.
-    let defer_resolver_fn = if metadata.deferred_imports.is_empty() || hmr_update {
-        None
-    } else if has_defer_block {
-        super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
-    } else {
-        // `deferredImports` declared but no `@defer` block — the resolver
-        // would be unused dead code. Leave it off.
-        None
-    };
+    let defer_resolver_fn =
+        if metadata.deferred_imports.is_empty() || hmr_update || defer_block_dependencies.is_some()
+        {
+            None
+        } else if has_defer_block {
+            super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
+        } else {
+            // `deferredImports` declared but no `@defer` block — the resolver
+            // would be unused dead code. Leave it off.
+            None
+        };
 
     // When we have a resolver, switch to PerComponent emit mode so the
     // ingest stage threads `all_deferrable_deps_fn` into each `DeferOp`.
     // Without a resolver, the existing PerBlock-vs-JIT behavior stays in
-    // place (and `all_deferrable_deps_fn = None`).
+    // place (and `all_deferrable_deps_fn = None`). Per-block dependencies
+    // never come with a resolver, so they get PerBlock.
     let defer_block_deps_emit_mode = if defer_resolver_fn.is_some()
         || (hmr_update && !metadata.deferred_imports.is_empty() && has_defer_block)
     {
@@ -5795,7 +5983,20 @@ fn compile_component_full<'a>(
         // PerComponent mode: pass the shared resolver expression so the
         // ingest stage attaches it to every defer block's create op.
         all_deferrable_deps_fn: defer_resolver_fn,
-        defer_blocks: FxHashMap::default(),
+        // PerBlock mode: each block's own dependency function, if any.
+        defer_blocks: defer_block_dependencies
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(span, dependencies)| {
+                let deps_fn = super::defer_resolver::compile_defer_block_resolver(
+                    allocator,
+                    &dependencies,
+                    &metadata.deferred_imports,
+                    import_map,
+                );
+                (span, deps_fn)
+            })
+            .collect(),
         // Use the shared pool starting index to avoid duplicate constant names
         // when compiling multiple components in the same file
         pool_starting_index,
@@ -8759,13 +8960,15 @@ export class CustomElementsModule {}
         let result =
             transform_angular_file(&allocator, "custom-elements.module.ts", source, None, None);
 
-        // ɵmod should be generated with schemas
+        // ɵmod should be generated without schemas: like ngtsc, they are only
+        // kept in the class metadata.
+        let mod_line = result.code.lines().find(|l| l.contains("static ɵmod = ")).unwrap();
+        assert!(!mod_line.contains("schemas"), "ɵmod should not list schemas: {mod_line}");
         assert!(
-            result.code.contains("static ɵmod = "),
-            "Code should contain .ɵmod = , but got:\n{}",
+            result.code.contains("schemas:[CUSTOM_ELEMENTS_SCHEMA]"),
+            "Class metadata should keep schemas, but got:\n{}",
             result.code
         );
-        assert!(result.code.contains("schemas"), "Code should contain schemas property");
     }
 
     #[test]
@@ -9179,29 +9382,34 @@ export class TestComponent {
         let result =
             transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
-        // @Inject(DARK_THEME) now uses namespace imports (i1 for @app/theme),
-        // so rxjs gets i2 for Observable.
+        // Like ngtsc, the factory names @Inject(DARK_THEME) as written, so only
+        // rxjs gets a namespace import (i1 for Observable).
         assert!(
-            result.code.contains("import * as i1 from '@app/theme'"),
-            "Should generate namespace import for @app/theme, but got:\n{}",
-            result.code
-        );
-        assert!(
-            result.code.contains("import * as i2 from 'rxjs'"),
+            result.code.contains("import * as i1 from 'rxjs'"),
             "Should generate namespace import for rxjs, but got:\n{}",
             result.code
         );
-
-        // The factory should use namespace-prefixed DARK_THEME
         assert!(
-            result.code.contains("i1.DARK_THEME"),
-            "Factory should use namespace-prefixed DARK_THEME, but got:\n{}",
+            !result.code.contains("import * as i2"),
+            "@app/theme should not get a namespace import, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("import { DARK_THEME } from '@app/theme'"),
+            "The DARK_THEME import should be kept, but got:\n{}",
             result.code
         );
 
-        // The setClassMetadata ctor params should reference i2.Observable
+        // The factory should use DARK_THEME as written
         assert!(
-            result.code.contains("i2.Observable"),
+            result.code.contains("ɵɵdirectiveInject(DARK_THEME)"),
+            "Factory should use DARK_THEME as written, but got:\n{}",
+            result.code
+        );
+
+        // The setClassMetadata ctor params should reference i1.Observable
+        assert!(
+            result.code.contains("i1.Observable"),
             "setClassMetadata should use namespace-prefixed Observable, but got:\n{}",
             result.code
         );

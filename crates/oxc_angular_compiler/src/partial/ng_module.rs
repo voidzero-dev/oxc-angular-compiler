@@ -85,14 +85,11 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
 
 /// Builds the partial ɵfac factory paired with this NgModule.
 ///
-/// `deps` is the module's extracted constructor dependencies (`None` when it
-/// has no constructor). A class without a constructor gets `deps: []` to
-/// match upstream's golden behavior (see compiler-cli/test/compliance/
-/// test_cases/r3_view_compiler/hello_world/GOLDEN_PARTIAL.js — every ɵfac
-/// for an NgModule carries `deps: []`). The linker then generates the
-/// simple `new MyModule()` factory. OXC doesn't track base classes, so the
-/// no-ctor `deps: null` upstream uses for the inherited-factory pattern
-/// becomes `[]` here — a suboptimal-but-correct factory.
+/// `deps` is the module's extracted constructor dependencies: empty for a
+/// class with neither a constructor nor a superclass (`deps: []`, a plain
+/// `new MyModule()` factory), and `None` for a class with no constructor
+/// that extends another class (`deps: null`, so the linker uses
+/// `ɵɵgetInheritedFactory`).
 pub fn compile_declare_factory_for_ng_module<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
@@ -119,7 +116,7 @@ pub fn compile_declare_factory_for_ng_module<'a>(
             }
             R3FactoryDeps::Valid(factory_deps)
         }
-        None => R3FactoryDeps::Valid(Vec::new_in(&allocator)),
+        None => R3FactoryDeps::None,
     };
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
         name: Ident::from("NgModuleFactory"),

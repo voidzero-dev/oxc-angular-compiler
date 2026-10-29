@@ -52,7 +52,8 @@ fn assert_kept(source: &str, names: &[&str]) {
 }
 
 #[test]
-fn plain_inject_token_and_decorator_are_still_elided() {
+fn plain_inject_token_is_kept_and_decorators_are_elided() {
+    // Like ngtsc, the factory names the token as written (`ɵɵinject(TOKEN, 8)`).
     let code = compile(
         r#"
 import { Injectable, Inject, Optional } from "@angular/core";
@@ -61,10 +62,11 @@ import { TOKEN } from "./tokens";
 export class B { constructor(@Optional() @Inject(TOKEN) v: unknown) {} }
 "#,
     );
-    assert!(!imports(&code, "TOKEN"), "{code}");
+    assert!(imports(&code, "TOKEN"), "{code}");
     assert!(!imports(&code, "Inject"), "{code}");
     assert!(!imports(&code, "Optional"), "{code}");
-    assert!(code.contains("i1.TOKEN"), "{code}");
+    assert!(code.contains("ɵɵinject(TOKEN,8)"), "{code}");
+    assert!(!code.contains("i1.TOKEN"), "{code}");
 }
 
 #[test]
@@ -84,9 +86,9 @@ export class B { constructor(@Inject(TOKEN) v: unknown) {} }
 }
 
 #[test]
-fn inject_member_expression_reads_off_namespace_import() {
-    // The factory reads `TOKEN.sub` off the namespace import (`i1.TOKEN.sub`).
-    for (arg, member) in [("TOKEN.sub", "i1.TOKEN.sub"), ("TOKEN?.a.b", "i1.TOKEN?.a.b")] {
+fn inject_member_expression_keeps_token() {
+    // The factory copies `TOKEN.sub` as written, like ngtsc.
+    for arg in ["TOKEN.sub", "TOKEN?.a.b"] {
         let code = compile(&format!(
             r#"
 import {{ Injectable, Inject }} from "@angular/core";
@@ -94,8 +96,9 @@ import {{ TOKEN }} from "./tokens";
 @Injectable() export class S {{ constructor(@Inject({arg}) private v: unknown) {{}} }}
 "#
         ));
-        assert!(!imports(&code, "TOKEN"), "{code}");
-        assert!(code.contains(member), "{code}");
+        assert!(imports(&code, "TOKEN"), "{code}");
+        assert!(code.contains(&format!("ɵɵinject({arg})")), "{code}");
+        assert!(!code.contains("i1."), "{code}");
     }
 }
 

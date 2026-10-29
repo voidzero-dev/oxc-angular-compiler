@@ -4076,7 +4076,8 @@ export class BitLabelComponent {
         "DOCUMENT should be kept in imports (named by setClassMetadata). Import line: {common_line}"
     );
 
-    // With class metadata emission disabled, the same imports are elided again.
+    // With class metadata emission disabled, the param decorators are elided again,
+    // but DOCUMENT stays: the factory names it as written (`ɵɵdirectiveInject(DOCUMENT)`).
     let no_metadata = ComponentTransformOptions {
         emit_class_metadata: false,
         ..ComponentTransformOptions::default()
@@ -4097,14 +4098,15 @@ export class BitLabelComponent {
             "{decorator} should be elided when no setClassMetadata is emitted. Import line: {import_line}"
         );
     }
-    if let Some(common_line) =
-        code.lines().find(|l| l.starts_with("import") && l.contains("@angular/common"))
-    {
-        assert!(
-            !common_line.contains("DOCUMENT"),
-            "DOCUMENT should be elided when no setClassMetadata is emitted. Import line: {common_line}"
-        );
-    }
+    let common_line = code
+        .lines()
+        .find(|l| l.starts_with("import") && l.contains("@angular/common"))
+        .unwrap_or_else(|| panic!("DOCUMENT import missing. Code: {code}"));
+    assert!(
+        common_line.contains("DOCUMENT"),
+        "DOCUMENT should be kept (named by the factory). Import line: {common_line}"
+    );
+    assert!(code.contains("ɵɵdirectiveInject(DOCUMENT)"), "Code: {code}");
 }
 
 /// Test that @HostBinding and @HostListener decorators are elided from imports.

@@ -17,6 +17,7 @@ mod hoist;
 mod import_elision;
 mod metadata;
 mod namespace_registry;
+pub(crate) mod signal_debug_name;
 mod transform;
 
 #[cfg(feature = "cross_file_elision")]

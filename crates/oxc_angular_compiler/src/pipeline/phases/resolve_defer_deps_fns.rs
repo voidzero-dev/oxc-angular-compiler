@@ -57,12 +57,12 @@ pub fn resolve_defer_deps_fns(job: &mut ComponentCompilationJob<'_>) {
     for (view_xref, slot_id) in defer_locations {
         // Get the full path name from the view's fn_name
         // In Angular TS: const fullPathName = unit.fnName?.replace('_Template', '');
+        // `String.prototype.replace` with a string pattern replaces only the
+        // first match.
         let full_path_name = job
             .view(view_xref)
             .and_then(|v| v.fn_name.as_ref())
-            .map(|n| n.as_str().trim_end_matches("_Template"))
-            .unwrap_or(job.component_name.as_str())
-            .to_string(); // Convert to owned String to avoid borrow issues
+            .map_or_else(|| job.component_name.to_string(), |n| n.replacen("_Template", "", 1));
 
         // Find the defer op and take ownership of own_resolver_fn
         let view =

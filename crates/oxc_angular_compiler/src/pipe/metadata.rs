@@ -26,7 +26,8 @@ pub struct R3PipeMetadata<'a> {
     pub type_argument_count: u32,
 
     /// Constructor dependencies for dependency injection.
-    /// None means use default factory (no-arg constructor).
+    /// `None` means the class has no constructor but extends another class,
+    /// so its factory is inherited (`ɵɵgetInheritedFactory`).
     pub deps: Option<Vec<'a, R3DependencyMetadata<'a>>>,
 
     /// Whether the pipe is pure (default: true).
@@ -61,6 +62,11 @@ pub struct R3DependencyMetadata<'a> {
 
     /// Whether `@SkipSelf()` decorator is present.
     pub skip_self: bool,
+
+    /// Whether the token came from a type-only import, which is erased at
+    /// runtime. Any such dependency makes the factory `ɵɵinvalidFactory()`.
+    /// See issue #288.
+    pub type_only_invalid: bool,
 }
 
 impl<'a> R3DependencyMetadata<'a> {
@@ -73,6 +79,7 @@ impl<'a> R3DependencyMetadata<'a> {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         }
     }
 
@@ -85,6 +92,7 @@ impl<'a> R3DependencyMetadata<'a> {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         }
     }
 }

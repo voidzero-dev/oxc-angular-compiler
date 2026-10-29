@@ -95,6 +95,17 @@ impl<'a> R3DependencyMetadata<'a> {
             type_only_invalid: false,
         }
     }
+
+    /// Whether this dependency makes the whole factory invalid.
+    ///
+    /// ngtsc never emits `ɵɵinvalidFactoryDep` in AOT: a parameter without a
+    /// usable token turns the constructor deps into `'invalid'`, which becomes
+    /// `ɵɵinvalidFactory()` (full) or `deps: "invalid"` (partial).
+    /// See: `packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts`
+    /// (`unwrapConstructorDependencies`).
+    pub fn is_invalid(&self) -> bool {
+        self.type_only_invalid || (self.token.is_none() && self.attribute_name_type.is_none())
+    }
 }
 
 /// Result type for dependencies: valid deps, invalid (error), or none (inherited).

@@ -24,11 +24,15 @@ use super::metadata::{
 use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::output::ast::{
-    FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
-    LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
+    DeclareVarStmt, FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
+    LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
+    ReadVarExpr, StmtModifier,
 };
 use crate::parser::expression::BindingParser;
-use crate::pipeline::emit::{HostBindingCompilationResult, compile_host_bindings};
+use crate::pipeline::constant_pool::ConstantPool;
+use crate::pipeline::emit::{
+    HostBindingCompilationResult, compile_host_bindings, emit_pooled_constant_value,
+};
 use crate::pipeline::ingest::{HostAttributes, HostBindingInput, ingest_host_binding_with_version};
 use crate::pipeline::selector::{
     parse_selector_to_r3_selector as parse_css_to_r3, r3_selector_to_output_expr,
@@ -120,7 +124,6 @@ fn build_base_directive_fields<'a>(
     angular_version: Option<crate::AngularVersion>,
 ) -> (Vec<'a, LiteralMapEntry<'a>>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
     let mut entries = Vec::new_in(&allocator);
-    let mut next_pool_index = pool_starting_index;
     let mut host_declarations = oxc_allocator::Vec::new_in(&allocator);
 
     // type: MyDirective
@@ -137,16 +140,18 @@ fn build_base_directive_fields<'a>(
         }
     }
 
+    // Query predicates go to the constant pool, content queries first, like
+    // `baseDirectiveFields` in Angular's `render3/view/compiler.ts`.
+    let mut query_pool = ConstantPool::with_starting_index(allocator, pool_starting_index);
+
     // contentQueries: (rf, ctx, dirIndex) => { ... }
     if !metadata.queries.is_empty() {
-        // Note: Directive compiler doesn't have access to constant pool, so predicates
-        // are not pooled. For components, pool is passed from component compilation.
         let content_queries_fn = super::query::create_content_queries_function(
             &allocator,
             core_namespace,
             &metadata.queries,
             Some(metadata.name.as_str()),
-            None,
+            Some(&mut query_pool),
             angular_version,
         );
         entries.push(LiteralMapEntry::new(
@@ -158,17 +163,32 @@ fn build_base_directive_fields<'a>(
 
     // viewQuery: (rf, ctx) => { ... }
     if !metadata.view_queries.is_empty() {
-        // Note: Directive compiler doesn't have access to constant pool, so predicates
-        // are not pooled. For components, pool is passed from component compilation.
         let view_queries_fn = super::query::create_view_queries_function(
             &allocator,
             core_namespace,
             &metadata.view_queries,
             Some(metadata.name.as_str()),
-            None,
+            Some(&mut query_pool),
             angular_version,
         );
         entries.push(LiteralMapEntry::new(Ident::from("viewQuery"), view_queries_fn, false));
+    }
+
+    // Emit the pooled predicates before the host binding constants, which continue
+    // from the query pool's next index so `_cN` names don't clash.
+    let mut next_pool_index = query_pool.next_name_index();
+    for constant in query_pool.constants_mut() {
+        let value = emit_pooled_constant_value(allocator, &mut constant.kind);
+        host_declarations.push(OutputStatement::DeclareVar(Box::new_in(
+            DeclareVarStmt {
+                name: constant.name,
+                value: Some(value),
+                modifiers: StmtModifier::FINAL,
+                leading_comment: None,
+                source_span: None,
+            },
+            &allocator,
+        )));
     }
 
     // hostBindings: (rf, ctx) => { ... }
@@ -182,7 +202,7 @@ fn build_base_directive_fields<'a>(
             allocator,
             core_namespace,
             metadata,
-            pool_starting_index,
+            next_pool_index,
             angular_version,
         ) {
             next_pool_index = new_pool_index;
@@ -219,7 +239,7 @@ fn build_base_directive_fields<'a>(
             }
 
             // Collect host binding pool declarations (pure functions, etc.)
-            host_declarations = result.declarations;
+            host_declarations.extend(result.declarations);
         }
     }
 

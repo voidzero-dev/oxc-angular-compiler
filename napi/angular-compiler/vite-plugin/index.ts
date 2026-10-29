@@ -173,6 +173,11 @@ export interface PluginOptions {
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
 const ANGULAR_TS_REGEX = /\.tsx?$/
+// The name of a signal API ngtsc's implicit signal debugName transform names. Only the
+// name is matched: the file has to import it, and a call can take any shape
+// (`signal?.(0)`, `signal /* c */ (0)`, `input.required(`, `computed<T>(`, ...).
+const SIGNAL_API_NAME_REGEX =
+  /\b(?:signal|computed|linkedSignal|input|model|viewChild|viewChildren|contentChild|contentChildren|effect|afterRenderEffect|resource|httpResource)\b/
 const TEMPLATE_REGEX = /\.html?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
@@ -1056,12 +1061,42 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             code.includes('@Service') ||
             (code.includes('@angular/core') &&
               /\b(?:Component|Directive|NgModule|Injectable|Pipe|Service)\b/.test(code))
-          if (!hasAngularDecorator) {
+          // ngtsc names the signals of every file it emits (its implicit signal
+          // debugName transform), so a file without a decorator is still
+          // compiled when it calls a signal API from `@angular/core` (or
+          // `httpResource` from `@angular/common`). The JIT build has no such
+          // transform.
+          const mayNameSignals =
+            !hasAngularDecorator &&
+            !pluginOptions.jit &&
+            (code.includes('@angular/core') || code.includes('@angular/common')) &&
+            SIGNAL_API_NAME_REGEX.test(code)
+          if (!hasAngularDecorator && !mayNameSignals) {
             return
           }
 
           // Apply file replacements
           const actualId = pluginOptions.fileReplacements?.[id] ?? id
+
+          // Such a file has no component: nothing to resolve or register for HMR.
+          if (mayNameSignals) {
+            const result = await transformAngularFile(
+              code,
+              actualId,
+              transformOptionsFor(actualId, !!options?.ssr, this as any),
+              emptyResources().resources,
+            )
+            for (const error of result.errors) {
+              this.error(describeDiagnostic(error))
+            }
+            for (const warning of result.warnings) {
+              this.warn(describeDiagnostic(warning))
+            }
+            return {
+              code: result.code,
+              map: result.map ?? null,
+            }
+          }
 
           // Resolve external resources. JIT output never reads them: the Rust
           // JIT transform turns `templateUrl`/`styleUrl(s)` into

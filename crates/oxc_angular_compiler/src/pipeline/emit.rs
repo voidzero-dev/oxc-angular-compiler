@@ -1495,7 +1495,7 @@ fn convert_ast_for_pure_function_body<'a>(
 
 /// Emit a pooled constant as an OutputExpression.
 /// Takes mutable reference to allow taking ownership of expressions that can't be cloned.
-fn emit_pooled_constant_value<'a>(
+pub fn emit_pooled_constant_value<'a>(
     allocator: &'a Allocator,
     kind: &mut crate::pipeline::constant_pool::PooledConstantKind<'a>,
 ) -> OutputExpression<'a> {

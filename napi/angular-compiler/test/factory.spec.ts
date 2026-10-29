@@ -207,9 +207,9 @@ describe('compileFactory', () => {
     const result = await compileFactory(input)
     expect(result.errors).toHaveLength(0)
     expect(result.code).toContain('MyService_Factory')
-    // Invalid dependency calls invalidFactoryDep(index)
-    expect(result.code).toContain('invalidFactoryDep')
-    expect(result.code).toContain('0') // index 0
+    // Like ngtsc, an invalid dependency makes the whole factory invalid
+    expect(result.code).toContain('ɵɵinvalidFactory()')
+    expect(result.code).not.toContain('invalidFactoryDep')
   })
 
   test('returns error for invalid target', async () => {

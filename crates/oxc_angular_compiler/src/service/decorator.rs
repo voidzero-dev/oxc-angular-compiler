@@ -12,6 +12,8 @@
 //! See `component/transform.rs::find_angular_service_decorator` for the
 //! import-map gate the AOT caller uses.
 
+use std::borrow::Cow;
+
 use oxc_allocator::{Allocator, Box};
 use oxc_ast::ast::{Argument, Class, Decorator, Expression, ObjectPropertyKind, PropertyKey};
 use oxc_span::{GetSpan, Span};
@@ -53,7 +55,7 @@ pub fn find_service_decorator_span(class: &Class<'_>) -> Option<Span> {
 /// the class's decorators by literal name — which would skip aliased imports
 /// such as `import { Service as NgService }; @NgService()`.
 pub fn extract_service_metadata<'a>(
-    _allocator: &'a Allocator,
+    allocator: &'a Allocator,
     class: &'a Class<'a>,
     decorator: &'a Decorator<'a>,
     source_text: Option<&'a str>,
@@ -98,8 +100,16 @@ pub fn extract_service_metadata<'a>(
             }
             "factory" => {
                 if let Some(src) = source_text {
-                    let span = prop.value.span();
-                    factory = Some(&src[span.start as usize..span.end as usize]);
+                    // With the signal `debugName`s inside it.
+                    factory = Some(
+                        match crate::component::signal_debug_name::source_text(
+                            src,
+                            prop.value.span(),
+                        ) {
+                            Cow::Borrowed(text) => text,
+                            Cow::Owned(text) => allocator.alloc_str(&text),
+                        },
+                    );
                 }
             }
             _ => {}

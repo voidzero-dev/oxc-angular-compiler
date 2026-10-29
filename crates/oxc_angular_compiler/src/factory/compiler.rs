@@ -141,9 +141,10 @@ pub fn compile_factory_function<'a>(
     // Build the constructor expression based on deps
     // See: r3_factory.ts:119-129
     let ctor_expr: Option<OutputExpression<'a>> = match &base.deps {
-        R3FactoryDeps::Valid(deps) if deps.iter().any(|d| d.type_only_invalid) => {
-            // A constructor parameter resolves to a type-only import; the factory
-            // as a whole cannot be formed. Force `ɵɵinvalidFactory()`. See #288.
+        R3FactoryDeps::Valid(deps) if deps.iter().any(R3DependencyMetadata::is_invalid) => {
+            // A constructor parameter has no usable token (or resolves to a type-only
+            // import), so the factory as a whole cannot be formed. Like ngtsc, which
+            // marks such deps `'invalid'`, force `ɵɵinvalidFactory()`. See #288.
             None
         }
         R3FactoryDeps::Valid(deps) => {
