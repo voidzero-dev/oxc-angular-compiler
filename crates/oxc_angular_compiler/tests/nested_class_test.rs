@@ -356,3 +356,35 @@ export function f() {
     assert!(update.module.is_some());
     assert!(update.template_js.contains("\"i\""), "{}", update.template_js);
 }
+
+#[test]
+fn compiles_two_nested_classes_of_one_name_without_hmr() {
+    // HMR finds a component by `{path}@{name}`, which names neither `Tp`: an
+    // update for one would replace the other's template too.
+    let source = r"
+import { Component } from '@angular/core';
+export function a() {
+  @Component({ selector: 'a', template: '<i>a</i>', standalone: true })
+  class Tp {}
+  return Tp;
+}
+export function b() {
+  @Component({ selector: 'b', template: '<b>b</b>', standalone: true })
+  class Tp {}
+  return Tp;
+}
+@Component({ selector: 'c', template: '<u>c</u>', standalone: true })
+export class Other {}
+";
+    let result = transform_with(source, &TransformOptions { hmr: true, ..Default::default() });
+    let code = &result.code;
+    assert_eq!(code.matches("ɵɵdefineComponent({type:Tp,").count(), 2, "{code}");
+    assert!(!code.contains("Tp_HmrLoad"), "{code}");
+    assert!(code.contains("Other_HmrLoad"), "{code}");
+    assert!(!result.template_updates.keys().any(|id| id.ends_with("@Tp")), "{code}");
+
+    let allocator = Allocator::default();
+    let input = ComponentHmrUpdateInput { class_name: "Tp", ..Default::default() };
+    let update = compile_component_hmr_update(&allocator, "test.ts", source, &input, None, None);
+    assert!(update.module.is_none());
+}

@@ -3593,6 +3593,10 @@ pub fn transform_angular_file(
     // definitions stay on the class, and the constants and child template
     // functions its compile declares go to the file top level.
     let declared_classes = crate::util::declared_classes(&parser_ret.program);
+    // HMR finds a component by `{path}@{name}`, so a name two classes of the
+    // file declare (in two functions) names neither: they compile without it.
+    let hmr_options = options.hmr.then(|| TransformOptions { hmr: false, ..options.clone() });
+    let ambiguous_names = ambiguous_class_names(&declared_classes);
     for site in &declared_classes {
         let class = site.class;
         let stmt = site.top_level;
@@ -3905,6 +3909,11 @@ pub fn transform_angular_file(
                     );
                     #[cfg(not(feature = "cross_file_elision"))]
                     let (import_selector, can_defer) = (None, None);
+
+                    let options = match &hmr_options {
+                        Some(no_hmr) if ambiguous_names.contains(class_name.as_str()) => no_hmr,
+                        _ => options,
+                    };
 
                     // 4. Compile the template and generate ɵcmp/ɵfac
                     // Pass the shared pool index to ensure unique constant names
@@ -5529,8 +5538,12 @@ pub fn compile_component_hmr_update(
     update.fingerprint = Some(fingerprint);
 
     // A nested class too: the transform compiles those, with an HMR
-    // initializer like ngtsc's.
-    let Some(class) = crate::util::declared_classes(program).into_iter().find_map(|declared| {
+    // initializer like ngtsc's, unless another class has its name.
+    let declared_classes = crate::util::declared_classes(program);
+    if ambiguous_class_names(&declared_classes).contains(class_name) {
+        return update;
+    }
+    let Some(class) = declared_classes.into_iter().find_map(|declared| {
         let class = declared.class;
         class.id.as_ref().is_some_and(|id| id.name == class_name).then_some(class)
     }) else {
@@ -5853,6 +5866,21 @@ fn implicit_defer_candidates<'a>(
         .filter(|name| block_only.contains(name) && imported.contains(name))
         .collect();
     Some(DeferCandidates { candidates, block_only, marked })
+}
+
+/// The class names two or more classes of the file declare (in different
+/// functions or blocks).
+fn ambiguous_class_names<'a>(
+    declared_classes: &[crate::util::DeclaredClass<'_, 'a>],
+) -> rustc_hash::FxHashSet<&'a str> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut ambiguous = rustc_hash::FxHashSet::default();
+    for name in declared_classes.iter().filter_map(|declared| declared.class.id.as_ref()) {
+        if !seen.insert(name.name.as_str()) {
+            ambiguous.insert(name.name.as_str());
+        }
+    }
+    ambiguous
 }
 
 /// The `imports` entries another component of the file marks as deferrable
