@@ -16165,6 +16165,38 @@ export class I3 {}
 }
 
 #[test]
+fn test_use_class_call_is_parenthesized_when_instantiated() {
+    // A `useClass` with deps is instantiated as `new useClass(...deps)`.
+    // ngtsc wraps a call or an optional chain in the callee:
+    // `new makeClass()(dep)` would construct `makeClass` itself, and
+    // `new Maybe?.cls(dep)` is a SyntaxError.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable, InjectionToken } from '@angular/core';
+export const DEP = new InjectionToken<number>('DEP');
+export function makeClass() { return class { constructor(d) { this.d = d; } }; }
+export const Maybe = undefined;
+@Injectable({ providedIn: 'root', useClass: makeClass(), deps: [DEP] })
+export class E1 {}
+@Injectable({ providedIn: 'root', useClass: makeClass().inner, deps: [DEP] })
+export class E2 {}
+@Injectable({ providedIn: 'root', useClass: Maybe?.cls, deps: [DEP] })
+export class E3 {}
+@Injectable({ providedIn: 'root', useClass: Maybe.cls, deps: [DEP] })
+export class E4 {}
+",
+    );
+    for expected in [
+        "new (makeClass())(i0.ɵɵinject(DEP))",
+        "new (makeClass().inner)(i0.ɵɵinject(DEP))",
+        "new (Maybe?.cls)(i0.ɵɵinject(DEP))",
+        "new Maybe.cls(i0.ɵɵinject(DEP))",
+    ] {
+        assert!(code.contains(expected), "Missing `{expected}` in:\n{code}");
+    }
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).

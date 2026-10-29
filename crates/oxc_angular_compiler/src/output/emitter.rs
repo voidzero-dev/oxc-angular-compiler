@@ -872,7 +872,16 @@ impl JsEmitter {
             }
             OutputExpression::Instantiate(e) => {
                 ctx.print_with_span("new ", source_span);
+                // A user `useClass` like `makeClass()` must not take the
+                // constructor arguments: ngtsc emits `new (makeClass())(dep)`.
+                let should_parenthesize = new_callee_needs_parens(&e.class_expr);
+                if should_parenthesize {
+                    ctx.print("(");
+                }
                 self.visit_expression(&e.class_expr, ctx);
+                if should_parenthesize {
+                    ctx.print(")");
+                }
                 ctx.print("(");
                 self.visit_all_expressions(&e.args, ctx, ",");
                 ctx.print(")");
@@ -1238,6 +1247,22 @@ fn is_left_hand_side_source(source: &str) -> bool {
         | Expression::ComputedMemberExpression(_)
         | Expression::StaticMemberExpression(_)
         | Expression::PrivateFieldExpression(_) => true,
+        _ => false,
+    }
+}
+
+/// Whether the callee of a `new` needs parentheses. Ported from TypeScript's
+/// `parenthesizeExpressionOfNew`, which `ts.factory.createNewExpression`
+/// applies when ngtsc translates `new useClass(...deps)`: a call on the
+/// callee's left spine would take the arguments (`new f()(a)` constructs
+/// `f`), and an optional chain is not allowed there (`new a?.b()` is a
+/// SyntaxError).
+fn new_callee_needs_parens(expr: &OutputExpression<'_>) -> bool {
+    match expr {
+        OutputExpression::InvokeFunction(_) | OutputExpression::ArrowFunction(_) => true,
+        OutputExpression::ReadProp(e) => e.optional || new_callee_needs_parens(&e.receiver),
+        OutputExpression::ReadKey(e) => e.optional || new_callee_needs_parens(&e.receiver),
+        OutputExpression::RawSource(raw) => !is_left_hand_side_source(&raw.source),
         _ => false,
     }
 }
