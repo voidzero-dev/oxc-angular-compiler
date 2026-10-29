@@ -5696,7 +5696,10 @@ struct DeferCandidates<'a> {
 }
 
 /// The [`DeferCandidates`] of a component, or `None` when its template has
-/// no `@defer` block or an `imports` entry can't be read.
+/// no `@defer` block or its `imports` isn't an array literal. An entry that
+/// doesn't name a class (a spread, a nested array, `ns.Cmp`) is never a
+/// candidate, as ngc's `registerDeferrableCandidate` skips anything but an
+/// identifier, and the classes it brings in stay eager.
 fn implicit_defer_candidates<'a>(
     metadata: &ComponentMetadata<'a>,
     nodes: &[crate::ast::r3::R3Node<'a>],
@@ -5706,11 +5709,6 @@ fn implicit_defer_candidates<'a>(
         return None;
     };
     if raw_imports.entries.len() != metadata.import_entry_classes.len()
-        || !raw_imports
-            .entries
-            .iter()
-            .zip(&metadata.import_entry_classes)
-            .all(|(entry, class)| class.is_some() || matches!(entry, OutputExpression::ReadVar(_)))
         || !super::defer_resolver::template_has_defer_block(nodes)
     {
         return None;

@@ -295,6 +295,140 @@ export class Parent {}
     assert!(code.contains("import { EagerCmp }"), "{code}");
 }
 
+fn shared_other_cmp(dir: &TempDir) {
+    other_cmp(dir);
+    create_test_file(
+        dir.path(),
+        "app/shared.ts",
+        r"
+import { OtherCmp } from './other';
+
+export const SHARED = [OtherCmp];
+",
+    );
+}
+
+#[test]
+fn entry_next_to_a_spread_entry_is_lazy_loaded() {
+    // ngc's `registerDeferrableCandidate` skips the spread, and the classes it
+    // brings in stay eager.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    shared_other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { SHARED } from './shared';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, ...SHARED],
+    template: '@defer { <app-lazy/> } <app-other/>',
+})
+export class Parent {}
+",
+    );
+    let code = &result.code;
+    assert_lazy(code, "./lazy", "LazyCmp");
+    assert!(compact(code).contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"), "{code}");
+    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[...SHARED])"), "{code}");
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+}
+
+#[test]
+fn entry_deferred_by_two_components_one_with_a_spread_entry_is_lazy_loaded() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    shared_other_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { SHARED } from './shared';
+
+@Component({ selector: 'app-a', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class ParentA {}
+
+@Component({
+    selector: 'app-b',
+    imports: [LazyCmp, ...SHARED],
+    template: '@defer { <app-lazy/> } <app-other/>',
+})
+export class ParentB {}
+",
+    );
+    let code = &result.code;
+    assert_lazy(code, "./lazy", "LazyCmp");
+    assert!(
+        compact(code).contains("setClassMetadataAsync(ParentA,()=>[import(\"./lazy\")")
+            && compact(code).contains("setClassMetadataAsync(ParentB,()=>[import(\"./lazy\")"),
+        "{code}"
+    );
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+}
+
+#[test]
+fn entry_next_to_a_nested_array_entry_is_lazy_loaded() {
+    // Like a spread, ngc skips the nested array, and its classes stay eager.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let source = r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import { OtherCmp } from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, [OtherCmp]],
+    template: '@defer { <app-lazy/> } <app-other/>',
+})
+export class Parent {}
+";
+    let code = &transform(&dir, source).code;
+    assert_lazy(code, "./lazy", "LazyCmp");
+    assert!(compact(code).contains("ɵɵdefer(1,0,Parent_Defer_1_DepsFn)"), "{code}");
+    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[[OtherCmp]])"), "{code}");
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+
+    let code = &transform_with(&dir, source, &partial_options()).code;
+    assert!(
+        compact(code)
+            .contains("deferBlockDependencies:[()=>[import(\"./lazy\").then((m)=>m.LazyCmp)]]"),
+        "{code}"
+    );
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+}
+
+#[test]
+fn entry_next_to_a_namespace_member_entry_is_lazy_loaded() {
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    other_cmp(&dir);
+    let code = &transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+import * as other from './other';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp, other.OtherCmp],
+    template: '@defer { <app-lazy/> } <app-other/>',
+})
+export class Parent {}
+",
+    )
+    .code;
+    assert_lazy(code, "./lazy", "LazyCmp");
+    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[other.OtherCmp])"), "{code}");
+    assert!(!code.contains("import { LazyCmp }"), "{code}");
+}
+
 #[test]
 fn forward_ref_not_from_angular_core_stays_eager() {
     let dir = TempDir::new().unwrap();
