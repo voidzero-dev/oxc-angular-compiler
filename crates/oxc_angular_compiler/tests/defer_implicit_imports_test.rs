@@ -1411,11 +1411,10 @@ export class My_TemplateCmp {
         "{code}"
     );
     assert!(compact.contains("ɵɵdefer(1,0,Foo_Template_Defer_1_DepsFn)"), "{code}");
-    assert!(
-        compact
-            .contains("constMyCmp_Conditional_0_Template_Defer_1_DepsFn=()=>[import(\"./lazy\")"),
-        "{code}"
-    );
+    // `My_TemplateCmp`'s block loads the same thing as `Foo`'s, and ngc's
+    // file-wide pool hands it `Foo_Defer_1_DepsFn`.
+    assert_eq!(compact.matches("ɵɵdefer(1,0,Foo_Defer_1_DepsFn)").count(), 2, "{code}");
+    assert!(!compact.contains("MyCmp_Conditional_0_Template_Defer_1_DepsFn"), "{code}");
     assert_eq!(code.matches("const Foo_Defer_1_DepsFn").count(), 1, "{code}");
 }
 
@@ -1579,8 +1578,8 @@ fn import_deferred_by_two_components_is_lazy_loaded() {
     let compact = compact(code);
     assert!(
         compact.contains("constParentA_Defer_1_DepsFn=()=>[import(\"./lazy\")")
-            && compact.contains("constParentB_Defer_2_DepsFn=()=>[import(\"./lazy\")"),
-        "Both components must load `LazyCmp` lazily. Output:\n{code}"
+            && compact.contains("ɵɵdefer(2,0,ParentA_Defer_1_DepsFn,null,1);"),
+        "Both components must load `LazyCmp` lazily, through one shared function. Output:\n{code}"
     );
     assert!(!code.contains("import { LazyCmp }"), "{code}");
     assert!(
