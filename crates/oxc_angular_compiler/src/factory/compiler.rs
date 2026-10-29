@@ -42,7 +42,7 @@ use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, DeclareVarStmt,
     ExpressionStatement, FnParam, FunctionExpr, IfStmt, InstantiateExpr, InvokeFunctionExpr,
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
-    ReturnStatement, StmtModifier,
+    ReturnStatement, StmtModifier, clone_callee,
 };
 use crate::r3::Identifiers;
 
@@ -210,7 +210,7 @@ pub fn compile_factory_function<'a>(
                     OutputExpression::InvokeFunction(Box::new_in(
                         InvokeFunctionExpr {
                             fn_expr: Box::new_in(
-                                delegated_meta.delegate.clone_in(allocator),
+                                clone_callee(&delegated_meta.delegate, allocator),
                                 &allocator,
                             ),
                             args: delegate_args,

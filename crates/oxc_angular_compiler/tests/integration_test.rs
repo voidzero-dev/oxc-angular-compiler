@@ -16197,6 +16197,64 @@ export class E4 {}
 }
 
 #[test]
+fn test_optional_chain_factory_is_parenthesized_when_called() {
+    // ngtsc wraps an optional-chain factory before calling it, so
+    // `(Maybe?.make)()` throws when `Maybe` is nullish. A bare
+    // `Maybe?.make()` would short-circuit to `undefined` instead.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable, InjectionToken, Service } from '@angular/core';
+export const DEP = new InjectionToken<number>('DEP');
+export const Maybe = undefined;
+@Injectable({ providedIn: 'root', useFactory: Maybe?.make })
+export class F1 {}
+@Service({ factory: Maybe?.make })
+export class F2 {}
+@Injectable({ providedIn: 'root', useFactory: Maybe?.make, deps: [DEP] })
+export class F3 {}
+@Injectable({ providedIn: 'root', useFactory: Maybe?.a.b?.() })
+export class F4 {}
+@Injectable({ providedIn: 'root', useFactory: (Maybe?.a).b })
+export class F5 {}
+@Injectable({ providedIn: 'root', useFactory: Maybe.make })
+export class F6 {}
+",
+    );
+    for expected in [
+        "factory:() =>(Maybe?.make)(),",
+        "return (Maybe?.make)();",
+        "(Maybe?.make)(i0.ɵɵinject(DEP))",
+        "factory:() =>(Maybe?.a.b?.())(),",
+        "factory:() =>(Maybe?.a).b(),",
+        "factory:() =>Maybe.make(),",
+    ] {
+        assert!(code.contains(expected), "Missing `{expected}` in:\n{code}");
+    }
+}
+
+#[test]
+fn test_optional_chain_use_class_is_parenthesized_before_fac() {
+    // ngtsc reads `ɵfac` off `(Maybe?.cls)`, which throws when `Maybe` is
+    // nullish. A bare `Maybe?.cls.ɵfac(...)` would short-circuit instead.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable } from '@angular/core';
+export const Maybe = undefined;
+@Injectable({ providedIn: 'root', useClass: Maybe?.cls })
+export class C1 {}
+@Injectable({ providedIn: 'root', useClass: Maybe.cls })
+export class C2 {}
+",
+    );
+    for expected in [
+        "factory:(__ngFactoryType__) =>(Maybe?.cls).ɵfac(__ngFactoryType__),",
+        "factory:(__ngFactoryType__) =>Maybe.cls.ɵfac(__ngFactoryType__),",
+    ] {
+        assert!(code.contains(expected), "Missing `{expected}` in:\n{code}");
+    }
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).

@@ -20,7 +20,7 @@ use oxc_str::Ident;
 use super::metadata::R3ServiceMetadata;
 use crate::output::ast::{
     FunctionExpr, InvokeFunctionExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr, LiteralValue,
-    OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement,
+    OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement, clone_callee,
 };
 use crate::r3::Identifiers;
 
@@ -84,7 +84,7 @@ fn create_factory_arrow<'a>(
 
     let factory_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(factory.clone_in(allocator), &allocator),
+            fn_expr: Box::new_in(clone_callee(factory, allocator), &allocator),
             args: Vec::new_in(&allocator),
             pure: false,
             optional: false,
