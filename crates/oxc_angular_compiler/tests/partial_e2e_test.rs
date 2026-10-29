@@ -218,6 +218,27 @@ export class F1 {}
 }
 
 #[test]
+fn partial_use_factory_keeps_empty_deps() {
+    // ngtsc: ɵɵngDeclareInjectable({..., useFactory: make, deps: [] }),
+    // which links to the conditional factory rather than `() => (make)()`.
+    let (partial, linked) = partial_and_linked(
+        "import { Injectable } from '@angular/core';
+export function make() { return {}; }
+@Injectable({ providedIn: 'root', useFactory: make, deps: [] })
+export class F1 {}
+",
+    );
+    assert!(
+        partial.contains("providedIn:\"root\",useFactory:make,deps:[]})"),
+        "useFactory should keep its empty deps, got:\n{partial}"
+    );
+    assert!(
+        linked.contains("__ngConditionalFactory__=(make)()"),
+        "linked useFactory should build the conditional factory, got:\n{linked}"
+    );
+}
+
+#[test]
 fn partial_injectable_factory_inherits_constructor() {
     // ngtsc: ɵɵngDeclareFactory({..., type: S, deps: null,
     // target: i0.ɵɵFactoryTarget.Injectable })

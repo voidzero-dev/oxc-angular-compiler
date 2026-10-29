@@ -76,8 +76,9 @@ pub struct UseClassMetadata<'a> {
 pub struct UseFactoryMetadata<'a> {
     /// The factory function expression.
     pub factory: OutputExpression<'a>,
-    /// Dependencies for the factory function.
-    pub deps: Vec<'a, DependencyMetadata<'a>>,
+    /// Dependencies for the factory function, `None` without a `deps` key.
+    /// An empty `deps: []` still makes ngtsc build the delegated factory.
+    pub deps: Option<Vec<'a, DependencyMetadata<'a>>>,
 }
 
 /// Metadata for useExisting provider.
@@ -147,11 +148,7 @@ impl<'a> InjectableMetadata<'a> {
                 deps,
             );
         } else if let Some(use_factory) = &self.use_factory {
-            let deps = if use_factory.deps.is_empty() {
-                None
-            } else {
-                Some(convert_deps_to_r3(allocator, &use_factory.deps))
-            };
+            let deps = use_factory.deps.as_ref().map(|deps| convert_deps_to_r3(allocator, deps));
             builder = builder.use_factory(use_factory.factory.clone_in(allocator), deps);
         }
 
@@ -410,8 +407,7 @@ fn extract_use_factory<'a>(
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "useFactory" {
                     let factory = convert_oxc_expression(allocator, &prop.value, source_text)?;
-                    let deps = extract_deps_from_config(allocator, config_obj, source_text, consts)
-                        .unwrap_or_else(|| Vec::new_in(&allocator));
+                    let deps = extract_deps_from_config(allocator, config_obj, source_text, consts);
                     return Some(UseFactoryMetadata { factory, deps });
                 }
             }

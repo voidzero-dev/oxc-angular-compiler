@@ -16332,6 +16332,25 @@ export class F2 {}
 }
 
 #[test]
+fn test_use_factory_with_empty_deps_builds_conditional_factory() {
+    // `deps: []` is still deps: ngtsc builds the delegated conditional
+    // factory, as for useClass, instead of `() => make()`.
+    let code = compile_to_valid_js(
+        r"
+import { Injectable } from '@angular/core';
+export function make() { return {}; }
+@Injectable({ providedIn: 'root', useFactory: make, deps: [] })
+export class F1 {}
+",
+    );
+    assert!(
+        code.contains("(__ngConditionalFactory__ = make());"),
+        "Missing conditional factory in:\n{code}"
+    );
+    assert!(!code.contains("() => make()"), "Unexpected arrow wrapper in:\n{code}");
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).
