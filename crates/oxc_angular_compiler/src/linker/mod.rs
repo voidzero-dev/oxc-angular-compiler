@@ -38,14 +38,15 @@ use std::borrow::Cow;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, CallExpression, Decorator,
-    ExportDefaultDeclaration, Expression, ExpressionStatement, Function, MethodDefinition,
-    ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
-    Statement,
+    ExportDefaultDeclaration, Expression, ExpressionStatement, Function, IdentifierReference,
+    MethodDefinition, ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, PropertyKey,
+    PropertyKind, Statement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, SourceType, Span};
+use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::{ScopeFlags, ScopeId};
 use rustc_hash::FxHashMap;
 
@@ -280,6 +281,25 @@ impl<'a> DeclarationCollector<'_, 'a> {
         self.constant_scopes.contains_key(&scope).then_some(scope)
     }
 
+    /// Whether a `@defer` dependency function of `meta` uses a binding of a scope
+    /// inside `scope`, such as a class declared in the function that declares
+    /// the component. At the top of `scope` it would throw, so unlike Angular's
+    /// linker, which moves it there anyway, it stays local.
+    fn defer_deps_use_inner_binding(&self, meta: &ObjectExpression<'a>, scope: ScopeId) -> bool {
+        let Some(deps) = get_array_property(meta, "deferBlockDependencies") else { return false };
+        let mut references = ReferenceCollector(Vec::new());
+        references.visit_array_expression(deps);
+        references.0.into_iter().any(|reference| {
+            let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
+                return false;
+            };
+            let symbol_scope = self.scoping.symbol_scope_id(symbol);
+            // Neither visible from the top of `scope` nor bound in the functions themselves
+            !self.scoping.scope_ancestors(scope).any(|ancestor| ancestor == symbol_scope)
+                && !deps.span.contains_inclusive(self.scoping.symbol_span(symbol))
+        })
+    }
+
     /// Links a declaration, with the pool of its constant scope or one of its own.
     fn link(&mut self, name: &str, call: &CallExpression<'a>) -> Option<Edit> {
         let meta = get_metadata_object(call)?;
@@ -287,7 +307,10 @@ impl<'a> DeclarationCollector<'_, 'a> {
             Expression::StaticMemberExpression(member) => Some(&member.object),
             _ => None,
         });
-        let Some(scope) = ng_import.and_then(|ng_import| self.constant_scope(ng_import)) else {
+        let Some(scope) = ng_import
+            .and_then(|ng_import| self.constant_scope(ng_import))
+            .filter(|&scope| !self.defer_deps_use_inner_binding(meta, scope))
+        else {
             // Angular's `LocalEmitScope`: the constants go in an IIFE with the definition
             let mut pool = LinkPool::default();
             let (definition, statements) = link_declaration(
@@ -331,6 +354,15 @@ impl<'a> DeclarationCollector<'_, 'a> {
         };
         emit_scope.statements_js.push_str(&statements);
         Some(Edit::replace(call.span.start, call.span.end, definition))
+    }
+}
+
+/// The references to bindings in a node.
+struct ReferenceCollector(Vec<ReferenceId>);
+
+impl<'a> Visit<'a> for ReferenceCollector {
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        self.0.extend(ident.reference_id.get());
     }
 }
 

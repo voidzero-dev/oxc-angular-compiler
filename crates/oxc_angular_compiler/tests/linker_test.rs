@@ -1030,6 +1030,41 @@ export function f3() { class A {} A.ɵdir = i0.ɵɵngDeclareDirective({ minVersi
     }
 }
 
+/// A `@defer` dependency function that uses a class of the function declaring the
+/// component stays local with the declaration's other constants, as the base linker kept
+/// it: Angular 22.2.3's linker moves it after the imports, where the class is not defined.
+#[test]
+fn test_link_keeps_defer_deps_with_inner_bindings_local() {
+    let code = r#"import * as i0 from "@angular/core";
+export function make() {
+  class Child {}
+  class A {}
+  A.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "22.2.2", type: A, isStandalone: true, selector: "cmp-a", ngImport: i0, template: '@defer { <child/> } @placeholder { <p>x</p> }', isInline: true, deferBlockDependencies: [() => [Child]] });
+  return A;
+}
+export class B {}
+B.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "22.2.2", type: B, isStandalone: true, selector: "cmp-b", ngImport: i0, template: '@defer { <child/> }', isInline: true, deferBlockDependencies: [() => [import("./c").then(m => m.C)]] });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "/x/main.js");
+    assert!(result.linked);
+    let code = &result.code;
+    let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut last = 0;
+    for expected in [
+        r#"import*asi0from"@angular/core";constB_Defer_1_DepsFn=()=>[import("./c").then(m=>m.C)];"#,
+        "exportfunctionmake(){classChild{}classA{}A.ɵcmp=/*@__PURE__*/(()=>{constA_Defer_2_DepsFn=()=>[Child];",
+        "i0.ɵɵdefer(2,0,A_Defer_2_DepsFn,null,1);",
+        "exportclassB{}B.ɵcmp=/*@__PURE__*/i0.ɵɵdefineComponent(",
+        "i0.ɵɵdefer(1,0,B_Defer_1_DepsFn);",
+    ] {
+        let Some(at) = linked[last..].find(expected) else {
+            panic!("missing `{expected}` after byte {last} in\n{code}");
+        };
+        last += at + expected.len();
+    }
+}
+
 /// Angular's linker names Closure messages after the linked file's path, without external
 /// ids even for a custom id, as Angular 22.2.3's linker shows for `/x/lib/a.component.mjs`.
 #[test]
