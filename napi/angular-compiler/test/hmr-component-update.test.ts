@@ -139,10 +139,10 @@ describe('compileComponentHmrUpdate', () => {
     const names = (code: string) => code.match(/MSG_\w+/g)?.sort()
     const transformed = transformAngularFileSync(code, FILE, { hmr: true })
     expect(names(result.hmrModule)).toEqual([
-      'MSG__APP_SRC_X_COMPONENT_TS__0',
-      'MSG__APP_SRC_X_COMPONENT_TS__0',
-      'MSG__APP_SRC_X_COMPONENT_TS__1',
-      'MSG__APP_SRC_X_COMPONENT_TS__1',
+      'MSG__APP_SRC_X_COMPONENT_TS_0',
+      'MSG__APP_SRC_X_COMPONENT_TS_0',
+      'MSG__APP_SRC_X_COMPONENT_TS_1',
+      'MSG__APP_SRC_X_COMPONENT_TS_1',
     ])
     expect(names(result.hmrModule)).toEqual(names(transformed.code))
 

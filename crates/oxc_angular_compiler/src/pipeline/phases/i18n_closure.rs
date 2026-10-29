@@ -36,6 +36,7 @@ use crate::output::ast::{
     LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, StmtModifier,
     TypeofExpr,
 };
+use crate::pipeline::constant_pool::ConstantPool;
 
 /// The value of an i18n message param.
 ///
@@ -412,34 +413,41 @@ pub fn create_translation_declaration<'a>(
     statements
 }
 
-/// Generates an i18n variable name for the standard (non-Closure) mode.
+/// Claims the next i18n variable name (`i18n_0`, `i18n_1`, ...) in `pool`.
 ///
-/// Uses lowercase prefix to avoid Closure treating it as a constant.
-pub fn generate_i18n_var_name(index: usize) -> String {
-    format!("{TRANSLATION_VAR_PREFIX}{index}")
+/// Uses lowercase prefix to avoid Closure treating it as a constant. As in
+/// Angular, the count goes through `pool.uniqueName`, so it runs across the
+/// classes of a file.
+pub fn generate_i18n_var_name<'a>(pool: &mut ConstantPool<'a>) -> Ident<'a> {
+    pool.unique_name(TRANSLATION_VAR_PREFIX, true)
 }
 
-/// Generates a Closure-compatible variable name for goog.getMsg.
+/// Claims a Closure-compatible variable name for goog.getMsg in `pool`.
 ///
-/// When `use_external_ids` is true, generates: `MSG_EXTERNAL_{sanitized_id}$${suffix}`
-/// When `use_external_ids` is false, generates: `MSG_{suffix}_{index}`
+/// When `use_external_ids` is true, generates: `MSG_EXTERNAL_{sanitized_id}$${suffix}{n}`,
+/// counting `suffix`.
+/// When `use_external_ids` is false, generates: `MSG_{suffix}{n}`, counting `MSG_{suffix}`.
+///
+/// Ported from Angular's `i18nGenerateClosureVar`.
 pub fn generate_closure_var_name(
+    pool: &mut ConstantPool<'_>,
     message_id: Option<&str>,
     file_suffix: &str,
-    index: usize,
     use_external_ids: bool,
 ) -> String {
     if use_external_ids {
-        if let Some(id) = message_id {
-            let sanitized_id = sanitize_identifier(id);
-            format!(
-                "{CLOSURE_TRANSLATION_VAR_PREFIX}EXTERNAL_{sanitized_id}$${file_suffix}_{index}"
-            )
-        } else {
-            format!("{CLOSURE_TRANSLATION_VAR_PREFIX}{file_suffix}_{index}")
+        let unique_suffix = pool.unique_name(file_suffix, true);
+        match message_id {
+            Some(id) => {
+                let sanitized_id = sanitize_identifier(id);
+                format!("{CLOSURE_TRANSLATION_VAR_PREFIX}EXTERNAL_{sanitized_id}$${unique_suffix}")
+            }
+            // Angular always has an id here; the message is still counted with the others.
+            None => format!("{CLOSURE_TRANSLATION_VAR_PREFIX}{unique_suffix}"),
         }
     } else {
-        format!("{CLOSURE_TRANSLATION_VAR_PREFIX}{file_suffix}_{index}")
+        pool.unique_name(&format!("{CLOSURE_TRANSLATION_VAR_PREFIX}{file_suffix}"), true)
+            .to_string()
     }
 }
 

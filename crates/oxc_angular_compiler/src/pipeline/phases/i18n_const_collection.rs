@@ -20,6 +20,7 @@ use crate::output::ast::{
     LiteralValue, LocalizedStringExpr, OutputExpression, OutputStatement, ReadVarExpr,
 };
 use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
+use crate::pipeline::constant_pool::ConstantPool;
 use crate::pipeline::phases::i18n_closure::{
     I18nMessageMeta, I18nParamExpr, create_translation_declaration, generate_closure_var_name,
     generate_file_based_i18n_suffix, generate_i18n_var_name,
@@ -158,9 +159,6 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
     // Map: i18n_context xref -> i18n variable name, for contexts owning an extracted attribute
     let mut attr_var_names_by_context: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
-    // Counter for unique variable names
-    let mut i18n_var_counter: usize = 0;
-
     // Collect view xrefs first to avoid borrowing issues
     let view_xrefs_for_messages: Vec<XrefId> = job.all_views().map(|v| v.xref).collect();
 
@@ -202,7 +200,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
             &msg_info,
             &file_based_i18n_suffix,
             job.i18n_use_external_ids,
-            &mut i18n_var_counter,
+            &mut job.pool,
             &mut job.emit_errors,
         );
 
@@ -476,7 +474,7 @@ fn collect_message<'a>(
     msg_info: &MessageInfo,
     file_suffix: &str,
     use_external_ids: bool,
-    counter: &mut usize,
+    pool: &mut ConstantPool<'a>,
     errors: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> (String, ArenaVec<'a, OutputStatement<'a>>) {
     let mut all_statements = ArenaVec::new_in(&allocator);
@@ -496,7 +494,7 @@ fn collect_message<'a>(
                 sub_msg,
                 file_suffix,
                 use_external_ids,
-                counter,
+                pool,
                 errors,
             );
             all_statements.extend(sub_statements);
@@ -536,15 +534,14 @@ fn collect_message<'a>(
     // Sort params for consistency
     params.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Generate variable names
-    let i18n_var_name = generate_i18n_var_name(*counter);
+    // Generate variable names, the Closure one first as in Angular
     let closure_var_name = generate_closure_var_name(
+        pool,
         msg_info.message_id.as_deref().or(msg_info.custom_id.as_deref()),
         file_suffix,
-        *counter,
         use_external_ids,
     );
-    *counter += 1;
+    let i18n_var_name = generate_i18n_var_name(pool).to_string();
 
     // The meaning and description go into a JSDoc comment, so, as Angular's `tagToString` throws,
     // neither may end that comment or start another.

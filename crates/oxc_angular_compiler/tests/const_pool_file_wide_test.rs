@@ -271,3 +271,45 @@ export class B { k = 1; }
     );
     assert_eq!(squashed.matches(",_c0,ctx.k)").count(), 2, "{code}");
 }
+
+#[test]
+fn i18n_message_names_are_counted_across_the_file() {
+    // ngtsc names messages with `pool.uniqueName`: `B` goes on from `A`'s
+    // `i18n_1` and `..._1`, with external ids as without.
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'a-a', template: '<p i18n="@@foo">Hello {{w}}</p><b i18n-title="@@bar" title="T"></b>' })
+export class A { w = 1; }
+
+@Component({ selector: 'b-b', template: '<p i18n="@@baz">Bye</p>' })
+export class B {}
+"#;
+    let names = |use_external_ids: bool| {
+        let allocator = Allocator::default();
+        let options =
+            TransformOptions { i18n_use_external_ids: use_external_ids, ..Default::default() };
+        let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+        assert!(!result.has_errors(), "{:?}", result.diagnostics);
+        // `(i18n_0=MSG_...)`, the Closure branch's assignments.
+        squash(&result.code)
+            .split("(i18n_")
+            .skip(1)
+            .filter_map(|part| part.split(')').next())
+            .filter(|assignment| assignment.contains("=MSG_"))
+            .map(|assignment| format!("i18n_{assignment}"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(true),
+        [
+            "i18n_0=MSG_EXTERNAL_bar$$TEST_TS_0",
+            "i18n_1=MSG_EXTERNAL_foo$$TEST_TS_1",
+            "i18n_2=MSG_EXTERNAL_baz$$TEST_TS_2",
+        ]
+    );
+    assert_eq!(
+        names(false),
+        ["i18n_0=MSG_TEST_TS_0", "i18n_1=MSG_TEST_TS_1", "i18n_2=MSG_TEST_TS_2"]
+    );
+}
