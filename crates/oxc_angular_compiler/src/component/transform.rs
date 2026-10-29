@@ -4177,6 +4177,7 @@ pub fn transform_angular_file(
                         file_namespace_registry.angular_core_ns().as_str(),
                         &directive_metadata,
                         shared_pool_index,
+                        &mut shared_literals,
                         options.compilation_mode,
                         options.angular_version,
                     );

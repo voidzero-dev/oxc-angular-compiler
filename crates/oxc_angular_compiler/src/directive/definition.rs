@@ -14,7 +14,7 @@
 
 use oxc_allocator::{Allocator, Vec};
 
-use super::compiler::compile_directive;
+use super::compiler::compile_directive_from_metadata;
 use super::metadata::R3DirectiveMetadata;
 use crate::CompilationMode;
 use crate::factory::{
@@ -25,6 +25,7 @@ use crate::output::ast::{OutputExpression, OutputStatement};
 use crate::partial::directive::{
     compile_declare_directive_from_metadata, compile_declare_factory_for_directive,
 };
+use crate::pipeline::constant_pool::SharedLiterals;
 
 /// Result of generating directive definitions.
 pub struct DirectiveDefinitions<'a> {
@@ -80,6 +81,7 @@ pub fn generate_directive_definitions<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    shared_literals: &mut SharedLiterals<'a>,
     compilation_mode: CompilationMode,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveDefinitions<'a> {
@@ -96,6 +98,7 @@ pub fn generate_directive_definitions<'a>(
                 core_namespace,
                 metadata,
                 pool_starting_index,
+                shared_literals,
                 angular_version,
             );
             DirectiveDefinitions { dir_definition, fac_definition, next_pool_index, statements }
@@ -122,7 +125,7 @@ pub fn generate_directive_definitions<'a>(
 
 /// Generate the ɵdir definition.
 ///
-/// This calls `compile_directive()` which creates an expression like:
+/// This calls `compile_directive_from_metadata()` which creates an expression like:
 /// ```javascript
 /// /*@__PURE__*/ i0.ɵɵdefineDirective({
 ///   type: MyDirective,
@@ -140,13 +143,15 @@ fn generate_dir_definition<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    shared_literals: &mut SharedLiterals<'a>,
     angular_version: Option<crate::AngularVersion>,
 ) -> (OutputExpression<'a>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
-    let result = compile_directive(
+    let result = compile_directive_from_metadata(
         allocator,
         core_namespace,
         metadata,
         pool_starting_index,
+        shared_literals,
         angular_version,
     );
     (result.expression, result.next_pool_index, result.statements)
@@ -277,6 +282,7 @@ mod tests {
             "i0",
             &metadata,
             0,
+            &mut SharedLiterals::default(),
             CompilationMode::Full,
             None,
         );
@@ -449,8 +455,14 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let (dir, _next_pool_index, _statements) =
-            generate_dir_definition(&allocator, "i0", &metadata, 0, None);
+        let (dir, _next_pool_index, _statements) = generate_dir_definition(
+            &allocator,
+            "i0",
+            &metadata,
+            0,
+            &mut SharedLiterals::default(),
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&dir);
@@ -505,6 +517,7 @@ mod tests {
             "i0",
             &metadata1,
             0,
+            &mut SharedLiterals::default(),
             CompilationMode::Full,
             None,
         );
@@ -549,6 +562,7 @@ mod tests {
             "i0",
             &metadata2,
             next_index,
+            &mut SharedLiterals::default(),
             CompilationMode::Full,
             None,
         );

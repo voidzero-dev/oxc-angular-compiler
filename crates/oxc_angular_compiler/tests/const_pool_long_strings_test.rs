@@ -197,3 +197,22 @@ export class B {}
     assert!(code.contains(r#"const_c1=["a","b","c","d"];"#), "{code}");
     assert!(code.contains("type:B,selectors:[[\"\",\"a\",\"b\",\"c\",\"d\"]],attrs:_c1"), "{code}");
 }
+
+#[test]
+fn directive_query_predicates_are_shared_with_the_other_classes() {
+    // ngtsc's one pool per file gives the directive and both components the same `["x"]`.
+    let code = squash(&transform(
+        "import {Component, Directive, ViewChild, ContentChild} from '@angular/core';
+@Component({selector: 'a', template: '', standalone: true})
+export class A { @ViewChild('x') q: any; }
+@Directive({selector: '[d]', standalone: true})
+export class D { @ContentChild('x') q: any; @ViewChild('y') r: any; }
+@Component({selector: 'b', template: '', standalone: true})
+export class B { @ViewChild('y') q: any; }
+",
+    ));
+    assert_eq!(code.matches(r#"=["x"];"#).count(), 1, "{code}");
+    assert_eq!(code.matches(r#"=["y"];"#).count(), 1, "{code}");
+    assert!(code.contains(r#"const_c0=["x"];"#), "{code}");
+    assert!(code.contains("i0.ɵɵcontentQuery(dirIndex,_c0,5)"), "{code}");
+}
