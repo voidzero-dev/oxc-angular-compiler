@@ -51,6 +51,7 @@ use crate::optimizer::Edit;
 use crate::output::ast::{LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression};
 use crate::output::emitter::JsEmitter;
 use crate::output::emitter::escape_string;
+use crate::output::emitter::is_left_hand_side_source;
 use crate::pipeline::constant_pool::{ConstantPool, SharedPool};
 use crate::pipeline::emit::declare_pooled_constants_from;
 use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
@@ -912,6 +913,22 @@ fn link_factory(
     }
 }
 
+/// Parenthesize source that will be the object of a property access, as TS's
+/// `parenthesizeLeftSideOfAccess` does when Angular's linker builds
+/// `useClass.ɵfac`. Without it, `flag ? A : B` would read `B.ɵfac` alone and
+/// `Maybe?.cls` would pull `.ɵfac` into its optional chain.
+fn parenthesize_left_side_of_access(source: &str) -> Cow<'_, str> {
+    let allocator = Allocator::default();
+    let is_optional_chain = Parser::new(&allocator, source, SourceType::mjs())
+        .parse_expression()
+        .is_ok_and(|expr| matches!(expr, Expression::ChainExpression(_)));
+    if is_optional_chain || !is_left_hand_side_source(source) {
+        Cow::Owned(format!("({source})"))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
+
 /// Generate the conditional factory pattern used by Angular for injectable linking.
 /// `ctor_type` is used in the if-branch: `new (ctor_type)()`.
 /// `non_ctor_expr` is used in the else-branch.
@@ -960,7 +977,8 @@ fn link_injectable(
         }
         // useClass without deps: delegate to useClass's own factory
         if use_class != type_name {
-            // Case 7: useClass !== type without deps — already correct
+            // Case 7: useClass !== type without deps
+            let use_class = parenthesize_left_side_of_access(use_class);
             return Some(format!(
                 "/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return {use_class}.\u{0275}fac(__ngFactoryType__); }}{provided_in_suffix} }})"
             ));
@@ -2500,6 +2518,40 @@ MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "
         assert!(
             result.code.contains("OtherService.\u{0275}fac"),
             "useClass != type without deps should delegate to useClass.ɵfac, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_class_parenthesized_before_fac() {
+        // Angular's linker builds `useClass.ɵfac` as an AST, so a conditional or an
+        // optional chain gets wrapped: `(flag ? A : B).ɵfac(...)`. Pasting the source
+        // as text would read `B.ɵfac` alone, or extend the chain `Maybe?.cls.ɵfac`.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class S1 {}
+S1.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "22.2.2", ngImport: i0, type: S1, providedIn: 'root', useClass: Maybe?.cls });
+class S2 {}
+S2.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "22.2.2", ngImport: i0, type: S2, providedIn: 'root', useClass: i0.forwardRef(() => flag ? A : B) });
+class S3 {}
+S3.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "22.2.2", ngImport: i0, type: S3, providedIn: 'root', useClass: Ns.Other });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("return (Maybe?.cls).\u{0275}fac(__ngFactoryType__);"),
+            "optional chain should be parenthesized, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("return (flag ? A : B).\u{0275}fac(__ngFactoryType__);"),
+            "conditional should be parenthesized, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("return Ns.Other.\u{0275}fac(__ngFactoryType__);"),
+            "plain member access should stay bare, got:\n{}",
             result.code
         );
     }

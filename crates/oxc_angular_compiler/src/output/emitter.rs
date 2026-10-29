@@ -1208,7 +1208,7 @@ fn emits_leading_brace(expr: &OutputExpression<'_>) -> bool {
 /// without an argument list is not one: `new X()` would call the class.
 /// Source that does not parse is treated as needing parentheses, which is
 /// always valid.
-fn is_left_hand_side_source(source: &str) -> bool {
+pub(crate) fn is_left_hand_side_source(source: &str) -> bool {
     use oxc_ast::ast::Expression;
     use oxc_span::GetSpan;
 
