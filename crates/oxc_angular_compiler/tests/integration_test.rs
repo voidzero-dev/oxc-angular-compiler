@@ -2953,6 +2953,40 @@ export class B {}
     assert!(code.contains(r#"selectors:[["b","a",""],["c"]],attrs:_c2,"#), "{}", result.code);
 }
 
+/// v21's `compileComponentFromMetadata` pools `attrs` after `baseDirectiveFields`,
+/// so after the host bindings' constants and before the template's.
+#[test]
+fn test_selector_attrs_before_v22_follow_host_constants() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'x[role=a]',
+    host: { '[class]': '{on: on, off: !on}' },
+    template: '<i [class]="{a: on, b: !on}"></i>',
+})
+export class X { on = true; }
+"#;
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(21, 2, 0)),
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "x.ts", source, Some(&options), None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains(
+            r#"const_c0=(a0,a1)=>({on:a0,off:a1});const_c1=["role","a"];const_c2=(a0,a1)=>({a:a0,b:a1});"#
+        ),
+        "{}",
+        result.code
+    );
+    assert!(code.contains("},attrs:_c1,decls:1,"), "{}", result.code);
+}
+
 // ============================================================================
 // Multi-Component File Tests
 // ============================================================================
