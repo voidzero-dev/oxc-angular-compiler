@@ -239,6 +239,29 @@ function make() {
 }
 
 #[test]
+fn declares_a_constant_a_nested_class_shares_with_an_earlier_class_after_the_imports() {
+    // `B` reuses the `_c0` that `A` pooled first; `make` runs before `A`'s
+    // statement, so `_c0` goes after the imports, as in ngtsc.
+    let code = transform(
+        r"
+import { Component } from '@angular/core';
+export const Made = make();
+@Component({ selector: 'a-a', template: '<ng-content></ng-content>' })
+export class A {}
+function make() {
+  @Component({ selector: 'b-b', template: '<ng-content></ng-content>' })
+  class B {}
+  return B;
+}
+",
+    );
+    assert_eq!(constants(&code), ["_c0"], "{code}");
+    assert!(offset(&code, "import * as i0") < offset(&code, "const _c0"), "{code}");
+    assert!(offset(&code, "const _c0") < offset(&code, "export const Made"), "{code}");
+    assert_eq!(squash(&code).matches("ngContentSelectors:_c0").count(), 2, "{code}");
+}
+
+#[test]
 fn compiles_a_nested_class_referencing_its_own_or_local_classes() {
     let code = transform(
         r"

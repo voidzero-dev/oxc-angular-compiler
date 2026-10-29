@@ -5057,9 +5057,13 @@ pub fn transform_angular_file(
     // 5d. Class definition insertion edits. A nested class's constants go
     // after the imports, like ngtsc's (a function declared later in the file
     // may run before its statement), so the declarations of each position are
-    // joined into one edit, in the order the classes compiled.
+    // joined into one edit, in the order the classes compiled. So do those of
+    // every class compiled before the last nested one: the nested class may
+    // reuse a constant one of them pooled.
+    let last_nested = class_positions.iter().rposition(|(span, ..)| nested_compiled.contains(span));
     let mut decls_by_start: Vec<(u32, String)> = Vec::new();
-    for (class_span, effective_start, class_body_end) in &class_positions {
+    for (index, (class_span, effective_start, class_body_end)) in class_positions.iter().enumerate()
+    {
         if let Some((property_assignments, decls_before_class, decls_after_class)) =
             class_definitions.get(class_span)
         {
@@ -5073,7 +5077,7 @@ pub fn transform_angular_file(
 
             // Constants/child views before the class
             if !decls_before_class.is_empty() {
-                let start = if nested_compiled.contains(class_span) {
+                let start = if last_nested.is_some_and(|last| index <= last) {
                     after_imports
                 } else {
                     *effective_start
