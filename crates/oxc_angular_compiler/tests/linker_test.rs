@@ -1168,3 +1168,20 @@ D.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.25", 
     assert!(linked.contains("ɵɵviewQuery(_c0,5)"), "{code}");
     assert!(linked.contains("},attrs:_c0,decls:0,"), "{code}");
 }
+
+/// Angular's linker compiles with `i18nUseExternalIds: false`, so a Closure message is named
+/// `MSG_<suffix><n>`, never after its message id (`MSG_EXTERNAL_<id>$$...`).
+#[test]
+fn test_link_i18n_closure_names_do_not_use_message_ids() {
+    let code = link_for_version(
+        r#"
+import * as i0 from "@angular/core";
+class Greet {
+}
+Greet.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0", type: Greet, isStandalone: true, selector: "x-greet", ngImport: i0, template: '<p i18n>Hello</p>' });
+"#,
+        None,
+    );
+    assert!(!code.contains("MSG_EXTERNAL_"), "{code}");
+    assert!(code.contains("const MSG_"), "{code}");
+}

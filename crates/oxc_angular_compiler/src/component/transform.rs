@@ -7041,10 +7041,11 @@ pub fn compile_component_template<'a>(
     }
 
     // Stage 1.5: Remove whitespace if not preserving (default behavior)
+    let untrimmed: &'a [crate::ast::html::HtmlNode<'a>] = allocator.alloc(html_result.nodes);
     let nodes = if parse_options.preserve_whitespaces {
-        &html_result.nodes
+        untrimmed
     } else {
-        let processed = remove_whitespaces(allocator, &html_result.nodes, true);
+        let processed = remove_whitespaces(allocator, untrimmed, true);
         allocator.alloc(processed) as &_
     };
 
@@ -7054,7 +7055,8 @@ pub fn compile_component_template<'a>(
         angular_version: None,
         ..R3TransformOptions::default()
     };
-    let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
+    let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options)
+        .with_untrimmed_nodes(untrimmed);
     let r3_result = transformer.transform(nodes);
 
     if !r3_result.errors.is_empty() {
@@ -8184,7 +8186,7 @@ pub fn compile_template_for_linker<'a>(
     let ingest_options = IngestOptions {
         mode,
         // Angular's linker names Closure messages after the file it links
-        // (`MSG__X_MAIN_JS_0` for `/x/main.js`), without external ids.
+        // (`MSG__X_MAIN_JS_0` for `/x/main.js`), never after their ids.
         relative_context_file_path: Some(Ident::from_in(file_path, allocator)),
         i18n_use_external_ids: false,
         defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,

@@ -40,7 +40,9 @@ pub use ast::{
     BlockPlaceholder, Container, Icu, IcuPlaceholder, Message, MessagePlaceholder, MessageSpan,
     Node, Placeholder, TagPlaceholder, Text, Visitor,
 };
-pub use digest::{compute_decimal_digest, compute_digest, compute_msg_id, fingerprint, sha1};
+pub use digest::{
+    compute_decimal_digest, compute_digest, compute_msg_id, decimal_digest, fingerprint, sha1,
+};
 pub use extractor_merger::{
     ExtractionResult, MergeResult, TranslatedNode, extract_messages, merge_translations,
 };

@@ -136,13 +136,13 @@ describe('compileComponentHmrUpdate', () => {
     const result = await expectUpdateMatchesTransform(code)
     // Closure message names are derived from the file path. They only show
     // in the Closure branch, which `$localize` skips at runtime.
-    const names = (code: string) => code.match(/MSG_\w+/g)?.sort()
+    const names = (code: string) => code.match(/MSG_[\w$]+/g)?.sort()
     const transformed = transformAngularFileSync(code, FILE, { hmr: true })
     expect(names(result.hmrModule)).toEqual([
-      'MSG__APP_SRC_X_COMPONENT_TS_0',
-      'MSG__APP_SRC_X_COMPONENT_TS_0',
-      'MSG__APP_SRC_X_COMPONENT_TS_1',
-      'MSG__APP_SRC_X_COMPONENT_TS_1',
+      'MSG_EXTERNAL_3771704108176831903$$_APP_SRC_X_COMPONENT_TS_1',
+      'MSG_EXTERNAL_3771704108176831903$$_APP_SRC_X_COMPONENT_TS_1',
+      'MSG_EXTERNAL_5573521891741907372$$_APP_SRC_X_COMPONENT_TS_0',
+      'MSG_EXTERNAL_5573521891741907372$$_APP_SRC_X_COMPONENT_TS_0',
     ])
     expect(names(result.hmrModule)).toEqual(names(transformed.code))
 

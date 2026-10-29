@@ -5897,6 +5897,33 @@ fn test_i18n_meta_is_trimmed_once() {
     assert_contains(&js, r#"$localize `:m | d @@ custom:Custom`"#);
 }
 
+/// With external ids, a message without a custom id is named after its computed id
+/// (`decimalDigest`, with the meaning), and so are ICU sub-messages. The id of an element
+/// message is computed before whitespace removal, and a sole ICU takes it. Angular 22.2.2
+/// gives these names, in this order (MSG_3 is the nested select, MSG_4 the plural's element):
+#[test]
+fn test_i18n_external_ids_use_computed_message_id() {
+    let js = compile_i18n_component(
+        "<div i18n>Hello {{name}}!</div><span i18n=\"m|d\">Hi <b>x</b></span>\
+         <img i18n-alt=\"am|ad\" alt=\"Logo\">\
+         <div i18n>\n  {count, plural, =1 {one} other {{gender, select, male {m} other {o}}}}\n</div>\
+         <div i18n>before {count, plural, =1 {one} other {many}} after</div>\
+         {gender, select, male {M} other {O}}",
+    );
+    for name in [
+        "MSG_EXTERNAL_96409403850032568$$REPRO_TS_0 =",
+        "MSG_EXTERNAL_4848371593517801531$$REPRO_TS_1 =",
+        "MSG_EXTERNAL_7210328206936269780$$REPRO_TS_2 =",
+        "MSG_EXTERNAL_2330724444582433569$$REPRO_TS_3 =",
+        "MSG_EXTERNAL_2793568635912092133$$REPRO_TS_4 =",
+        "MSG_EXTERNAL_2403750739669008444$$REPRO_TS_5 =",
+        "MSG_EXTERNAL_6754785010889443455$$REPRO_TS_6 =",
+        "MSG_EXTERNAL_4388111603494198272$$REPRO_TS_7 =",
+    ] {
+        assert_contains(&js, name);
+    }
+}
+
 /// Compiles `template` with `enableI18nLegacyMessageIdFormat` set to `legacy_ids`.
 fn compile_with_legacy_ids(template: &str, legacy_ids: bool) -> String {
     let allocator = Allocator::default();
