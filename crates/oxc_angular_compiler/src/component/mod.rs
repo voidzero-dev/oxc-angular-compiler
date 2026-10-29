@@ -36,8 +36,8 @@ pub use hmr_fingerprint::{ComponentHmrFingerprint, component_hmr_fingerprint};
 pub use import_elision::ImportElisionAnalyzer;
 pub use metadata::{
     AngularVersion, ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode,
-    HostDirectiveMetadata, HostMetadata, LifecycleMetadata, Prerelease, TemplateDependency,
-    TemplateDependencyKind, ViewEncapsulation,
+    HostDirectiveMetadata, HostMetadata, ImportRef, LifecycleMetadata, Prerelease,
+    TemplateDependency, TemplateDependencyKind, ViewEncapsulation,
 };
 pub use namespace_registry::NamespaceRegistry;
 pub use transform::{

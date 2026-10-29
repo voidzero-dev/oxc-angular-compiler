@@ -1682,6 +1682,95 @@ export class C {}
     assert!(compact.contains("ɵɵdefer(2,1,C_Defer_2_DepsFn);"), "{code}");
 }
 
+#[test]
+fn deps_fns_reading_a_const_imports_array_are_shared_by_components() {
+    // ngc resolves `imports: IMPORTS` through the `const`, and reads each class
+    // through the identifier in its array, which both components share: their
+    // equivalent functions are one. Classes outside an `imports` array literal
+    // are never lazy-loaded.
+    let dir = TempDir::new().unwrap();
+    create_test_file(
+        dir.path(),
+        "app/deps.ts",
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-dep', template: 'dep' })
+export class Dep {}
+
+@Component({ selector: 'app-dep2', template: 'dep2' })
+export class Dep2 {}
+",
+    );
+    let source = r"
+import { Component } from '@angular/core';
+import { Dep, Dep2 } from './deps';
+
+const IMPORTS = [Dep, Dep2];
+
+@Component({ selector: 'app-a', imports: IMPORTS, template: '<app-dep/> @defer { <app-dep2/> }' })
+export class A {}
+
+@Component({ selector: 'app-b', imports: IMPORTS, template: '@defer { <app-dep/><app-dep2/> }' })
+export class B {}
+
+@Component({ selector: 'app-c', imports: IMPORTS, template: '@defer { <app-dep/><app-dep2/> }' })
+export class C {}
+";
+    let code = &transform(&dir, source).code;
+    let compact = compact(code);
+    assert!(compact.contains("constA_Defer_2_DepsFn=()=>[Dep2];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(2,1,A_Defer_2_DepsFn);"), "{code}");
+    assert!(compact.contains("constB_Defer_1_DepsFn=()=>[Dep,Dep2];"), "{code}");
+    assert!(!compact.contains("C_Defer_1_DepsFn"), "{code}");
+    assert_eq!(compact.matches("ɵɵdefer(1,0,B_Defer_1_DepsFn);").count(), 2, "{code}");
+    assert!(code.contains("import { Dep, Dep2 }"), "{code}");
+    assert_eager(code, "./deps");
+
+    let code = &transform_with(&dir, source, &partial_options()).code;
+    let partial = self::compact(code);
+    assert!(partial.contains("deferBlockDependencies:[()=>[Dep2]]"), "{code}");
+    assert_eq!(partial.matches("deferBlockDependencies:[()=>[Dep,Dep2]]").count(), 2, "{code}");
+}
+
+#[test]
+fn deps_fns_read_an_imports_array_through_let_an_alias_and_as_const() {
+    // ngc's partial evaluator reads any top-level variable, through `as const`
+    // and through a variable naming another one.
+    let dir = TempDir::new().unwrap();
+    for declaration in [
+        "let IMPORTS = [Dep, Dep2];",
+        "const BASE = [Dep, Dep2];\nconst IMPORTS = BASE;",
+        "const IMPORTS = [Dep, Dep2] as const;",
+    ] {
+        let source = format!(
+            r"
+import {{ Component }} from '@angular/core';
+
+@Component({{ selector: 'app-dep', template: 'dep' }})
+export class Dep {{}}
+
+@Component({{ selector: 'app-dep2', template: 'dep2' }})
+export class Dep2 {{}}
+
+{declaration}
+
+@Component({{ selector: 'app-a', imports: IMPORTS, template: '<app-dep/> @defer {{ <app-dep2/> }}' }})
+export class A {{}}
+"
+        );
+        let code = &transform(&dir, &source).code;
+        let compact = compact(code);
+        assert!(compact.contains("constA_Defer_2_DepsFn=()=>[Dep2];"), "{code}");
+        assert!(compact.contains("ɵɵdefer(2,1,A_Defer_2_DepsFn);"), "{code}");
+
+        let code = &transform_with(&dir, &source, &partial_options()).code;
+        let partial = self::compact(code);
+        assert!(partial.contains("deferBlockDependencies:[()=>[Dep2]]"), "{code}");
+        assert!(!partial.contains("type:IMPORTS"), "{code}");
+    }
+}
+
 // --- ngc's `DeferredSymbolTracker` over the whole file: the `imports`
 // entries of every component that defers a class don't keep its import ---
 

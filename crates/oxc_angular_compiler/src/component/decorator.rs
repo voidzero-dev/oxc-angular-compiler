@@ -5,15 +5,15 @@
 
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
-    MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, PropertyKey,
+    Argument, ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration, Decorator,
+    Expression, MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, PropertyKey, Statement,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
 
 use super::dependency::R3DependencyMetadata;
 use super::metadata::{
-    ChangeDetectionStrategy, ComponentMetadata, HostDirectiveMetadata, HostMetadata,
+    ChangeDetectionStrategy, ComponentMetadata, HostDirectiveMetadata, HostMetadata, ImportRef,
     TemplateDependency, ViewEncapsulation,
 };
 use super::transform::ImportMap;
@@ -185,6 +185,7 @@ pub fn extract_component_metadata<'a>(
                     metadata.imports = extract_identifier_array(allocator, &prop.value);
                     metadata.import_entry_classes =
                         extract_import_entry_classes(allocator, &prop.value, consts);
+                    metadata.import_refs = extract_import_refs(allocator, &prop.value, consts);
                     // 2. The raw expression to pass to ɵɵgetComponentDepsFactory in RuntimeResolved mode
                     metadata.raw_imports =
                         convert_oxc_expression(allocator, &prop.value, source_text);
@@ -515,6 +516,63 @@ fn extract_import_entry_classes<'a>(
         }
     }
     result
+}
+
+/// The classes an `imports` value names: the entries of an array literal
+/// that [`extract_import_entry_classes`] reads, or of the array a same-file
+/// `const` holds when `imports` names one (`imports: IMPORTS`). The spans are
+/// those of the identifiers in the `const`'s array, which every component
+/// naming it shares.
+fn extract_import_refs<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+) -> Vec<'a, ImportRef<'a>> {
+    let expr = match expr {
+        Expression::Identifier(id) => match top_level_const_init(consts, &id.name) {
+            Some(init @ Expression::ArrayExpression(_)) => init,
+            _ => return Vec::new_in(&allocator),
+        },
+        _ => expr,
+    };
+    let mut refs = Vec::new_in(&allocator);
+    for (name, span) in extract_import_entry_classes(allocator, expr, consts).into_iter().flatten()
+    {
+        refs.push(ImportRef { name, span });
+    }
+    refs
+}
+
+/// The initializer of the top-level variable (`const`, `let` or `var`,
+/// exported or not) that binds `name` in the file `consts` were collected
+/// from. Like ngtsc's partial evaluator, it reads through `as const` and
+/// through a variable that names another one (`const IMPORTS = BASE`).
+fn top_level_const_init<'a>(consts: &StringConsts<'a>, name: &str) -> Option<&'a Expression<'a>> {
+    let mut name = name;
+    // `const A = B; const B = A;` never ends.
+    for _ in 0..16 {
+        let init = consts.program()?.body.iter().find_map(|stmt| {
+            let decl = match stmt {
+                Statement::VariableDeclaration(decl) => decl,
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(decl) => decl,
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            decl.declarations.iter().find_map(|declarator| match &declarator.id {
+                BindingPattern::BindingIdentifier(id) if id.name == name => {
+                    declarator.init.as_ref()
+                }
+                _ => None,
+            })
+        })?;
+        match init.get_inner_expression() {
+            Expression::Identifier(id) => name = id.name.as_str(),
+            init => return Some(init),
+        }
+    }
+    None
 }
 
 /// Extract ViewEncapsulation from an expression.

@@ -63,7 +63,7 @@ use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
 use oxc_str::Ident;
 
-use super::metadata::ComponentMetadata;
+use super::metadata::{ComponentMetadata, ImportRef};
 use super::transform::ImportMap;
 
 /// Returns `true` if any `@defer` block exists anywhere in the template.
@@ -358,15 +358,15 @@ pub(super) fn defer_block_dependencies<'a>(
 /// ngc's plain reference is the `WrappedNodeExpr` its `LocalIdentifierStrategy`
 /// emits (`Reference.getIdentityIn`): the name of a class declared in the
 /// file, which is the same node for every component and stays a plain read
-/// here, or for an imported class the identifier in this component's
-/// `imports`, found in `import_entry_classes`. Wrapped nodes are equal only
-/// when they are the same node, so the constant pool shares a function that
-/// reads an imported class within this component only.
+/// here, or for an imported class the identifier it was read from, found in
+/// `import_refs`. Wrapped nodes are equal only when they are the same node,
+/// so the constant pool shares a function that reads an imported class
+/// within this component only, unless the components name one `const` array.
 pub(super) fn compile_defer_block_resolver<'a>(
     allocator: &'a Allocator,
     dependencies: &[Ident<'a>],
     deferred: &[Ident<'a>],
-    import_entry_classes: &[Option<(Ident<'a>, oxc_span::Span)>],
+    import_refs: &[ImportRef<'a>],
     import_map: &ImportMap<'a>,
 ) -> Option<OutputExpression<'a>> {
     if dependencies.is_empty() {
@@ -381,13 +381,11 @@ pub(super) fn compile_defer_block_resolver<'a>(
         } else {
             None
         };
-        let imports_identifier = import_entry_classes
-            .iter()
-            .flatten()
-            .find(|(class, _)| class == name && import_map.contains_key(name));
+        let imports_identifier =
+            import_refs.iter().find(|import| import.name == *name && import_map.contains_key(name));
         entries.push(deferrable.unwrap_or_else(|| match imports_identifier {
-            Some((_, span)) => OutputExpression::WrappedNode(oxc_allocator::Box::new_in(
-                WrappedNodeExpr { node_id: *name, source_span: Some(*span) },
+            Some(import) => OutputExpression::WrappedNode(oxc_allocator::Box::new_in(
+                WrappedNodeExpr { node_id: *name, source_span: Some(import.span) },
                 &allocator,
             )),
             None => OutputExpression::ReadVar(oxc_allocator::Box::new_in(

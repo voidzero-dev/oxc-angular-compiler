@@ -554,6 +554,13 @@ pub struct ComponentMetadata<'a> {
     /// comes with the span of its identifier in the array.
     pub import_entry_classes: Vec<'a, Option<(Ident<'a>, Span)>>,
 
+    /// The classes `imports` names, read through a same-file `const` array
+    /// (`imports: IMPORTS`) the way ngtsc's partial evaluator resolves it.
+    /// Unlike [`Self::import_entry_classes`], these may come from outside the
+    /// array literal, so `@defer` lists them in its blocks' dependency
+    /// functions but never lazy-loads them.
+    pub import_refs: Vec<'a, ImportRef<'a>>,
+
     /// Exported names for template references.
     ///
     /// In Angular, `exportAs` can be a comma-separated string (e.g., "foo, bar"),
@@ -709,6 +716,18 @@ pub struct ComponentMetadata<'a> {
     ///
     /// See: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts:382-390
     pub is_signal: bool,
+}
+
+/// A class an `@Component.imports` value names (see
+/// [`ComponentMetadata::import_refs`]).
+#[derive(Debug, Clone, Copy)]
+pub struct ImportRef<'a> {
+    /// The identifier that names the class.
+    pub name: Ident<'a>,
+    /// The span of that identifier. ngtsc emits a reference to an imported
+    /// class as a `WrappedNodeExpr` of the identifier it was read from, so
+    /// two references are equivalent only when they come from the same node.
+    pub span: Span,
 }
 
 /// Metadata for a host directive.
@@ -984,6 +1003,7 @@ impl<'a> ComponentMetadata<'a> {
             host: None,
             imports: Vec::new_in(&allocator),
             import_entry_classes: Vec::new_in(&allocator),
+            import_refs: Vec::new_in(&allocator),
             export_as: Vec::new_in(&allocator),
             preserve_whitespaces: None,
             constructor_deps: None,

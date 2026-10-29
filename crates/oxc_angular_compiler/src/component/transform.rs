@@ -5876,29 +5876,30 @@ struct DeferCandidates<'a> {
 }
 
 /// The [`DeferCandidates`] of a component, or `None` when its template has
-/// no `@defer` block or its `imports` isn't an array literal. An entry that
-/// doesn't name a class (a spread, a nested array, `ns.Cmp`) is never a
-/// candidate, as ngc's `registerDeferrableCandidate` skips anything but an
-/// identifier, and the classes it brings in stay eager.
+/// no `@defer` block or its `imports` names no class. Only an entry of an
+/// `imports` array literal can be marked: one that doesn't name a class (a
+/// spread, a nested array, `ns.Cmp`) is never marked, as ngc's
+/// `registerDeferrableCandidate` skips anything but an identifier, and the
+/// classes it brings in stay eager, like the classes of a `const` array
+/// (`imports: IMPORTS`).
 fn implicit_defer_candidates<'a>(
     metadata: &ComponentMetadata<'a>,
     nodes: &[crate::ast::r3::R3Node<'a>],
     import_selector: ImportSelector<'_>,
 ) -> Option<DeferCandidates<'a>> {
-    let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports else {
-        return None;
-    };
-    if raw_imports.entries.len() != metadata.import_entry_classes.len()
-        || !super::defer_resolver::template_has_defer_block(nodes)
+    if let Some(OutputExpression::LiteralArray(raw_imports)) = &metadata.raw_imports
+        && raw_imports.entries.len() != metadata.import_entry_classes.len()
     {
+        return None;
+    }
+    if metadata.import_refs.is_empty() || !super::defer_resolver::template_has_defer_block(nodes) {
         return None;
     }
     let mut imported = std::vec::Vec::new();
     let candidates: std::vec::Vec<_> = metadata
-        .import_entry_classes
+        .import_refs
         .iter()
-        .flatten()
-        .map(|(name, _)| *name)
+        .map(|import| import.name)
         .filter_map(|name| {
             let (selector, is_imported) = import_selector(name.as_str())?;
             if is_imported {
@@ -6203,7 +6204,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &metadata.import_entry_classes,
+                    &metadata.import_refs,
                     import_map,
                 )
             })
@@ -6397,7 +6398,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &metadata.import_entry_classes,
+                    &metadata.import_refs,
                     import_map,
                 );
                 (span, deps_fn)
