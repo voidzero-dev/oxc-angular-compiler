@@ -44,10 +44,13 @@ use oxc_ast::ast::{
     Statement,
 };
 
+use crate::ast::expression::AngularExpression;
 use crate::ast::expression::BindingType;
 use crate::ast::r3::{
-    R3BoundAttribute, R3BoundEvent, R3Component, R3DeferredBlock, R3Directive, R3Element, R3Node,
-    R3Template, R3TemplateAttr, R3TextAttribute, R3Visitor, visit_all,
+    R3BoundAttribute, R3BoundEvent, R3BoundText, R3Component, R3DeferredBlock, R3Directive,
+    R3Element, R3ForLoopBlock, R3Icu, R3IcuPlaceholder, R3IfBlockBranch, R3LetDeclaration, R3Node,
+    R3SwitchBlock, R3SwitchBlockCase, R3Template, R3TemplateAttr, R3TextAttribute, R3Visitor,
+    visit_all,
 };
 use crate::class_metadata::{
     R3DeferPerComponentDependency, compile_component_metadata_async_resolver,
@@ -215,16 +218,17 @@ pub fn build_defer_resolver_expression<'a>(
     Some(compile_component_metadata_async_resolver(allocator, &deps))
 }
 
-/// The selector of the top-level class `local` declares in `program`,
-/// exported or not, when it is a standalone `@Component` or `@Directive` whose
-/// `selector` and `standalone` are literals: an `imports` entry that names a
-/// class of the file being compiled. `consts` are the program's.
+/// The [`ClassUse`] of the top-level class `local` declares in `program`,
+/// exported or not, when it is a standalone `@Component`, `@Directive` or
+/// `@Pipe` whose `selector` (or `name`) and `standalone` are literals: an
+/// `imports` entry that names a class of the file being compiled. `consts`
+/// are the program's.
 pub(super) fn local_standalone_class_selector<'a>(
     program: &'a Program<'a>,
     consts: &StringConsts<'a>,
     local: &str,
     implicit_standalone: bool,
-) -> Option<String> {
+) -> Option<ClassUse> {
     let is_local = |class: &Class| class.id.as_ref().is_some_and(|id| id.name == local);
     let class = program.body.iter().find_map(|stmt| match stmt {
         Statement::ClassDeclaration(class) if is_local(class) => Some(&**class),
@@ -243,16 +247,30 @@ pub(super) fn local_standalone_class_selector<'a>(
     decorated_class_selector(class, consts, implicit_standalone)
 }
 
-/// The selector of `class` when it is a standalone `@Component` or
-/// `@Directive` whose `selector` and `standalone` are literals.
+/// How a template uses a standalone class an `imports` entry names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClassUse {
+    /// A component or directive, matched by its selector.
+    Selector(String),
+    /// A pipe, by its name.
+    Pipe(String),
+}
+
+/// The [`ClassUse`] of `class` when it is a standalone `@Component` or
+/// `@Directive` whose `selector` and `standalone` are literals, or a
+/// standalone `@Pipe` whose `name` and `standalone` are.
 pub(super) fn decorated_class_selector<'a>(
     class: &Class<'a>,
     consts: &StringConsts<'a>,
     implicit_standalone: bool,
-) -> Option<String> {
-    let decorator = ["Component", "Directive"].iter().find_map(|name| {
-        crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
-    })?;
+) -> Option<ClassUse> {
+    let (decorator, name_key) =
+        [("Component", "selector"), ("Directive", "selector"), ("Pipe", "name")].iter().find_map(
+            |(name, key)| {
+                crate::directive::find_angular_class_decorator(&class.decorators, name, consts)
+                    .map(|decorator| (decorator, *key))
+            },
+        )?;
     let Expression::CallExpression(call) = &decorator.expression else { return None };
     let Some(Expression::ObjectExpression(object)) =
         call.arguments.first().and_then(|arg| arg.as_expression())
@@ -266,7 +284,7 @@ pub(super) fn decorated_class_selector<'a>(
         let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
         // A computed key can override `selector` or `standalone`.
         let key = property.key.static_name()?;
-        if key == "selector" {
+        if key == name_key {
             let Expression::StringLiteral(value) = &property.value else { return None };
             selector = Some(value.value.as_str()?.to_string());
         } else if key == "standalone" {
@@ -274,15 +292,37 @@ pub(super) fn decorated_class_selector<'a>(
             standalone = value.value;
         }
     }
-    selector.filter(|selector| standalone && !selector.trim().is_empty())
+    let selector = selector.filter(|selector| standalone && !selector.trim().is_empty())?;
+    Some(if name_key == "name" { ClassUse::Pipe(selector) } else { ClassUse::Selector(selector) })
 }
+
+/// What a template matches against an `imports` class to tell whether it
+/// uses it.
+pub(super) enum CandidateUse {
+    /// The parsed selector of a component or directive.
+    Selectors(std::vec::Vec<CssSelector>),
+    /// The name of a pipe.
+    Pipe(String),
+}
+
+impl CandidateUse {
+    pub(super) fn of(class_use: &ClassUse) -> Self {
+        match class_use {
+            ClassUse::Selector(selector) => Self::Selectors(CssSelector::parse(selector)),
+            ClassUse::Pipe(name) => Self::Pipe(name.clone()),
+        }
+    }
+}
+
+/// An `imports` class `@defer` may lazy-load, by the name it is known by.
+pub(super) type Candidate<'a> = (Ident<'a>, CandidateUse);
 
 /// The `candidates` matched only inside the main content of `@defer` blocks
 /// (`resolveDeferBlocks` in ngc's component `handler.ts`). `@placeholder`,
 /// `@loading` and `@error` count as eager. Selectorless templates return none.
 pub(super) fn implicitly_deferred_imports<'a>(
     nodes: &[R3Node<'a>],
-    candidates: &[(Ident<'a>, std::vec::Vec<CssSelector>)],
+    candidates: &[Candidate<'a>],
 ) -> std::vec::Vec<Ident<'a>> {
     let mut matcher = CandidateMatcher::new(candidates);
     visit_all(&mut matcher, nodes);
@@ -306,10 +346,10 @@ pub(super) fn implicitly_deferred_imports<'a>(
 /// keeps the order of `candidates`. `None` for a selectorless template.
 pub(super) fn defer_block_dependencies<'a>(
     nodes: &[R3Node<'a>],
-    candidates: &[(Ident<'a>, std::vec::Vec<CssSelector>)],
+    candidates: &[Candidate<'a>],
 ) -> Option<std::vec::Vec<(oxc_span::Span, std::vec::Vec<Ident<'a>>)>> {
     struct BlockCollector<'c, 'a> {
-        candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)],
+        candidates: &'c [Candidate<'a>],
         blocks: std::vec::Vec<(oxc_span::Span, std::vec::Vec<Ident<'a>>)>,
     }
 
@@ -428,7 +468,7 @@ pub(super) fn compile_defer_block_resolver<'a>(
 /// blocks and which it matches anywhere else, as t2_binder's
 /// `DirectiveBinder` tells eagerly used directives apart.
 struct CandidateMatcher<'c, 'a> {
-    candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)],
+    candidates: &'c [Candidate<'a>],
     in_defer: bool,
     deferred: std::vec::Vec<bool>,
     eager: std::vec::Vec<bool>,
@@ -436,7 +476,7 @@ struct CandidateMatcher<'c, 'a> {
 }
 
 impl<'c, 'a> CandidateMatcher<'c, 'a> {
-    fn new(candidates: &'c [(Ident<'a>, std::vec::Vec<CssSelector>)]) -> Self {
+    fn new(candidates: &'c [Candidate<'a>]) -> Self {
         Self {
             candidates,
             in_defer: false,
@@ -447,15 +487,98 @@ impl<'c, 'a> CandidateMatcher<'c, 'a> {
     }
 
     fn record(&mut self, element: &CssSelector) {
-        for (index, (_, selectors)) in self.candidates.iter().enumerate() {
-            if selectors.iter().any(|selector| selector.matches(element)) {
-                if self.in_defer {
-                    self.deferred[index] = true;
-                } else {
-                    self.eager[index] = true;
-                }
+        for (index, (_, class_use)) in self.candidates.iter().enumerate() {
+            if let CandidateUse::Selectors(selectors) = class_use
+                && selectors.iter().any(|selector| selector.matches(element))
+            {
+                self.mark(index);
             }
         }
+    }
+
+    /// Records the pipes `expr` uses (`visitPipe` in t2_binder's
+    /// `TemplateBinder`).
+    fn record_pipes(&mut self, expr: &AngularExpression<'_>) {
+        visit_pipe_names(expr, &mut |name| {
+            for (index, (_, class_use)) in self.candidates.iter().enumerate() {
+                if matches!(class_use, CandidateUse::Pipe(pipe) if pipe == name) {
+                    self.mark(index);
+                }
+            }
+        });
+    }
+
+    fn mark(&mut self, index: usize) {
+        if self.in_defer {
+            self.deferred[index] = true;
+        } else {
+            self.eager[index] = true;
+        }
+    }
+}
+
+/// Calls `f` with the name of each pipe `expr` uses.
+fn visit_pipe_names(expr: &AngularExpression<'_>, f: &mut dyn FnMut(&str)) {
+    let all = |exprs: &[AngularExpression<'_>], f: &mut dyn FnMut(&str)| {
+        for expr in exprs {
+            visit_pipe_names(expr, f);
+        }
+    };
+    match expr {
+        AngularExpression::BindingPipe(pipe) => {
+            f(&pipe.name);
+            visit_pipe_names(&pipe.exp, f);
+            all(&pipe.args, f);
+        }
+        AngularExpression::Binary(b) => {
+            visit_pipe_names(&b.left, f);
+            visit_pipe_names(&b.right, f);
+        }
+        AngularExpression::Conditional(c) => {
+            visit_pipe_names(&c.condition, f);
+            visit_pipe_names(&c.true_exp, f);
+            visit_pipe_names(&c.false_exp, f);
+        }
+        AngularExpression::PropertyRead(p) => visit_pipe_names(&p.receiver, f),
+        AngularExpression::SafePropertyRead(p) => visit_pipe_names(&p.receiver, f),
+        AngularExpression::KeyedRead(k) => {
+            visit_pipe_names(&k.receiver, f);
+            visit_pipe_names(&k.key, f);
+        }
+        AngularExpression::SafeKeyedRead(k) => {
+            visit_pipe_names(&k.receiver, f);
+            visit_pipe_names(&k.key, f);
+        }
+        AngularExpression::Call(c) => {
+            visit_pipe_names(&c.receiver, f);
+            all(&c.args, f);
+        }
+        AngularExpression::SafeCall(c) => {
+            visit_pipe_names(&c.receiver, f);
+            all(&c.args, f);
+        }
+        AngularExpression::PrefixNot(p) => visit_pipe_names(&p.expression, f),
+        AngularExpression::Unary(u) => visit_pipe_names(&u.expr, f),
+        AngularExpression::TypeofExpression(t) => visit_pipe_names(&t.expression, f),
+        AngularExpression::VoidExpression(v) => visit_pipe_names(&v.expression, f),
+        AngularExpression::NonNullAssert(n) => visit_pipe_names(&n.expression, f),
+        AngularExpression::ParenthesizedExpression(p) => visit_pipe_names(&p.expression, f),
+        AngularExpression::SpreadElement(s) => visit_pipe_names(&s.expression, f),
+        AngularExpression::ArrowFunction(a) => visit_pipe_names(&a.body, f),
+        AngularExpression::LiteralArray(a) => all(&a.expressions, f),
+        AngularExpression::LiteralMap(m) => all(&m.values, f),
+        AngularExpression::Chain(c) => all(&c.expressions, f),
+        AngularExpression::Interpolation(i) => all(&i.expressions, f),
+        AngularExpression::TaggedTemplateLiteral(t) => {
+            visit_pipe_names(&t.tag, f);
+            all(&t.template.expressions, f);
+        }
+        AngularExpression::TemplateLiteral(t) => all(&t.expressions, f),
+        AngularExpression::Empty(_)
+        | AngularExpression::ImplicitReceiver(_)
+        | AngularExpression::ThisReceiver(_)
+        | AngularExpression::LiteralPrimitive(_)
+        | AngularExpression::RegularExpressionLiteral(_) => {}
     }
 }
 
@@ -478,10 +601,77 @@ impl<'a> R3Visitor<'a> for CandidateMatcher<'_, 'a> {
             self.selectorless = true;
         }
         self.record(&template_selector(template));
+        for attr in &template.template_attrs {
+            if let R3TemplateAttr::Bound(attr) = attr {
+                self.record_pipes(&attr.value);
+            }
+        }
         self.visit_template_children(template);
     }
 
+    fn visit_bound_text(&mut self, text: &R3BoundText<'a>) {
+        self.record_pipes(&text.value);
+    }
+
+    fn visit_bound_attribute(&mut self, attr: &R3BoundAttribute<'a>) {
+        self.record_pipes(&attr.value);
+    }
+
+    fn visit_bound_event(&mut self, event: &R3BoundEvent<'a>) {
+        self.record_pipes(&event.handler);
+    }
+
+    fn visit_icu(&mut self, icu: &R3Icu<'a>) {
+        for (_, var) in &icu.vars {
+            self.record_pipes(&var.value);
+        }
+        for (_, placeholder) in &icu.placeholders {
+            if let R3IcuPlaceholder::BoundText(text) = placeholder {
+                self.record_pipes(&text.value);
+            }
+        }
+    }
+
+    fn visit_if_block_branch(&mut self, branch: &R3IfBlockBranch<'a>) {
+        if let Some(expression) = &branch.expression {
+            self.record_pipes(expression);
+        }
+        visit_all(self, &branch.children);
+    }
+
+    fn visit_for_loop_block(&mut self, block: &R3ForLoopBlock<'a>) {
+        self.record_pipes(&block.expression.ast);
+        self.record_pipes(&block.track_by.ast);
+        visit_all(self, &block.children);
+        if let Some(empty) = &block.empty {
+            self.visit_for_loop_block_empty(empty);
+        }
+    }
+
+    fn visit_switch_block(&mut self, block: &R3SwitchBlock<'a>) {
+        self.record_pipes(&block.expression);
+        for group in &block.groups {
+            self.visit_switch_block_case_group(group);
+        }
+    }
+
+    fn visit_switch_block_case(&mut self, case: &R3SwitchBlockCase<'a>) {
+        if let Some(expression) = &case.expression {
+            self.record_pipes(expression);
+        }
+    }
+
+    fn visit_let_declaration(&mut self, decl: &R3LetDeclaration<'a>) {
+        self.record_pipes(&decl.value);
+    }
+
     fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
+        // Its `when` conditions belong to the enclosing template.
+        for triggers in [&block.triggers, &block.prefetch_triggers, &block.hydrate_triggers] {
+            if let Some(when) = &triggers.when {
+                self.record_pipes(&when.value);
+            }
+        }
         let outer = self.in_defer;
         self.in_defer = true;
         for child in &block.children {

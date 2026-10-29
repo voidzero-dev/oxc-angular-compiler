@@ -690,33 +690,64 @@ export class Parent {}
 }
 
 #[test]
-fn pipe_stays_eager() {
+fn pipe_used_only_inside_defer_is_lazy_loaded() {
+    // ngc matches a standalone pipe by its name: used only inside `@defer`,
+    // it is lazy-loaded like a component, and listed after the directives.
+    // A `when` condition is part of the enclosing template.
     let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
     create_test_file(
         dir.path(),
         "app/shout.ts",
-        r#"
+        r"
 import { Pipe } from '@angular/core';
 
 @Pipe({ name: 'shout' })
 export class ShoutPipe { transform(v: string) { return v; } }
-"#,
+",
     );
-    let result = transform(
-        &dir,
-        r#"
+    create_test_file(
+        dir.path(),
+        "app/whisper.ts",
+        r"
+import { Pipe } from '@angular/core';
+
+@Pipe({ name: 'whisper' })
+export class WhisperPipe { transform(v: string) { return v; } }
+",
+    );
+    let source = r"
 import { Component } from '@angular/core';
 import { ShoutPipe } from './shout';
+import { WhisperPipe } from './whisper';
+import { LazyCmp } from './lazy';
 
 @Component({
     selector: 'app-parent',
-    imports: [ShoutPipe],
-    template: '@defer { {{ name | shout }} }',
+    imports: [ShoutPipe, LazyCmp, WhisperPipe],
+    template: '@defer { {{ name | shout }} <app-lazy/> } @defer (when name | whisper) { {{ name | whisper }} }',
 })
 export class Parent { name = ''; }
-"#,
+";
+    let code = &transform(&dir, source).code;
+    assert!(
+        compact(code).contains(
+            "constParent_Defer_1_DepsFn=()=>[import(\"./lazy\").then((m)=>m.LazyCmp),import(\"./shout\").then((m)=>m.ShoutPipe)];"
+        ),
+        "{code}"
     );
-    assert_eager(&result.code, "./shout");
+    assert!(compact(code).contains("constParent_Defer_4_DepsFn=()=>[WhisperPipe];"), "{code}");
+    assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[WhisperPipe])"), "{code}");
+    assert!(code.contains("import { WhisperPipe } from './whisper'"), "{code}");
+    assert!(!code.contains("import { ShoutPipe }"), "{code}");
+
+    let code = &transform_with(&dir, source, &partial_options()).code;
+    assert!(
+        compact(code).contains(
+            "deferBlockDependencies:[()=>[import(\"./lazy\").then((m)=>m.LazyCmp),import(\"./shout\").then((m)=>m.ShoutPipe)],()=>[WhisperPipe]]"
+        ),
+        "{code}"
+    );
 }
 
 #[test]

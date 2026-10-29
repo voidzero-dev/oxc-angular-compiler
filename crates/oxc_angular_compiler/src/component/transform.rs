@@ -3579,13 +3579,13 @@ pub fn transform_angular_file(
                 if info.is_type_only {
                     return None;
                 }
-                let (selector, declaration) = analyzer.standalone_directive_selector(
+                let (class_use, declaration) = analyzer.standalone_directive_selector(
                     info.source_module.as_str(),
                     export_name,
                     std::path::Path::new(path),
                     implicit_standalone,
                 )?;
-                Some(ImportedClass { selector, is_imported, declaration })
+                Some(ImportedClass { class_use, is_imported, declaration })
             }
         });
     // Without cross-file analysis, only the classes declared in this file
@@ -5854,7 +5854,7 @@ type ImportSelector<'f> = &'f dyn Fn(&ImportRef<'_>) -> Option<ImportedClass>;
 /// What `@defer` reads of the standalone component or directive an `imports`
 /// entry refers to.
 struct ImportedClass {
-    selector: String,
+    class_use: super::defer_resolver::ClassUse,
     /// Whether a named import brings it in, which `@defer` may then replace
     /// with a dynamic `import()`.
     is_imported: bool,
@@ -5893,14 +5893,14 @@ fn local_class<'p>(
     if import.namespace.is_some() {
         return None;
     }
-    let selector = super::defer_resolver::local_standalone_class_selector(
+    let class_use = super::defer_resolver::local_standalone_class_selector(
         program,
         consts,
         &import.name,
         implicit_standalone,
     )?;
     Some(ImportedClass {
-        selector,
+        class_use,
         is_imported: false,
         declaration: (String::new(), import.name.to_string()),
     })
@@ -5915,7 +5915,7 @@ type CanDefer<'f> = &'f dyn Fn(&str, &[Ident<'_>]) -> bool;
 /// `resolveDeferBlocks` finds it.
 struct DeferCandidates<'a> {
     /// Each `imports` class with a known selector.
-    candidates: std::vec::Vec<(Ident<'a>, std::vec::Vec<crate::pipeline::selector::CssSelector>)>,
+    candidates: std::vec::Vec<super::defer_resolver::Candidate<'a>>,
     /// The candidates the template matches only inside `@defer` blocks.
     block_only: std::vec::Vec<Ident<'a>>,
     /// The `imports` entries naming a `block_only` candidate a named import
@@ -5947,28 +5947,30 @@ fn implicit_defer_candidates<'a>(
     let mut imported = std::vec::Vec::new();
     // Each class is listed once, where `imports` first names it, as ngc's
     // scope does; an identifier naming it may still lazy-load it.
-    let mut candidates: std::vec::Vec<(Ident<'a>, _)> = std::vec::Vec::new();
+    let mut candidates: std::vec::Vec<super::defer_resolver::Candidate<'a>> = std::vec::Vec::new();
     let mut declarations = std::vec::Vec::new();
     for import in &metadata.import_refs {
         let Some(class) = import_selector(import) else { continue };
         if class.is_imported {
             imported.push(import.key);
         }
-        match declarations.iter().position(|declaration| *declaration == class.declaration) {
-            Some(index) => {
-                if class.is_imported && !imported.contains(&candidates[index].0) {
-                    candidates[index].0 = import.key;
-                }
+        if let Some(index) =
+            declarations.iter().position(|declaration| *declaration == class.declaration)
+        {
+            if class.is_imported && !imported.contains(&candidates[index].0) {
+                candidates[index].0 = import.key;
             }
-            None => {
-                declarations.push(class.declaration);
-                candidates.push((
-                    import.key,
-                    crate::pipeline::selector::CssSelector::parse(&class.selector),
-                ));
-            }
+        } else {
+            declarations.push(class.declaration);
+            candidates
+                .push((import.key, super::defer_resolver::CandidateUse::of(&class.class_use)));
         }
     }
+    // ngc's declarations list the pipes after the directives
+    // (`componentDependenciesToDeclarations`).
+    candidates.sort_by_key(|(_, class_use)| {
+        matches!(class_use, super::defer_resolver::CandidateUse::Pipe(_))
+    });
     let block_only = super::defer_resolver::implicitly_deferred_imports(nodes, &candidates);
     let marked = metadata
         .import_entry_classes
