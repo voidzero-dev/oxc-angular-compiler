@@ -19,8 +19,7 @@ use std::hash::{DefaultHasher, Hasher};
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, Class, Declaration, ExportDefaultDeclarationKind, Expression, ObjectPropertyKind,
-    Program, PropertyKey, PropertyKind, Statement,
+    Argument, Class, Expression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
@@ -78,10 +77,14 @@ pub(super) fn hmr_fingerprint_of_program(
 ) -> ComponentHmrFingerprint {
     let mut components = Vec::new();
     let mut excluded = Vec::new();
-    for stmt in &program.body {
-        let Some(class) = top_level_class(stmt) else { continue };
+    // Every class the transform compiles, nested ones too. A name two classes
+    // declare compiles without HMR, so neither is read.
+    let declared_classes = crate::util::declared_classes(program);
+    let ambiguous = super::transform::ambiguous_class_names(&declared_classes);
+    for declared in &declared_classes {
+        let class = declared.class;
         let Some(id) = &class.id else { continue };
-        if !is_compiled(id.name.as_str()) {
+        if ambiguous.contains(id.name.as_str()) || !is_compiled(id.name.as_str()) {
             continue;
         }
         if collect_excluded_ranges(class, consts, &mut excluded) {
@@ -90,22 +93,6 @@ pub(super) fn hmr_fingerprint_of_program(
     }
     excluded.sort_unstable_by_key(|span| span.start);
     fingerprint_with_exclusions(source, components, excluded)
-}
-
-/// A class declared at the top level, the places the transform compiles.
-fn top_level_class<'a>(stmt: &'a Statement<'a>) -> Option<&'a Class<'a>> {
-    match stmt {
-        Statement::ClassDeclaration(class) => Some(class),
-        Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-            ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class),
-            _ => None,
-        },
-        Statement::ExportDeclaration(export) => match &export.declaration {
-            Declaration::ClassDeclaration(class) => Some(class),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 /// Push the inside of each literal `template` / `styles` value in `class`'s

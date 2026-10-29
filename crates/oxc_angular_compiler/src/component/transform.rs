@@ -5874,7 +5874,7 @@ fn implicit_defer_candidates<'a>(
 
 /// The class names two or more classes of the file declare (in different
 /// functions or blocks).
-fn ambiguous_class_names<'a>(
+pub(super) fn ambiguous_class_names<'a>(
     declared_classes: &[crate::util::DeclaredClass<'_, 'a>],
 ) -> rustc_hash::FxHashSet<&'a str> {
     let mut seen = rustc_hash::FxHashSet::default();
