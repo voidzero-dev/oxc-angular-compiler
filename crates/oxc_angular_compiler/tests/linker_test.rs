@@ -816,3 +816,54 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", n
     assert!(result.code.contains(r#"["x"]"#), "{}", result.code);
     assert!(result.code.contains("[\"y\u{85}\"]"), "{}", result.code);
 }
+
+/// `ɵɵngDeclareComponent` of ngtsc 21.2.25 for
+/// `@Component({ selector: 'span[bitBadge]', template: '<ng-content></ng-content>' })`.
+const BADGE_COMPONENT: &str = r#"import * as i0 from "@angular/core";
+export class BadgeComponent {}
+BadgeComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.25", type: BadgeComponent, isStandalone: true, selector: "span[bitBadge]", ngImport: i0, template: '<ng-content></ng-content>', isInline: true });
+"#;
+
+/// Angular before v22.0.0-next.4 sets `attrs` to the first selector's
+/// attributes, pooled after the host bindings' constants and before the
+/// template's, as Angular 21.2.25's linker does.
+#[test]
+fn test_link_selector_attrs_before_v22() {
+    let code = link_for_version(BADGE_COMPONENT, Some(AngularVersion::new(21, 2, 25)));
+    let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(linked.contains(r#"const_c0=["bitBadge",""];const_c1=["*"];"#), "{code}");
+    assert!(linked.contains("attrs:_c0,ngContentSelectors:_c1,"), "{code}");
+
+    for version in [Some(AngularVersion::new(22, 0, 0)), None] {
+        let code = link_for_version(BADGE_COMPONENT, version);
+        assert!(!code.contains("attrs:"), "{version:?}:\n{code}");
+        assert!(code.contains(r#"const _c0 = ["*"];"#), "{version:?}:\n{code}");
+    }
+
+    // After the query predicates and the host bindings' constants.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.25", type: C, isStandalone: true, selector: "span[bitBadge]", host: { properties: { "attr.a": "[1, 2]" } }, viewQueries: [{ propertyName: "q", first: true, predicate: ["x"], descendants: true }], ngImport: i0, template: '<ng-content></ng-content>', isInline: true });
+"#;
+    let code = link_for_version(code, Some(AngularVersion::new(21, 2, 25)));
+    let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        linked.contains(
+            r#"const_c0=["x"];const_c1=()=>[1,2];const_c2=["bitBadge",""];const_c3=["*"];"#
+        ),
+        "{code}"
+    );
+    assert!(linked.contains("attrs:_c2,ngContentSelectors:_c3,"), "{code}");
+
+    // Shared with an equal predicate.
+    let code = r#"import * as i0 from "@angular/core";
+export class D {}
+D.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.25", type: D, isStandalone: true, selector: "[x]", viewQueries: [{ propertyName: "q", first: true, predicate: ["x, "], descendants: true }], ngImport: i0, template: '', isInline: true });
+"#;
+    let code = link_for_version(code, Some(AngularVersion::new(21, 2, 25)));
+    let linked: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert_eq!(linked.matches("const_c").count(), 1, "{code}");
+    assert!(linked.contains(r#"const_c0=["x",""];"#), "{code}");
+    assert!(linked.contains("ɵɵviewQuery(_c0,5)"), "{code}");
+    assert!(linked.contains("},attrs:_c0,decls:0,"), "{code}");
+}

@@ -54,7 +54,7 @@ use crate::output::emitter::escape_string;
 use crate::pipeline::constant_pool::{ConstantPool, SharedPool};
 use crate::pipeline::emit::declare_pooled_constants_from;
 use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
-use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
+use crate::pipeline::selector::{CssSelector, R3SelectorElement, parse_selector_to_r3_selector};
 use crate::util::lone_surrogate::js_str_to_str;
 
 /// Check if an object property key needs quoting because it contains unsafe characters.
@@ -1609,7 +1609,7 @@ fn build_queries(
                 query_selectors(selectors).map_or_else(
                     || source[expr.span().start as usize..expr.span().end as usize].to_string(),
                     |selectors| {
-                        JsEmitter::new().emit_expression(&pool_query_selectors(pool, &selectors))
+                        JsEmitter::new().emit_expression(&pool_string_array(pool, &selectors))
                     },
                 )
             } else {
@@ -1730,21 +1730,23 @@ fn query_selectors<'a>(
     Some(refs)
 }
 
-/// Pool the refs of a string array query predicate as one constant, as
-/// Angular's `getQueryPredicate` does with `getConstLiteral(..., true)`.
-fn pool_query_selectors<'a>(
+/// Pool an array of strings as one constant, as Angular's `getQueryPredicate`
+/// (for the refs of a string query predicate) and v21's
+/// `compileComponentFromMetadata` (for `attrs`) do with
+/// `getConstLiteral(..., true)`.
+fn pool_string_array<'a>(
     pool: &mut ConstantPool<'a>,
-    selectors: &[impl AsRef<str>],
+    values: &[impl AsRef<str>],
 ) -> OutputExpression<'a> {
     use oxc_allocator::FromIn;
     use oxc_str::Ident;
 
     let allocator = pool.allocator();
-    let mut entries = oxc_allocator::Vec::with_capacity_in(selectors.len(), &allocator);
-    for selector in selectors {
+    let mut entries = oxc_allocator::Vec::with_capacity_in(values.len(), &allocator);
+    for value in values {
         entries.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Ident::from_in(selector.as_ref(), &allocator)),
+                value: LiteralValue::String(Ident::from_in(value.as_ref(), allocator)),
                 source_span: None,
             },
             &allocator,
@@ -1787,20 +1789,24 @@ fn link_queries<'a>(
     let view_query = get_array_property(meta, "viewQueries")
         .and_then(|queries| build_queries(queries, source, ns, type_name, false, &mut pool));
 
-    let emitter = JsEmitter::with_core_namespace(ns);
-    let mut declarations_js = String::new();
-    for decl in &declare_pooled_constants_from(&mut pool, 0) {
-        declarations_js.push_str(&emitter.emit_statement(decl));
-        declarations_js.push('\n');
-    }
-
     LinkedQueries {
         content_queries,
         view_query,
-        declarations_js,
+        declarations_js: declare_pooled_constants_js(&mut pool, ns),
         next_pool_index: pool.next_name_index(),
         shared_pool: pool.take_shared(),
     }
+}
+
+/// The declarations of the constants in `pool` as JS.
+fn declare_pooled_constants_js(pool: &mut ConstantPool<'_>, ns: &str) -> String {
+    let emitter = JsEmitter::with_core_namespace(ns);
+    let mut declarations_js = String::new();
+    for decl in &declare_pooled_constants_from(pool, 0) {
+        declarations_js.push_str(&emitter.emit_statement(decl));
+        declarations_js.push('\n');
+    }
+    declarations_js
 }
 
 /// Build the features array from component metadata.
@@ -1938,6 +1944,28 @@ fn link_component(
         )
     });
 
+    // Pool the `attrs` const when the first selector has attributes, after the
+    // host bindings and before the template. Only Angular before
+    // v22.0.0-next.4 adds it, in `compileComponentFromMetadata` after
+    // `baseDirectiveFields`.
+    let mut attrs_pool = ConstantPool::with_starting_index(
+        &template_allocator,
+        host_output
+            .as_ref()
+            .map_or(query_next_pool_index, |host_output| host_output.next_pool_index),
+    );
+    attrs_pool.inherit_shared(shared_pool);
+    let attrs = get_string_property(meta, "selector")
+        .filter(|_| options.angular_version.is_some_and(|v| v.emits_selector_attrs()))
+        .and_then(|selector| CssSelector::parse(selector).into_iter().next())
+        .map(|first_selector| first_selector.get_attrs())
+        .filter(|attrs| !attrs.is_empty())
+        .map(|attrs| {
+            let attrs: Vec<&str> = attrs.iter().map(String::as_str).collect();
+            JsEmitter::new().emit_expression(&pool_string_array(&mut attrs_pool, &attrs))
+        });
+    let attrs_declarations_js = declare_pooled_constants_js(&mut attrs_pool, ns);
+
     let template_output = crate::component::compile_template_for_linker(
         &template_allocator,
         template_ref,
@@ -1947,10 +1975,8 @@ fn link_component(
         ns,
         options.angular_version,
         &defer_block_deps,
-        host_output
-            .as_ref()
-            .map_or(query_next_pool_index, |host_output| host_output.next_pool_index),
-        shared_pool,
+        attrs_pool.next_name_index(),
+        attrs_pool.take_shared(),
     )
     .ok()?;
 
@@ -2027,6 +2053,11 @@ fn link_component(
     // 12. features
     if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
+    }
+
+    // 12b. attrs (pooled above, before Angular v22)
+    if let Some(attrs) = attrs {
+        parts.push(format!("attrs: {attrs}"));
     }
 
     // 13. ngContentSelectors (from template compilation)
@@ -2231,10 +2262,11 @@ fn link_component(
     let define_component =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
-    // Wrap in IIFE with query, host binding and template declarations, in the
-    // order they were pooled
+    // Wrap in IIFE with query, host binding, attrs and template declarations,
+    // in the order they were pooled
     let mut declarations = query_declarations_js;
     declarations.push_str(&host_binding_declarations_js);
+    declarations.push_str(&attrs_declarations_js);
     declarations.push_str(&template_output.declarations_js);
     if declarations.trim().is_empty() {
         Some(define_component)
