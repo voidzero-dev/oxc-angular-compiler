@@ -232,18 +232,14 @@ fn get_query_predicate<'a>(
             let mut entries = Vec::new_in(&allocator);
 
             for selector in selectors.iter() {
-                // Split by comma and trim
-                for part in selector.as_str().split(',') {
-                    let trimmed = part.trim();
-                    if !trimmed.is_empty() {
-                        entries.push(OutputExpression::Literal(Box::new_in(
-                            LiteralExpr {
-                                value: LiteralValue::String(Ident::from(trimmed)),
-                                source_span: None,
-                            },
-                            &allocator,
-                        )));
-                    }
+                for part in split_query_predicate(selector.as_str()) {
+                    entries.push(OutputExpression::Literal(Box::new_in(
+                        LiteralExpr {
+                            value: LiteralValue::String(Ident::from(part)),
+                            source_span: None,
+                        },
+                        &allocator,
+                    )));
                 }
             }
 
@@ -262,6 +258,19 @@ fn get_query_predicate<'a>(
             }
         }
     }
+}
+
+/// The refs of one string of a query predicate: split by comma and trimmed,
+/// keeping empty parts (`'x, '` gives `["x", ""]`), as Angular's
+/// `getQueryPredicate` does with `selector.split(',').map(t => t.trim())`.
+pub fn split_query_predicate(selector: &str) -> impl Iterator<Item = &str> {
+    selector.split(',').map(js_trim)
+}
+
+/// `String.prototype.trim`: Unicode white space and line terminators, plus
+/// U+FEFF but not U+0085.
+fn js_trim(value: &str) -> &str {
+    value.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{FEFF}')
 }
 
 // Note: get_query_create_parameters has been replaced by:

@@ -7698,6 +7698,60 @@ export class MixedQueryComponent {
     );
 }
 
+/// Angular's `getQueryPredicate` splits a string predicate on `,` and trims
+/// each part, keeping the empty ones: ngtsc 22.2.3 gives `["x", ""]` for
+/// `@ViewChild('x, ')`, for decorator and signal queries alike.
+#[test]
+fn test_query_predicate_keeps_empty_parts() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, ContentChild, ViewChild, ViewChildren, viewChild, contentChildren } from '@angular/core';
+
+@Component({ selector: 'app-a', template: '', standalone: true })
+export class A {
+    a = viewChild('x, ');
+    b = contentChildren('x,,y');
+    @ViewChildren(', y') c: any;
+    @ContentChild(', ') d: any;
+}
+";
+
+    let result = transform_angular_file(&allocator, "a.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains(
+            r#"const_c0=["x","","y"];const_c1=["",""];const_c2=["x",""];const_c3=["","y"];"#
+        ),
+        "{}",
+        result.code
+    );
+}
+
+/// The predicate parts are trimmed with `String.prototype.trim`, which strips
+/// U+FEFF but not U+0085: ngtsc 22.2.3 gives `["x"]` for `@ViewChild('\uFEFFx')`
+/// and `["y\u0085"]` for `@ViewChild('y\u0085')`.
+#[test]
+fn test_query_predicate_trims_like_js() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, ViewChild } from '@angular/core';
+
+@Component({ selector: 'app-a', template: '', standalone: true })
+export class A {
+    @ViewChild('\uFEFFx') q: any;
+    @ViewChild('y\u0085') r: any;
+}
+";
+
+    let result = transform_angular_file(&allocator, "a.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(result.code.contains("const _c0 = [\"x\"];"), "{}", result.code);
+    assert!(result.code.contains("const _c1 = [\"y\u{85}\"];"), "{}", result.code);
+}
+
 /// Compatibility guard. Two contracts at once:
 ///
 /// 1. **`None` = assume latest.** Crates-wide convention: unset

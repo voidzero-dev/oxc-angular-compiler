@@ -708,3 +708,35 @@ C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "22.2.2", n
     }
     assert!(!linked.contains("C_Defer_4_DepsFn"), "{}", result.code);
 }
+
+#[test]
+fn test_link_query_predicate_splits_refs() {
+    // Angular's `getQueryPredicate` splits each string of the predicate on `,`
+    // and trims each part, keeping the empty ones, as ngtsc 22.2.3 partial
+    // output linked by Angular 22.2.3's linker shows.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", ngImport: i0, type: C, isStandalone: true, selector: "c", queries: [{ propertyName: "a", predicate: ["y, z"] }], viewQueries: [{ propertyName: "b", first: true, predicate: ["x, "], descendants: true }], template: "" });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    let linked: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(linked.contains(r#"ɵɵcontentQuery(dirIndex,["y","z"],4)"#), "{}", result.code);
+    assert!(linked.contains(r#"ɵɵviewQuery(["x",""],5)"#), "{}", result.code);
+}
+
+#[test]
+fn test_link_query_predicate_trims_like_js() {
+    // The parts are trimmed with `String.prototype.trim`, which strips U+FEFF
+    // but not U+0085, as Angular 22.2.3's linker shows.
+    let code = r#"import * as i0 from "@angular/core";
+export class C {}
+C.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.2", ngImport: i0, type: C, isStandalone: true, selector: "c", viewQueries: [{ propertyName: "q", first: true, predicate: ["\uFEFFx"], descendants: true }, { propertyName: "r", first: true, predicate: ["y\u0085"], descendants: true }], template: "" });
+"#;
+    let allocator = Allocator::default();
+    let result = link(&allocator, code, "test.mjs");
+    assert!(result.linked);
+    assert!(result.code.contains(r#"["x"]"#), "{}", result.code);
+    assert!(result.code.contains("[\"y\u{85}\"]"), "{}", result.code);
+}

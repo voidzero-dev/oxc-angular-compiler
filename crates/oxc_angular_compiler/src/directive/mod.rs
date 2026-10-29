@@ -62,4 +62,5 @@ pub use property_decorators::{
     extract_input_metadata, extract_input_metadata_in, extract_output_metadata,
     extract_output_metadata_in, extract_view_queries, find_angular_class_decorator,
 };
+pub(crate) use query::split_query_predicate;
 pub use query::{create_content_queries_function, create_view_queries_function};

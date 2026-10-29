@@ -44,6 +44,7 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
 
 use crate::AngularVersion;
+use crate::directive::split_query_predicate;
 use crate::optimizer::Edit;
 use crate::output::emitter::escape_string;
 use crate::pipeline::constant_pool::SharedPool;
@@ -1596,17 +1597,23 @@ fn build_queries(
         // For type references, unwrap forwardRef() (TS linker: extractForwardRef(predicateExpr)).
         let predicate = if let Some(expr) = get_property_expression(query_obj.as_ref(), "predicate")
         {
-            if matches!(expr, Expression::ArrayExpression(_)) {
-                // String array predicate — pass through as-is
-                let span = expr.span();
-                &source[span.start as usize..span.end as usize]
+            if let Expression::ArrayExpression(selectors) = expr {
+                // String array predicate — split into its refs, or pass through as-is
+                query_selectors(selectors).map_or_else(
+                    || source[expr.span().start as usize..expr.span().end as usize].to_string(),
+                    |selectors| {
+                        let selectors: Vec<String> =
+                            selectors.iter().map(|s| escape_string(s, false)).collect();
+                        format!("[{}]", selectors.join(", "))
+                    },
+                )
             } else {
                 // Type reference — unwrap forwardRef if present
                 let (src, _) = extract_forward_ref(expr, source);
-                src
+                src.to_string()
             }
         } else {
-            "null"
+            "null".to_string()
         };
 
         // Calculate flags: DESCENDANTS=1, IS_STATIC=2, EMIT_DISTINCT_CHANGES_ONLY=4
@@ -1684,6 +1691,21 @@ fn build_queries(
             "function {type_name}_Query(rf, ctx) {{\nif (rf & 1) {{\n{create_block};\n}}\nif (rf & 2) {{\n{update_block};\n}}\n}}"
         ))
     }
+}
+
+/// The refs of a string array query predicate, or `None` if an entry is not a
+/// static string.
+///
+/// Each entry may hold comma-separated refs (`"a, b"`), split and trimmed with
+/// the empty parts kept (`"x, "` gives `x` and an empty ref), as Angular's
+/// `getQueryPredicate` does (see [`split_query_predicate`]).
+fn query_selectors<'a>(selectors: &'a oxc_ast::ast::ArrayExpression<'a>) -> Option<Vec<&'a str>> {
+    let mut refs = Vec::new();
+    for el in &selectors.elements {
+        let selector = as_static_string(el.as_expression()?)?;
+        refs.extend(split_query_predicate(selector));
+    }
+    Some(refs)
 }
 
 /// Build the features array from component metadata.
