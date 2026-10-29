@@ -240,3 +240,34 @@ export class Cmp { w = 1; h = 2; f(x: any) { return ''; } }
     assert_eq!(squashed.matches(",_c0,ctx.w,ctx.h)").count(), 2, "{}", linked.code);
     assert_eq!(squashed.matches(",arrowFn0,ctx)").count(), 2, "{}", linked.code);
 }
+
+#[test]
+fn pure_functions_whose_strings_join_alike_stay_apart() {
+    // `'a","b'` must not read as the two entries `'a', 'b'`. Angular's
+    // `GenericKeyFn` doesn't escape strings and gives both bindings one
+    // function, so `B` would get a two-entry array; Oxc keeps them apart, in
+    // one class as across classes.
+    let code = transform(
+        r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'a-a', template: '<i [title]="[k, &apos;a&quot;,&quot;b&apos;]"></i>' })
+export class A { k = 1; }
+
+@Component({
+  selector: 'b-b',
+  template: '<i [title]="[k, &apos;a&apos;, &apos;b&apos;]" [id]="[k, &apos;a&quot;,&quot;b&apos;]"></i>',
+})
+export class B { k = 1; }
+"#,
+    );
+    assert_eq!(constants(&code), ["_c0", "_c1"], "{code}");
+    let squashed = squash(&code);
+    assert_eq!(value(&squashed, "_c0"), r#"(a0)=>[a0,"a\",\"b"]"#, "{code}");
+    assert_eq!(value(&squashed, "_c1"), r#"(a0)=>[a0,"a","b"]"#, "{code}");
+    assert!(
+        squashed.contains(r#"ɵɵdomProperty("title",i0.ɵɵpureFunction1(2,_c1,ctx.k))("id""#),
+        "{code}"
+    );
+    assert_eq!(squashed.matches(",_c0,ctx.k)").count(), 2, "{code}");
+}

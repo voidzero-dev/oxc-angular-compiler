@@ -178,8 +178,7 @@ fn generate_expression_key(expr: &IrExpression<'_>) -> String {
                     if *is_spread {
                         format!("...{}", value_key)
                     } else {
-                        let key_str =
-                            if *quoted { format!("\"{}\"", key) } else { key.to_string() };
+                        let key_str = if *quoted { quote_key(key) } else { key.to_string() };
                         format!("{}:{}", key_str, value_key)
                     }
                 })
@@ -240,6 +239,13 @@ fn generate_expression_key(expr: &IrExpression<'_>) -> String {
     }
 }
 
+/// `s` in quotes, escaped, so no string can read as several entries in a
+/// key (`'a","b'` against `'a', 'b'`). Angular's `GenericKeyFn` doesn't
+/// escape and shares one pure function between such bindings.
+fn quote_key(s: &str) -> String {
+    format!("{s:?}")
+}
+
 /// Generate a key for an Angular AST expression.
 ///
 /// This matches the key format from Angular's `GenericKeyFn.keyOf` in `constant_pool.ts`.
@@ -247,9 +253,9 @@ fn generate_angular_expression_key(expr: &crate::ast::expression::AngularExpress
     use crate::ast::expression::{AngularExpression, LiteralValue};
 
     match expr {
-        // LiteralExpr with string value -> `"${value}"`
+        // LiteralExpr with string value -> `"${value}"`, escaped (see `quote_key`)
         AngularExpression::LiteralPrimitive(lit) => match &lit.value {
-            LiteralValue::String(s) => format!("\"{}\"", s),
+            LiteralValue::String(s) => quote_key(s),
             LiteralValue::Number(n) => {
                 // Match JavaScript's String() behavior for numbers
                 if n.is_nan() {
@@ -297,7 +303,7 @@ fn generate_angular_expression_key(expr: &crate::ast::expression::AngularExpress
                 .filter_map(|(key, value)| {
                     if let LiteralMapKey::Property(prop) = key {
                         let key_str = if prop.quoted {
-                            format!("\"{}\"", prop.key)
+                            quote_key(prop.key.as_str())
                         } else {
                             prop.key.to_string()
                         };
@@ -402,7 +408,7 @@ fn generate_angular_expression_key(expr: &crate::ast::expression::AngularExpress
         }
 
         AngularExpression::Interpolation(interp) => {
-            let strings: Vec<_> = interp.strings.iter().map(|s| format!("\"{}\"", s)).collect();
+            let strings: Vec<_> = interp.strings.iter().map(|s| quote_key(s)).collect();
             let exprs: Vec<_> =
                 interp.expressions.iter().map(generate_angular_expression_key).collect();
             format!("interp([{}],[{}])", strings.join(","), exprs.join(","))
@@ -415,7 +421,7 @@ fn generate_angular_expression_key(expr: &crate::ast::expression::AngularExpress
         }
 
         AngularExpression::TemplateLiteral(tl) => {
-            let elements: Vec<_> = tl.elements.iter().map(|e| format!("\"{}\"", e.text)).collect();
+            let elements: Vec<_> = tl.elements.iter().map(|e| quote_key(e.text.as_str())).collect();
             let exprs: Vec<_> =
                 tl.expressions.iter().map(generate_angular_expression_key).collect();
             format!("template([{}],[{}])", elements.join(","), exprs.join(","))
@@ -424,7 +430,7 @@ fn generate_angular_expression_key(expr: &crate::ast::expression::AngularExpress
         AngularExpression::TaggedTemplateLiteral(ttl) => {
             let tag = generate_angular_expression_key(&ttl.tag);
             let elements: Vec<_> =
-                ttl.template.elements.iter().map(|e| format!("\"{}\"", e.text)).collect();
+                ttl.template.elements.iter().map(|e| quote_key(e.text.as_str())).collect();
             let exprs: Vec<_> =
                 ttl.template.expressions.iter().map(generate_angular_expression_key).collect();
             format!("tagged({},template([{}],[{}]))", tag, elements.join(","), exprs.join(","))
