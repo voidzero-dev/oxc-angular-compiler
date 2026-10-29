@@ -52,6 +52,7 @@ use crate::class_metadata::{
 use crate::i18n::serializer::is_i18n_attribute;
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, OutputExpression, ReadVarExpr,
+    WrappedNodeExpr,
 };
 use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
@@ -286,10 +287,19 @@ pub(super) fn defer_block_dependencies<'a>(
 /// `dependencies` that `deferred` lists, and a plain reference to the others.
 /// `None` when the block has no dependencies (`compileDeferBlocks` in ngc's
 /// component `handler.ts`).
+///
+/// ngc's plain reference is the `WrappedNodeExpr` its `LocalIdentifierStrategy`
+/// emits (`Reference.getIdentityIn`): the name of a class declared in the
+/// file, which is the same node for every component and stays a plain read
+/// here, or for an imported class the identifier in this component's
+/// `imports`, found in `import_entry_classes`. Wrapped nodes are equal only
+/// when they are the same node, so the constant pool shares a function that
+/// reads an imported class within this component only.
 pub(super) fn compile_defer_block_resolver<'a>(
     allocator: &'a Allocator,
     dependencies: &[Ident<'a>],
     deferred: &[Ident<'a>],
+    import_entry_classes: &[Option<(Ident<'a>, oxc_span::Span)>],
     import_map: &ImportMap<'a>,
 ) -> Option<OutputExpression<'a>> {
     if dependencies.is_empty() {
@@ -304,11 +314,19 @@ pub(super) fn compile_defer_block_resolver<'a>(
         } else {
             None
         };
-        entries.push(deferrable.unwrap_or_else(|| {
-            OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+        let imports_identifier = import_entry_classes
+            .iter()
+            .flatten()
+            .find(|(class, _)| class == name && import_map.contains_key(name));
+        entries.push(deferrable.unwrap_or_else(|| match imports_identifier {
+            Some((_, span)) => OutputExpression::WrappedNode(oxc_allocator::Box::new_in(
+                WrappedNodeExpr { node_id: *name, source_span: Some(*span) },
+                &allocator,
+            )),
+            None => OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                 ReadVarExpr { name: *name, source_span: None },
                 &allocator,
-            ))
+            )),
         }));
     }
     let array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(

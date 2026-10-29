@@ -103,8 +103,7 @@ fn extract_pure_function<'a>(
             // Pool immediately (matching TypeScript's single-pass behavior)
             let fn_name = {
                 let mut pool = pool_cell.borrow_mut();
-                let (_, name) = pool.pool_pure_function(pf.args.len() as u32, &body_key, body);
-                name
+                pool.pool_pure_function(pf.args.len() as u32, &body_key, body)
             };
 
             // Set fn_ref to a direct variable reference (not ctx.property).

@@ -2960,7 +2960,7 @@ export class FirstComponent {
 @Component({
     selector: 'app-second',
     template: `
-        @for (user of users; track user.id) {
+        @for (user of users; track user.email) {
             <span>{{ user.email }}</span>
         }
     `,
@@ -2996,14 +2996,11 @@ export class SecondComponent {
         );
     }
 
-    // Verify we have at least 2 unique track variables (one from each component)
-    assert!(
-        track_names.len() >= 2,
-        "Expected at least 2 unique track variables, got {}. Variables: {:?}\nFull output:\n{}",
-        track_names.len(),
-        track_names,
-        code
-    );
+    // One track function from each component, numbered by the `_forTrack`
+    // count across the file like ngtsc's single pool.
+    let expected: std::collections::HashSet<String> =
+        ["_forTrack0", "_forTrack1"].into_iter().map(String::from).collect();
+    assert_eq!(track_names, expected, "Full output:\n{code}");
 
     // Also check for function declarations with numbered suffixes
     // Both components generate template functions with unique names

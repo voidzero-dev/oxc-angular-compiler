@@ -46,6 +46,7 @@ use oxc_span::{GetSpan, SourceType, Span};
 use crate::AngularVersion;
 use crate::optimizer::Edit;
 use crate::output::emitter::escape_string;
+use crate::pipeline::constant_pool::SharedPool;
 use crate::pipeline::phases::parse_extracted_styles::parse_style_string;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
@@ -1441,10 +1442,12 @@ fn link_directive(
         let host_input = extract_host_metadata_input(host_obj);
         let selector = get_string_property(meta, "selector");
         if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
+            &Allocator::default(),
             &host_input,
             type_name,
             selector,
             0, // directives have no template, so pool starts at 0
+            &mut SharedPool::default(),
             ns,
             options.angular_version,
         ) {
@@ -1791,6 +1794,26 @@ fn link_component(
         })
         .unwrap_or_default();
 
+    // Angular's `compileComponentFromMetadata` compiles the host bindings (in
+    // `baseDirectiveFields`) before the template, with one pool: the host
+    // bindings' constants come first, and the template reuses equal ones.
+    let host_obj = get_object_property(meta, "host");
+    let mut shared_pool = SharedPool::default();
+    let host_output = host_obj.and_then(|host_obj| {
+        // Extract host properties and listeners as HostMetadataInput and compile
+        // through the full Angular expression parser for correct output.
+        crate::component::compile_host_bindings_for_linker(
+            &template_allocator,
+            &extract_host_metadata_input(host_obj),
+            type_name,
+            get_string_property(meta, "selector"),
+            0,
+            &mut shared_pool,
+            ns,
+            options.angular_version,
+        )
+    });
+
     let template_output = crate::component::compile_template_for_linker(
         &template_allocator,
         template_ref,
@@ -1800,6 +1823,8 @@ fn link_component(
         ns,
         options.angular_version,
         &defer_block_deps,
+        host_output.as_ref().map_or(0, |host_output| host_output.next_pool_index),
+        shared_pool,
     )
     .ok()?;
 
@@ -1830,26 +1855,15 @@ fn link_component(
     }
 
     // 5-7. Host bindings (hostAttrs, hostVars, hostBindings)
-    if let Some(host_obj) = get_object_property(meta, "host") {
+    if let Some(host_obj) = host_obj {
         // Static attributes → hostAttrs
         let host_attrs = build_host_attrs(host_obj, source);
         if !host_attrs.is_empty() {
             parts.push(format!("hostAttrs: [{host_attrs}]"));
         }
 
-        // Dynamic bindings → hostVars + hostBindings function
-        // Extract host properties and listeners as HostMetadataInput and compile
-        // through the full Angular expression parser for correct output.
-        let host_input = extract_host_metadata_input(host_obj);
-        let selector = get_string_property(meta, "selector");
-        if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
-            &host_input,
-            type_name,
-            selector,
-            template_output.next_pool_index,
-            ns,
-            options.angular_version,
-        ) {
+        // Dynamic bindings → hostVars + hostBindings function (compiled above)
+        if let Some(host_output) = host_output {
             if host_output.host_vars > 0 {
                 parts.push(format!("hostVars: {}", host_output.host_vars));
             }
@@ -2095,11 +2109,10 @@ fn link_component(
     let define_component =
         format!("/*@__PURE__*/ {ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
-    // Wrap in IIFE with template and host binding declarations
-    let mut declarations = template_output.declarations_js;
-    if !host_binding_declarations_js.is_empty() {
-        declarations.push_str(&host_binding_declarations_js);
-    }
+    // Wrap in IIFE with host binding and template declarations, in the order
+    // they were pooled
+    let mut declarations = host_binding_declarations_js;
+    declarations.push_str(&template_output.declarations_js);
     if declarations.trim().is_empty() {
         Some(define_component)
     } else {

@@ -5827,7 +5827,7 @@ fn compile_component_full<'a>(
             .import_entry_classes
             .iter()
             .flatten()
-            .copied()
+            .map(|(name, _)| *name)
             .filter_map(|name| {
                 let (selector, can_defer) = import_selector(name.as_str())?;
                 if can_defer {
@@ -5887,7 +5887,7 @@ fn compile_component_full<'a>(
             if let Some(OutputExpression::LiteralArray(raw_imports)) = &mut metadata.raw_imports {
                 let mut classes = metadata.import_entry_classes.iter();
                 raw_imports.entries.retain(|_| {
-                    !classes.next().copied().flatten().is_some_and(|name| is_removed(&name))
+                    !classes.next().copied().flatten().is_some_and(|(name, _)| is_removed(&name))
                 });
                 // Nothing left to resolve at runtime: like a standalone
                 // component without `imports`, it gets no `dependencies`.
@@ -5993,6 +5993,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
+                    &metadata.import_entry_classes,
                     import_map,
                 );
                 (span, deps_fn)
@@ -6018,15 +6019,10 @@ fn compile_component_full<'a>(
     // component compiled, as a failed one does not move `shared_pool_index`.
     job.pool.inherit_shared(shared_pool.clone());
 
-    // BEFORE template compilation: Pool attrs const if first selector has attributes.
-    // This matches TypeScript Angular which adds attrs to the pool BEFORE template ingestion.
-    // By pooling attrs first, it gets _c0 (or the first available index).
-    // See: packages/compiler/src/render3/view/compiler.ts lines 192-212
-    let attrs_ref = pool_selector_attrs(allocator, &mut job, metadata);
-
-    // BEFORE template compilation: Pool query predicates so they
-    // appear in the constant table as `attrs -> query predicates ->
-    // pure functions`.
+    // BEFORE template compilation: Pool query predicates, then the host
+    // bindings' constants, then the selector attrs, as Angular's
+    // `compileComponentFromMetadata` runs `baseDirectiveFields` before it
+    // pools the attrs and ingests the template.
     //
     // Order matters: upstream ngtsc pools **content queries first, then
     // view queries** (compiler/src/render3/view/compiler.ts emits
@@ -6063,25 +6059,21 @@ fn compile_component_full<'a>(
         None
     };
 
-    let compiled = compile_template(&mut job);
-
-    if !job.emit_errors.is_empty() {
-        diagnostics.append(&mut job.emit_errors);
-        return Err(diagnostics);
-    }
-
-    // Stage 6: Compile host bindings (if any)
-    // Pass the template pool's current index to ensure host binding constants
-    // continue from where template compilation left off (avoiding duplicate names)
-    let template_pool_index = job.pool.next_name_index();
+    // Compile host bindings (if any) in `baseDirectiveFields`, after the
+    // queries. Their pool continues from the query predicates, and the
+    // template's pool from theirs, as both are one pool in Angular.
+    let query_constant_count = job.pool.len();
+    let mut component_pool = job.pool.take_shared();
     let host_binding_output = compile_component_host_bindings(
         &allocator,
         job.core_namespace.as_str(),
         metadata,
-        template_pool_index,
+        job.pool.next_name_index(),
+        &mut component_pool,
         options.angular_version,
         options.legacy_optional_chaining,
     );
+    job.pool.inherit_shared(component_pool);
 
     // Extract the result and update pool index if host bindings were compiled
     let (host_binding_result, host_binding_next_pool_index, host_binding_declarations) =
@@ -6098,15 +6090,27 @@ fn compile_component_full<'a>(
             }
             None => (None, None, OxcVec::new_in(&allocator)),
         };
+    if let Some(index) = host_binding_next_pool_index {
+        job.pool.continue_from(index);
+    }
+
+    // Pool attrs const if first selector has attributes, after the host
+    // bindings and before the template.
+    // See: packages/compiler/src/render3/view/compiler.ts lines 192-212
+    let attrs_ref = pool_selector_attrs(allocator, &mut job, metadata);
+
+    let compiled = compile_template(&mut job);
+
+    if !job.emit_errors.is_empty() {
+        diagnostics.append(&mut job.emit_errors);
+        return Err(diagnostics);
+    }
 
     // Stage 7: Generate ɵcmp/ɵfac definitions
     // The namespace registry is shared across all components in the file to ensure
     // consistent namespace assignments between factory generation and import statements.
     // Pass the pre-pooled attrs_ref so the attrs entry uses the correct constant index
-    // The styles pool their long strings after the host bindings' constants.
-    if let Some(index) = host_binding_next_pool_index {
-        job.pool.continue_from(index);
-    }
+    // The styles pool their long strings after the template's constants.
     let template_constant_count = job.pool.len();
     let definitions = generate_component_definitions(
         &allocator,
@@ -6124,17 +6128,23 @@ fn compile_component_full<'a>(
     // Emit JavaScript
     let emitter = JsEmitter::new();
 
-    // Emit declarations (child view functions, constants)
+    // Emit declarations in the order they were pooled: the query predicates
+    // (the template pool's first constants), the host bindings' constants,
+    // then the template's (constants, child view functions).
     let mut declarations_js = String::new();
-    for decl in compiled.declarations.iter() {
+    let (query_declarations, template_declarations) =
+        compiled.declarations.split_at(query_constant_count);
+    for decl in
+        query_declarations.iter().chain(&host_binding_declarations).chain(template_declarations)
+    {
         declarations_js.push_str(&emitter.emit_statement(decl));
         declarations_js.push('\n');
     }
 
     // An HMR update replaces the template fields of the live definition, so
     // it takes them from the definition just built: the same text the full
-    // transform emits. Only the template's declarations go along; the host
-    // binding's belong to fields the update keeps.
+    // transform emits. The host bindings' declarations go along too, as the
+    // template may share their constants.
     let hmr_update = hmr_update.then(|| HmrUpdateParts {
         template_js: cmp_definition_field(&definitions.cmp_definition, "template")
             .map(|template| emitter.emit_expression(template))
@@ -6151,12 +6161,6 @@ fn compile_component_full<'a>(
         .map(|selectors| emitter.emit_expression(selectors)),
         styles: cmp_definition_styles(&definitions.cmp_definition, &job.pool),
     });
-
-    // Emit host binding declarations (pooled constants like pure functions)
-    for decl in host_binding_declarations.iter() {
-        declarations_js.push_str(&emitter.emit_statement(decl));
-        declarations_js.push('\n');
-    }
 
     // Emit the long styles this component shared (the pool's last constants)
     for decl in &declare_pooled_constants_from(&mut job.pool, template_constant_count) {
@@ -6254,8 +6258,6 @@ fn compile_component_full<'a>(
     };
 
     // Get the next pool index for the next component in this file
-    // (the template pool continued from the host binding pool's next index
-    // before the styles were pooled)
     let next_pool_index = job.pool.next_name_index();
 
     // Collect any diagnostics from the compilation job
@@ -6741,13 +6743,14 @@ pub fn compile_template_to_js_with_options<'a>(
     // Stage 6: Compile host bindings if provided via options
     let host_pool_starting_index = job.pool.next_name_index();
     if let Some(ref host_input) = options.host {
-        if let Some(host_result) = compile_host_bindings_from_input(
+        if let Some((host_result, _)) = compile_host_bindings_from_input(
             &allocator,
             crate::r3::CORE_ALIAS,
             host_input,
             component_name,
             options.selector.as_deref(),
             host_pool_starting_index,
+            &mut job.pool.take_shared(),
             options.angular_version,
             options.legacy_optional_chaining,
         ) {
@@ -7052,9 +7055,9 @@ struct HostBindingCompilationOutput<'a> {
 /// into a compiled host binding result (function, hostAttrs, hostVars).
 ///
 /// The `pool_starting_index` parameter is used to ensure constant names don't conflict
-/// with those already used by template compilation. In Angular TypeScript, both template
-/// and host binding compilation share the same ConstantPool instance. In our implementation,
-/// we pass the template pool's next index to achieve the same effect.
+/// with those already used by the query predicates. In Angular TypeScript, the queries,
+/// host bindings and template share the same ConstantPool instance. In our implementation,
+/// we pass the component pool's next index and its `shared_pool` to achieve the same effect.
 ///
 /// Returns None if the component has no host bindings.
 fn compile_component_host_bindings<'a>(
@@ -7062,6 +7065,7 @@ fn compile_component_host_bindings<'a>(
     core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     pool_starting_index: u32,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<AngularVersion>,
     legacy_optional_chaining: Option<bool>,
 ) -> Option<HostBindingCompilationOutput<'a>> {
@@ -7086,7 +7090,7 @@ fn compile_component_host_bindings<'a>(
     let input = convert_host_metadata_to_input(allocator, host, component_name, component_selector);
 
     // Ingest and compile the host bindings with the pool starting index
-    // This ensures constant names continue from where template compilation left off
+    // This ensures constant names continue from where the queries left off
     let mut job = ingest_host_binding_with_version(
         &allocator,
         input,
@@ -7095,7 +7099,9 @@ fn compile_component_host_bindings<'a>(
         legacy_optional_chaining,
     );
     job.core_namespace = Ident::from(core_namespace);
+    job.pool.inherit_shared(std::mem::take(shared_pool));
     let result = compile_host_bindings(&mut job);
+    *shared_pool = job.pool.take_shared();
 
     // Get the next pool index after host binding compilation
     let next_pool_index = job.pool.next_name_index();
@@ -7406,7 +7412,9 @@ fn pool_selector_attrs<'a>(
 /// Compile host bindings from HostMetadataInput (owned strings).
 ///
 /// This is used by `compile_template_to_js_with_options` when host metadata is provided
-/// via TransformOptions for isolated template compilation.
+/// via TransformOptions for isolated template compilation, and by the linker.
+///
+/// Returns a tuple of (result, next_pool_index).
 fn compile_host_bindings_from_input<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
@@ -7414,9 +7422,10 @@ fn compile_host_bindings_from_input<'a>(
     component_name: &str,
     selector: Option<&str>,
     pool_starting_index: u32,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<crate::AngularVersion>,
     legacy_optional_chaining: Option<bool>,
-) -> Option<HostBindingCompilationResult<'a>> {
+) -> Option<(HostBindingCompilationResult<'a>, u32)> {
     use oxc_allocator::FromIn;
 
     // Check if there are any host bindings at all
@@ -7449,9 +7458,11 @@ fn compile_host_bindings_from_input<'a>(
         legacy_optional_chaining,
     );
     job.core_namespace = Ident::from(core_namespace);
+    job.pool.inherit_shared(std::mem::take(shared_pool));
     let result = compile_host_bindings(&mut job);
+    *shared_pool = job.pool.take_shared();
 
-    Some(result)
+    Some((result, job.pool.next_name_index()))
 }
 
 /// Result of compiling host bindings for the linker.
@@ -7462,6 +7473,9 @@ pub struct LinkerHostBindingOutput {
     pub host_vars: u32,
     /// Pool constant declarations (pure functions, etc.) as JS.
     pub declarations_js: String,
+    /// The next available pool index after host binding compilation.
+    /// Used to continue constant numbering in template compilation.
+    pub next_pool_index: u32,
 }
 
 /// Compile host bindings for the linker, returning the emitted JS function + hostVars count.
@@ -7469,23 +7483,27 @@ pub struct LinkerHostBindingOutput {
 /// This takes host property/listener data extracted from a partial declaration and compiles
 /// it through the full Angular expression parser and host binding pipeline, producing
 /// correctly compiled output (unlike raw string interpolation which would fail for complex
-/// Angular template expressions).
-pub fn compile_host_bindings_for_linker(
+/// Angular template expressions). `shared_pool` carries what the host bindings pool to the
+/// component's template (see [`compile_template_for_linker`]), which Angular compiles after
+/// them with the same pool.
+pub fn compile_host_bindings_for_linker<'a>(
+    allocator: &'a Allocator,
     host_input: &HostMetadataInput,
     component_name: &str,
     selector: Option<&str>,
     pool_starting_index: u32,
+    shared_pool: &mut SharedPool<'a>,
     core_namespace: &str,
     angular_version: Option<crate::AngularVersion>,
 ) -> Option<LinkerHostBindingOutput> {
-    let allocator = Allocator::default();
-    let result = compile_host_bindings_from_input(
-        &allocator,
+    let (result, next_pool_index) = compile_host_bindings_from_input(
+        allocator,
         allocator.alloc_str(core_namespace),
         host_input,
         component_name,
         selector,
         pool_starting_index,
+        shared_pool,
         angular_version,
         // Angular's linker uses native `?.` for declarations at version 22+ (and the
         // placeholder), which is not modeled here yet: keep legacy, and never let the
@@ -7505,11 +7523,11 @@ pub fn compile_host_bindings_for_linker(
     }
 
     let fn_js = result.host_binding_fn.map(|f| {
-        let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &&allocator));
+        let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &allocator));
         emitter.emit_expression(&expr)
     })?;
 
-    Some(LinkerHostBindingOutput { fn_js, host_vars, declarations_js })
+    Some(LinkerHostBindingOutput { fn_js, host_vars, declarations_js, next_pool_index })
 }
 
 /// Output from compiling a template for the linker.
@@ -7536,10 +7554,6 @@ pub struct LinkerTemplateOutput {
 
     /// The ngContentSelectors array as a JavaScript expression string, if any.
     pub ng_content_selectors_js: Option<String>,
-
-    /// The next available pool index after template compilation.
-    /// Used to continue constant numbering in host binding compilation.
-    pub next_pool_index: u32,
 }
 
 /// Compile a template for the linker, returning all data needed to build a `defineComponent` call.
@@ -7547,6 +7561,10 @@ pub struct LinkerTemplateOutput {
 /// This is similar to `compile_template_to_js_with_options` but returns a richer result
 /// that includes numeric metadata (decls, vars) and the consts/ngContentSelectors as strings,
 /// which the linker needs to assemble the `defineComponent({...})` replacement.
+///
+/// Angular's `compileComponentFromMetadata` compiles the host bindings first, so the
+/// template's pool continues from `pool_starting_index` and reuses what the host bindings
+/// pooled, from `shared_pool` (see [`compile_host_bindings_for_linker`]).
 pub fn compile_template_for_linker<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -7556,6 +7574,8 @@ pub fn compile_template_for_linker<'a>(
     core_namespace: &str,
     angular_version: Option<crate::AngularVersion>,
     defer_block_deps: &[Option<&str>],
+    pool_starting_index: u32,
+    shared_pool: SharedPool<'a>,
 ) -> Result<LinkerTemplateOutput, std::vec::Vec<OxcDiagnostic>> {
     use crate::pipeline::ingest::{IngestOptions, ingest_component_with_options};
     use oxc_allocator::FromIn;
@@ -7633,7 +7653,7 @@ pub fn compile_template_for_linker<'a>(
         template_source: Some(template),
         all_deferrable_deps_fn: None,
         defer_blocks,
-        pool_starting_index: 0,
+        pool_starting_index,
         angular_version,
         // Angular's linker uses native `?.` for declarations at version 22+ (and the
         // placeholder), which is not modeled here yet: keep legacy, and never let the
@@ -7649,6 +7669,7 @@ pub fn compile_template_for_linker<'a>(
         ingest_options,
     );
     job.core_namespace = Ident::from_in(core_namespace, &allocator);
+    job.pool.inherit_shared(shared_pool);
 
     let compiled = compile_template(&mut job);
 
@@ -7750,7 +7771,6 @@ pub fn compile_template_for_linker<'a>(
     }
 
     let declarations_js = emitter.emit_statements(&all_statements);
-    let next_pool_index = job.pool.next_name_index();
 
     Ok(LinkerTemplateOutput {
         declarations_js,
@@ -7759,7 +7779,6 @@ pub fn compile_template_for_linker<'a>(
         vars,
         consts_js,
         ng_content_selectors_js,
-        next_pool_index,
     })
 }
 

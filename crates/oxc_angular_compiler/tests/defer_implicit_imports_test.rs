@@ -1471,7 +1471,9 @@ export class A2 {{
 #[test]
 fn block_only_dependencies_leave_dependencies_of_each_component() {
     // Like ngc, a same-file component used only inside `@defer` is provided
-    // by the block's function, not by `dependencies`.
+    // by the block's function, not by `dependencies`. The second component's
+    // function is the first one's, which ngc's single pool finds equivalent
+    // (`getSharedFunctionReference`).
     let dir = TempDir::new().unwrap();
     let result = transform(
         &dir,
@@ -1495,7 +1497,53 @@ export class App2 {}
     let code = &result.code;
     let compact = compact(code);
     assert!(compact.contains("constApp1_Defer_1_DepsFn=()=>[LocalCmp];"), "{code}");
-    assert!(compact.contains("constApp2_Defer_2_DepsFn=()=>[LocalCmp];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(2,1,App1_Defer_1_DepsFn);"), "{code}");
+    assert!(!compact.contains("App2_Defer_2_DepsFn"), "{code}");
     assert!(!compact.contains("ɵɵgetComponentDepsFactory(App1"), "{code}");
     assert!(compact.contains("ɵɵgetComponentDepsFactory(App2,[LocalCmp])"), "{code}");
+}
+
+#[test]
+fn deps_fns_reading_an_imported_class_are_one_per_component() {
+    // ngc reads an imported class through the identifier in each component's
+    // `imports` (a `WrappedNodeExpr`), and `isEquivalent` compares nodes: the
+    // blocks of one component share a function, two components don't.
+    let dir = TempDir::new().unwrap();
+    create_test_file(
+        dir.path(),
+        "app/deps.ts",
+        r"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-dep', template: 'dep' })
+export class Dep {}
+
+@Component({ selector: 'app-dep2', template: 'dep2' })
+export class Dep2 {}
+",
+    );
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { Dep, Dep2 } from './deps';
+
+@Component({
+    selector: 'app-b',
+    imports: [Dep, Dep2],
+    template: '<app-dep2/> @defer { <app-dep/> } @defer { <app-dep/> }',
+})
+export class B {}
+
+@Component({ selector: 'app-c', imports: [Dep, Dep2], template: '<app-dep2/> @defer { <app-dep/> }' })
+export class C {}
+",
+    );
+    let code = &result.code;
+    let compact = compact(code);
+    assert!(compact.contains("constB_Defer_2_DepsFn=()=>[Dep];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(2,1,B_Defer_2_DepsFn);"), "{code}");
+    assert!(compact.contains("ɵɵdefer(5,4,B_Defer_2_DepsFn);"), "{code}");
+    assert!(compact.contains("constC_Defer_2_DepsFn=()=>[Dep];"), "{code}");
+    assert!(compact.contains("ɵɵdefer(2,1,C_Defer_2_DepsFn);"), "{code}");
 }

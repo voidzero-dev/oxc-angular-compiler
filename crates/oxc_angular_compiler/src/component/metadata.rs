@@ -530,8 +530,9 @@ pub struct ComponentMetadata<'a> {
     /// array literal, by position: `X`, or `forwardRef(() => X)` with
     /// `@angular/core`'s `forwardRef` (which [`Self::imports`] leaves out),
     /// as ngtsc resolves them through its `forwardRefResolver`; `None` for
-    /// anything else, such as `X as any`, which ngtsc keeps eager.
-    pub import_entry_classes: Vec<'a, Option<Ident<'a>>>,
+    /// anything else, such as `X as any`, which ngtsc keeps eager. Each class
+    /// comes with the span of its identifier in the array.
+    pub import_entry_classes: Vec<'a, Option<(Ident<'a>, Span)>>,
 
     /// Exported names for template references.
     ///

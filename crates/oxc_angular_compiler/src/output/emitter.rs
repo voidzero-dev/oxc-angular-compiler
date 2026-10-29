@@ -897,17 +897,12 @@ impl JsEmitter {
             OutputExpression::LocalizedString(e) => {
                 self.visit_localized_string(e, ctx);
             }
-            OutputExpression::WrappedNode(_) => {
-                // Wrapped nodes should not appear in JavaScript output.
-                // This matches Angular's abstract_js_emitter.ts which throws:
-                // `throw new Error("Cannot emit a WrappedNodeExpr in Javascript.");`
-                // WrappedNodeExpr is used internally during compilation but should
-                // be resolved before emission - if we hit this, it's a compiler bug.
-                ctx.diagnostics.push(OxcDiagnostic::error(
-                    "Cannot emit a WrappedNodeExpr in JavaScript. WrappedNodeExpr should be resolved before emission."
-                ));
-                // Emit undefined as fallback
-                ctx.print("undefined");
+            OutputExpression::WrappedNode(e) => {
+                // A wrapped node of the class's file is emitted as written, as
+                // ngtsc's `ExpressionTranslatorVisitor.visitWrappedNodeExpr`
+                // does. Its span is in that file, not in the template the
+                // source map points to, so it isn't mapped.
+                ctx.print(&e.node_id);
             }
             OutputExpression::WrappedIrNode(_) => {
                 // Wrapped IR expressions should not appear in JavaScript output.

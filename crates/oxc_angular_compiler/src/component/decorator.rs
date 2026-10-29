@@ -492,18 +492,19 @@ fn extract_identifier_array<'a>(
 }
 
 /// The class each element of an array literal names, by position: `X`, or
-/// `forwardRef(() => X)` with `@angular/core`'s `forwardRef`.
+/// `forwardRef(() => X)` with `@angular/core`'s `forwardRef`, with the span of
+/// the identifier.
 fn extract_import_entry_classes<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
     consts: &StringConsts<'_>,
-) -> Vec<'a, Option<Ident<'a>>> {
+) -> Vec<'a, Option<(Ident<'a>, Span)>> {
     let mut result = Vec::new_in(&allocator);
     if let Expression::ArrayExpression(arr) = expr {
         for element in &arr.elements {
             let class = element.as_expression().and_then(|element| {
                 match try_unwrap_forward_ref(element, Some(consts)).unwrap_or(element) {
-                    Expression::Identifier(id) => Some(id.name),
+                    Expression::Identifier(id) => Some((id.name, id.span)),
                     _ => None,
                 }
             });

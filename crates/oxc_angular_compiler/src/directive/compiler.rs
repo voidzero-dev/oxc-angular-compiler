@@ -212,6 +212,7 @@ fn build_base_directive_fields<'a>(
             core_namespace,
             metadata,
             next_pool_index,
+            shared_pool,
             angular_version,
         ) {
             next_pool_index = new_pool_index;
@@ -622,7 +623,8 @@ pub fn create_outputs_literal<'a>(
 ///
 /// The `pool_starting_index` parameter is used to ensure constant names don't conflict
 /// when compiling multiple directives in the same file. Each directive continues from
-/// where the previous directive's pool left off.
+/// where the previous directive's pool left off, and `shared_pool` carries what the
+/// earlier classes of the file pooled, to reuse.
 ///
 /// Returns a tuple of (result, next_pool_index) where next_pool_index is the
 /// next available constant pool index after host binding compilation.
@@ -631,6 +633,7 @@ fn compile_directive_host_bindings<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    shared_pool: &mut SharedPool<'a>,
     angular_version: Option<crate::AngularVersion>,
 ) -> Option<(HostBindingCompilationResult<'a>, u32)> {
     let host = &metadata.host;
@@ -658,7 +661,9 @@ fn compile_directive_host_bindings<'a>(
         None,
     );
     job.core_namespace = Ident::from(core_namespace);
+    job.pool.inherit_shared(std::mem::take(shared_pool));
     let result = compile_host_bindings(&mut job);
+    *shared_pool = job.pool.take_shared();
 
     // Get the next pool index after host binding compilation
     let next_pool_index = job.pool.next_name_index();

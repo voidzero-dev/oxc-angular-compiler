@@ -1158,10 +1158,10 @@ impl<'a> OutputExpression<'a> {
                         _ => false,
                     }
             }
-            // Wrapped nodes compare by identity upstream; node_id is the port's
-            // stable identity for a wrapped external node.
+            // Wrapped nodes compare by identity upstream; the port's identity
+            // for a wrapped node of the file is its name and its span.
             (OutputExpression::WrappedNode(a), OutputExpression::WrappedNode(b)) => {
-                a.node_id == b.node_id
+                a.node_id == b.node_id && a.source_span == b.source_span
             }
             (OutputExpression::WrappedIrNode(a), OutputExpression::WrappedIrNode(b)) => {
                 std::ptr::eq(a.node.as_ref(), b.node.as_ref())
