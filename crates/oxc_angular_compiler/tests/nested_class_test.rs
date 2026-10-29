@@ -558,6 +558,53 @@ export declare namespace B.C {
 }
 
 #[test]
+fn injects_a_member_of_a_dotted_namespace_and_of_its_head_apart() {
+    // `A.C` is not the `C` of `namespace A.B`.
+    let source = r"
+import { Component } from '@angular/core';
+export namespace A.B {
+  @Component({ selector: 'ab-c', template: 'ab' })
+  export class C {}
+}
+export namespace A {
+  @Component({ selector: 'a-e', template: 'e' })
+  export class C {}
+}
+";
+    let partial =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result = transform_with(source, &partial);
+    let dts = "export declare namespace A.B {
+    class C {
+    }
+}
+export declare namespace A {
+    class C {
+    }
+}
+";
+    let declarations: Vec<_> = result
+        .dts_declarations
+        .into_iter()
+        .map(|d| DtsInjectDeclaration {
+            class_name: d.class_name,
+            members: d.members,
+            namespace_imports: d.namespace_imports.into_iter().collect(),
+            source_file: None,
+        })
+        .collect();
+    let out = inject_dts_declarations(dts, &declarations);
+    let section = |head: &str| {
+        let section = out.split("export declare ").find(|s| s.starts_with(head));
+        squash(section.unwrap_or_else(|| panic!("no {head:?} in\n{out}")))
+    };
+    assert_eq!(out.matches("static ɵfac").count(), 2, "{out}");
+    let ab = section("namespace A.B");
+    assert!(ab.contains("\"ab-c\"") && !ab.contains("\"a-e\""), "{out}");
+    assert!(section("namespace A {").contains("\"a-e\""), "{out}");
+}
+
+#[test]
 fn keeps_hmr_for_a_component_a_namespace_member_shadows() {
     // A namespace member gets no HMR code, so a top-level class of its name
     // does, as in ngtsc.
