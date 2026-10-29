@@ -6,7 +6,8 @@
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    CompilationMode, ComponentHmrUpdateInput, TransformOptions, compile_component_hmr_update, link,
+    CompilationMode, ComponentHmrUpdateInput, HostMetadataInput, TransformOptions,
+    compile_component_hmr_update, compile_template_to_js_with_options, link,
     transform_angular_file,
 };
 
@@ -161,6 +162,33 @@ export class Cmp { k = true; }
     );
     assert_eq!(constants(&code), ["_c0"], "{code}");
     assert_eq!(squash(&code).matches("i0.ɵɵpureFunction1(").count(), 2, "{code}");
+}
+
+#[test]
+fn compile_template_pools_host_constants_first() {
+    // As a full compile of the component: the host bindings' `{q: x}` and
+    // `{k: x}` first, the template's `{q: x}` reusing `_c0`, then `{z: x}`.
+    let allocator = Allocator::default();
+    let options = TransformOptions {
+        host: Some(HostMetadataInput {
+            properties: vec![
+                ("[style]".to_string(), "{q: x}".to_string()),
+                ("[class]".to_string(), "{k: x}".to_string()),
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let template = r#"<i [title]="{q: x}" [id]="{z: x}"></i>"#;
+    let output = compile_template_to_js_with_options(&allocator, template, "A", "a.ts", &options)
+        .expect("compiles");
+    let code = output.code;
+    assert_eq!(constants(&code), ["_c0", "_c1", "_c2"], "{code}");
+    let squashed = squash(&code);
+    assert!(value(&squashed, "_c0").contains("q:a0"), "{code}");
+    assert!(value(&squashed, "_c1").contains("k:a0"), "{code}");
+    assert!(value(&squashed, "_c2").contains("z:a0"), "{code}");
+    assert!(squashed.contains(r#"ɵɵproperty("title",i0.ɵɵpureFunction1(2,_c0,ctx.x))"#), "{code}");
 }
 
 #[test]

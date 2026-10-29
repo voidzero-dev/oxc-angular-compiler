@@ -6889,6 +6889,29 @@ pub fn compile_template_to_js_with_options<'a>(
         ingest_options,
     );
 
+    // Compile the host bindings before the template, as
+    // `compile_component_full` does (Angular's `compileComponentFromMetadata`
+    // runs `baseDirectiveFields` first, with one pool): their constants come
+    // first, and the template reuses equal ones.
+    let mut component_pool = job.pool.take_shared();
+    let host_output = options.host.as_ref().and_then(|host_input| {
+        compile_host_bindings_from_input(
+            allocator,
+            crate::r3::CORE_ALIAS,
+            host_input,
+            component_name,
+            options.selector.as_deref(),
+            job.pool.next_name_index(),
+            &mut component_pool,
+            options.angular_version,
+            options.legacy_optional_chaining,
+        )
+    });
+    job.pool.inherit_shared(component_pool);
+    if let Some((_, next_pool_index)) = &host_output {
+        job.pool.continue_from(*next_pool_index);
+    }
+
     let compiled = compile_template(&mut job);
 
     // Collect any diagnostics from the compilation job
@@ -6905,6 +6928,14 @@ pub fn compile_template_to_js_with_options<'a>(
     // 1. Declarations (child view functions, pooled constants)
     // 2. Main template function as a declaration
     let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
+
+    // The host bindings' pool declarations (pure functions, etc.) come first,
+    // as they were pooled first.
+    let mut host_fn = None;
+    if let Some((host_result, _)) = host_output {
+        all_statements.extend(host_result.declarations);
+        host_fn = host_result.host_binding_fn;
+    }
 
     // Add all declarations first (child view functions come before main template)
     for decl in compiled.declarations {
@@ -6927,43 +6958,21 @@ pub fn compile_template_to_js_with_options<'a>(
         all_statements.push(main_fn_stmt);
     }
 
-    // Stage 6: Compile host bindings if provided via options
-    let host_pool_starting_index = job.pool.next_name_index();
-    if let Some(ref host_input) = options.host {
-        if let Some((host_result, _)) = compile_host_bindings_from_input(
+    // Add the host bindings function as a declaration if present
+    if let Some(host_fn) = host_fn
+        && let Some(fn_name) = host_fn.name
+    {
+        let host_fn_stmt = OutputStatement::DeclareFunction(oxc_allocator::Box::new_in(
+            DeclareFunctionStmt {
+                name: fn_name,
+                params: host_fn.params,
+                statements: host_fn.statements,
+                modifiers: StmtModifier::NONE,
+                source_span: host_fn.source_span,
+            },
             &allocator,
-            crate::r3::CORE_ALIAS,
-            host_input,
-            component_name,
-            options.selector.as_deref(),
-            host_pool_starting_index,
-            &mut job.pool.take_shared(),
-            options.angular_version,
-            options.legacy_optional_chaining,
-        ) {
-            // Add host binding pool declarations (pure functions, etc.)
-            for decl in host_result.declarations {
-                all_statements.push(decl);
-            }
-
-            // Add the host bindings function as a declaration if present
-            if let Some(host_fn) = host_result.host_binding_fn {
-                if let Some(fn_name) = host_fn.name.clone() {
-                    let host_fn_stmt =
-                        OutputStatement::DeclareFunction(oxc_allocator::Box::new_in(
-                            DeclareFunctionStmt {
-                                name: fn_name,
-                                params: host_fn.params,
-                                statements: host_fn.statements,
-                                modifiers: StmtModifier::NONE,
-                                source_span: host_fn.source_span,
-                            },
-                            &allocator,
-                        ));
-                    all_statements.push(host_fn_stmt);
-                }
-            }
-        }
+        ));
+        all_statements.push(host_fn_stmt);
     }
 
     // Generate code with optional source map
