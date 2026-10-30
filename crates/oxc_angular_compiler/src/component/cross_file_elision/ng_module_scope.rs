@@ -316,11 +316,19 @@ impl Inner {
     /// Parse `source` as the text of `file`, the file being compiled, in
     /// place of what's on disk. Returns the key it's read by.
     fn set_compiled_source(&self, file: &Path, source: &str) -> String {
-        // The resolver gives real paths; `/tmp` is a link on macOS.
+        // The resolver gives real paths; `/tmp` is a link on macOS. On
+        // Windows, it drops the `\\?\` prefix `canonicalize` adds.
         let key = std::fs::canonicalize(file)
             .unwrap_or_else(|_| file.to_path_buf())
             .to_string_lossy()
             .into_owned();
+        let key = if let Some(share) = key.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{share}")
+        } else if let Some(path) = key.strip_prefix(r"\\?\") {
+            path.to_string()
+        } else {
+            key
+        };
         let current = self
             .parsed
             .borrow()
