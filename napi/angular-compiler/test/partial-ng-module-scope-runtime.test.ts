@@ -176,6 +176,23 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(scope(m.App)).toEqual({ directives: ['S'], pipes: [] })
   })
 
+  it('reads an exported class declared after the component when it renders', async () => {
+    const m = await load(
+      {
+        main: `
+          import { Component, Directive, NgModule, forwardRef } from '@angular/core';
+          @NgModule({ imports: [forwardRef(() => D)], exports: [forwardRef(() => D)] })
+          export class M {}
+          @Component({ selector: 'app', template: '<i d></i>', imports: [M] })
+          export class App {}
+          @Directive({ selector: '[d]' }) export class D {}
+        `,
+      },
+      linker,
+    )
+    expect(scope(m.App)).toEqual({ directives: ['D'], pipes: [] })
+  })
+
   it('links templates with block syntax', async () => {
     const m = await load(
       {

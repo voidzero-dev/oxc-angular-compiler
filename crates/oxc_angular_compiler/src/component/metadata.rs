@@ -1098,6 +1098,9 @@ pub enum ImportedName {
 pub struct ScopeEntry {
     pub kind: ScopeKind,
     pub name: ImportedName,
+    /// Declared later in the file of the component it's listed for, so read
+    /// through `forwardRef`.
+    pub is_forward_reference: bool,
 }
 
 /// The compilation scope of a component an NgModule declares.

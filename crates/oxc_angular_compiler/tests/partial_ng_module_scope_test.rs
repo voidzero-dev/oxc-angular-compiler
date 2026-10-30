@@ -658,3 +658,30 @@ export class SharedModule {}
     );
     assert!(!result.code.contains("ɵɵsetComponentScope"), "{}", result.code);
 }
+
+#[test]
+fn a_class_declared_after_the_component_is_a_forward_reference() {
+    let dir = TempDir::new().unwrap();
+    let result = compile(
+        &dir,
+        "src/app.ts",
+        r"
+import { Component, Directive, NgModule, forwardRef } from '@angular/core';
+@Directive({ selector: '[e]' }) export class Early {}
+@NgModule({ imports: [Early, forwardRef(() => Late)], exports: [Early, forwardRef(() => Late)] })
+export class M {}
+@Component({ selector: 'app', template: '<i e l></i>', imports: [M] })
+export class App {}
+@Directive({ selector: '[l]' }) export class Late {}
+",
+        &partial(),
+    );
+    let code = compact(&result.code);
+    assert!(
+        code.contains(
+            "dependencies:[{kind:\"ngmodule\",type:M},{kind:\"directive\",type:Early,selector:\"[e]\"},{kind:\"directive\",type:i0.forwardRef(function(){returnLate;}),selector:\"[l]\"}]"
+        ),
+        "{}",
+        result.code
+    );
+}

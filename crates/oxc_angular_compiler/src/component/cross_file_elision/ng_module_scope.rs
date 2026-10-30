@@ -21,6 +21,7 @@ use oxc_ast::ast::{
     Expression, ImportDeclarationSpecifier, ObjectPropertyKind, Program, PropertyKey, Statement,
     TSLiteral, TSTupleElement, TSType, TSTypeName,
 };
+use oxc_span::GetSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
@@ -195,8 +196,8 @@ impl CrossFileAnalyzer {
         Some(scopes)
     }
 
-    /// For each of a standalone component's `imports` (`namespace.name` or
-    /// `name` in `file`), the directives and pipes it adds when it's an
+    /// For each of the `imports` (`namespace.name` or `name` in `file`) of the
+    /// standalone `component`, the directives and pipes it adds when it's an
     /// NgModule, or `None` when it's none or its scope can't be read
     /// statically. A class is listed once: an NgModule leaves out what
     /// another import already is, or an earlier NgModule exports.
@@ -204,9 +205,41 @@ impl CrossFileAnalyzer {
         &self,
         file: &Path,
         source: &str,
+        component: &str,
         imports: &[(Option<&str>, &str)],
     ) -> Vec<Option<Vec<ScopeEntry>>> {
         let file = self.inner.set_compiled_source(file, source);
+        // The classes of the file declared after the component, which its
+        // definition can't read when it's created.
+        let declared_later: FxHashSet<String> = self
+            .inner
+            .parsed_file(&file)
+            .map(|parsed| {
+                parsed.with(|_, program, _| {
+                    let start = find_class(program, component).map_or(u32::MAX, |c| c.span.start);
+                    program
+                        .body
+                        .iter()
+                        .filter(|stmt| stmt.span().start > start)
+                        .filter_map(|stmt| match stmt {
+                            Statement::ClassDeclaration(class) => class.id.as_ref(),
+                            Statement::ExportDeclaration(decl) => match &decl.declaration {
+                                Declaration::ClassDeclaration(class) => class.id.as_ref(),
+                                _ => None,
+                            },
+                            Statement::ExportDefaultDeclaration(decl) => match &decl.declaration {
+                                ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                                    class.id.as_ref()
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .map(|id| id.name.to_string())
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
         let resolved: Vec<_> = imports
             .iter()
             .map(|(namespace, name)| {
@@ -234,7 +267,12 @@ impl CrossFileAnalyzer {
                     .filter(|item| !listed.contains(&item.class.decl))
                     .cloned()
                     .collect();
-                let entries = self.inner.named_entries(added.clone(), &file)?;
+                let mut entries = self.inner.named_entries(added.clone(), &file)?;
+                for entry in &mut entries {
+                    entry.is_forward_reference = matches!(
+                        &entry.name, ImportedName::Local(name) if declared_later.contains(name)
+                    );
+                }
                 // A pipe the linker can't match without a name.
                 if entries.iter().any(|entry| matches!(entry.kind, ScopeKind::Pipe { name: None }))
                 {
@@ -533,7 +571,11 @@ impl Inner {
         items
             .into_iter()
             .map(|item| {
-                Some(ScopeEntry { name: self.imported_name(&item.class, file)?, kind: item.kind })
+                Some(ScopeEntry {
+                    name: self.imported_name(&item.class, file)?,
+                    kind: item.kind,
+                    is_forward_reference: false,
+                })
             })
             .collect()
     }

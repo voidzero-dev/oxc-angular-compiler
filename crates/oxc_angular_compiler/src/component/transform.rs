@@ -3583,14 +3583,19 @@ pub fn transform_angular_file(
                 && matches!(options.compilation_mode, crate::CompilationMode::Partial)
         })
         .map(|analyzer| {
-            move |imports: &[ImportRef<'_>]| {
+            move |component: &str, imports: &[ImportRef<'_>]| {
                 let imports: std::vec::Vec<_> = imports
                     .iter()
                     .map(|import| {
                         (import.namespace.as_ref().map(Ident::as_str), import.name.as_str())
                     })
                     .collect();
-                analyzer.standalone_import_scopes(std::path::Path::new(path), source, &imports)
+                analyzer.standalone_import_scopes(
+                    std::path::Path::new(path),
+                    source,
+                    component,
+                    &imports,
+                )
             }
         });
     // Without cross-file analysis, only the classes declared in this file
@@ -5400,9 +5405,14 @@ fn scope_dependencies<'a>(
                 TemplateDependency::pipe(allocator, name, ident(pipe_name.as_deref()?))
             }
         };
-        dependencies.push(match namespace {
+        let dependency = match namespace {
             Some(namespace) => dependency.with_type_namespace(namespace),
             None => dependency,
+        };
+        dependencies.push(if entry.is_forward_reference {
+            dependency.with_forward_reference()
+        } else {
+            dependency
         });
     }
     Some(dependencies)
@@ -5976,6 +5986,7 @@ type ImportSelector<'f> = &'f dyn Fn(&ImportRef<'_>) -> Option<ImportedClass>;
 /// to adds, when cross-file analysis reads them.
 type NgModuleExports<'f> =
     &'f dyn Fn(
+        &str,
         &[ImportRef<'_>],
     ) -> std::vec::Vec<Option<std::vec::Vec<super::metadata::ScopeEntry>>>;
 
@@ -6434,7 +6445,7 @@ fn compile_component_full<'a>(
             })
             .collect();
         let import_scopes: std::vec::Vec<_> = ng_module_exports
-            .map(|exports| exports(&metadata.import_refs))
+            .map(|exports| exports(metadata.class_name.as_str(), &metadata.import_refs))
             .unwrap_or_default()
             .into_iter()
             .zip(&metadata.import_refs)
