@@ -18,7 +18,7 @@
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
-use super::{MIN_VERSION_INJECTOR, PLACEHOLDER_VERSION};
+use super::MIN_VERSION_INJECTOR;
 use crate::injector::R3InjectorMetadata;
 use crate::output::ast::{
     InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
@@ -30,12 +30,13 @@ use crate::r3::Identifiers;
 pub fn compile_declare_injector_from_metadata<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &R3InjectorMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_INJECTOR));
-    entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
+    entries.push(string_entry(allocator, "version", version));
     entries.push(LiteralMapEntry::new(
         Ident::from("ngImport"),
         read_var(allocator, core_namespace),
@@ -131,7 +132,7 @@ fn namespaced_prop<'a>(
     ))
 }
 
-fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
+fn string_literal<'a>(allocator: &'a Allocator, value: &'a str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
         &allocator,
@@ -141,7 +142,7 @@ fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputEx
 fn string_entry<'a>(
     allocator: &'a Allocator,
     key: &'static str,
-    value: &'static str,
+    value: &'a str,
 ) -> LiteralMapEntry<'a> {
     LiteralMapEntry::new(Ident::from(key), string_literal(allocator, value), false)
 }

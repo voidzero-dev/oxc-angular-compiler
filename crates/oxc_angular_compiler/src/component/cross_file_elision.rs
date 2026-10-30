@@ -32,6 +32,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::defer_resolver::{ClassUse, decorated_class_selector};
 use crate::directive::{ImportValueResolver, StringConsts};
 
+mod ng_module_scope;
+
 /// `(file, exported_name, local_name, implicit_standalone)` -> how a
 /// template uses the class (see `Inner::selector_memo`).
 type SelectorMemo = FxHashMap<(String, String, String, bool), Option<ClassUse>>;
@@ -102,6 +104,8 @@ struct Inner {
     /// Handle to this state, for the resolvers of the files in `parsed`
     /// (`parse_file` only sees `&self`).
     this: Weak<Inner>,
+    /// Memoized NgModule scope reads (see [`ng_module_scope`]).
+    scope: ng_module_scope::ScopeState,
 }
 
 /// A file parsed once per analyzer: its program, and the consts the
@@ -250,6 +254,7 @@ impl CrossFileAnalyzer {
                 evaluating_values: RefCell::new(FxHashSet::default()),
                 value_dependencies: RefCell::new(FxHashSet::default()),
                 this: this.clone(),
+                scope: ng_module_scope::ScopeState::default(),
             }),
         }
     }

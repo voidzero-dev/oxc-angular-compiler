@@ -24,7 +24,7 @@
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
-use super::{MIN_VERSION_SERVICE, PLACEHOLDER_VERSION};
+use super::MIN_VERSION_SERVICE;
 use crate::output::ast::{
     InvokeFunctionExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr, LiteralValue,
     OutputExpression, ReadPropExpr, ReadVarExpr,
@@ -39,12 +39,13 @@ use crate::service::R3ServiceMetadata;
 pub fn compile_declare_service_from_metadata<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &R3ServiceMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_SERVICE));
-    entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
+    entries.push(string_entry(allocator, "version", version));
     entries.push(LiteralMapEntry::new(
         Ident::from("ngImport"),
         read_var(allocator, core_namespace),
@@ -113,7 +114,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a>
 fn string_entry<'a>(
     allocator: &'a Allocator,
     key: &'static str,
-    value: &'static str,
+    value: &'a str,
 ) -> LiteralMapEntry<'a> {
     LiteralMapEntry::new(
         Ident::from(key),

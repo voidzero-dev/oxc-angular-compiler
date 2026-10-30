@@ -2139,7 +2139,7 @@ export class Parent {}
     assert!(!code.contains("import { LazyCmp }"), "Output:\n{code}");
     assert!(
         compact.contains(
-            "ɵɵngDeclareClassMetadataAsync({minVersion:\"18.0.0\",version:\"0.0.0-PLACEHOLDER\",ngImport:i0,type:Parent,resolveDeferredDeps:()=>[import(\"./lazy\").then((m)=>m.LazyCmp)],resolveMetadata:(LazyCmp)=>"
+            "ɵɵngDeclareClassMetadataAsync({minVersion:\"18.0.0\",version:\"22.2.3\",ngImport:i0,type:Parent,resolveDeferredDeps:()=>[import(\"./lazy\").then((m)=>m.LazyCmp)],resolveMetadata:(LazyCmp)=>"
         ),
         "Output:\n{code}"
     );

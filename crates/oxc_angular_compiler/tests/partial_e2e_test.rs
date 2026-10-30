@@ -42,8 +42,8 @@ export class MyService {}
 
     // Both declarations carry the partial version envelope.
     assert!(
-        code.contains("minVersion") && code.contains("\"0.0.0-PLACEHOLDER\""),
-        "expected minVersion + placeholder version, got:\n{code}"
+        code.contains("minVersion") && code.contains("\"22.2.3\""),
+        "expected minVersion + release version, got:\n{code}"
     );
 
     // Round-trip the entire emitted file through our linker — it should
@@ -258,7 +258,7 @@ export class S3 {}
     );
     assert!(
         partial.contains(
-            "i0.ɵɵngDeclareService({minVersion:\"22.0.0\",version:\"0.0.0-PLACEHOLDER\",ngImport:i0,type:S2,autoProvided:false})"
+            "i0.ɵɵngDeclareService({minVersion:\"22.0.0\",version:\"22.2.3\",ngImport:i0,type:S2,autoProvided:false})"
         ),
         "autoProvided: false should be declared, got:\n{partial}"
     );

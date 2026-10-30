@@ -12,6 +12,7 @@ use oxc_angular_compiler::factory::{
 };
 use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
 use oxc_angular_compiler::output::emitter::JsEmitter;
+use oxc_angular_compiler::partial::PLACEHOLDER_VERSION;
 use oxc_str::Ident;
 
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
@@ -50,7 +51,7 @@ fn simple_injectable_factory_with_one_dep() {
 
     let meta =
         make_meta(&allocator, "MyService", R3FactoryDeps::Valid(deps), FactoryTarget::Injectable);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     insta::assert_snapshot!(emit(&expr));
 }
@@ -59,7 +60,7 @@ fn simple_injectable_factory_with_one_dep() {
 fn factory_with_no_deps_emits_null() {
     let allocator = Allocator::default();
     let meta = make_meta(&allocator, "MyService", R3FactoryDeps::None, FactoryTarget::Injectable);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains("deps:null"), "deps should be null, got: {js}");
@@ -71,7 +72,7 @@ fn factory_with_invalid_deps_emits_string_invalid() {
     let allocator = Allocator::default();
     let meta =
         make_meta(&allocator, "MyService", R3FactoryDeps::Invalid, FactoryTarget::Injectable);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"deps:"invalid""#), "deps should be \"invalid\", got: {js}");
@@ -90,7 +91,7 @@ fn factory_with_type_only_invalid_dep_coerces_to_invalid() {
 
     let meta =
         make_meta(&allocator, "MyService", R3FactoryDeps::Valid(deps), FactoryTarget::Injectable);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"deps:"invalid""#), "deps should coerce to \"invalid\", got: {js}");
@@ -111,7 +112,7 @@ fn factory_with_flag_deps_emits_only_set_flags() {
         R3FactoryDeps::Valid(deps),
         FactoryTarget::Injectable,
     );
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     // Set flags appear.
@@ -130,7 +131,7 @@ fn factory_with_flag_deps_emits_only_set_flags() {
 fn factory_target_pipe() {
     let allocator = Allocator::default();
     let meta = make_meta(&allocator, "TitlePipe", R3FactoryDeps::None, FactoryTarget::Pipe);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains("ɵɵFactoryTarget.Pipe"), "expected Pipe target, got: {js}");
@@ -140,7 +141,7 @@ fn factory_target_pipe() {
 fn factory_target_directive() {
     let allocator = Allocator::default();
     let meta = make_meta(&allocator, "MyDir", R3FactoryDeps::None, FactoryTarget::Directive);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains("ɵɵFactoryTarget.Directive"), "expected Directive target, got: {js}");
@@ -150,7 +151,7 @@ fn factory_target_directive() {
 fn factory_target_component() {
     let allocator = Allocator::default();
     let meta = make_meta(&allocator, "MyCmp", R3FactoryDeps::None, FactoryTarget::Component);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains("ɵɵFactoryTarget.Component"), "expected Component target, got: {js}");
@@ -160,7 +161,7 @@ fn factory_target_component() {
 fn factory_target_ng_module() {
     let allocator = Allocator::default();
     let meta = make_meta(&allocator, "MyMod", R3FactoryDeps::None, FactoryTarget::NgModule);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains("ɵɵFactoryTarget.NgModule"), "expected NgModule target, got: {js}");
@@ -180,7 +181,7 @@ fn round_trip_through_linker_to_full_factory() {
 
     let meta =
         make_meta(&allocator, "MyService", R3FactoryDeps::Valid(deps), FactoryTarget::Injectable);
-    let expr = compile_declare_factory_function(&allocator, "i0", &meta);
+    let expr = compile_declare_factory_function(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let source = format!(
         "import * as i0 from \"@angular/core\";\nexport class MyService {{}}\nMyService.\u{0275}fac = {};",

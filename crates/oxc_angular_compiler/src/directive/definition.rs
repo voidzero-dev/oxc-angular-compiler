@@ -109,10 +109,16 @@ pub fn generate_directive_definitions<'a>(
             // constants are emitted here. `angular_version` is irrelevant
             // because partial mode emits the verbatim selector and lets
             // the linker pick up the consumer's runtime version.
+            let version =
+                allocator.alloc_str(&crate::partial::declaration_version(angular_version));
             let fac_definition =
-                compile_declare_factory_for_directive(allocator, core_namespace, metadata);
-            let dir_definition =
-                compile_declare_directive_from_metadata(allocator, core_namespace, metadata);
+                compile_declare_factory_for_directive(allocator, core_namespace, version, metadata);
+            let dir_definition = compile_declare_directive_from_metadata(
+                allocator,
+                core_namespace,
+                version,
+                metadata,
+            );
             DirectiveDefinitions {
                 dir_definition,
                 fac_definition,

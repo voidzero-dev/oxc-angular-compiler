@@ -38,7 +38,9 @@ pub fn generate_service_definition<'a>(
     core_namespace: &'a str,
     metadata: &R3ServiceMetadata<'a>,
     compilation_mode: CompilationMode,
+    angular_version: Option<crate::AngularVersion>,
 ) -> ServiceDefinition<'a> {
+    let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
     // Generate ɵfac BEFORE ɵprov so namespace-index assignment order matches
     // upstream's [fac, prov, ...] ordering.
     match compilation_mode {
@@ -51,10 +53,11 @@ pub fn generate_service_definition<'a>(
             let fac_definition = compile_declare_factory_function(
                 allocator,
                 core_namespace,
+                version,
                 &service_factory_metadata(allocator, metadata),
             );
             let prov_definition =
-                compile_declare_service_from_metadata(allocator, core_namespace, metadata);
+                compile_declare_service_from_metadata(allocator, core_namespace, version, metadata);
             ServiceDefinition { prov_definition, fac_definition }
         }
     }
@@ -67,9 +70,16 @@ pub fn generate_service_definition_from_decorator<'a>(
     metadata: &ServiceMetadata<'a>,
     type_argument_count: u32,
     compilation_mode: CompilationMode,
+    angular_version: Option<crate::AngularVersion>,
 ) -> ServiceDefinition<'a> {
     let r3_metadata = metadata.to_r3_metadata(allocator, type_argument_count);
-    generate_service_definition(allocator, core_namespace, &r3_metadata, compilation_mode)
+    generate_service_definition(
+        allocator,
+        core_namespace,
+        &r3_metadata,
+        compilation_mode,
+        angular_version,
+    )
 }
 
 /// Emit the ɵfac factory function. `@Service` factories never inject ctor
@@ -124,7 +134,8 @@ mod tests {
             factory: None,
         };
 
-        let def = generate_service_definition(&allocator, "i0", &metadata, CompilationMode::Full);
+        let def =
+            generate_service_definition(&allocator, "i0", &metadata, CompilationMode::Full, None);
         let emitter = JsEmitter::new();
         let fac_js = emitter.emit_expression(&def.fac_definition);
         let prov_js = emitter.emit_expression(&def.prov_definition);

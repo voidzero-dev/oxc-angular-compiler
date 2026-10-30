@@ -29,8 +29,8 @@
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
+use super::MIN_VERSION_NG_MODULE;
 use super::factory::compile_declare_factory_function;
-use super::{MIN_VERSION_NG_MODULE, PLACEHOLDER_VERSION};
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3FactoryDeps, R3FactoryMetadata,
 };
@@ -45,12 +45,13 @@ use crate::r3::Identifiers;
 pub fn compile_declare_ng_module_from_metadata<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &R3NgModuleMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_NG_MODULE));
-    entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
+    entries.push(string_entry(allocator, "version", version));
     entries.push(LiteralMapEntry::new(
         Ident::from("ngImport"),
         read_var(allocator, core_namespace),
@@ -93,6 +94,7 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
 pub fn compile_declare_factory_for_ng_module<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &R3NgModuleMetadata<'a>,
     deps: Option<&Vec<'a, crate::factory::R3DependencyMetadata<'a>>>,
 ) -> OutputExpression<'a> {
@@ -126,7 +128,7 @@ pub fn compile_declare_factory_for_ng_module<'a>(
         deps: factory_deps,
         target: FactoryTarget::NgModule,
     });
-    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, version, &factory_meta)
 }
 
 // ---- ref list helpers ------------------------------------------------------
@@ -231,7 +233,7 @@ fn namespaced_prop<'a>(
     ))
 }
 
-fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
+fn string_literal<'a>(allocator: &'a Allocator, value: &'a str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
         &allocator,
@@ -241,7 +243,7 @@ fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputEx
 fn string_entry<'a>(
     allocator: &'a Allocator,
     key: &'static str,
-    value: &'static str,
+    value: &'a str,
 ) -> LiteralMapEntry<'a> {
     LiteralMapEntry::new(Ident::from(key), string_literal(allocator, value), false)
 }

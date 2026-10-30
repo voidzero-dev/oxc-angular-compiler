@@ -109,7 +109,7 @@ fn hello_world_component_partial_emit_matches_upstream_shape() {
     assert!(
         contains_collapsed(
             &code,
-            r#"ɵɵngDeclareComponent({minVersion:"14.0.0",version:"0.0.0-PLACEHOLDER",type:MyComponent,isStandalone:false,selector:"my-component""#
+            r#"ɵɵngDeclareComponent({minVersion:"14.0.0",version:"22.2.3",type:MyComponent,isStandalone:false,selector:"my-component""#
         ),
         "ɵcmp field order should match upstream (minVersion..type..isStandalone..selector). Got:\n{code}"
     );
@@ -212,7 +212,7 @@ export class MyPipe {}
     assert!(
         contains_collapsed(
             &code,
-            r#"ɵɵngDeclarePipe({minVersion:"14.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,type:MyPipe,isStandalone:false,name:"myPipe",pure:false})"#
+            r#"ɵɵngDeclarePipe({minVersion:"14.0.0",version:"22.2.3",ngImport:i0,type:MyPipe,isStandalone:false,name:"myPipe",pure:false})"#
         ),
         "Pipe partial shape should match upstream byte-for-byte (modulo whitespace). Got:\n{code}"
     );
@@ -235,7 +235,7 @@ export class MyService {}
     assert!(
         contains_collapsed(
             &code,
-            r#"ɵɵngDeclareInjectable({minVersion:"12.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,type:MyService,providedIn:"root"})"#
+            r#"ɵɵngDeclareInjectable({minVersion:"12.0.0",version:"22.2.3",ngImport:i0,type:MyService,providedIn:"root"})"#
         ),
         "Injectable partial shape should match upstream. Got:\n{code}"
     );
@@ -263,7 +263,7 @@ export class MyService {}
     assert!(
         contains_collapsed(
             &code,
-            r#"ɵɵngDeclareClassMetadata({minVersion:"12.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,type:MyService"#
+            r#"ɵɵngDeclareClassMetadata({minVersion:"12.0.0",version:"22.2.3",ngImport:i0,type:MyService"#
         ),
         "ClassMetadata partial field order should match upstream. Got:\n{code}"
     );

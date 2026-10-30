@@ -147,7 +147,9 @@ pub fn generate_full_pipe_definition_from_decorator<'a>(
     core_namespace: &'a str,
     metadata: &PipeMetadata<'a>,
     compilation_mode: CompilationMode,
+    angular_version: Option<crate::AngularVersion>,
 ) -> Option<FullPipeDefinition<'a>> {
+    let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
     // IMPORTANT: Generate ɵfac BEFORE ɵpipe to match Angular's namespace index assignment order.
     // Angular processes results in order [fac, def, ...] during the transform phase
@@ -162,9 +164,13 @@ pub fn generate_full_pipe_definition_from_decorator<'a>(
         }
         CompilationMode::Partial => {
             let fac_definition =
-                compile_declare_factory_for_pipe(allocator, core_namespace, &r3_metadata);
-            let pipe_definition =
-                compile_declare_pipe_from_metadata(allocator, core_namespace, &r3_metadata);
+                compile_declare_factory_for_pipe(allocator, core_namespace, version, &r3_metadata);
+            let pipe_definition = compile_declare_pipe_from_metadata(
+                allocator,
+                core_namespace,
+                version,
+                &r3_metadata,
+            );
             Some(FullPipeDefinition { pipe_definition, fac_definition })
         }
     }

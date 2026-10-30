@@ -35,7 +35,7 @@ use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;
 
 use super::factory::compile_declare_factory_function;
-use super::{PLACEHOLDER_VERSION, wrap_forward_ref};
+use super::wrap_forward_ref;
 use crate::component::R3DependencyMetadata as ComponentDep;
 use crate::component::{
     ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode, HostDirectiveMetadata,
@@ -74,12 +74,17 @@ pub struct PartialComponentInputs<'a, 'm> {
     /// dependencies, in the order Angular's binder lists the blocks. Empty
     /// when the blocks weren't resolved.
     pub defer_block_dependencies: &'m [Option<OutputExpression<'a>>],
+    /// For an `imports` entry (by [`ImportRef::key`]) that is an NgModule,
+    /// the directives and pipes it exports, when cross-file analysis read
+    /// them (#655).
+    pub import_scopes: &'m [(Ident<'a>, Vec<'a, TemplateDependency<'a>>)],
 }
 
 /// Emits the `ɵɵngDeclareComponent` call for a component's `ɵcmp` static.
 pub fn compile_declare_component_from_metadata<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &ComponentMetadata<'a>,
     inputs: &PartialComponentInputs<'a, '_>,
 ) -> OutputExpression<'a> {
@@ -87,7 +92,7 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     let min_version = compute_min_version(meta, inputs);
     entries.push(string_entry(allocator, "minVersion", min_version));
-    entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
+    entries.push(string_entry(allocator, "version", version));
 
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: meta.class_name.clone(), source_span: None },
@@ -268,9 +273,12 @@ pub fn compile_declare_component_from_metadata<'a>(
     // in Direct mode. The linker reads only the `type` expression from
     // each entry (see `linker/mod.rs:1844`), so the placeholder kind/
     // selector is harmless — the emitted full ɵcmp ends up with
-    // `dependencies: [Import1, Import2, …]` regardless.
+    // `dependencies: [Import1, Import2, …]` regardless. An NgModule whose
+    // exports were read is an `ngmodule` entry followed by those, like
+    // ngtsc's: the runtime can't read them from the module, which the
+    // Angular CLI's linker emits without its scope.
     let synthetic_declarations = if meta.declarations.is_empty() && !meta.import_refs.is_empty() {
-        Some(lower_imports_to_declarations(allocator, &meta.import_refs))
+        Some(lower_imports_to_declarations(allocator, &meta.import_refs, inputs.import_scopes))
     } else {
         None
     };
@@ -383,6 +391,7 @@ pub fn compile_declare_component_from_metadata<'a>(
 pub fn compile_declare_factory_for_component<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
+    version: &'a str,
     meta: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
@@ -404,7 +413,7 @@ pub fn compile_declare_factory_for_component<'a>(
         ),
         target: FactoryTarget::Component,
     });
-    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, version, &factory_meta)
 }
 
 // ---- min version ---------------------------------------------------------
@@ -728,18 +737,27 @@ fn host_directives_mapping_array<'a>(
 fn lower_imports_to_declarations<'a>(
     allocator: &'a Allocator,
     imports: &[ImportRef<'a>],
+    import_scopes: &[(Ident<'a>, Vec<'a, TemplateDependency<'a>>)],
 ) -> Vec<'a, TemplateDependency<'a>> {
     let mut out: Vec<'a, TemplateDependency<'a>> = Vec::with_capacity_in(imports.len(), &allocator);
     for (index, import) in imports.iter().enumerate() {
         if imports[..index].iter().any(|seen| seen.key == import.key) {
             continue;
         }
-        let mut dependency = TemplateDependency::directive(
-            &allocator,
-            import.name,
-            Ident::from("*"),
-            false, // is_component — unknown at this point
-        );
+        let scope = import_scopes.iter().find(|(key, _)| *key == import.key);
+        let mut dependency = match scope {
+            Some(_) => TemplateDependency {
+                kind: TemplateDependencyKind::NgModule,
+                selector: None,
+                ..TemplateDependency::directive(allocator, import.name, Ident::from("*"), false)
+            },
+            None => TemplateDependency::directive(
+                allocator,
+                import.name,
+                Ident::from("*"),
+                false, // is_component — unknown at this point
+            ),
+        };
         if let Some(namespace) = import.namespace {
             dependency = dependency.with_type_namespace(namespace);
         }
@@ -747,6 +765,20 @@ fn lower_imports_to_declarations<'a>(
             dependency = dependency.with_forward_reference();
         }
         out.push(dependency);
+        for exported in scope.iter().flat_map(|(_, exported)| exported) {
+            let is_listed = out.iter().any(|listed| {
+                listed.type_namespace == exported.type_namespace
+                    && listed.type_name == exported.type_name
+            });
+            if !is_listed {
+                out.push(TemplateDependency {
+                    inputs: Vec::new_in(&allocator),
+                    outputs: Vec::new_in(&allocator),
+                    export_as: Vec::new_in(&allocator),
+                    ..*exported
+                });
+            }
+        }
     }
     out
 }
@@ -1022,9 +1054,9 @@ fn string_literal_str<'a>(allocator: &'a Allocator, value: &str) -> OutputExpres
 fn string_entry<'a>(
     allocator: &'a Allocator,
     key: &'static str,
-    value: &'static str,
+    value: &'a str,
 ) -> LiteralMapEntry<'a> {
-    LiteralMapEntry::new(Ident::from(key), string_literal_static(allocator, value), false)
+    LiteralMapEntry::new(Ident::from(key), string_literal_str(allocator, value), false)
 }
 
 fn bool_lit<'a>(allocator: &'a Allocator, value: bool) -> OutputExpression<'a> {

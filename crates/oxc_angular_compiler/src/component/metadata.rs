@@ -1071,6 +1071,41 @@ impl<'a> ComponentMetadata<'a> {
     }
 }
 
+// NgModule scopes read across files for partial compilation (#655), by
+// `CrossFileAnalyzer::ng_module_component_scopes` and `ng_module_exports`.
+
+/// A directive or pipe in a scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopeKind {
+    /// A component or directive, with its selector when it's a string.
+    Directive { selector: Option<String>, is_component: bool },
+    /// A pipe, with its name when it's a string.
+    Pipe { name: Option<String> },
+}
+
+/// How the compiled file names a class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportedName {
+    /// A class the file declares, by its name.
+    Local(String),
+    /// The export `name` of the module `specifier`, which the file imports.
+    Module { specifier: String, name: String },
+}
+
+/// A directive or pipe of a scope, named for the compiled file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeEntry {
+    pub kind: ScopeKind,
+    pub name: ImportedName,
+}
+
+/// The compilation scope of a component an NgModule declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentScope {
+    pub component: ImportedName,
+    pub entries: std::vec::Vec<ScopeEntry>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

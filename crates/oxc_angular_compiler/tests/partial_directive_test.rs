@@ -2,6 +2,7 @@
 //! (`ɵɵngDeclareDirective`).
 
 use oxc_allocator::{Allocator, Box, Vec};
+use oxc_angular_compiler::partial::PLACEHOLDER_VERSION;
 use oxc_angular_compiler::{
     CompilationMode, TransformOptions, compile_declare_directive_from_metadata,
     directive::{
@@ -35,7 +36,8 @@ fn minimal_directive_emits_required_fields_only() {
         .selector(Ident::from("[myDir]"))
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"minVersion:"14.0.0""#), "base minVersion 14.0.0, got: {js}");
@@ -59,7 +61,8 @@ fn legacy_inputs_string_when_names_match() {
         .add_input(R3InputMetadata::simple(Ident::from("value")))
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"inputs:{value:"value"}"#), "expected string-shape input, got: {js}");
@@ -78,7 +81,8 @@ fn legacy_inputs_tuple_when_names_differ() {
         .add_input(input)
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     let compact: String = js.chars().filter(|c| !c.is_whitespace()).collect();
@@ -98,7 +102,8 @@ fn signal_input_uses_new_format_and_bumps_minversion_17_1() {
         .add_input(R3InputMetadata::signal(Ident::from("value")))
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"minVersion:"17.1.0""#), "expected bumped minVersion 17.1.0, got: {js}");
@@ -126,7 +131,8 @@ fn signal_query_bumps_minversion_17_2() {
         .add_view_query(q)
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"minVersion:"17.2.0""#), "expected bumped minVersion 17.2.0, got: {js}");
@@ -148,7 +154,8 @@ fn host_listeners_and_properties_emitted_raw() {
         .host(host)
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
     let js = emit(&expr);
     // Listeners and properties carried as raw unparsed strings — the linker
@@ -224,7 +231,12 @@ fn host_directive_with_forward_ref_wraps_directive() {
             v
         },
     };
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &manual_meta);
+    let expr = compile_declare_directive_from_metadata(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &manual_meta,
+    );
     let js = emit(&expr);
     assert!(
         js.contains("forwardRef(function") && js.contains("return FwdHostDir"),
@@ -260,7 +272,8 @@ fn outputs_emitted_as_object_map() {
         is_signal: false,
         host_directives: Vec::new_in(&&allocator),
     };
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
     let js = emit(&expr);
     assert!(
         js.contains(r#"outputs:{valueChange:"valueChange",internalEvent:"publicEvent"}"#),
@@ -304,7 +317,8 @@ fn directive_uses_inheritance_and_on_changes() {
         is_signal: false,
         host_directives: Vec::new_in(&&allocator),
     };
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &manual);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &manual);
     let js = emit(&expr);
     assert!(js.contains("usesInheritance:true"), "expected usesInheritance, got: {js}");
     assert!(js.contains("usesOnChanges:true"), "expected usesOnChanges, got: {js}");
@@ -337,7 +351,8 @@ fn directive_export_as_emitted_as_string_array() {
         is_signal: false,
         host_directives: Vec::new_in(&&allocator),
     };
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
     let js = emit(&expr);
     assert!(js.contains(r#"exportAs:["alias1","alias2"]"#), "expected exportAs array, got: {js}");
 }
@@ -352,7 +367,8 @@ fn ng_import_is_last_field() {
         .selector(Ident::from("[myDir]"))
         .build()
         .unwrap();
-    let expr = compile_declare_directive_from_metadata(&allocator, "i0", &meta);
+    let expr =
+        compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
     let js = emit(&expr);
     let ng_idx = js.find("ngImport").expect("ngImport should be present");
     let selector_idx = js.find("selector:").expect("selector should be present");

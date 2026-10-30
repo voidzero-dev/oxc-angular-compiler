@@ -14,6 +14,7 @@ use oxc_angular_compiler::output::ast::{
     LiteralArrayExpr, LiteralMapEntry, LiteralMapExpr, OutputExpression, ReadVarExpr,
 };
 use oxc_angular_compiler::output::emitter::JsEmitter;
+use oxc_angular_compiler::partial::PLACEHOLDER_VERSION;
 use oxc_angular_compiler::{
     CompilationMode, TransformOptions, compile_component_declare_class_metadata,
     compile_declare_class_metadata_async, transform_angular_file,
@@ -74,7 +75,13 @@ fn async_class_metadata_emits_async_call_with_18_0_min_version() {
         is_default_import: false,
     }];
 
-    let expr = compile_declare_class_metadata_async(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_declare_class_metadata_async(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     assert!(
@@ -107,7 +114,13 @@ fn async_class_metadata_emits_resolve_deferred_deps_and_resolve_metadata() {
         },
     ];
 
-    let expr = compile_declare_class_metadata_async(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_declare_class_metadata_async(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     // resolveDeferredDeps: arrow returning dynamic imports for each dep.
@@ -148,7 +161,13 @@ fn async_class_metadata_emits_null_for_missing_ctor_params() {
         is_default_import: false,
     }];
 
-    let expr = compile_declare_class_metadata_async(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_declare_class_metadata_async(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     assert!(
@@ -173,7 +192,13 @@ fn default_import_uses_m_default_in_resolver() {
         is_default_import: true,
     }];
 
-    let expr = compile_declare_class_metadata_async(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_declare_class_metadata_async(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     assert!(
@@ -188,7 +213,13 @@ fn dispatch_helper_falls_back_to_sync_when_no_deferred_deps() {
     let cmp_meta = make_class_metadata(&allocator, "MyCmp", "Component");
 
     let empty: [R3DeferPerComponentDependency<'_>; 0] = [];
-    let expr = compile_component_declare_class_metadata(&allocator, "i0", &cmp_meta, &empty);
+    let expr = compile_component_declare_class_metadata(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &empty,
+    );
     let js = emit(&expr);
 
     // Sync form — NOT async.
@@ -216,7 +247,13 @@ fn dispatch_helper_picks_async_when_deferred_deps_present() {
         is_default_import: false,
     }];
 
-    let expr = compile_component_declare_class_metadata(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_component_declare_class_metadata(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     assert!(
@@ -317,7 +354,13 @@ fn unit_field_order_matches_upstream() {
         import_path: Ident::from("./lazy"),
         is_default_import: false,
     }];
-    let expr = compile_declare_class_metadata_async(&allocator, "i0", &cmp_meta, &deps);
+    let expr = compile_declare_class_metadata_async(
+        &allocator,
+        "i0",
+        PLACEHOLDER_VERSION,
+        &cmp_meta,
+        &deps,
+    );
     let js = emit(&expr);
 
     let positions = [

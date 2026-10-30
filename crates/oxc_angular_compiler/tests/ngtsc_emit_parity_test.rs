@@ -128,7 +128,7 @@ fn ng_module_schemas_are_left_out_of_the_partial_declaration() {
     let code = compile_partial(SCHEMAS_MODULE);
     assert_contains(
         &code,
-        "ɵɵngDeclareNgModule({minVersion:\"14.0.0\",version:\"0.0.0-PLACEHOLDER\",ngImport:i0,type:M})",
+        "ɵɵngDeclareNgModule({minVersion:\"14.0.0\",version:\"22.2.3\",ngImport:i0,type:M})",
     );
     assert_contains(&code, "args:[{schemas:[NO_ERRORS_SCHEMA,CUSTOM_ELEMENTS_SCHEMA]}]");
 }
