@@ -536,3 +536,125 @@ import { LibModule } from '@ws/lib';
         result.code
     );
 }
+
+#[test]
+fn a_module_with_an_unnamed_pipe_hides_none_of_its_classes() {
+    let dir = TempDir::new().unwrap();
+    write(
+        &dir,
+        "src/shared.ts",
+        r"
+import { Directive, NgModule, Pipe } from '@angular/core';
+declare function pipeName(): string;
+@Directive({ selector: '[s]' }) export class S {}
+@Pipe({ name: pipeName() }) export class Q { transform(v: unknown) { return v; } }
+@NgModule({ imports: [S, Q], exports: [S, Q] }) export class AModule {}
+@NgModule({ imports: [S], exports: [S] }) export class BModule {}
+",
+    );
+    let result = compile(
+        &dir,
+        "src/app.ts",
+        r"
+import { Component } from '@angular/core';
+import { AModule, BModule } from './shared';
+@Component({ selector: 'app', template: '<i s></i>', imports: [AModule, BModule] })
+export class App {}
+",
+        &partial(),
+    );
+    let code = compact(&result.code);
+    assert!(
+        code.contains(
+            "dependencies:[{kind:\"directive\",type:AModule,selector:\"*\"},{kind:\"ngmodule\",type:BModule},{kind:\"directive\",type:i1.S,selector:\"[s]\"}]"
+        ),
+        "{}",
+        result.code
+    );
+}
+
+/// `src/app.module.ts` declaring `C` from `src/c.ts`, whose source is `c`.
+fn module_declaring_c(dir: &TempDir, c: &str) -> String {
+    write(dir, "src/c.ts", c);
+    let result = compile(
+        dir,
+        "src/app.module.ts",
+        r"
+import { NgModule } from '@angular/core';
+import { C } from './c';
+export interface Config {}
+export const TOKEN = 'token';
+@NgModule({ declarations: [C] })
+export class AppModule {}
+",
+        &partial(),
+    );
+    compact(&result.code)
+}
+
+#[test]
+fn a_type_only_import_of_the_module_file_is_no_cycle() {
+    for import in [
+        "import type { Config } from './app.module';",
+        "import { type Config } from './app.module';",
+        "export type { Config } from './app.module';",
+    ] {
+        let dir = TempDir::new().unwrap();
+        let code = module_declaring_c(
+            &dir,
+            &format!(
+                "import {{ Component }} from '@angular/core';\n{import}\n@Component({{ selector: 'c', template: '', standalone: false }}) export class C {{}}\n"
+            ),
+        );
+        assert!(code.contains("ɵɵsetComponentScope(i1.C,()=>[i1.C],()=>[]);"), "{import}: {code}");
+    }
+}
+
+#[test]
+fn a_namespace_re_export_of_the_module_file_is_a_cycle() {
+    let dir = TempDir::new().unwrap();
+    write(&dir, "src/reexp.ts", "export * as mod from './app.module';\n");
+    let code = module_declaring_c(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { mod } from './reexp';
+@Component({ selector: 'c', template: '', standalone: false })
+export class C { token = mod.TOKEN; }
+",
+    );
+    assert!(!code.contains("ɵɵsetComponentScope"), "{code}");
+}
+
+#[test]
+fn a_cycle_through_the_barrel_the_component_is_imported_from_is_one() {
+    let dir = TempDir::new().unwrap();
+    write(
+        &dir,
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/shared": ["src/shared/index.ts"] } } }"#,
+    );
+    write(&dir, "src/shared/index.ts", "export * from './shared.module';\nexport * from './c';\n");
+    write(
+        &dir,
+        "src/shared/c.ts",
+        r"
+import { Component } from '@angular/core';
+@Component({ selector: 'c', template: '', standalone: false }) export class C {}
+",
+    );
+    let options =
+        TransformOptions { tsconfig_path: Some(dir.path().join("tsconfig.json")), ..partial() };
+    let result = compile(
+        &dir,
+        "src/shared/shared.module.ts",
+        r"
+import { NgModule } from '@angular/core';
+import { C } from '@app/shared';
+@NgModule({ declarations: [C], exports: [C] })
+export class SharedModule {}
+",
+        &options,
+    );
+    assert!(!result.code.contains("ɵɵsetComponentScope"), "{}", result.code);
+}

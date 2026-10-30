@@ -109,6 +109,9 @@ struct FileExports {
     locals: FxHashMap<String, Local>,
     /// The specifiers of its imports, in source order.
     import_specs: Vec<String>,
+    /// The specifiers of the imports and re-exports that load a module at
+    /// runtime: not those of types only.
+    loads: Vec<String>,
 }
 
 /// Per NgModule, and the module it was imported through, its exported scope.
@@ -164,25 +167,32 @@ impl CrossFileAnalyzer {
         let mut components = Vec::new();
         for (class, declared) in inner.resolve_refs(declarations, None, 0)? {
             let kind = scope_kind(&declared)?;
-            // The call reads the component class when this file runs, which
-            // in an import cycle back to it can be before the class exists.
-            if matches!(kind, ScopeKind::Directive { is_component: true, .. })
-                && (class.decl.file == file || !inner.imports_file(&class.decl.file, &file))
-            {
+            if matches!(kind, ScopeKind::Directive { is_component: true, .. }) {
                 components.push(class.clone());
             }
             scope.push(ScopeItem { class, kind });
         }
         let entries = inner.named_entries(dedupe(scope), &file)?;
-        components
-            .iter()
-            .map(|class| {
-                Some(ComponentScope {
-                    component: inner.imported_name(class, &file)?,
-                    entries: entries.clone(),
-                })
-            })
-            .collect()
+        let mut scopes = Vec::new();
+        for class in &components {
+            let component = inner.imported_name(class, &file)?;
+            // The call reads the component class when this file runs: in an
+            // import cycle back to it, through the file it's imported from
+            // or the one that declares it, that can be before it exists.
+            let loaded = match &component {
+                ImportedName::Local(_) => None,
+                ImportedName::Module { specifier, .. } => inner.resolve_types(&file, specifier),
+            };
+            if loaded
+                .iter()
+                .chain([&class.decl.file])
+                .any(|from| *from != file && inner.imports_file(from, &file))
+            {
+                continue;
+            }
+            scopes.push(ComponentScope { component, entries: entries.clone() });
+        }
+        Some(scopes)
     }
 
     /// For each of a standalone component's `imports` (`namespace.name` or
@@ -225,6 +235,11 @@ impl CrossFileAnalyzer {
                     .cloned()
                     .collect();
                 let entries = self.inner.named_entries(added.clone(), &file)?;
+                // A pipe the linker can't match without a name.
+                if entries.iter().any(|entry| matches!(entry.kind, ScopeKind::Pipe { name: None }))
+                {
+                    return None;
+                }
                 listed.extend(added.into_iter().map(|item| item.class.decl));
                 Some(entries)
             })
@@ -314,11 +329,7 @@ impl Inner {
                 continue;
             }
             let Some(exports) = self.file_exports(&file) else { continue };
-            let re_exports = exports.named.values().filter_map(|export| match export {
-                Export::From { spec, .. } => Some(spec),
-                Export::Local(_) => None,
-            });
-            for spec in exports.import_specs.iter().chain(&exports.stars).chain(re_exports) {
+            for spec in &exports.loads {
                 pending.extend(self.resolve_types(&file, spec));
             }
         }
@@ -661,6 +672,19 @@ fn collect_file_exports(program: &Program<'_>) -> FileExports {
             Statement::ImportDeclaration(import) => {
                 let Some(spec) = import.source.value.as_str() else { continue };
                 exports.import_specs.push(spec.to_string());
+                // `import { type A }` is erased; `import {} from` and
+                // `import 'x'` load the module.
+                let types_only = import.import_kind.is_type()
+                    || import.specifiers.as_ref().is_some_and(|specifiers| {
+                        !specifiers.is_empty()
+                            && specifiers.iter().all(|specifier| {
+                                matches!(specifier, ImportDeclarationSpecifier::ImportSpecifier(s)
+                                    if s.import_kind.is_type())
+                            })
+                    });
+                if !types_only {
+                    exports.loads.push(spec.to_string());
+                }
                 for specifier in import.specifiers.iter().flatten() {
                     let (local, imported) = match specifier {
                         ImportDeclarationSpecifier::ImportSpecifier(s) => {
@@ -691,6 +715,11 @@ fn collect_file_exports(program: &Program<'_>) -> FileExports {
             }
             Statement::ExportFromDeclaration(decl) if !decl.export_kind.is_type() => {
                 let Some(source) = decl.source.value.as_str() else { continue };
+                if decl.specifiers.is_empty()
+                    || decl.specifiers.iter().any(|spec| !spec.export_kind.is_type())
+                {
+                    exports.loads.push(source.to_string());
+                }
                 for spec in decl.specifiers.iter().filter(|spec| !spec.export_kind.is_type()) {
                     let how = Export::From {
                         spec: source.to_string(),
@@ -699,11 +728,14 @@ fn collect_file_exports(program: &Program<'_>) -> FileExports {
                     export(&mut exports, &spec.exported.name(), how);
                 }
             }
-            Statement::ExportAllDeclaration(decl)
-                if decl.exported.is_none() && !decl.export_kind.is_type() =>
-            {
+            Statement::ExportAllDeclaration(decl) if !decl.export_kind.is_type() => {
                 if let Some(source) = decl.source.value.as_str() {
-                    exports.stars.push(source.to_string());
+                    exports.loads.push(source.to_string());
+                    // `export * as ns` names a namespace, which no scope
+                    // reads a class through.
+                    if decl.exported.is_none() {
+                        exports.stars.push(source.to_string());
+                    }
                 }
             }
             Statement::ExportDefaultDeclaration(decl) => match &decl.declaration {
