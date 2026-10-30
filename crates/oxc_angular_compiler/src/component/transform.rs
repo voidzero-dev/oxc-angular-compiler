@@ -3310,6 +3310,10 @@ pub fn transform_angular_file(
     // Collect class positions from original AST for edit-based output.
     // (class span, class_body_end)
     let mut class_positions: Vec<(Span, u32)> = Vec::new();
+    // Statements that run once the whole file has, when every class it
+    // declares exists.
+    #[cfg_attr(not(feature = "cross_file_elision"), allow(unused_mut))]
+    let mut decls_at_end = String::new();
     // The compiled classes of a `namespace` body: ngtsc adds no statement
     // after them there.
     let mut namespace_compiled: rustc_hash::FxHashSet<Span> = rustc_hash::FxHashSet::default();
@@ -3579,13 +3583,14 @@ pub fn transform_angular_file(
                 && matches!(options.compilation_mode, crate::CompilationMode::Partial)
         })
         .map(|analyzer| {
-            move |import: &ImportRef<'_>| {
-                analyzer.ng_module_exports(
-                    std::path::Path::new(path),
-                    source,
-                    import.namespace.as_ref().map(Ident::as_str),
-                    import.name.as_str(),
-                )
+            move |imports: &[ImportRef<'_>]| {
+                let imports: std::vec::Vec<_> = imports
+                    .iter()
+                    .map(|import| {
+                        (import.namespace.as_ref().map(Ident::as_str), import.name.as_str())
+                    })
+                    .collect();
+                analyzer.standalone_import_scopes(std::path::Path::new(path), source, &imports)
             }
         });
     // Without cross-file analysis, only the classes declared in this file
@@ -4765,10 +4770,8 @@ pub fn transform_angular_file(
                             )
                         {
                             for scope in &scopes {
-                                if !external_decls.is_empty() {
-                                    external_decls.push('\n');
-                                }
-                                external_decls.push_str(&set_component_scope_statement(
+                                decls_at_end.push('\n');
+                                decls_at_end.push_str(&set_component_scope_statement(
                                     allocator,
                                     scope,
                                     &mut file_namespace_registry,
@@ -5161,6 +5164,9 @@ pub fn transform_angular_file(
             }
         }
     }
+    if !decls_at_end.is_empty() {
+        edits.push(Edit::insert(parser_ret.program.span.end, decls_at_end));
+    }
     if !decls_after_imports.is_empty() {
         // ngtsc moves the imports above the rest of the file. Imports load
         // before the module body runs anyway, so a statement ahead of the
@@ -5402,8 +5408,10 @@ fn scope_dependencies<'a>(
     Some(dependencies)
 }
 
-/// `i0.ɵɵsetComponentScope(Cmp, [directives], [pipes]);` for `scope`, with
-/// the modules its classes come from imported as namespaces.
+/// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for
+/// `scope`, with the modules its classes come from imported as namespaces.
+/// The lists are read when the component first renders: a module in an
+/// import cycle with this file may not have run yet.
 #[cfg(feature = "cross_file_elision")]
 fn set_component_scope_statement<'a>(
     allocator: &'a Allocator,
@@ -5429,7 +5437,7 @@ fn set_component_scope_statement<'a>(
         list.push(name_of(&entry.name));
     }
     format!(
-        "{}.ɵɵsetComponentScope({component}, [{}], [{}]);",
+        "{}.ɵɵsetComponentScope({component}, () => [{}], () => [{}]);",
         registry.angular_core_ns(),
         directives.join(", "),
         pipes.join(", ")
@@ -5964,10 +5972,12 @@ fn html_parse_error_diagnostic(
 /// refers to (see [`ImportedClass`]).
 type ImportSelector<'f> = &'f dyn Fn(&ImportRef<'_>) -> Option<ImportedClass>;
 
-/// The directives and pipes the NgModule an `imports` entry refers to
-/// exports, when cross-file analysis reads them.
+/// For each `imports` entry, the directives and pipes the NgModule it refers
+/// to adds, when cross-file analysis reads them.
 type NgModuleExports<'f> =
-    &'f dyn Fn(&ImportRef<'_>) -> Option<std::vec::Vec<super::metadata::ScopeEntry>>;
+    &'f dyn Fn(
+        &[ImportRef<'_>],
+    ) -> std::vec::Vec<Option<std::vec::Vec<super::metadata::ScopeEntry>>>;
 
 /// What `@defer` reads of the standalone component or directive an `imports`
 /// entry refers to.
@@ -6424,10 +6434,12 @@ fn compile_component_full<'a>(
             })
             .collect();
         let import_scopes: std::vec::Vec<_> = ng_module_exports
+            .map(|exports| exports(&metadata.import_refs))
+            .unwrap_or_default()
             .into_iter()
-            .flat_map(|exports| metadata.import_refs.iter().map(move |import| (import, exports)))
-            .filter_map(|(import, exports)| {
-                let entries = exports(import)?;
+            .zip(&metadata.import_refs)
+            .filter_map(|(entries, import)| {
+                let entries = entries?;
                 let dependencies = scope_dependencies(allocator, &entries, namespace_registry)?;
                 Some((import.key, dependencies))
             })

@@ -150,6 +150,17 @@ pub fn declaration_version(angular_version: Option<crate::AngularVersion>) -> St
     }
 }
 
+/// Whether the linker reads a declaration of `version` without
+/// `isStandalone` as standalone: from v19 on, as Angular's linker's
+/// `getDefaultStandaloneValue` does.
+pub(crate) fn standalone_is_default(version: &str) -> bool {
+    version
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u32>().ok())
+        .is_some_and(|major| major >= 19)
+}
+
 /// Minimum linker version that understands a `ɵɵngDeclareFactory` shape.
 ///
 /// Matches upstream `packages/compiler/src/render3/partial/factory.ts:25`.

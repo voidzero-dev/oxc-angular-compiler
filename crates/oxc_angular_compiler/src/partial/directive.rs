@@ -87,10 +87,11 @@ pub(crate) fn create_directive_definition_map<'a>(
 
     // isStandalone: emit only when not standalone — matches Pipe/Component
     // convention. Linker defaults to true (v19+ runtime default).
-    if !meta.is_standalone {
+    // An older linker defaults to `false`, so it's told `true`.
+    if !meta.is_standalone || !super::standalone_is_default(version) {
         entries.push(LiteralMapEntry::new(
             Ident::from("isStandalone"),
-            bool_lit(allocator, false),
+            bool_lit(allocator, meta.is_standalone),
             false,
         ));
     }

@@ -123,10 +123,13 @@ export class AppModule {}
     let code = compact(&result.code);
     // The file's own `./dep.js` import names the module the classes come from.
     assert!(code.contains("import*asi1from'./dep.js';"), "{}", result.code);
-    assert!(code.contains("i0.ɵɵsetComponentScope(App,[i1.D,App],[i1.P]);"), "{}", result.code);
-    // After the module's declarations: it names the component.
-    let module = code.find("ɵɵngDeclareNgModule").unwrap();
-    assert!(code.find("ɵɵsetComponentScope").unwrap() > module, "{}", result.code);
+    assert!(
+        code.contains("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P]);"),
+        "{}",
+        result.code
+    );
+    // At the end of the file, once every class in it exists.
+    assert!(code.ends_with("()=>[i1.P]);"), "{}", result.code);
     // The files read are watched.
     assert!(
         result.dependencies.iter().any(|file| file.ends_with("dep.ts")),
@@ -190,7 +193,9 @@ export class AppModule {}
     );
     let code = compact(&result.code);
     assert!(
-        code.contains("i0.ɵɵsetComponentScope(App,[i1.UiDir,i1.InnerDir,App],[i1.UiPipe]);"),
+        code.contains(
+            "i0.ɵɵsetComponentScope(App,()=>[i1.UiDir,i1.InnerDir,App],()=>[i1.UiPipe]);"
+        ),
         "{}",
         result.code
     );
@@ -224,8 +229,16 @@ export class AppModule {}
         &partial(),
     );
     let code = compact(&result.code);
-    assert!(code.contains("i0.ɵɵsetComponentScope(A,[i1.D,A,B],[i1.P]);"), "{}", result.code);
-    assert!(code.contains("i0.ɵɵsetComponentScope(B,[i1.D,A,B],[i1.P]);"), "{}", result.code);
+    assert!(
+        code.contains("i0.ɵɵsetComponentScope(A,()=>[i1.D,A,B],()=>[i1.P]);"),
+        "{}",
+        result.code
+    );
+    assert!(
+        code.contains("i0.ɵɵsetComponentScope(B,()=>[i1.D,A,B],()=>[i1.P]);"),
+        "{}",
+        result.code
+    );
     assert!(code.contains("import*asi1from'./dep';"), "{}", result.code);
 }
 
@@ -358,4 +371,168 @@ export class App {}
     let result = compile(&dir, "src/app.ts", source, &v20);
     assert!(compact(&result.code).contains("version:\"20.1.4\""), "{}", result.code);
     assert!(!result.code.contains("22.2.3"), "{}", result.code);
+    assert!(!result.code.contains("isStandalone"), "{}", result.code);
+    // Angular's linker reads a missing `isStandalone` as `false` before v19.
+    let v18 =
+        TransformOptions { angular_version: Some(AngularVersion::new(18, 2, 0)), ..partial() };
+    let standalone = source.replace("selector: 'app',", "selector: 'app', standalone: true,");
+    let result = compile(&dir, "src/app.ts", &standalone, &v18);
+    assert!(compact(&result.code).contains("isStandalone:true"), "{}", result.code);
+}
+
+#[test]
+fn standalone_component_lists_each_class_once() {
+    let dir = TempDir::new().unwrap();
+    write(
+        &dir,
+        "src/shared.ts",
+        r"
+import { Directive, NgModule, Pipe } from '@angular/core';
+@Directive({ selector: '[s]' }) export class S {}
+@Pipe({ name: 'q' }) export class Q { transform(v: unknown) { return v; } }
+@NgModule({ imports: [S, Q], exports: [S, Q] }) export class AModule {}
+@NgModule({ imports: [S, Q], exports: [S, Q] }) export class BModule {}
+",
+    );
+    let result = compile(
+        &dir,
+        "src/app.ts",
+        r"
+import { Component } from '@angular/core';
+import { AModule, BModule, S } from './shared';
+@Component({ selector: 'app', template: '<i s>{{ 1 | q }}</i>', imports: [S, AModule, BModule] })
+export class App {}
+",
+        &partial(),
+    );
+    let code = compact(&result.code);
+    assert!(
+        code.contains(
+            "dependencies:[{kind:\"directive\",type:S,selector:\"*\"},{kind:\"ngmodule\",type:AModule},{kind:\"pipe\",type:i1.Q,name:\"q\"},{kind:\"ngmodule\",type:BModule}]"
+        ),
+        "{}",
+        result.code
+    );
+}
+
+#[test]
+fn a_component_in_an_import_cycle_with_its_module_gets_no_scope() {
+    let dir = TempDir::new().unwrap();
+    dep_module(&dir);
+    // `cycle.ts` reaches the module file through `token.ts`, so it may run
+    // after it: the module file can't read `Cycle` when it runs.
+    write(&dir, "src/token.ts", "export { TOKEN } from './app.module';\n");
+    write(
+        &dir,
+        "src/cycle.ts",
+        r"
+import { Component } from '@angular/core';
+import { TOKEN } from './token';
+@Component({ selector: 'cycle', template: '{{ token }}', standalone: false })
+export class Cycle { token = TOKEN; }
+",
+    );
+    write(
+        &dir,
+        "src/plain.ts",
+        r"
+import { Component } from '@angular/core';
+@Component({ selector: 'plain', template: '', standalone: false }) export class Plain {}
+",
+    );
+    let result = compile(
+        &dir,
+        "src/app.module.ts",
+        r"
+import { NgModule } from '@angular/core';
+import { DepModule } from './dep';
+import { Cycle } from './cycle';
+import { Plain } from './plain';
+export const TOKEN = 'token';
+@NgModule({ declarations: [Cycle, Plain], imports: [DepModule] })
+export class AppModule {}
+",
+        &partial(),
+    );
+    let code = compact(&result.code);
+    assert_eq!(code.matches("ɵɵsetComponentScope").count(), 1, "{}", result.code);
+    assert!(
+        code.contains("ɵɵsetComponentScope(i1.Plain,()=>[i2.D,i3.Cycle,i1.Plain],()=>[i2.P]);"),
+        "{}",
+        result.code
+    );
+}
+
+#[test]
+fn export_star_cycles_end() {
+    use std::fmt::Write as _;
+    // Every file re-exports the next two and the first: a search that
+    // follows each path separately takes exponential time.
+    const FILES: usize = 40;
+    let dir = TempDir::new().unwrap();
+    for i in 0..FILES {
+        let mut source = String::from("export * from './f0';\n");
+        for next in [i + 1, i + 2] {
+            if next < FILES {
+                writeln!(source, "export * from './f{next}';").unwrap();
+            }
+        }
+        if i == FILES - 1 {
+            source.push_str(
+                "import { NgModule } from '@angular/core';\n@NgModule({}) export class EndModule {}\n",
+            );
+        }
+        write(&dir, &format!("src/f{i}.ts"), &source);
+    }
+    let source = r"
+import { Component, NgModule } from '@angular/core';
+import { EndModule, Missing } from './f0';
+@Component({ selector: 'app', template: '', standalone: false }) export class App {}
+@NgModule({ declarations: [App], imports: [EndModule] }) export class AModule {}
+@NgModule({ declarations: [App], imports: [Missing] }) export class BModule {}
+";
+    let result = compile(&dir, "src/app.ts", source, &partial());
+    let code = compact(&result.code);
+    assert!(code.contains("ɵɵsetComponentScope(App,()=>[App],()=>[]);"), "{}", result.code);
+    assert_eq!(code.matches("ɵɵsetComponentScope").count(), 1, "{}", result.code);
+}
+
+#[test]
+fn a_workspace_library_class_its_entry_point_does_not_export_is_imported_by_path() {
+    let dir = TempDir::new().unwrap();
+    write(
+        &dir,
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ws/lib": ["libs/lib/index.ts"] } } }"#,
+    );
+    write(&dir, "libs/lib/index.ts", "export { LibModule } from './lib.module';\n");
+    write(
+        &dir,
+        "libs/lib/lib.module.ts",
+        r"
+import { Directive, NgModule } from '@angular/core';
+@Directive({ selector: '[lib]', standalone: false }) export class LibDir {}
+@NgModule({ declarations: [LibDir], exports: [LibDir] }) export class LibModule {}
+",
+    );
+    let options =
+        TransformOptions { tsconfig_path: Some(dir.path().join("tsconfig.json")), ..partial() };
+    let result = compile(
+        &dir,
+        "src/app.ts",
+        r"
+import { Component, NgModule } from '@angular/core';
+import { LibModule } from '@ws/lib';
+@Component({ selector: 'app', template: '<i lib></i>', standalone: false }) export class App {}
+@NgModule({ declarations: [App], imports: [LibModule] }) export class AppModule {}
+",
+        &options,
+    );
+    let code = compact(&result.code);
+    assert!(code.contains("import*asi1from'../libs/lib/lib.module';"), "{}", result.code);
+    assert!(
+        code.contains("ɵɵsetComponentScope(App,()=>[i1.LibDir,App],()=>[]);"),
+        "{}",
+        result.code
+    );
 }

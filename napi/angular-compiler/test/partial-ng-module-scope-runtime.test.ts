@@ -138,6 +138,44 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(scope(m.App)).toEqual({ directives: ['D'], pipes: ['P'] })
   })
 
+  it('sets the scope once the file has declared the component', async () => {
+    const m = await load(
+      {
+        dep: DEP,
+        main: `
+          import { Component, NgModule, forwardRef } from '@angular/core';
+          import { DepModule } from './dep.mjs';
+          @NgModule({ declarations: [forwardRef(() => App)], imports: [DepModule] })
+          export class AppModule {}
+          @Component({ selector: 'app', template: '<i d></i>', standalone: false })
+          export class App {}
+        `,
+      },
+      linker,
+    )
+    expect(scope(m.App)).toEqual({ directives: ['D', 'App'], pipes: ['P'] })
+  })
+
+  it('lists a class an imported NgModule also exports once', async () => {
+    const m = await load(
+      {
+        dep: `
+          import { Directive, NgModule } from '@angular/core';
+          @Directive({ selector: '[s]' }) export class S {}
+          @NgModule({ imports: [S], exports: [S] }) export class SModule {}
+        `,
+        main: `
+          import { Component } from '@angular/core';
+          import { S, SModule } from './dep.mjs';
+          @Component({ selector: 'app', template: '<i s></i>', imports: [SModule, S] })
+          export class App {}
+        `,
+      },
+      linker,
+    )
+    expect(scope(m.App)).toEqual({ directives: ['S'], pipes: [] })
+  })
+
   it('links templates with block syntax', async () => {
     const m = await load(
       {

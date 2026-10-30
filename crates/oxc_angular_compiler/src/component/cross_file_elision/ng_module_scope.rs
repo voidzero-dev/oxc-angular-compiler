@@ -126,6 +126,10 @@ pub(super) struct ScopeState {
     visiting: RefCell<FxHashSet<Decl>>,
     /// Per module file, the name it exports each declaration by.
     export_names: RefCell<FxHashMap<String, Rc<FxHashMap<Decl, String>>>>,
+    /// The declaration each `(file, name)` is exported as.
+    found_exports: RefCell<FxHashMap<(String, String), Option<Decl>>>,
+    /// `const` lists being flattened: a list that spreads itself has none.
+    flattening: RefCell<FxHashSet<Decl>>,
 }
 
 impl CrossFileAnalyzer {
@@ -160,7 +164,11 @@ impl CrossFileAnalyzer {
         let mut components = Vec::new();
         for (class, declared) in inner.resolve_refs(declarations, None, 0)? {
             let kind = scope_kind(&declared)?;
-            if matches!(kind, ScopeKind::Directive { is_component: true, .. }) {
+            // The call reads the component class when this file runs, which
+            // in an import cycle back to it can be before the class exists.
+            if matches!(kind, ScopeKind::Directive { is_component: true, .. })
+                && (class.decl.file == file || !inner.imports_file(&class.decl.file, &file))
+            {
                 components.push(class.clone());
             }
             scope.push(ScopeItem { class, kind });
@@ -177,28 +185,50 @@ impl CrossFileAnalyzer {
             .collect()
     }
 
-    /// The directives and pipes the NgModule `file` imports as `namespace.name`
-    /// (or `name`) exports, or `None` when it's no NgModule or its scope
-    /// can't be read statically.
-    pub(crate) fn ng_module_exports(
+    /// For each of a standalone component's `imports` (`namespace.name` or
+    /// `name` in `file`), the directives and pipes it adds when it's an
+    /// NgModule, or `None` when it's none or its scope can't be read
+    /// statically. A class is listed once: an NgModule leaves out what
+    /// another import already is, or an earlier NgModule exports.
+    pub(crate) fn standalone_import_scopes(
         &self,
         file: &Path,
         source: &str,
-        namespace: Option<&str>,
-        name: &str,
-    ) -> Option<Vec<ScopeEntry>> {
+        imports: &[(Option<&str>, &str)],
+    ) -> Vec<Option<Vec<ScopeEntry>>> {
         let file = self.inner.set_compiled_source(file, source);
-        let raw = RawRef {
-            file: file.clone(),
-            namespace: namespace.map(Into::into),
-            name: name.into(),
-            method: None,
-        };
-        let class = self.inner.resolve_ref(&raw, None, 0)?;
-        let declared = self.inner.declared(&class.decl)?;
-        let Declared::NgModule { exports, .. } = &*declared else { return None };
-        let scope = self.inner.exported_scope(&class, exports)?;
-        self.inner.named_entries(scope.to_vec(), &file)
+        let resolved: Vec<_> = imports
+            .iter()
+            .map(|(namespace, name)| {
+                let raw = RawRef {
+                    file: file.clone(),
+                    namespace: namespace.map(Into::into),
+                    name: (*name).into(),
+                    method: None,
+                };
+                let class = self.inner.resolve_ref(&raw, None, 0)?;
+                let declared = self.inner.declared(&class.decl)?;
+                Some((class, declared))
+            })
+            .collect();
+        let mut listed: FxHashSet<Decl> =
+            resolved.iter().flatten().map(|(class, _)| class.decl.clone()).collect();
+        resolved
+            .into_iter()
+            .map(|import| {
+                let (class, declared) = import?;
+                let Declared::NgModule { exports, .. } = &*declared else { return None };
+                let scope = self.inner.exported_scope(&class, exports)?;
+                let added: Vec<_> = scope
+                    .iter()
+                    .filter(|item| !listed.contains(&item.class.decl))
+                    .cloned()
+                    .collect();
+                let entries = self.inner.named_entries(added.clone(), &file)?;
+                listed.extend(added.into_iter().map(|item| item.class.decl));
+                Some(entries)
+            })
+            .collect()
     }
 }
 
@@ -217,6 +247,11 @@ fn scope_kind(declared: &Declared) -> Option<ScopeKind> {
         Declared::Pipe { name } => Some(ScopeKind::Pipe { name: name.clone() }),
         Declared::NgModule { .. } | Declared::List(_) => None,
     }
+}
+
+/// Whether `file` is in a package rather than the workspace.
+fn in_node_modules(file: &str) -> bool {
+    Path::new(file).components().any(|part| part.as_os_str() == "node_modules")
 }
 
 /// Whether `spec` names a module by path rather than by package.
@@ -258,13 +293,36 @@ impl Inner {
             self.resolver.clone_with_options(options)
         });
         let resolved = resolver.resolve_dts(from_file, spec).ok()?;
-        let path = resolved.path();
-        let file = path.to_string_lossy().into_owned();
+        let file = resolved.path().to_string_lossy().into_owned();
         // A package is no file the build watches.
-        if !path.components().any(|part| part.as_os_str() == "node_modules") {
+        if !in_node_modules(&file) {
             self.value_dependencies.borrow_mut().insert(file.clone());
         }
         Some(file)
+    }
+
+    /// Whether loading the workspace file `from` loads `target`: whether it
+    /// imports or re-exports it, directly or through other workspace files.
+    fn imports_file(&self, from: &str, target: &str) -> bool {
+        let mut seen = FxHashSet::default();
+        let mut pending = vec![from.to_string()];
+        while let Some(file) = pending.pop() {
+            if file == target {
+                return true;
+            }
+            if in_node_modules(&file) || !seen.insert(file.clone()) {
+                continue;
+            }
+            let Some(exports) = self.file_exports(&file) else { continue };
+            let re_exports = exports.named.values().filter_map(|export| match export {
+                Export::From { spec, .. } => Some(spec),
+                Export::Local(_) => None,
+            });
+            for spec in exports.import_specs.iter().chain(&exports.stars).chain(re_exports) {
+                pending.extend(self.resolve_types(&file, spec));
+            }
+        }
+        false
     }
 
     /// The exports and top-level bindings of `file`.
@@ -279,31 +337,45 @@ impl Inner {
     }
 
     /// The declaration `file` exports as `name`, following re-exports.
-    fn find_export(&self, file: &str, name: &str, depth: u16) -> Option<Decl> {
-        if depth > MAX_EXPORT_CHAIN {
+    fn find_export(&self, file: &str, name: &str) -> Option<Decl> {
+        let key = (file.to_string(), name.to_string());
+        if let Some(found) = self.scope.found_exports.borrow().get(&key) {
+            return found.clone();
+        }
+        let found = self.search_export(file, name, 0, &mut FxHashSet::default());
+        self.scope.found_exports.borrow_mut().insert(key, found.clone());
+        found
+    }
+
+    /// [`Self::find_export`], looking at each `(file, name)` once, as
+    /// TypeScript does: an `export *` cycle ends, and no path is followed
+    /// twice.
+    fn search_export(
+        &self,
+        file: &str,
+        name: &str,
+        depth: u16,
+        seen: &mut FxHashSet<(String, String)>,
+    ) -> Option<Decl> {
+        if depth > MAX_EXPORT_CHAIN || !seen.insert((file.to_string(), name.to_string())) {
             return None;
         }
         let exports = self.file_exports(file)?;
         match exports.named.get(name) {
-            Some(Export::Local(local)) => self.find_local(file, local, depth + 1),
+            Some(Export::Local(local)) => match exports.locals.get(local)? {
+                Local::Declared => Some(Decl { file: file.to_string(), name: local.clone() }),
+                Local::Import { spec, imported: Some(imported) } => {
+                    self.search_export(&self.resolve_types(file, spec)?, imported, depth + 1, seen)
+                }
+                Local::Import { imported: None, .. } => None,
+            },
             Some(Export::From { spec, name }) => {
-                self.find_export(&self.resolve_types(file, spec)?, name, depth + 1)
+                self.search_export(&self.resolve_types(file, spec)?, name, depth + 1, seen)
             }
             None if name == "default" => None,
             None => exports.stars.iter().find_map(|spec| {
-                self.find_export(&self.resolve_types(file, spec)?, name, depth + 1)
+                self.search_export(&self.resolve_types(file, spec)?, name, depth + 1, seen)
             }),
-        }
-    }
-
-    /// The declaration the top-level binding `local` of `file` is.
-    fn find_local(&self, file: &str, local: &str, depth: u16) -> Option<Decl> {
-        match self.file_exports(file)?.locals.get(local)? {
-            Local::Declared => Some(Decl { file: file.to_string(), name: local.to_string() }),
-            Local::Import { spec, imported: Some(imported) } => {
-                self.find_export(&self.resolve_types(file, spec)?, imported, depth + 1)
-            }
-            Local::Import { imported: None, .. } => None,
         }
     }
 
@@ -324,7 +396,7 @@ impl Inner {
                     (None, Some(_)) => raw.name.as_str(),
                     _ => return None,
                 };
-                let decl = self.find_export(&self.resolve_types(&raw.file, spec)?, name, depth)?;
+                let decl = self.find_export(&self.resolve_types(&raw.file, spec)?, name)?;
                 let owner =
                     if is_relative(spec) { owner.map(Into::into) } else { Some(spec.clone()) };
                 (decl, owner)
@@ -405,7 +477,12 @@ impl Inner {
             let class = self.resolve_ref(raw, owner, 0)?;
             let declared = self.declared(&class.decl)?;
             if let Declared::List(items) = &*declared {
-                out.extend(self.resolve_refs(items, class.owner.as_deref(), depth + 1)?);
+                if !self.scope.flattening.borrow_mut().insert(class.decl.clone()) {
+                    return None;
+                }
+                let items = self.resolve_refs(items, class.owner.as_deref(), depth + 1);
+                self.scope.flattening.borrow_mut().remove(&class.decl);
+                out.extend(items?);
             } else {
                 out.push((class, declared));
             }
@@ -460,9 +537,17 @@ impl Inner {
                 .then(|| ImportedName::Local(class.decl.name.clone()));
         }
         if let Some(specifier) = &class.owner {
-            let entry = self.resolve_types(file, specifier)?;
-            let name = self.export_name(&entry, &class.decl)?;
-            return Some(ImportedName::Module { specifier: specifier.clone(), name });
+            let name = self
+                .resolve_types(file, specifier)
+                .and_then(|entry| self.export_name(&entry, &class.decl));
+            if let Some(name) = name {
+                return Some(ImportedName::Module { specifier: specifier.clone(), name });
+            }
+            // A workspace library's source, by path, when its entry point
+            // doesn't export the class.
+            if in_node_modules(&class.decl.file) {
+                return None;
+            }
         }
         let name = self.export_name(&class.decl.file, &class.decl)?;
         // The file's own import of that file, as it's written
@@ -498,7 +583,7 @@ impl Inner {
         self.all_export_names(file, &mut FxHashSet::default(), &mut all, 0);
         let mut names: FxHashMap<Decl, String> = FxHashMap::default();
         for name in all {
-            let Some(found) = self.find_export(file, &name, 0) else { continue };
+            let Some(found) = self.find_export(file, &name) else { continue };
             if found.name == name || !names.contains_key(&found) {
                 names.insert(found, name);
             }

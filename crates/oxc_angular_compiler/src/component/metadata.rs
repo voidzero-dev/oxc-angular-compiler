@@ -1072,7 +1072,8 @@ impl<'a> ComponentMetadata<'a> {
 }
 
 // NgModule scopes read across files for partial compilation (#655), by
-// `CrossFileAnalyzer::ng_module_component_scopes` and `ng_module_exports`.
+// `CrossFileAnalyzer::ng_module_component_scopes` and
+// `standalone_import_scopes`.
 
 /// A directive or pipe in a scope.
 #[derive(Debug, Clone, PartialEq, Eq)]

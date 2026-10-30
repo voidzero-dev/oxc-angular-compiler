@@ -59,10 +59,11 @@ pub fn compile_declare_pipe_from_metadata<'a>(
     // plain bool, so emit only when false — the linker defaults to true,
     // matching the v19+ runtime. (Skipping `isStandalone: true` produces a
     // smaller payload that the linker handles identically.)
-    if !meta.is_standalone {
+    // An older linker defaults to `false`, so it's told `true`.
+    if !meta.is_standalone || !super::standalone_is_default(version) {
         entries.push(LiteralMapEntry::new(
             Ident::from("isStandalone"),
-            bool_literal(allocator, false),
+            bool_literal(allocator, meta.is_standalone),
             false,
         ));
     }

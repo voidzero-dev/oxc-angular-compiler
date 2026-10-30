@@ -1,7 +1,7 @@
 //! Tests for the partial-declaration Pipe emitter (`ɵɵngDeclarePipe`).
 
 use oxc_allocator::{Allocator, Box};
-use oxc_angular_compiler::partial::PLACEHOLDER_VERSION;
+use oxc_angular_compiler::partial::{LATEST_VERSION, PLACEHOLDER_VERSION};
 use oxc_angular_compiler::{
     CompilationMode, TransformOptions, compile_declare_pipe_from_metadata, link,
     output::ast::{OutputExpression, ReadVarExpr},
@@ -33,7 +33,7 @@ fn standalone_pure_named_pipe_omits_optional_fields() {
             .pure(true)
             .is_standalone(true)
             .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", LATEST_VERSION, &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"name:"upper""#), "expected name:\"upper\", got: {js}");
@@ -208,4 +208,19 @@ export class ReversePipe {}
         "Full mode must not leak ngDeclare calls, got:\n{}",
         result.code
     );
+}
+
+#[test]
+fn standalone_is_explicit_for_a_linker_before_v19() {
+    // Angular's linker reads a missing `isStandalone` as `false` before v19.
+    let allocator = Allocator::default();
+    let meta =
+        R3PipeMetadataBuilder::new(Ident::from("UpperPipe"), read_var(&allocator, "UpperPipe"))
+            .pipe_name(Ident::from("upper"))
+            .is_standalone(true)
+            .build();
+    let old = emit(&compile_declare_pipe_from_metadata(&allocator, "i0", "18.2.0", &meta));
+    assert!(old.contains("isStandalone:true"), "got: {old}");
+    let new = emit(&compile_declare_pipe_from_metadata(&allocator, "i0", "19.0.0", &meta));
+    assert!(!new.contains("isStandalone"), "got: {new}");
 }

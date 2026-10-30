@@ -2,5 +2,5 @@
 source: crates/oxc_angular_compiler/tests/partial_pipe_test.rs
 expression: js
 ---
-i0.ɵɵngDeclarePipe({minVersion:"14.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,type:UpperPipe,
+i0.ɵɵngDeclarePipe({minVersion:"14.0.0",version:"22.2.3",ngImport:i0,type:UpperPipe,
     name:"upper"})

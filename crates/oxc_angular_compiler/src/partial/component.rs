@@ -102,10 +102,11 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     // isStandalone — emit only when not standalone. Matches the
     // Pipe/Directive convention; linker defaults to true.
-    if !meta.standalone {
+    // An older linker defaults to `false`, so it's told `true`.
+    if !meta.standalone || !super::standalone_is_default(version) {
         entries.push(LiteralMapEntry::new(
             Ident::from("isStandalone"),
-            bool_lit(allocator, false),
+            bool_lit(allocator, meta.standalone),
             false,
         ));
     }
