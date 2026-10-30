@@ -685,3 +685,83 @@ export class App {}
         result.code
     );
 }
+
+#[test]
+fn a_class_whose_file_loads_the_component_file_is_a_forward_reference() {
+    let dir = TempDir::new().unwrap();
+    // Loading `d.ts` runs `app.ts` before `D` exists.
+    write(
+        &dir,
+        "src/d.ts",
+        r"
+import { Directive } from '@angular/core';
+import { M } from './m';
+import { App } from './app';
+@Directive({ selector: '[d]' }) export class D {}
+export const all = [M, App];
+",
+    );
+    write(
+        &dir,
+        "src/m.ts",
+        r"
+import { NgModule, forwardRef } from '@angular/core';
+import { D } from './d';
+@NgModule({ imports: [forwardRef(() => D)], exports: [forwardRef(() => D)] })
+export class M {}
+",
+    );
+    let result = compile(
+        &dir,
+        "src/app.ts",
+        r"
+import { Component } from '@angular/core';
+import { M } from './m';
+@Component({ selector: 'app', template: '<i d></i>', imports: [M] })
+export class App {}
+",
+        &partial(),
+    );
+    let code = compact(&result.code);
+    assert!(
+        code.contains(
+            "{kind:\"directive\",type:i0.forwardRef(function(){returni1.D;}),selector:\"[d]\"}"
+        ),
+        "{}",
+        result.code
+    );
+}
+
+#[test]
+fn a_class_imported_by_path_from_an_mts_file_is_imported_as_mjs() {
+    let dir = TempDir::new().unwrap();
+    write(
+        &dir,
+        "src/d.mts",
+        r"
+import { Directive, NgModule } from '@angular/core';
+@Directive({ selector: '[d]' }) export class D {}
+",
+    );
+    write(
+        &dir,
+        "src/m.mts",
+        r"
+import { NgModule } from '@angular/core';
+import { D } from './d.mjs';
+@NgModule({ imports: [D], exports: [D] }) export class M {}
+",
+    );
+    let result = compile(
+        &dir,
+        "src/app.mts",
+        r"
+import { Component } from '@angular/core';
+import { M } from './m.mjs';
+@Component({ selector: 'app', template: '<i d></i>', imports: [M] })
+export class App {}
+",
+        &partial(),
+    );
+    assert!(compact(&result.code).contains("import*asi1from'./d.mjs';"), "{}", result.code);
+}

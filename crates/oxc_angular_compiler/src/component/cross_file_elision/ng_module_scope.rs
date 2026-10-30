@@ -177,18 +177,8 @@ impl CrossFileAnalyzer {
         let mut scopes = Vec::new();
         for class in &components {
             let component = inner.imported_name(class, &file)?;
-            // The call reads the component class when this file runs: in an
-            // import cycle back to it, through the file it's imported from
-            // or the one that declares it, that can be before it exists.
-            let loaded = match &component {
-                ImportedName::Local(_) => None,
-                ImportedName::Module { specifier, .. } => inner.resolve_types(&file, specifier),
-            };
-            if loaded
-                .iter()
-                .chain([&class.decl.file])
-                .any(|from| *from != file && inner.imports_file(from, &file))
-            {
+            // The call reads the component class when this file runs.
+            if inner.loads_back(&file, &component, &class.decl) {
                 continue;
             }
             scopes.push(ComponentScope { component, entries: entries.clone() });
@@ -268,10 +258,14 @@ impl CrossFileAnalyzer {
                     .cloned()
                     .collect();
                 let mut entries = self.inner.named_entries(added.clone(), &file)?;
-                for entry in &mut entries {
-                    entry.is_forward_reference = matches!(
-                        &entry.name, ImportedName::Local(name) if declared_later.contains(name)
-                    );
+                // The component's definition reads them when it's created.
+                for (entry, item) in entries.iter_mut().zip(&added) {
+                    entry.is_forward_reference = match &entry.name {
+                        ImportedName::Local(name) => declared_later.contains(name),
+                        ImportedName::Module { .. } => {
+                            self.inner.loads_back(&file, &entry.name, &item.class.decl)
+                        }
+                    };
                 }
                 // A pipe the linker can't match without a name.
                 if entries.iter().any(|entry| matches!(entry.kind, ScopeKind::Pipe { name: None }))
@@ -302,6 +296,22 @@ fn scope_kind(declared: &Declared) -> Option<ScopeKind> {
     }
 }
 
+/// `file` as the resolver writes a real path: `/tmp` is a link on macOS,
+/// and on Windows without the `\\?\` prefix `canonicalize` adds.
+fn real_path(file: &Path) -> String {
+    let path = std::fs::canonicalize(file)
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else if let Some(local) = path.strip_prefix(r"\\?\") {
+        local.to_string()
+    } else {
+        path
+    }
+}
+
 /// Whether `file` is in a package rather than the workspace.
 fn in_node_modules(file: &str) -> bool {
     Path::new(file).components().any(|part| part.as_os_str() == "node_modules")
@@ -316,19 +326,7 @@ impl Inner {
     /// Parse `source` as the text of `file`, the file being compiled, in
     /// place of what's on disk. Returns the key it's read by.
     fn set_compiled_source(&self, file: &Path, source: &str) -> String {
-        // The resolver gives real paths; `/tmp` is a link on macOS. On
-        // Windows, it drops the `\\?\` prefix `canonicalize` adds.
-        let key = std::fs::canonicalize(file)
-            .unwrap_or_else(|_| file.to_path_buf())
-            .to_string_lossy()
-            .into_owned();
-        let key = if let Some(share) = key.strip_prefix(r"\\?\UNC\") {
-            format!(r"\\{share}")
-        } else if let Some(path) = key.strip_prefix(r"\\?\") {
-            path.to_string()
-        } else {
-            key
-        };
+        let key = real_path(file);
         let current = self
             .parsed
             .borrow()
@@ -362,17 +360,32 @@ impl Inner {
         Some(file)
     }
 
+    /// Whether the class `decl`, which `file` refers to as `name`, can be
+    /// read before it exists when `file` runs: whether the file it's
+    /// imported from or the one that declares it loads `file` back.
+    fn loads_back(&self, file: &str, name: &ImportedName, decl: &Decl) -> bool {
+        let loaded = match name {
+            ImportedName::Local(_) => None,
+            ImportedName::Module { specifier, .. } => self.resolve_types(file, specifier),
+        };
+        loaded.iter().chain([&decl.file]).any(|from| {
+            from != file && real_path(Path::new(from)) != file && self.imports_file(from, file)
+        })
+    }
+
     /// Whether loading the workspace file `from` loads `target`: whether it
     /// imports or re-exports it, directly or through other workspace files.
     fn imports_file(&self, from: &str, target: &str) -> bool {
         let mut seen = FxHashSet::default();
         let mut pending = vec![from.to_string()];
         while let Some(file) = pending.pop() {
-            if file == target {
-                return true;
-            }
             if in_node_modules(&file) || !seen.insert(file.clone()) {
                 continue;
+            }
+            // A path through a tsconfig alias can be spelled differently
+            // (a Windows short name, a link).
+            if file == target || real_path(Path::new(&file)) == target {
+                return true;
             }
             let Some(exports) = self.file_exports(&file) else { continue };
             for spec in &exports.loads {
@@ -626,10 +639,19 @@ impl Inner {
             return Some(ImportedName::Module { specifier, name });
         }
         let from_dir = Path::new(file).parent()?;
-        let mut specifier = self.make_relative_path(from_dir, Path::new(&class.decl.file))?;
-        if let Some(stripped) = specifier.strip_suffix(".d") {
-            specifier.truncate(stripped.len());
-        }
+        let specifier = self.make_relative_path(from_dir, Path::new(&class.decl.file))?;
+        // The JavaScript file TypeScript writes for it: `./a.mts` is loaded
+        // as `./a.mjs`.
+        let specifier = [
+            (".d.mts", ".mjs"),
+            (".mts", ".mjs"),
+            (".d.cts", ".cjs"),
+            (".cts", ".cjs"),
+            (".d", ""),
+        ]
+        .iter()
+        .find_map(|(ts, js)| specifier.strip_suffix(ts).map(|path| format!("{path}{js}")))
+        .unwrap_or(specifier);
         Some(ImportedName::Module { specifier, name })
     }
 
