@@ -376,3 +376,32 @@ export class Svc {
         }
     }
 }
+
+#[test]
+fn a_const_enum_kept_inside_one_namespace_block_does_not_hide_an_exported_class() {
+    // ngtsc 22.2.3: `type: NS.E`. Only the class is `NS.E` from outside.
+    let source = "import { Injectable } from '@angular/core';
+export namespace NS { const enum E { A = 1 } export const x = E.A; }
+export namespace NS { export class E {} }
+@Injectable()
+export class Svc { constructor(e: NS.E) {} }
+";
+    for mode in MODES {
+        let code = compile(source, mode);
+        assert_eq!(ctor_params(&code), "[{type:NS.E}]", "{mode:?}");
+    }
+}
+
+#[test]
+fn an_exported_namespace_const_enum_is_still_undefined() {
+    let source = "import { Injectable } from '@angular/core';
+export namespace NS { export const enum E { A = 1 } }
+declare namespace Amb { const enum F { A = 1 } }
+@Injectable()
+export class Svc { constructor(e: NS.E, f: Amb.F) {} }
+";
+    for mode in MODES {
+        let code = compile(source, mode);
+        assert_eq!(ctor_params(&code), "[{type:undefined},{type:undefined}]", "{mode:?}");
+    }
+}

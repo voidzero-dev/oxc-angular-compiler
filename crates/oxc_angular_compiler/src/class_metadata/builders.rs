@@ -1455,20 +1455,36 @@ impl<'a> LocalDecls<'a> {
         decl: &'a oxc_ast::ast::TSNamespaceDeclaration<'a>,
         globals: &mut std::vec::Vec<&'a Statement<'a>>,
     ) {
-        self.namespaces
-            .entry(decl.id.name.as_str())
-            .or_default()
-            .merge(Self::from_namespace_body(&decl.body, globals));
+        self.namespaces.entry(decl.id.name.as_str()).or_default().merge(Self::from_namespace_body(
+            &decl.body,
+            decl.declare,
+            globals,
+        ));
     }
 
+    /// `ambient` is whether the namespace is `declare`d, where every member
+    /// is visible from outside it.
     fn from_namespace_body(
         body: &'a TSNamespaceDeclarationBody<'a>,
+        ambient: bool,
         globals: &mut std::vec::Vec<&'a Statement<'a>>,
     ) -> Self {
         match body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => {
                 let mut decls = LocalDecls::default();
                 decls.insert_all(&block.body, globals);
+                // `NS.E` reads an exported member only: a const enum the block
+                // keeps to itself must not hide an exported `E` that another
+                // `namespace NS` block declares.
+                if !ambient {
+                    decls.const_enums.retain(|name| {
+                        block.body.iter().any(|stmt| {
+                            matches!(stmt, Statement::ExportDeclaration(export)
+                                if matches!(&export.declaration,
+                                    Declaration::TSEnumDeclaration(e) if e.id.name == *name))
+                        })
+                    });
+                }
                 decls
             }
             // `namespace Outer.Inner { ... }` nests by qualified name.
@@ -1476,7 +1492,7 @@ impl<'a> LocalDecls<'a> {
                 let mut decls = LocalDecls::default();
                 decls.namespaces.insert(
                     nested.id.name.as_str(),
-                    Self::from_namespace_body(&nested.body, globals),
+                    Self::from_namespace_body(&nested.body, ambient || nested.declare, globals),
                 );
                 decls
             }
