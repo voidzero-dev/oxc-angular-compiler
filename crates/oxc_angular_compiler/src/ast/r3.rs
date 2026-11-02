@@ -1115,6 +1115,9 @@ pub struct R3DeferredBlock<'a> {
     pub prefetch_triggers: R3DeferredBlockTriggers<'a>,
     /// Hydrate triggers.
     pub hydrate_triggers: R3DeferredBlockTriggers<'a>,
+    /// The block's `name` parameter (`@defer (name blk)`), which picks its
+    /// entry of `@Component.deferredImports` (Angular's `definedName`).
+    pub defined_name: Option<Ident<'a>>,
     /// Placeholder block.
     pub placeholder: Option<R3DeferredBlockPlaceholder<'a>>,
     /// Loading block.

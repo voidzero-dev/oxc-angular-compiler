@@ -786,6 +786,8 @@ pub struct DeferTriggerParseResult<'a> {
     pub prefetch_triggers: R3DeferredBlockTriggers<'a>,
     /// Hydrate triggers.
     pub hydrate_triggers: R3DeferredBlockTriggers<'a>,
+    /// The `name` parameter (`name blk`), if any.
+    pub defined_name: Option<&'a str>,
     /// Parse errors, in the order Angular reports them.
     pub errors: std::vec::Vec<DeferTriggerError>,
 }
@@ -866,13 +868,17 @@ fn get_trigger_parameters_start(value: &str, start_position: usize) -> Option<us
 ///
 /// `supports_idle_timeout` is whether the target Angular version accepts
 /// `idle(<time>)` (v22+); before that `idle` takes no parameters.
+/// `supports_name` is whether it accepts a `name` parameter (v22.2+); before
+/// that it is an unknown trigger.
 pub fn parse_defer_triggers<'a>(
     allocator: &'a Allocator,
     parameters: &[HtmlBlockParameter<'a>],
     binding_parser: &BindingParser<'a>,
     block_start_span: Span,
     supports_idle_timeout: bool,
+    supports_name: bool,
 ) -> DeferTriggerParseResult<'a> {
+    let mut defined_name = None;
     let mut triggers = R3DeferredBlockTriggers::default();
     let mut prefetch_triggers = R3DeferredBlockTriggers::default();
     let mut hydrate_triggers = R3DeferredBlockTriggers::default();
@@ -906,6 +912,27 @@ pub fn parse_defer_triggers<'a>(
             on_trigger(&param, &mut hydrate_triggers, &mut errors);
         } else if is_hydrate_never_pattern(expr) {
             parse_never_trigger(&param, &mut hydrate_triggers, &mut errors);
+        } else if supports_name && starts_with_keyword(expr, "name", has_trailing_ws) {
+            // `NAME_PARAMETER_PATTERN` (`/^name\s+/`) in r3_deferred_blocks.ts.
+            if defined_name.is_some() {
+                errors
+                    .push(DeferTriggerError::new(span, "Cannot specify multiple name parameters"));
+            } else {
+                let name = expr[4..].trim();
+                if name.starts_with(['\'', '"']) || name.ends_with(['\'', '"']) {
+                    errors.push(DeferTriggerError::new(
+                        span,
+                        "Block names cannot be quoted in @defer blocks",
+                    ));
+                } else if !is_block_name(name) {
+                    errors.push(DeferTriggerError::new(
+                        span,
+                        format!("Invalid block name \"{name}\""),
+                    ));
+                } else {
+                    defined_name = Some(name);
+                }
+            }
         } else {
             errors.push(DeferTriggerError::new(span, "Unrecognized trigger"));
         }
@@ -919,7 +946,14 @@ pub fn parse_defer_triggers<'a>(
         ));
     }
 
-    DeferTriggerParseResult { triggers, prefetch_triggers, hydrate_triggers, errors }
+    DeferTriggerParseResult { triggers, prefetch_triggers, hydrate_triggers, defined_name, errors }
+}
+
+/// A `@defer` block name: `^[a-zA-Z_$][a-zA-Z0-9_$]*$`.
+fn is_block_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
 /// Checks if there are any hydrate triggers besides `never`.

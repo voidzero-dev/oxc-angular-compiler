@@ -388,6 +388,36 @@ pub(super) fn defer_block_dependencies<'a>(
     Some(collector.blocks)
 }
 
+/// Every `@defer` block of the template with its `name` parameter, keyed by
+/// the block's span, in [`defer_block_dependencies`] order: a block comes
+/// before the blocks it holds, as the binder's `getDeferBlocks()` lists them
+/// for the partial declaration's `deferBlockDependencies`.
+pub(super) fn defer_block_names<'a>(
+    nodes: &[R3Node<'a>],
+) -> std::vec::Vec<(oxc_span::Span, Option<Ident<'a>>)> {
+    struct NameCollector<'a>(std::vec::Vec<(oxc_span::Span, Option<Ident<'a>>)>);
+
+    impl<'a> R3Visitor<'a> for NameCollector<'a> {
+        fn visit_deferred_block(&mut self, block: &R3DeferredBlock<'a>) {
+            self.0.push((block.source_span, block.defined_name));
+            visit_all(self, &block.children);
+            if let Some(placeholder) = &block.placeholder {
+                self.visit_deferred_block_placeholder(placeholder);
+            }
+            if let Some(loading) = &block.loading {
+                self.visit_deferred_block_loading(loading);
+            }
+            if let Some(error) = &block.error {
+                self.visit_deferred_block_error(error);
+            }
+        }
+    }
+
+    let mut collector = NameCollector(std::vec::Vec::new());
+    visit_all(&mut collector, nodes);
+    collector.0
+}
+
 /// A `@defer` block's dependency function, for `DeferBlockDepsEmitMode`
 /// `PerBlock` (`compileDeferResolverFunction` in Angular's
 /// `render3/view/compiler.ts`): a dynamic `import()` for each of the
