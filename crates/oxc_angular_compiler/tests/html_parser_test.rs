@@ -3174,6 +3174,41 @@ mod foreign_void_elements {
     }
 
     #[test]
+    fn keeps_the_element_children_of_an_html_void_name_in_a_foreign_namespace() {
+        for (html, expected) in [
+            (
+                "<svg><area><g></g></area></svg>",
+                vec![element("svg", 0), element("area", 1), element("g", 2)],
+            ),
+            (
+                "<math><br><mi>x</mi></br></math>",
+                vec![element("math", 0), element("br", 1), element("mi", 2), text("x", 3)],
+            ),
+            (
+                "<svg><br><br></br></br></svg>",
+                vec![element("svg", 0), element("br", 1), element("br", 2)],
+            ),
+        ] {
+            let (nodes, errors) = parse_with_errors(html);
+            assert_eq!(errors, Vec::<String>::new(), "{html}");
+            assert_eq!(nodes, expected, "{html}");
+        }
+    }
+
+    #[test]
+    fn reports_an_html_void_name_left_open_in_a_foreign_namespace() {
+        // `:svg:img` needs an end tag: `</svg>` skips an open element, as upstream.
+        let (nodes, errors) = parse_with_errors("<svg><img><circle/></svg>");
+        assert_eq!(nodes, vec![element("svg", 0), element("img", 1), element("circle", 2)]);
+        assert_eq!(
+            errors,
+            vec![
+                "Unexpected closing tag \"svg\". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn reads_html_void_elements_again_inside_foreign_object() {
         assert_eq!(
             parse_errors("<svg><foreignObject><area></area></foreignObject></svg>"),

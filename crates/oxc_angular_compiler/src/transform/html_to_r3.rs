@@ -4618,7 +4618,8 @@ impl<'a> HtmlToR3Transform<'a> {
         use indexmap::IndexMap;
 
         let tag_name = element.name.as_str();
-        let is_void = crate::parser::html::is_void_element(tag_name);
+        // The parser's value: `:svg:area` is no void element (i18n_parser.ts reads the full name).
+        let is_void = element.is_void;
 
         // Collect attributes for placeholder name generation
         let mut attrs: IndexMap<String, String> = element
