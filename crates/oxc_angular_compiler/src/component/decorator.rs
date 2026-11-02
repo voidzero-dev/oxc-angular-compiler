@@ -13,8 +13,8 @@ use oxc_str::Ident;
 
 use super::dependency::R3DependencyMetadata;
 use super::metadata::{
-    ChangeDetectionStrategy, ComponentMetadata, HostDirectiveMetadata, HostMetadata, ImportRef,
-    TemplateDependency, ViewEncapsulation,
+    ChangeDetectionStrategy, ComponentMetadata, DeferredImportsForm, HostDirectiveMetadata,
+    HostMetadata, ImportRef, TemplateDependency, ViewEncapsulation,
 };
 use super::transform::ImportMap;
 use crate::directive::{
@@ -198,7 +198,7 @@ pub fn extract_component_metadata<'a>(
                     // dependencies (full compilation additionally derives them
                     // from template usage of `imports: [...]`, which requires
                     // cross-file selector info OXC doesn't have).
-                    metadata.deferred_imports = extract_identifier_array(allocator, &prop.value);
+                    read_deferred_imports(allocator, &prop.value, consts, &mut metadata);
                 }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
@@ -493,6 +493,81 @@ fn extract_identifier_array<'a>(
     }
 
     result
+}
+
+/// Read `@Component.deferredImports`: an array of classes, or (Angular
+/// v22.2+) an object mapping each block name to an array of classes, as
+/// ngtsc's local compilation reads it (`deferredImports` in its component
+/// `handler.ts`): a spread, a computed key or a value other than an array
+/// literal is left out. Each class is `X` or `forwardRef(() => X)`, or in
+/// the object form also `ns.X`.
+fn read_deferred_imports<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    consts: &StringConsts<'a>,
+    metadata: &mut ComponentMetadata<'a>,
+) {
+    let classes = |expr: &'a Expression<'a>| {
+        let mut classes = Vec::new_in(&allocator);
+        for (name, _) in extract_import_entry_classes(allocator, expr, consts).into_iter().flatten()
+        {
+            classes.push(name);
+        }
+        classes
+    };
+    match expr {
+        Expression::ArrayExpression(_) => {
+            metadata.deferred_imports_form = Some(DeferredImportsForm::Array);
+            metadata.deferred_import_mentions = classes(expr);
+            for name in &metadata.deferred_import_mentions {
+                if !metadata.deferred_imports.contains(name) {
+                    metadata.deferred_imports.push(*name);
+                }
+            }
+        }
+        Expression::ObjectExpression(object) => {
+            metadata.deferred_imports_form = Some(DeferredImportsForm::Object);
+            for property in &object.properties {
+                let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
+                let block = match &property.key {
+                    _ if property.computed => continue,
+                    PropertyKey::StaticIdentifier(id) => id.name,
+                    PropertyKey::StringLiteral(literal) => match literal.value.as_str() {
+                        Some(name) => Ident::from(name),
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                let Expression::ArrayExpression(array) = &property.value else { continue };
+                let mut dependencies = Vec::new_in(&allocator);
+                for element in &array.elements {
+                    let Some(element) = element.as_expression() else { continue };
+                    match try_unwrap_forward_ref(element, Some(consts)).unwrap_or(element) {
+                        Expression::Identifier(id) => {
+                            metadata.deferred_import_mentions.push(id.name);
+                            dependencies.push(id.name);
+                        }
+                        // `ns.Cmp`: ngtsc can't lazy-load a namespace member,
+                        // and the block reads it eagerly (`() => [i1.Cmp]`).
+                        Expression::StaticMemberExpression(_) => {
+                            for import in extract_import_refs(allocator, element, consts) {
+                                dependencies.push(import.key);
+                                metadata.deferred_import_refs.push(import);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for name in &dependencies {
+                    if !metadata.deferred_imports.contains(name) {
+                        metadata.deferred_imports.push(*name);
+                    }
+                }
+                metadata.deferred_imports_by_block.push((block, dependencies));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The class each element of an array literal names, by position: `X`, or

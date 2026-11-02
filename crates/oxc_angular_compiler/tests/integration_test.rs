@@ -656,7 +656,13 @@ import { LazyCmp } from './lazy';
 export class Parent {}
 "#;
 
-    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+    // Before v22.2, `deferredImports` is an array (#654 covers the object).
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 1, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "parent.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -748,8 +754,8 @@ import { HeavyWidget as Heavy } from './widget';
 
 @Component({
     selector: 'app-parent',
-    deferredImports: [Heavy],
-    template: '@defer { <app-heavy/> }',
+    deferredImports: { blk: [Heavy] },
+    template: '@defer (name blk) { <app-heavy/> }',
     standalone: true,
 })
 export class Parent {}
@@ -804,8 +810,8 @@ import LazyCmp from './lazy-default';
 
 @Component({
     selector: 'app-parent',
-    deferredImports: [LazyCmp],
-    template: '@defer { <app-lazy/> }',
+    deferredImports: { blk: [LazyCmp] },
+    template: '@defer (name blk) { <app-lazy/> }',
     standalone: true,
 })
 export class Parent {}
@@ -851,7 +857,7 @@ import { ChildCmp } from './child';
 
 @Component({
     selector: 'app-parent',
-    deferredImports: [ChildCmp],
+    deferredImports: { blk: [ChildCmp] },
     template: '<app-child/>',
     standalone: true,
 })
@@ -916,8 +922,8 @@ import { Mixed } from './mixed';
 @Component({
     selector: 'app-parent',
     imports: [Mixed],
-    deferredImports: [Mixed],
-    template: '@defer { <app-mixed/> }',
+    deferredImports: { blk: [Mixed] },
+    template: '@defer (name blk) { <app-mixed/> }',
     standalone: true,
 })
 export class Parent {}
@@ -5444,7 +5450,12 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    assert!(compiles_dom_only(source, None));
+    // An array, as before v22.2.
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 1, 0)),
+        ..Default::default()
+    };
+    assert!(compiles_dom_only(source, Some(&options)));
 }
 
 /// Anything Oxc cannot prove empty keeps Full mode: imports through an
@@ -5468,7 +5479,12 @@ fn test_full_mode_used_when_imports_are_not_provably_empty() {
              @Component({{ selector: 'app-test', {config} template: '<div>@defer {{ <p>x</p> }}</div>' }})\n\
              export class TestComponent {{}}\n"
         );
-        assert!(!compiles_dom_only(&source, None), "`{config}` should keep Full mode");
+        // `deferredImports` as an array, before v22.2.
+        let options = ComponentTransformOptions {
+            angular_version: Some(AngularVersion::new(22, 1, 0)),
+            ..Default::default()
+        };
+        assert!(!compiles_dom_only(&source, Some(&options)), "`{config}` should keep Full mode");
     }
 }
 

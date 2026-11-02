@@ -7,7 +7,9 @@
 #![cfg(feature = "cross_file_elision")]
 
 use oxc_allocator::Allocator;
-use oxc_angular_compiler::{TransformOptions, TransformResult, transform_angular_file};
+use oxc_angular_compiler::{
+    AngularVersion, TransformOptions, TransformResult, transform_angular_file,
+};
 use tempfile::TempDir;
 
 fn create_test_file(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
@@ -21,6 +23,11 @@ fn create_test_file(dir: &std::path::Path, name: &str, content: &str) -> std::pa
 
 fn options() -> TransformOptions {
     TransformOptions { resolve_imported_values: true, ..Default::default() }
+}
+
+/// Options for a `deferredImports` array, which v22.2 replaced with an object.
+fn before_named_deferred_imports() -> TransformOptions {
+    TransformOptions { angular_version: Some(AngularVersion::new(22, 1, 0)), ..options() }
 }
 
 fn transform_with(dir: &TempDir, source: &str, options: &TransformOptions) -> TransformResult {
@@ -754,7 +761,7 @@ export class Parent { name = ''; }
 fn implicit_and_explicit_deferred_imports_share_the_resolver() {
     let dir = TempDir::new().unwrap();
     lazy_cmp(&dir);
-    let result = transform(
+    let result = transform_with(
         &dir,
         r#"
 import { Component } from '@angular/core';
@@ -769,6 +776,7 @@ import { Other } from './other';
 })
 export class Parent {}
 "#,
+        &before_named_deferred_imports(),
     );
     assert_lazy(&result.code, "./lazy", "LazyCmp");
     assert_lazy(&result.code, "./other", "Other");
@@ -1197,10 +1205,12 @@ export class Parent {}
 
 #[test]
 fn sibling_specifier_in_deferred_imports_keeps_the_declaration_eager() {
-    // The explicit entry's static import stays, so the declaration does too.
+    // The explicit entry is a reference ngc's `canDefer` counts, so the
+    // declaration stays for `LazyCmp`; only `EagerCmp`, which `@defer` loads,
+    // leaves it.
     let dir = TempDir::new().unwrap();
     two_cmps(&dir);
-    let result = transform(
+    let result = transform_with(
         &dir,
         r#"
 import { Component } from '@angular/core';
@@ -1214,9 +1224,11 @@ import { LazyCmp, EagerCmp } from './cmps';
 })
 export class Parent {}
 "#,
+        &before_named_deferred_imports(),
     );
     let code = &result.code;
-    assert!(code.contains("import { LazyCmp, EagerCmp }"), "{code}");
+    assert!(code.contains("import { LazyCmp } from"), "{code}");
+    assert!(code.contains("import(\"./cmps\").then((m) =>m.EagerCmp)"), "{code}");
     assert!(compact(code).contains("ɵɵgetComponentDepsFactory(Parent,[LazyCmp])"), "{code}");
     assert!(!code.contains("m.LazyCmp"), "{code}");
 }
@@ -2301,4 +2313,33 @@ export class Top {}
     let code = &result.code;
     assert_eager(code, "./lazy");
     assert!(code.contains("import { LazyCmp }"), "{code}");
+}
+
+#[test]
+fn named_deferred_imports_component_keeps_its_imports_eager_for_the_file() {
+    // With block names, ngc defers no `imports` entry of `Named`, so its
+    // `LazyCmp` stays a static reference and `Implicit` can't defer it.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({ selector: 'app-implicit', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Implicit {}
+
+@Component({
+    selector: 'app-named',
+    imports: [LazyCmp],
+    deferredImports: { blk: [] },
+    template: '@defer (name blk) { <app-lazy/> }',
+})
+export class Named {}
+",
+    );
+    let code = &result.code;
+    assert!(code.contains("import { LazyCmp } from './lazy';"), "{code}");
+    assert!(!code.contains("m.LazyCmp"), "{code}");
 }

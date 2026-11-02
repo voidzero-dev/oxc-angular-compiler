@@ -293,8 +293,8 @@ fn numbers_constants_like_the_transform_after_selector_attrs_and_queries() {
 fn leaves_deferred_imports_to_the_live_definition() {
     let source = "import { Component } from '@angular/core';\n\
                   import { Child } from './child';\n\
-                  @Component({ selector: 'x-cmp', deferredImports: [Child], \
-                  template: '@defer { <child-cmp /> }' })\n\
+                  @Component({ selector: 'x-cmp', deferredImports: { blk: [Child] }, \
+                  template: '@defer (name blk) { <child-cmp /> }' })\n\
                   export class X {}\n";
     let options = hmr(TransformOptions::default());
     let update = update(source, &options, None);

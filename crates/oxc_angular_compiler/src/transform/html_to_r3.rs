@@ -3024,6 +3024,7 @@ impl<'a> HtmlToR3Transform<'a> {
             &self.binding_parser,
             block.start_span,
             self.angular_version.is_none_or(|v| v.major >= 22),
+            self.angular_version.is_none_or(|v| v.supports_named_deferred_imports()),
         );
 
         // Report trigger parsing errors via diagnostics
@@ -3268,6 +3269,7 @@ impl<'a> HtmlToR3Transform<'a> {
             triggers: trigger_result.triggers,
             prefetch_triggers: trigger_result.prefetch_triggers,
             hydrate_triggers: trigger_result.hydrate_triggers,
+            defined_name: trigger_result.defined_name.map(Ident::from),
             placeholder,
             loading,
             error,

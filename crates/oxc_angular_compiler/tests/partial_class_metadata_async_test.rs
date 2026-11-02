@@ -285,9 +285,9 @@ import { LazyCmp } from './lazy';
 
 @Component({
   selector: 'app-foo',
-  template: '@defer { <lazy-cmp /> }',
+  template: '@defer (name blk) { <lazy-cmp /> }',
   standalone: true,
-  deferredImports: [LazyCmp]
+  deferredImports: { blk: [LazyCmp] }
 })
 export class FooComponent {}
 ";

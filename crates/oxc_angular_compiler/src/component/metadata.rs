@@ -190,6 +190,31 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Whether this version is `22.2.0-next.<next>` or later.
+    fn is_at_least_22_2_next(&self, next: u32) -> bool {
+        match (self.major, self.minor, self.patch) {
+            (22, 2, 0) => {
+                self.prerelease.is_none_or(|prerelease| prerelease >= Prerelease::Next(next))
+            }
+            triple => triple > (22, 2, 0),
+        }
+    }
+
+    /// Check if `@Component.deferredImports` may map block names to their
+    /// dependencies, which `@defer (name blockName)` picks (v22.2.0-next.4+,
+    /// `angular/angular@b06ff75370`). Before, `name` is an unknown trigger.
+    pub fn supports_named_deferred_imports(&self) -> bool {
+        self.is_at_least_22_2_next(4)
+    }
+
+    /// Check if `@Component.deferredImports` must map block names to their
+    /// dependencies: an array is an error (v22.2.0-next.5+,
+    /// `angular/angular@9f440907e8`). Before, the array is the only form
+    /// (or, in v22.2.0-next.4, one of two).
+    pub fn requires_named_deferred_imports(&self) -> bool {
+        self.is_at_least_22_2_next(5)
+    }
+
     /// Check if this version's runtime supports chained query instructions
     /// (`ɵɵviewQuery(p1)(p2)`, `ɵɵcontentQuerySignal(...)(...)`).
     ///
@@ -697,6 +722,24 @@ pub struct ComponentMetadata<'a> {
     /// requires cross-file selector info OXC doesn't have.
     pub deferred_imports: Vec<'a, Ident<'a>>,
 
+    /// Which literal `@Component.deferredImports` is written as, if any.
+    pub deferred_imports_form: Option<DeferredImportsForm>,
+
+    /// The object form of `@Component.deferredImports` (Angular v22.2+):
+    /// each block name with the classes its list names, in source order.
+    /// `deferred_imports` lists them all once. Like ngtsc's local
+    /// compilation, a spread, a computed key or a value other than an array
+    /// literal is left out.
+    pub deferred_imports_by_block: Vec<'a, (Ident<'a>, Vec<'a, Ident<'a>>)>,
+
+    /// The `ns.X` entries of `deferred_imports_by_block`, which a block
+    /// reads eagerly, keyed `ns.X` like `import_refs`.
+    pub deferred_import_refs: Vec<'a, ImportRef<'a>>,
+
+    /// Every class `@Component.deferredImports` names, repeats included: how
+    /// many of the source's references to an import it accounts for.
+    pub deferred_import_mentions: Vec<'a, Ident<'a>>,
+
     /// `true` when the decorator provably brings nothing into the template's
     /// scope: `imports` and `deferredImports` are each absent or an empty
     /// array literal, and the config object has no spread that could add
@@ -824,6 +867,16 @@ pub struct LifecycleMetadata {
 // Template Dependencies
 // See: packages/compiler/src/render3/view/api.ts:149-396
 // =============================================================================
+
+/// How `@Component.deferredImports` is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferredImportsForm {
+    /// `deferredImports: [A, B]`, before Angular v22.2.
+    Array,
+    /// `deferredImports: {blk: [A, B]}`, which `@defer (name blk)` picks
+    /// (Angular v22.2+).
+    Object,
+}
 
 /// How the declarations list (directives/pipes) is emitted.
 ///
@@ -1054,6 +1107,10 @@ impl<'a> ComponentMetadata<'a> {
             declaration_list_emit_mode: DeclarationListEmitMode::default(),
             raw_imports: None,
             deferred_imports: Vec::new_in(&allocator),
+            deferred_imports_form: None,
+            deferred_imports_by_block: Vec::new_in(&allocator),
+            deferred_import_refs: Vec::new_in(&allocator),
+            deferred_import_mentions: Vec::new_in(&allocator),
             imports_provably_empty: false,
             animations: None,
             schemas: Vec::new_in(&allocator),

@@ -3372,6 +3372,9 @@ pub fn transform_angular_file(
     // (ctorParameters types/decorators, __param entries) even though their
     // source positions look elidable; accumulated here for the elision pass.
     let mut import_elision_mut = import_elision;
+    // How many times the file's components name each import in
+    // `@Component.deferredImports` and load it with a dynamic `import()`.
+    let mut explicitly_deferred_imports: FxHashMap<String, usize> = FxHashMap::default();
 
     // File-level namespace registry to collect all module imports.
     //
@@ -4034,6 +4037,9 @@ pub fn transform_angular_file(
                             // `@defer` loads these with a dynamic `import()` now.
                             for name in &compilation_result.implicitly_deferred_imports {
                                 import_elision_mut.elide(Ident::from_in(name.as_str(), allocator));
+                            }
+                            for name in &compilation_result.explicitly_deferred_imports {
+                                *explicitly_deferred_imports.entry(name.clone()).or_default() += 1;
                             }
 
                             // Stylesheet `<link>`s in the template are watched
@@ -5063,6 +5069,15 @@ pub fn transform_angular_file(
     // All edits reference positions in the original source and are applied in one pass.
 
     // 5a. Import elision edits (collected first for namespace insert position check)
+    // ngtsc removes the import of a class `@defer` loads with a dynamic
+    // `import()` when `@Component.deferredImports` is the only place the file
+    // names it (`DeferredSymbolTracker`). Where ngtsc reports that the import
+    // is still needed (`DEFERRED_DEPENDENCY_IMPORTED_EAGERLY`), it is kept.
+    for (name, mentions) in &explicitly_deferred_imports {
+        if import_elision_mut.value_reference_count(name) == Some(*mentions) {
+            import_elision_mut.elide(Ident::from_in(name.as_str(), allocator));
+        }
+    }
     let elision_edits = import_elision_edits(source, &parser_ret.program, &import_elision_mut);
 
     // 5b. Namespace import insertion
@@ -5365,6 +5380,11 @@ struct FullCompilationResult<'a> {
     /// resolver because the template matches them only inside `@defer`
     /// blocks (#313). The caller removes their static imports.
     implicitly_deferred_imports: Vec<String>,
+
+    /// The `@Component.deferredImports` classes `@defer` loads with a dynamic
+    /// `import()`, once per time the decorator names them. The caller removes
+    /// an import the file references only there.
+    explicitly_deferred_imports: Vec<String>,
 
     /// Resolvable-URL stylesheet `<link>`s the template's preparser collected
     /// (upstream `_extractTemplateStyleUrls`). The caller records them as
@@ -5917,6 +5937,7 @@ fn compile_component_partial<'a>(
         ng_content_selectors: Vec::new(),
         has_defer_block,
         implicitly_deferred_imports: Vec::new(),
+        explicitly_deferred_imports: Vec::new(),
         // Partial mode only parses the template to report its errors; the
         // linker collects link URLs at consumer build time.
         template_style_urls: Vec::new(),
@@ -6203,7 +6224,12 @@ fn component_deferrable_marks<'a>(
     let (Some(template), _) = resolve_template(&metadata, resolved_resources) else {
         return std::vec::Vec::new();
     };
-    if metadata.import_entry_classes.is_empty() || !template.contains("@defer") {
+    // With block names, no `imports` entry is deferred (`resolve_implicit_defer`
+    // is skipped): each stays a static reference.
+    if metadata.import_entry_classes.is_empty()
+        || !template.contains("@defer")
+        || metadata.deferred_imports_form == Some(super::metadata::DeferredImportsForm::Object)
+    {
         return std::vec::Vec::new();
     }
     let template = allocator.alloc_str(&template);
@@ -6335,6 +6361,119 @@ fn resolve_implicit_defer<'a>(
     (defer_block_dependencies, implicitly_deferred_imports)
 }
 
+/// ngtsc's checks of `@Component.deferredImports` against the target Angular
+/// version and the `name` of each `@defer` block, outer blocks first (`blocks`,
+/// from `defer_block_names`). From v22.2 the field maps block names to their
+/// dependencies (`deferredImports` and `resolveDeferBlocks` in ngtsc's
+/// component `handler.ts`); before, it is an array and `name` is an unknown
+/// trigger, which the template parser reports.
+fn deferred_imports_diagnostics(
+    metadata: &ComponentMetadata<'_>,
+    blocks: &[(Span, Option<Ident<'_>>)],
+    angular_version: Option<AngularVersion>,
+) -> Vec<OxcDiagnostic> {
+    use super::metadata::DeferredImportsForm;
+    let mut diagnostics = Vec::new();
+    match metadata.deferred_imports_form {
+        Some(DeferredImportsForm::Array)
+            if angular_version.is_none_or(|v| v.requires_named_deferred_imports()) =>
+        {
+            diagnostics.push(OxcDiagnostic::error(
+                "'deferredImports' must be an object mapping block names to dependency arrays.",
+            ));
+            return diagnostics;
+        }
+        Some(DeferredImportsForm::Object)
+            if !angular_version.is_none_or(|v| v.supports_named_deferred_imports()) =>
+        {
+            diagnostics.push(OxcDiagnostic::error(
+                "'deferredImports' must be an array of components, directives, or pipes.",
+            ));
+            return diagnostics;
+        }
+        _ => {}
+    }
+    let by_block = &metadata.deferred_imports_by_block;
+    for (_, name) in blocks {
+        match (metadata.deferred_imports_form, name) {
+            (Some(DeferredImportsForm::Object), None) => {
+                diagnostics.push(OxcDiagnostic::error(
+                    "@defer block must specify a 'name' parameter (e.g. '@defer (name blockName)') \
+                     when 'deferredImports' is defined.",
+                ));
+            }
+            (Some(DeferredImportsForm::Object), Some(name))
+                if !by_block.iter().any(|(block, _)| block == name) =>
+            {
+                diagnostics.push(OxcDiagnostic::error(format!(
+                    "The 'name' parameter references block '{name}' which is missing from \
+                     '@Component.deferredImports'."
+                )));
+            }
+            (None | Some(DeferredImportsForm::Array), Some(_)) => {
+                diagnostics.push(OxcDiagnostic::error(
+                    "The 'name' parameter can only be used when '@Component.deferredImports' is \
+                     defined.",
+                ));
+            }
+            _ => {}
+        }
+    }
+    diagnostics
+}
+
+/// What each `@defer` block loads when `@Component.deferredImports` maps
+/// block names to dependencies: the list its `name` picks, as written, as
+/// ngtsc's local compilation gives it (`DeferBlockDepsEmitMode.PerBlock`).
+/// The full compilation keeps only what the block's template uses, with
+/// directives before pipes; the runtime gets the same classes either way.
+/// `blocks` come from `defer_block_names`, and each has a known name
+/// (`deferred_imports_diagnostics`).
+fn named_defer_block_dependencies<'a>(
+    metadata: &ComponentMetadata<'a>,
+    blocks: &[(Span, Option<Ident<'a>>)],
+) -> DeferBlockDependencies<'a> {
+    blocks
+        .iter()
+        .map(|(span, name)| {
+            let mut dependencies = std::vec::Vec::new();
+            for (_, classes) in
+                metadata.deferred_imports_by_block.iter().filter(|(block, _)| Some(*block) == *name)
+            {
+                for class in classes {
+                    if !dependencies.contains(class) {
+                        dependencies.push(*class);
+                    }
+                }
+            }
+            (*span, dependencies)
+        })
+        .collect()
+}
+
+/// The `@Component.deferredImports` classes that `@defer` loads with a
+/// dynamic `import()` (see [`FullCompilationResult::explicitly_deferred_imports`]):
+/// an import of a class the template's blocks can load, unless HMR or JIT
+/// needs the static import.
+fn explicitly_deferred_imports(
+    metadata: &ComponentMetadata<'_>,
+    has_defer_block: bool,
+    options: &TransformOptions,
+    import_map: &ImportMap<'_>,
+) -> Vec<String> {
+    if !has_defer_block || options.hmr || options.jit {
+        return Vec::new();
+    }
+    metadata
+        .deferred_import_mentions
+        .iter()
+        .filter(|name| {
+            import_map.get(*name).is_some_and(|info| info.is_named_import && !info.is_type_only)
+        })
+        .map(ToString::to_string)
+        .collect()
+}
+
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -6420,6 +6559,29 @@ fn compile_component_full<'a>(
         return Err(diagnostics);
     }
 
+    // `@defer` blocks with their `name`, outer blocks first.
+    let defer_blocks = super::defer_resolver::defer_block_names(&r3_result.nodes);
+    diagnostics.extend(deferred_imports_diagnostics(
+        metadata,
+        &defer_blocks,
+        options.angular_version,
+    ));
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    // With block names, each block loads its own list, and no `imports`
+    // entry is deferred: ngtsc doesn't bind the template to find what only
+    // `@defer` uses (`resolveDeferBlocks` in its component `handler.ts`).
+    // An HMR update module keeps a null dependency function (see below).
+    let named_defer_blocks = (metadata.deferred_imports_form
+        == Some(super::metadata::DeferredImportsForm::Object))
+    .then(|| {
+        (!options.jit && !hmr_update)
+            .then(|| named_defer_block_dependencies(metadata, &defer_blocks))
+    });
+    let explicitly_deferred_imports =
+        explicitly_deferred_imports(metadata, !defer_blocks.is_empty(), options, import_map);
+
     // Partial mode stops here. Its declaration carries the template as a
     // verbatim string for the linker to compile at consumer build time, but
     // ngtsc still parses it first: its template errors are reported and
@@ -6429,8 +6591,31 @@ fn compile_component_full<'a>(
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
         // Read before `resolve_implicit_defer` leaves out what `@defer` provides.
         let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
-        let (defer_block_dependencies, implicitly_deferred_imports) =
-            resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
+        // What a block's dependency function can read eagerly: an `imports`
+        // entry, or an `ns.X` that `deferredImports` names.
+        let block_refs: std::vec::Vec<_> =
+            import_refs.iter().chain(&metadata.deferred_import_refs).copied().collect();
+        let (defer_block_dependencies, implicitly_deferred_imports) = match named_defer_blocks {
+            Some(blocks) => (blocks, std::vec::Vec::new()),
+            None => resolve_implicit_defer(
+                metadata,
+                &r3_result.nodes,
+                options,
+                import_selector,
+                can_defer,
+            ),
+        };
+        // A `deferredImports` array (before v22.2) gives every block all its
+        // classes. Without `deferBlockDependencies`, the linker would leave
+        // the blocks no dependency function to load them (#654).
+        let defer_block_dependencies = defer_block_dependencies.or_else(|| {
+            (!metadata.deferred_imports.is_empty()).then(|| {
+                defer_blocks
+                    .iter()
+                    .map(|(span, _)| (*span, metadata.deferred_imports.iter().copied().collect()))
+                    .collect()
+            })
+        });
         // `dependencies` lists each class once, like ngc's scope, which
         // `[Cmp, ns.Cmp]` would otherwise give twice, and leaves out a class
         // `@defer` lazy-loads however else `imports` names it. Two names are
@@ -6468,7 +6653,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &import_refs,
+                    &block_refs,
                     import_map,
                 )
             })
@@ -6498,6 +6683,7 @@ fn compile_component_full<'a>(
             namespace_registry,
         );
         result.implicitly_deferred_imports = implicitly_deferred_imports;
+        result.explicitly_deferred_imports = explicitly_deferred_imports;
         return Ok(result);
     }
 
@@ -6586,9 +6772,16 @@ fn compile_component_full<'a>(
 
     // `imports` entries matched only inside `@defer` are lazy-loaded, as in
     // ngc's full compilation (#313).
-    let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
-    let (defer_block_dependencies, implicitly_deferred_imports) =
-        resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer);
+    // What a block's dependency function can read eagerly: an `imports`
+    // entry, or an `ns.X` that `deferredImports` names.
+    let import_refs: std::vec::Vec<_> =
+        metadata.import_refs.iter().chain(&metadata.deferred_import_refs).copied().collect();
+    let (defer_block_dependencies, implicitly_deferred_imports) = match named_defer_blocks {
+        Some(blocks) => (blocks, std::vec::Vec::new()),
+        None => {
+            resolve_implicit_defer(metadata, &r3_result.nodes, options, import_selector, can_defer)
+        }
+    };
 
     // Build the deferrable-dependencies resolver from
     // `@Component.deferredImports`.
@@ -6970,6 +7163,7 @@ fn compile_component_full<'a>(
         ng_content_selectors,
         has_defer_block,
         implicitly_deferred_imports,
+        explicitly_deferred_imports,
         template_style_urls,
         missing_link_urls,
         hmr_update,
