@@ -775,7 +775,7 @@ fn resolve_factory_dep_namespaces<'a>(
             if !from_inject
                 && let Some(decls) = string_consts.local_decls()
                 && let Some(path) = dep.token.as_ref().and_then(member_chain_path)
-                && decls.is_type_only_token(&path)
+                && decls.is_type_only_token(&path, class)
             {
                 dep.token = None;
                 dep.type_only_invalid = true;

@@ -1398,13 +1398,31 @@ impl<'a> LocalDecls<'a> {
         }
     }
 
-    /// [`Self::is_type_only`] for an injection token. A name declared in
-    /// `declare global` is not counted: the global interface merges with
-    /// values this file can't see (`declare global { interface Window {..} }`
-    /// with lib.dom's `declare var Window`), so ngtsc keeps such a token.
-    pub(crate) fn is_type_only_token(&self, path: &[Ident<'_>]) -> bool {
-        path.first().is_some_and(|root| !self.global_names.contains(root.as_str()))
+    /// [`Self::is_type_only`] for a DI token of `class`'s constructor, leaving
+    /// out names one file can't prove have no value:
+    /// - the class's own name: a class nested in a block or function, named
+    ///   like a top-level interface, is what its parameter types read;
+    /// - a name a `declare global` block declares: it merges with values other
+    ///   files declare (lib.dom's `declare var Window`);
+    /// - a member of a namespace merged with a value: a class's statics can
+    ///   hold it (`class NS { static Foo = .. }` + `namespace NS { interface Foo }`).
+    pub(crate) fn is_type_only_token(&self, path: &[Ident<'_>], class: &Class<'_>) -> bool {
+        let Some(root) = path.first() else { return false };
+        class.id.as_ref().is_none_or(|id| id.name.as_str() != root.as_str())
+            && !self.global_names.contains(root.as_str())
+            && !self.merges_a_value(path)
             && self.is_type_only(path)
+    }
+
+    /// Whether a namespace on `path` (all names but the last) is also a value.
+    fn merges_a_value(&self, path: &[Ident<'_>]) -> bool {
+        match path {
+            [name, rest @ ..] if !rest.is_empty() => {
+                self.value_decls.contains(name.as_str())
+                    || self.namespaces.get(name.as_str()).is_some_and(|ns| ns.merges_a_value(rest))
+            }
+            _ => false,
+        }
     }
 }
 

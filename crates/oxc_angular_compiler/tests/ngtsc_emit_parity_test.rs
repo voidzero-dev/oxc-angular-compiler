@@ -208,6 +208,41 @@ export class C { constructor(e: HTMLElement) {} }",
     assert_contains(&code, "deps:[{token:HTMLElement}]");
 }
 
+/// A nested class named like a top-level interface: its parameter type reads
+/// the class.
+#[test]
+fn nested_class_named_like_an_interface_is_its_own_token() {
+    let source = "import { Injectable, Optional, SkipSelf } from '@angular/core';
+interface Foo { a: number }
+export function make() {
+  @Injectable()
+  class Foo { constructor(@Optional() @SkipSelf() parent: Foo) {} }
+  return Foo;
+}";
+    assert_contains(&compile(source), "i0.ɵɵinject(Foo,12)");
+    assert_contains(&compile_partial(source), "deps:[{token:Foo,optional:true,skipSelf:true}]");
+}
+
+/// `NS.Foo` is a class's static when `NS` is a class merged with a namespace.
+#[test]
+fn class_static_merged_with_a_namespace_interface_is_the_token() {
+    for (decorator, inject) in [
+        ("Injectable()", "ɵɵinject"),
+        ("Component({ selector: 'c', template: '' })", "ɵɵdirectiveInject"),
+    ] {
+        let name = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {name} }} from '@angular/core';
+export class NS {{ static Foo = class {{}}; }}
+export namespace NS {{ export interface Foo {{}} }}
+@{decorator}
+export class S {{ constructor(f: NS.Foo) {{}} }}"
+        );
+        assert_contains(&compile(&source), &format!("i0.{inject}(NS.Foo)"));
+        assert_contains(&compile_partial(&source), "deps:[{token:NS.Foo}]");
+    }
+}
+
 /// An `@Inject` token is used as written, whatever the parameter's type.
 #[test]
 fn inject_token_on_a_local_interface_param_stays_the_token() {

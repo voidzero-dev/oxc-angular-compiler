@@ -813,7 +813,7 @@ fn extract_constructor_deps<'a>(
             let mut deps = Vec::new_in(&allocator);
             let params = &ctor.value.params;
             for param in &params.items {
-                let dep = extract_param_dependency(allocator, param, import_map, consts);
+                let dep = extract_param_dependency(allocator, class, param, import_map, consts);
                 deps.push(dep);
             }
 
@@ -837,6 +837,7 @@ fn extract_constructor_deps<'a>(
 /// (see [`crate::directive::angular_param_decorator`]).
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
+    class: &Class<'a>,
     param: &'a oxc_ast::ast::FormalParameter<'a>,
     import_map: &ImportMap<'a>,
     consts: &StringConsts<'a>,
@@ -940,7 +941,7 @@ fn extract_param_dependency<'a>(
                 && consts.local_decls().is_some_and(|decls| {
                     let path: std::vec::Vec<Ident<'a>> =
                         std::iter::once(*token_name).chain(member_path.iter().copied()).collect();
-                    decls.is_type_only_token(&path)
+                    decls.is_type_only_token(&path, class)
                 })
             {
                 // An interface or type alias declared in the file is erased like
