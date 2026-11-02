@@ -6586,6 +6586,10 @@ fn compile_component_full<'a>(
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
         // Read before `resolve_implicit_defer` leaves out what `@defer` provides.
         let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
+        // What a block's dependency function can read eagerly: an `imports`
+        // entry, or an `ns.X` that `deferredImports` names.
+        let block_refs: std::vec::Vec<_> =
+            import_refs.iter().chain(&metadata.deferred_import_refs).copied().collect();
         let (defer_block_dependencies, implicitly_deferred_imports) = match named_defer_blocks {
             Some(blocks) => (blocks, std::vec::Vec::new()),
             None => resolve_implicit_defer(
@@ -6644,7 +6648,7 @@ fn compile_component_full<'a>(
                     allocator,
                     &dependencies,
                     &metadata.deferred_imports,
-                    &import_refs,
+                    &block_refs,
                     import_map,
                 )
             })
@@ -6763,7 +6767,10 @@ fn compile_component_full<'a>(
 
     // `imports` entries matched only inside `@defer` are lazy-loaded, as in
     // ngc's full compilation (#313).
-    let import_refs: std::vec::Vec<_> = metadata.import_refs.iter().copied().collect();
+    // What a block's dependency function can read eagerly: an `imports`
+    // entry, or an `ns.X` that `deferredImports` names.
+    let import_refs: std::vec::Vec<_> =
+        metadata.import_refs.iter().chain(&metadata.deferred_import_refs).copied().collect();
     let (defer_block_dependencies, implicitly_deferred_imports) = match named_defer_blocks {
         Some(blocks) => (blocks, std::vec::Vec::new()),
         None => {

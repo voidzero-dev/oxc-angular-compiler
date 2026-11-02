@@ -499,11 +499,12 @@ fn extract_identifier_array<'a>(
 /// v22.2+) an object mapping each block name to an array of classes, as
 /// ngtsc's local compilation reads it (`deferredImports` in its component
 /// `handler.ts`): a spread, a computed key or a value other than an array
-/// literal is left out. Each class is `X` or `forwardRef(() => X)`.
+/// literal is left out. Each class is `X` or `forwardRef(() => X)`, or in
+/// the object form also `ns.X`.
 fn read_deferred_imports<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
-    consts: &StringConsts<'_>,
+    consts: &StringConsts<'a>,
     metadata: &mut ComponentMetadata<'a>,
 ) {
     let classes = |expr: &'a Expression<'a>| {
@@ -537,12 +538,27 @@ fn read_deferred_imports<'a>(
                     },
                     _ => continue,
                 };
-                if !matches!(property.value, Expression::ArrayExpression(_)) {
-                    continue;
+                let Expression::ArrayExpression(array) = &property.value else { continue };
+                let mut dependencies = Vec::new_in(&allocator);
+                for element in &array.elements {
+                    let Some(element) = element.as_expression() else { continue };
+                    match try_unwrap_forward_ref(element, Some(consts)).unwrap_or(element) {
+                        Expression::Identifier(id) => {
+                            metadata.deferred_import_mentions.push(id.name);
+                            dependencies.push(id.name);
+                        }
+                        // `ns.Cmp`: ngtsc can't lazy-load a namespace member,
+                        // and the block reads it eagerly (`() => [i1.Cmp]`).
+                        Expression::StaticMemberExpression(_) => {
+                            for import in extract_import_refs(allocator, element, consts) {
+                                dependencies.push(import.key);
+                                metadata.deferred_import_refs.push(import);
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-                let dependencies = classes(&property.value);
                 for name in &dependencies {
-                    metadata.deferred_import_mentions.push(*name);
                     if !metadata.deferred_imports.contains(name) {
                         metadata.deferred_imports.push(*name);
                     }

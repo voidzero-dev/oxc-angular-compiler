@@ -732,6 +732,10 @@ pub struct ComponentMetadata<'a> {
     /// literal is left out.
     pub deferred_imports_by_block: Vec<'a, (Ident<'a>, Vec<'a, Ident<'a>>)>,
 
+    /// The `ns.X` entries of `deferred_imports_by_block`, which a block
+    /// reads eagerly, keyed `ns.X` like `import_refs`.
+    pub deferred_import_refs: Vec<'a, ImportRef<'a>>,
+
     /// Every class `@Component.deferredImports` names, repeats included: how
     /// many of the source's references to an import it accounts for.
     pub deferred_import_mentions: Vec<'a, Ident<'a>>,
@@ -1105,6 +1109,7 @@ impl<'a> ComponentMetadata<'a> {
             deferred_imports: Vec::new_in(&allocator),
             deferred_imports_form: None,
             deferred_imports_by_block: Vec::new_in(&allocator),
+            deferred_import_refs: Vec::new_in(&allocator),
             deferred_import_mentions: Vec::new_in(&allocator),
             imports_provably_empty: false,
             animations: None,

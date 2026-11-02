@@ -343,3 +343,21 @@ fn version_gates() {
     assert!(!required("22.2.0-next.4") && required("22.2.0-next.5") && required("22.2.1"));
     assert!(!required("21.2.0") && required("23.0.0-next.0"));
 }
+
+#[test]
+fn namespace_member_is_read_eagerly() {
+    // ngtsc can't lazy-load `ns.B` and reads it eagerly (`() => [i1.B]`).
+    let source = "import { Component } from '@angular/core';\n\
+                  import { A } from './a';\n\
+                  import * as ns from './b';\n\
+                  @Component({ selector: 'app', deferredImports: { x: [A], z: [ns.B] }, \
+                  template: '@defer (name x) { <cmp-a /> } @defer (name z) { <cmp-b /> }' })\n\
+                  export class App {}\n";
+    let code = compile(source, CompilationMode::Full, None);
+    assert!(code.contains("import * as ns from './b';"), "{code}");
+    assert!(compact(&code).contains("constApp_Defer_4_DepsFn=()=>[ns.B];"), "{code}");
+    assert!(compact(&code).contains("ɵɵdefer(4,3,App_Defer_4_DepsFn);"), "{code}");
+
+    let code = compact(&compile(source, CompilationMode::Partial, None));
+    assert!(code.contains(&format!("deferBlockDependencies:[()=>[{LAZY_A}],()=>[ns.B]]")));
+}
