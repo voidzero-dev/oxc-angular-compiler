@@ -635,41 +635,28 @@ fn get_property_expression<'a>(
 ///
 /// Handles both `function() { return expr; }` and `() => expr` forms.
 fn extract_function_return_source<'a>(expr: &Expression<'a>, source: &'a str) -> Option<&'a str> {
-    match expr {
-        Expression::FunctionExpression(func) => {
-            if let Some(body) = &func.body {
-                for stmt in &body.statements {
-                    if let Statement::ReturnStatement(ret) = stmt {
-                        if let Some(arg) = &ret.argument {
-                            let span = arg.span();
-                            return Some(&source[span.start as usize..span.end as usize]);
-                        }
-                    }
-                }
-            }
-            None
-        }
+    let span = extract_function_return(expr)?.span();
+    Some(&source[span.start as usize..span.end as usize])
+}
+
+/// The value a function expression returns: the first `return` of
+/// `function() { return expr; }` or `() => { return expr; }`, or the body of
+/// `() => expr`.
+fn extract_function_return<'e, 'a>(expr: &'e Expression<'a>) -> Option<&'e Expression<'a>> {
+    let body = match expr {
+        Expression::FunctionExpression(func) => func.body.as_deref()?,
         Expression::ArrowFunctionExpression(arrow) => {
-            // Expression body: () => expr
             if let Some(expr) = arrow.get_expression() {
-                let span = expr.span();
-                return Some(&source[span.start as usize..span.end as usize]);
+                return Some(expr);
             }
-            // Block body: () => { return expr; }
-            if let Some(body) = arrow.get_function_body() {
-                for stmt in &body.statements {
-                    if let Statement::ReturnStatement(ret) = stmt {
-                        if let Some(arg) = &ret.argument {
-                            let span = arg.span();
-                            return Some(&source[span.start as usize..span.end as usize]);
-                        }
-                    }
-                }
-            }
-            None
+            arrow.get_function_body()?
         }
+        _ => return None,
+    };
+    body.statements.iter().find_map(|stmt| match stmt {
+        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
         _ => None,
-    }
+    })
 }
 
 /// Unwrap a `forwardRef(function() { return X; })` or `forwardRef(() => X)` call expression.
@@ -853,6 +840,38 @@ fn has_on_push_by_default(meta: &ObjectExpression<'_>) -> bool {
         }
     }
     true // If we can't determine the version, default to true (latest behavior)
+}
+
+/// Whether a component's or directive's template and host bindings link `?.`
+/// the legacy way (`a == null ? null : a.b`, giving `null`) rather than
+/// natively (giving `undefined`), like `legacyOptionalChaining` in Angular's
+/// linker: for a declaration before v22, and always with a linker before
+/// v22.0.0-next.10, which has no such option. The placeholder version used by
+/// dev builds tracks the newest behaviour.
+fn uses_legacy_optional_chaining(
+    meta: &ObjectExpression<'_>,
+    angular_version: Option<AngularVersion>,
+) -> bool {
+    if angular_version.is_some_and(|version| !version.links_native_optional_chaining()) {
+        return true;
+    }
+    // `version` or `"version"`, read like npm's `semver`: trimmed, with an
+    // optional leading `v`.
+    let version = meta.properties.iter().find_map(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(prop)
+            if prop.key.static_name().is_some_and(|name| name == "version") =>
+        {
+            as_static_string(&prop.value)
+        }
+        _ => None,
+    });
+    version
+        .map(str::trim)
+        .filter(|version| *version != "0.0.0-PLACEHOLDER")
+        .and_then(|version| {
+            semver::Version::parse(version.strip_prefix('v').unwrap_or(version)).ok()
+        })
+        .is_some_and(|version| version.major < 22)
 }
 
 /// Extract the `deps` array from a factory metadata object and generate inject calls.
@@ -1330,9 +1349,9 @@ fn link_injector(
 /// The OXC linker always emits inline scope (equivalent to `selectorScopeMode: Inline`)
 /// since it operates on FESM bundles without full AOT scope resolution context.
 ///
-/// Forward declaration handling: if any of bootstrap/declarations/imports/exports is
-/// wrapped in a function (forward declaration), ALL arrays are wrapped consistently,
-/// matching the TS compiler's `containsForwardDecls` behavior.
+/// declarations, imports and exports are always `() => [...]`. bootstrap is too when any
+/// of the four is wrapped in a function (forward declaration), matching the TS
+/// compiler's `containsForwardDecls` behavior.
 fn link_ng_module(
     meta: &ObjectExpression<'_>,
     source: &str,
@@ -1348,34 +1367,38 @@ fn link_ng_module(
         || is_function_wrapped_property(meta, "imports")
         || is_function_wrapped_property(meta, "exports");
 
-    // Helper closure: wrap array source in function() { return ...; } if forward decls exist
-    let wrap_array = |array_source: &str| -> String {
-        if contains_forward_decls {
-            format!("function() {{ return {array_source}; }}")
-        } else {
-            array_source.to_string()
-        }
+    // The list `name` is, unwrapping a function. A function returning it,
+    // `() => [...]`, as Angular writes forward declarations, when `lazy`.
+    let list = |name: &str, lazy: bool| {
+        let expr = get_property_expression(meta, name)?;
+        let list = extract_function_return(expr).unwrap_or(expr);
+        let span = list.span();
+        let list_source = &source[span.start as usize..span.end as usize];
+        Some(match list {
+            _ if !lazy => list_source.to_string(),
+            // Not a block, nor the arrow's last argument.
+            Expression::ObjectExpression(_) | Expression::SequenceExpression(_) => {
+                format!("() => ({list_source})")
+            }
+            _ => format!("() => {list_source}"),
+        })
     };
 
     // Bootstrap is always emitted inline (not affected by selectorScopeMode).
-    // Unwrap function wrappers to get the inner array source.
-    if let Some(bootstrap) = get_property_source_unwrapping_function(meta, "bootstrap", source) {
-        parts.push(format!("bootstrap: {}", wrap_array(bootstrap)));
+    if let Some(bootstrap) = list("bootstrap", contains_forward_decls) {
+        parts.push(format!("bootstrap: {bootstrap}"));
     }
 
     // declarations, imports, and exports must be included so Angular's runtime DepsTracker
     // can resolve which pipes/directives an NgModule provides to standalone components.
     // Without these, getNgModuleDef(type).exports is empty → NG0302/NG0303 errors.
-    if let Some(declarations) =
-        get_property_source_unwrapping_function(meta, "declarations", source)
-    {
-        parts.push(format!("declarations: {}", wrap_array(declarations)));
-    }
-    if let Some(imports) = get_property_source_unwrapping_function(meta, "imports", source) {
-        parts.push(format!("imports: {}", wrap_array(imports)));
-    }
-    if let Some(exports) = get_property_source_unwrapping_function(meta, "exports", source) {
-        parts.push(format!("exports: {}", wrap_array(exports)));
+    // Angular's linker (without JIT) leaves them out, as ngtsc lists what a component
+    // uses itself. They are read lazily: in an import cycle with a file that declares
+    // one of the classes, this file can run before that class exists.
+    for field in ["declarations", "imports", "exports"] {
+        if let Some(list) = list(field, true) {
+            parts.push(format!("{field}: {list}"));
+        }
     }
     if let Some(schemas) = get_property_source(meta, "schemas", source) {
         parts.push(format!("schemas: {schemas}"));
@@ -1707,6 +1730,7 @@ fn link_directive<'a>(
             &mut pool.shared,
             ns,
             options.angular_version,
+            uses_legacy_optional_chaining(meta, options.angular_version),
         ) {
             pool.next_index = host_output.next_pool_index;
             if host_output.host_vars > 0 {
@@ -2189,6 +2213,7 @@ fn link_component<'a>(
     // constants, and the template reuses equal ones.
     let LinkedQueries { content_queries, view_query, declarations_js: query_declarations_js } =
         link_queries(allocator, pool, meta, source, ns, type_name, options.angular_version);
+    let legacy_optional_chaining = uses_legacy_optional_chaining(meta, options.angular_version);
     let host_obj = get_object_property(meta, "host");
     let host_output = host_obj.and_then(|host_obj| {
         // Extract host properties and listeners as HostMetadataInput and compile
@@ -2202,6 +2227,7 @@ fn link_component<'a>(
             &mut pool.shared,
             ns,
             options.angular_version,
+            legacy_optional_chaining,
         )
     });
     if let Some(host_output) = &host_output {
@@ -2235,6 +2261,7 @@ fn link_component<'a>(
         options.angular_version,
         &defer_block_deps,
         has_directive_dependencies(meta),
+        legacy_optional_chaining,
         pool.next_index,
         &mut pool.shared,
     )
@@ -4344,17 +4371,17 @@ MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0
             result.code
         );
         assert!(
-            result.code.contains("declarations: [FooComponent]"),
+            result.code.contains("declarations: () => [FooComponent]"),
             "Should contain declarations for runtime scope resolution, got:\n{}",
             result.code
         );
         assert!(
-            result.code.contains("imports: [CommonModule]"),
+            result.code.contains("imports: () => [CommonModule]"),
             "Should contain imports, got:\n{}",
             result.code
         );
         assert!(
-            result.code.contains("exports: [FooComponent]"),
+            result.code.contains("exports: () => [FooComponent]"),
             "Should contain exports for standalone component pipe/directive scope, got:\n{}",
             result.code
         );
@@ -4378,12 +4405,12 @@ TranslateModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version
         let result = link(&allocator, code, "ngx-translate-core.mjs");
         assert!(result.linked, "Should have linked the declarations");
         assert!(
-            result.code.contains("declarations: [TranslatePipe, TranslateDirective]"),
+            result.code.contains("declarations: () => [TranslatePipe, TranslateDirective]"),
             "ɵɵdefineNgModule must include declarations, got:\n{}",
             result.code
         );
         assert!(
-            result.code.contains("exports: [TranslatePipe, TranslateDirective]"),
+            result.code.contains("exports: () => [TranslatePipe, TranslateDirective]"),
             "ɵɵdefineNgModule must include exports so standalone components can resolve TranslatePipe, got:\n{}",
             result.code
         );
@@ -4396,12 +4423,13 @@ TranslateModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version
 import * as i0 from "@angular/core";
 class AppModule {
 }
-AppModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AppModule, bootstrap: [AppComponent] });
+AppModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AppModule, bootstrap: [AppComponent], declarations: [AppComponent] });
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked, "Should have linked the declaration");
+        // Read when the module bootstraps, as Angular's linker writes it.
         assert!(
-            result.code.contains("bootstrap:"),
+            result.code.contains("bootstrap: [AppComponent], declarations: () => [AppComponent]"),
             "Should contain bootstrap, got:\n{}",
             result.code
         );
@@ -4720,31 +4748,52 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "
     }
 
     #[test]
+    fn test_link_ng_module_lazy_list_keeps_its_value() {
+        // A sequence or an object literal returned is the arrow's value, not its last
+        // argument or its block.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class M {}
+M.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: M, declarations: function() { return foo(), [A]; }, imports: () => { return {a: A}; }, exports: SHARED });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.code.contains("declarations: () => (foo(), [A])"), "{}", result.code);
+        assert!(result.code.contains("imports: () => ({a: A})"), "{}", result.code);
+        assert!(result.code.contains("exports: () => SHARED"), "{}", result.code);
+    }
+
+    #[test]
     fn test_link_ng_module_forward_declarations() {
         // When any of bootstrap/declarations/imports/exports is function-wrapped,
-        // ALL arrays should be wrapped in function() { return ...; }.
+        // ALL arrays should be wrapped in `() => ...`, bootstrap included.
         let allocator = Allocator::default();
         let code = r#"
 import * as i0 from "@angular/core";
 class MyModule {}
-MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyModule, declarations: function() { return [FooComponent]; }, imports: [CommonModule], exports: [FooComponent] });
+MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyModule, bootstrap: [AppComponent], declarations: function() { return [FooComponent]; }, imports: [CommonModule], exports: [FooComponent] });
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked, "Should have linked the declaration");
         // declarations was function-wrapped, so ALL arrays should be wrapped
         assert!(
-            result.code.contains("declarations: function() { return [FooComponent]; }"),
+            result.code.contains("declarations: () => [FooComponent]"),
             "declarations should be wrapped, got:\n{}",
             result.code
         );
         assert!(
-            result.code.contains("imports: function() { return [CommonModule]; }"),
+            result.code.contains("imports: () => [CommonModule]"),
             "imports should also be wrapped when containsForwardDecls, got:\n{}",
             result.code
         );
         assert!(
-            result.code.contains("exports: function() { return [FooComponent]; }"),
+            result.code.contains("exports: () => [FooComponent]"),
             "exports should also be wrapped when containsForwardDecls, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("bootstrap: () => [AppComponent]"),
+            "bootstrap should also be wrapped when containsForwardDecls, got:\n{}",
             result.code
         );
     }

@@ -177,6 +177,19 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Check if this version's linker links `?.` natively in declarations of
+    /// v22 or later (v22.0.0-next.10+), with its `legacyOptionalChaining`
+    /// option. Earlier linkers always link it the legacy way.
+    pub fn links_native_optional_chaining(&self) -> bool {
+        if self.major == 22 && self.minor == 0 && self.patch == 0 {
+            return match self.prerelease {
+                None => true,
+                Some(prerelease) => prerelease >= Prerelease::Next(10),
+            };
+        }
+        self.major >= 22
+    }
+
     /// Check if this version's runtime supports chained query instructions
     /// (`ɵɵviewQuery(p1)(p2)`, `ɵɵcontentQuerySignal(...)(...)`).
     ///

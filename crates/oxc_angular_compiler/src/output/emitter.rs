@@ -1050,8 +1050,15 @@ impl JsEmitter {
         ctx: &mut EmitterContext,
     ) {
         // Emitted natively, as ngtsc does, so the tag receives the same strings array on
-        // every call.
+        // every call. An optional chain can't be a tag: `(a?.b)\`t\``, as Babel prints it.
+        let parenthesize = is_optional_chain(&expr.tag);
+        if parenthesize {
+            ctx.print("(");
+        }
         self.visit_expression(&expr.tag, ctx);
+        if parenthesize {
+            ctx.print(")");
+        }
         self.visit_template_literal(&expr.template, ctx);
     }
 
@@ -1519,6 +1526,16 @@ pub(crate) fn format_number_like_js(value: f64) -> String {
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// Whether `expr` is an optional chain, like `a?.b.c` or `a?.()`.
+fn is_optional_chain(expr: &OutputExpression<'_>) -> bool {
+    match expr {
+        OutputExpression::ReadProp(read) => read.optional || is_optional_chain(&read.receiver),
+        OutputExpression::ReadKey(read) => read.optional || is_optional_chain(&read.receiver),
+        OutputExpression::InvokeFunction(call) => call.optional || is_optional_chain(&call.fn_expr),
+        _ => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
