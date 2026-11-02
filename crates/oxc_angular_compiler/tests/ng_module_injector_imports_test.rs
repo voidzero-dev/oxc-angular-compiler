@@ -454,6 +454,59 @@ export class M {}
     }
 
     #[test]
+    fn a_list_through_a_local_forward_ref_stays() {
+        // This `forwardRef` returns `PlainModule`, not what its callback gives.
+        let dir = TempDir::new().unwrap();
+        dep(&dir);
+        write(
+            &dir,
+            "src/list.ts",
+            r"
+import { PlainModule, StandaloneDir } from './dep';
+function forwardRef(fn: () => unknown): any { return PlainModule; }
+export const IMPORTS = [forwardRef(() => StandaloneDir)];
+",
+        );
+        check(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { IMPORTS } from './list';
+@NgModule({ imports: [IMPORTS] })
+export class M {}
+",
+            &[("M", Some("IMPORTS"))],
+            &cross_file(),
+        );
+    }
+
+    #[test]
+    fn a_list_through_angular_forward_ref_is_left_out() {
+        let dir = TempDir::new().unwrap();
+        dep(&dir);
+        write(
+            &dir,
+            "src/list.ts",
+            r"
+import { forwardRef as ref } from '@angular/core';
+import { StandaloneDir } from './dep';
+export const IMPORTS = [ref(() => StandaloneDir)];
+",
+        );
+        check(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { IMPORTS } from './list';
+@NgModule({ imports: [IMPORTS] })
+export class M {}
+",
+            &[("M", None)],
+            &cross_file(),
+        );
+    }
+
+    #[test]
     fn without_imported_values_imported_classes_stay() {
         let dir = TempDir::new().unwrap();
         dep(&dir);

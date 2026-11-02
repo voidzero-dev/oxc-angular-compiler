@@ -584,7 +584,7 @@ impl Inner {
     /// `ngModule` of the object it returns.
     fn module_with_providers(&self, decl: &Decl, method: &str) -> Option<RawRef> {
         let parsed = self.parsed_file(&decl.file)?;
-        parsed.with(|_, program, _| {
+        parsed.with(|_, program, consts| {
             let class = find_class(program, &decl.name)?;
             let function = class.body.body.iter().find_map(|element| match element {
                 ClassElement::MethodDefinition(m)
@@ -608,7 +608,7 @@ impl Inner {
                 _ => None,
             })?;
             let mut refs = Vec::new();
-            collect_refs(returned, &decl.file, &mut refs, 0)?;
+            collect_refs(returned, consts, &decl.file, &mut refs, 0)?;
             match <[RawRef; 1]>::try_from(refs) {
                 Ok([module]) => Some(module),
                 Err(_) => None,
@@ -1042,7 +1042,7 @@ fn read_declared<'a>(
             return None;
         }
         let mut refs = Vec::new();
-        collect_refs(var.init.as_ref()?, &decl.file, &mut refs, 0)?;
+        collect_refs(var.init.as_ref()?, consts, &decl.file, &mut refs, 0)?;
         Some(Declared::List(refs))
     })
 }
@@ -1182,7 +1182,7 @@ fn read_decorator<'a>(
             let list = |key: &str| -> Option<Vec<RawRef>> {
                 let mut refs = Vec::new();
                 if let Some(value) = field(key) {
-                    collect_refs(value, file, &mut refs, 0)?;
+                    collect_refs(value, consts, file, &mut refs, 0)?;
                 }
                 Some(refs)
             };
@@ -1201,6 +1201,7 @@ fn read_decorator<'a>(
 /// anything else.
 fn collect_refs(
     expr: &Expression<'_>,
+    consts: &StringConsts<'_>,
     file: &str,
     out: &mut Vec<RawRef>,
     depth: u16,
@@ -1219,10 +1220,10 @@ fn collect_refs(
             for element in &array.elements {
                 match element {
                     ArrayExpressionElement::SpreadElement(spread) => {
-                        collect_refs(&spread.argument, file, out, depth + 1)?;
+                        collect_refs(&spread.argument, consts, file, out, depth + 1)?;
                     }
                     ArrayExpressionElement::Elision(_) => return None,
-                    _ => collect_refs(element.as_expression()?, file, out, depth + 1)?,
+                    _ => collect_refs(element.as_expression()?, consts, file, out, depth + 1)?,
                 }
             }
         }
@@ -1234,8 +1235,16 @@ fn collect_refs(
             out.push(raw(Some(&object.name), &member.property.name, None));
         }
         Expression::CallExpression(call) => match call.callee.get_inner_expression() {
-            // `forwardRef(() => A)`
-            Expression::Identifier(callee) if callee.name == "forwardRef" => {
+            // `forwardRef(() => A)`, with `forwardRef` imported from
+            // `@angular/core`: another function may return anything.
+            Expression::Identifier(callee)
+                if crate::directive::angular_core_identifier(
+                    &callee.name,
+                    Some(consts),
+                    &["forwardRef"],
+                )
+                .is_some() =>
+            {
                 let returned = match call.arguments.first()?.as_expression()?.get_inner_expression()
                 {
                     Expression::ArrowFunctionExpression(arrow) => arrow.get_expression()?,
@@ -1247,7 +1256,7 @@ fn collect_refs(
                     }
                     _ => return None,
                 };
-                collect_refs(returned, file, out, depth + 1)?;
+                collect_refs(returned, consts, file, out, depth + 1)?;
             }
             // `A.forRoot()`, `ns.A.forRoot()`
             Expression::StaticMemberExpression(member) => {
@@ -1274,7 +1283,7 @@ fn collect_refs(
                 }
                 _ => None,
             })?;
-            collect_refs(module, file, out, depth + 1)?;
+            collect_refs(module, consts, file, out, depth + 1)?;
         }
         _ => return None,
     }
