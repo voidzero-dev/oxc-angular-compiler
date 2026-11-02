@@ -30,6 +30,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
 use crate::component::metadata::{ComponentScope, ImportedName, ScopeEntry, ScopeKind};
 use crate::directive::{Evaluator, StringConsts, find_angular_class_decorator};
+use crate::ng_module::module_with_providers::{
+    MwpInit, MwpModule, module_with_providers_init, static_method_ng_module, top_level_const_init,
+};
 use crate::ng_module::{InjectorDrops, InjectorEntry};
 
 /// A top-level declaration: the file declaring it and its name there
@@ -333,6 +336,45 @@ impl CrossFileAnalyzer {
     }
 }
 
+impl CrossFileAnalyzer {
+    /// For each `ModuleWithProviders` entry of an NgModule's `imports` in
+    /// `file` (`source` is its text), the NgModule it names, as `file`
+    /// would import it, like ngtsc's `resolveTypeList`. An entry is
+    /// `(namespace, name, method)`: `name.method(...)` (or
+    /// `namespace.name.method(...)`), or with no method a constant `name`
+    /// holding one. The method or constant may be in another file; the
+    /// NgModule is named through an import of the file it comes from, as
+    /// ngtsc names a class it found in another file (`i1.DepModule`).
+    /// `None` for an entry that can't be read, or that names no NgModule.
+    pub(crate) fn module_with_providers_imports(
+        &self,
+        file: &Path,
+        source: &str,
+        entries: &[(Option<&str>, &str, Option<&str>)],
+    ) -> Vec<Option<ImportedName>> {
+        let file = self.inner.set_compiled_source(file, source);
+        entries
+            .iter()
+            .map(|(namespace, name, method)| {
+                let raw = RawRef {
+                    file: file.clone(),
+                    namespace: namespace.map(Into::into),
+                    name: (*name).into(),
+                    method: None,
+                };
+                let holder = self.inner.resolve_ref(&raw, None, 0)?;
+                let module = match method {
+                    Some(method) => self.inner.mwp_method_module(&holder, method)?,
+                    None => self.inner.mwp_const_module(&holder)?,
+                };
+                let declared = self.inner.declared(&module.decl)?;
+                let Declared::NgModule { .. } = &*declared else { return None };
+                self.inner.imported_name(&module, &file)
+            })
+            .collect()
+    }
+}
+
 /// `items` with each class once, where it first appears.
 fn dedupe(items: Vec<ScopeItem>) -> Vec<ScopeItem> {
     let mut seen = FxHashSet::default();
@@ -572,6 +614,45 @@ impl Inner {
                 Err(_) => None,
             }
         })
+    }
+
+    /// The NgModule `holder.method(...)` returns a `ModuleWithProviders`
+    /// of, read in ngtsc's order (see `static_method_ng_module`).
+    fn mwp_method_module(&self, holder: &ClassRef, method: &str) -> Option<ClassRef> {
+        let file = &holder.decl.file;
+        let raw = self.parsed_file(file)?.with(|_, program, _| {
+            let class = find_class(program, &holder.decl.name)?;
+            match static_method_ng_module(class, method)? {
+                MwpModule::Value(value) => value_ref(value, file),
+                MwpModule::Type(name) => type_name_ref(file, name),
+            }
+        })?;
+        self.resolve_ref(&raw, holder.owner.as_deref(), 1)
+    }
+
+    /// The NgModule the top-level `const` `decl` holds a
+    /// `ModuleWithProviders` of: `Class.method(...)` or `{ ngModule: T }`.
+    fn mwp_const_module(&self, decl: &ClassRef) -> Option<ClassRef> {
+        let file = &decl.decl.file;
+        let (raw, method) = self.parsed_file(file)?.with(|_, program, _| {
+            match module_with_providers_init(top_level_const_init(program, &decl.decl.name)?)? {
+                MwpInit::Call { namespace, class, method } => Some((
+                    RawRef {
+                        file: file.clone(),
+                        namespace: namespace.map(Into::into),
+                        name: class.into(),
+                        method: None,
+                    },
+                    Some(method.to_string()),
+                )),
+                MwpInit::Module(value) => Some((value_ref(value, file)?, None)),
+            }
+        })?;
+        let class = self.resolve_ref(&raw, decl.owner.as_deref(), 1)?;
+        match method {
+            Some(method) => self.mwp_method_module(&class, &method),
+            None => Some(class),
+        }
     }
 
     /// What the declaration `decl` is to a module scope.
@@ -1033,6 +1114,21 @@ fn type_name_ref(file: &str, name: &TSTypeName<'_>) -> Option<RawRef> {
             _ => return None,
         },
         TSTypeName::ThisExpression(_) => return None,
+    };
+    Some(RawRef { file: file.into(), namespace, name, method: None })
+}
+
+/// The class a value names: `A` or `ns.A`.
+fn value_ref(value: &Expression<'_>, file: &str) -> Option<RawRef> {
+    let (namespace, name) = match value.get_inner_expression() {
+        Expression::Identifier(id) => (None, id.name.to_string()),
+        Expression::StaticMemberExpression(member) => {
+            let Expression::Identifier(ns) = member.object.get_inner_expression() else {
+                return None;
+            };
+            (Some(ns.name.to_string()), member.property.name.to_string())
+        }
+        _ => return None,
     };
     Some(RawRef { file: file.into(), namespace, name, method: None })
 }

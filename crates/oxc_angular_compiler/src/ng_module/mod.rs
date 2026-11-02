@@ -16,6 +16,7 @@ mod decorator;
 mod definition;
 mod injector_imports;
 mod metadata;
+pub(crate) mod module_with_providers;
 
 pub use compiler::{NgModuleCompileResult, compile_ng_module, compile_ng_module_from_metadata};
 pub use decorator::{NgModuleMetadata, extract_ng_module_metadata, find_ng_module_decorator_span};

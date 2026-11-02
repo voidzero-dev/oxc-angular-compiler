@@ -4721,6 +4721,29 @@ pub fn transform_angular_file(
                         );
                     }
 
+                    // A partial declaration lists the NgModule of each
+                    // `ModuleWithProviders` import, like ngtsc. A class in a
+                    // function may see local bindings: it stays as before.
+                    if matches!(options.compilation_mode, crate::CompilationMode::Partial)
+                        && !site.nested
+                    {
+                        ng_module_metadata.partial_imports = partial_module_with_providers_imports(
+                            allocator,
+                            &parser_ret.program,
+                            class,
+                            &ng_module_metadata,
+                            &string_consts,
+                            &import_map,
+                            &import_elision_mut,
+                            #[cfg(feature = "cross_file_elision")]
+                            cross_file_analyzer
+                                .as_ref()
+                                .filter(|_| options.resolve_imported_values)
+                                .map(|analyzer| (analyzer, path, source)),
+                            &mut file_namespace_registry,
+                        );
+                    }
+
                     // Like ngtsc in full and partial compilation, ɵinj leaves
                     // out the directives and pipes of `imports` and `exports`
                     // (#623). A nested class may name a binding of its
@@ -5511,6 +5534,75 @@ fn scope_dependencies<'a>(
         });
     }
     Some(dependencies)
+}
+
+/// The partial `ɵɵngDeclareNgModule` imports of the NgModule `class`, with
+/// each `ModuleWithProviders` entry listed as its NgModule (see
+/// `ng_module::module_with_providers`), or `None` to list them as before.
+/// With cross-file analysis, a method or constant of another file is read
+/// too, and its NgModule is named through a namespace import, like
+/// `ɵɵsetComponentScope` names classes.
+#[expect(clippy::too_many_arguments)]
+fn partial_module_with_providers_imports<'a>(
+    allocator: &'a Allocator,
+    program: &Program<'_>,
+    class: &oxc_ast::ast::Class<'_>,
+    metadata: &crate::ng_module::NgModuleMetadata<'a>,
+    string_consts: &crate::directive::StringConsts<'_>,
+    import_map: &ImportMap<'_>,
+    import_elision: &ImportElisionAnalyzer<'_>,
+    #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
+    registry: &mut NamespaceRegistry<'a>,
+) -> Option<oxc_allocator::Vec<'a, OutputExpression<'a>>> {
+    use crate::ng_module::module_with_providers::{Binding, partial_imports};
+    #[cfg(feature = "cross_file_elision")]
+    use crate::ng_module::module_with_providers::{NamedClass, ResolveImported};
+    // Gives the closure the signature for every lifetime of its entries.
+    #[cfg(feature = "cross_file_elision")]
+    fn resolver<F>(f: F) -> F
+    where
+        F: Fn(&[(Option<&str>, &str, Option<&str>)]) -> Vec<Option<NamedClass>>,
+    {
+        f
+    }
+    let binding = |name: &str| match import_map.get(&Ident::from(name)) {
+        Some(info) if info.is_type_only => Binding::Other,
+        Some(info) if !info.is_named_import => Binding::Namespace,
+        Some(_) => Binding::Import { kept: !import_elision.should_elide(name) },
+        None => Binding::Other,
+    };
+    #[cfg(feature = "cross_file_elision")]
+    let resolve = analyzer.map(|(analyzer, path, source)| {
+        resolver(move |entries| {
+            use super::metadata::ImportedName;
+            analyzer
+                .module_with_providers_imports(std::path::Path::new(path), source, entries)
+                .into_iter()
+                .map(|name| {
+                    name.map(|name| match name {
+                        ImportedName::Local(name) => NamedClass::Local(name),
+                        ImportedName::Module { specifier, name } => {
+                            NamedClass::Module { specifier, name }
+                        }
+                    })
+                })
+                .collect()
+        })
+    });
+    #[cfg(feature = "cross_file_elision")]
+    let resolve_imported = resolve.as_ref().map(|resolve| resolve as ResolveImported<'_>);
+    #[cfg(not(feature = "cross_file_elision"))]
+    let resolve_imported = None;
+    partial_imports(
+        allocator,
+        program,
+        class,
+        string_consts,
+        &metadata.imports,
+        binding,
+        resolve_imported,
+        |specifier| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier))),
+    )
 }
 
 /// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for
