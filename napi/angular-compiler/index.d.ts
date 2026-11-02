@@ -1107,6 +1107,16 @@ export interface TransformOptions {
    * Defaults to `false`, as in the `tsconfig.json` that `ng new` generates.
    */
   enableI18nLegacyMessageIdFormat?: boolean
+  /**
+   * The `forbidOrphanComponents` Angular compiler option
+   * (`angularCompilerOptions.forbidOrphanComponents` in `tsconfig.json`).
+   *
+   * When `true`, each component's `ɵsetClassDebugInfo` call gets
+   * `forbidOrphanRendering: true`, so in dev mode (with JIT support) the runtime
+   * throws NG0981 when a non-standalone component is rendered before its NgModule
+   * was loaded. Full compilation mode only. Defaults to `false`, as in ngtsc.
+   */
+  forbidOrphanComponents?: boolean
   /** The CSS selector that identifies this component in a template. */
   selector?: string
   /**

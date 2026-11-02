@@ -244,6 +244,15 @@ pub struct TransformOptions {
     /// Default: `false`, as in the `tsconfig.json` that `ng new` generates. ngtsc itself
     /// defaults to `true` when the option is not set.
     pub enable_i18n_legacy_message_id_format: bool,
+
+    /// Angular's `forbidOrphanComponents` compiler option: every component's
+    /// `ɵsetClassDebugInfo` call gets `forbidOrphanRendering: true`, so that in dev
+    /// mode (with JIT support) the runtime throws NG0981 when a non-standalone
+    /// component is rendered before its NgModule was loaded.
+    ///
+    /// Full mode only, like ngtsc: partial output has no class debug info. Default:
+    /// `false`, as in ngtsc (`!!options.forbidOrphanComponents`).
+    pub forbid_orphan_components: bool,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -300,6 +309,7 @@ impl Default for TransformOptions {
             minify_component_styles: false,
             compilation_mode: crate::CompilationMode::Full,
             enable_i18n_legacy_message_id_format: false,
+            forbid_orphan_components: false,
         }
     }
 }
@@ -7310,7 +7320,10 @@ fn compile_component_full<'a>(
         // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
             .with_file_path(Ident::from_in(file_path, &allocator))
-            .with_line_number(class_line_number);
+            .with_line_number(class_line_number)
+            // ngtsc's ComponentDecoratorHandler passes `forbidOrphanComponents` to
+            // `extractClassDebugInfo` for every component, standalone or not.
+            .with_forbid_orphan_rendering(options.forbid_orphan_components);
 
         // Compile to IIFE-wrapped expression
         let debug_info_expr =

@@ -169,6 +169,15 @@ pub struct TransformOptions {
     #[napi(js_name = "enableI18nLegacyMessageIdFormat")]
     pub enable_i18n_legacy_message_id_format: Option<bool>,
 
+    /// The `forbidOrphanComponents` Angular compiler option
+    /// (`angularCompilerOptions.forbidOrphanComponents` in `tsconfig.json`).
+    ///
+    /// When `true`, each component's `ɵsetClassDebugInfo` call gets
+    /// `forbidOrphanRendering: true`, so in dev mode (with JIT support) the runtime
+    /// throws NG0981 when a non-standalone component is rendered before its NgModule
+    /// was loaded. Full compilation mode only. Defaults to `false`, as in ngtsc.
+    pub forbid_orphan_components: Option<bool>,
+
     // Component metadata fields for full compilation testing
     // These mirror Angular's @Component decorator options.
     /// The CSS selector that identifies this component in a template.
@@ -277,6 +286,7 @@ impl From<TransformOptions> for RustTransformOptions {
             enable_i18n_legacy_message_id_format: options
                 .enable_i18n_legacy_message_id_format
                 .unwrap_or(false),
+            forbid_orphan_components: options.forbid_orphan_components.unwrap_or(false),
             // Component metadata overrides
             selector: options.selector,
             standalone: options.standalone,

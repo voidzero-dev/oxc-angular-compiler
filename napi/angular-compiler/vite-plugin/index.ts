@@ -169,6 +169,17 @@ export interface PluginOptions {
    * `tsconfig.json` that `ng new` generates.
    */
   enableI18nLegacyMessageIdFormat?: boolean
+
+  /**
+   * Angular's `forbidOrphanComponents` compiler option: each component's
+   * `ɵsetClassDebugInfo` call gets `forbidOrphanRendering: true`, so in dev mode
+   * (with JIT support) the runtime throws NG0981 when a non-standalone component
+   * is rendered before its NgModule was loaded.
+   *
+   * Only affects `compilationMode: 'full'` (partial output has no class debug
+   * info). Default: `false`, as in ngtsc.
+   */
+  forbidOrphanComponents?: boolean
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -327,6 +338,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     compilationMode: options.compilationMode ?? 'full',
     preserveWhitespaces: options.preserveWhitespaces,
     enableI18nLegacyMessageIdFormat: options.enableI18nLegacyMessageIdFormat ?? false,
+    forbidOrphanComponents: options.forbidOrphanComponents ?? false,
     tsconfig: options.tsconfig,
   }
 
@@ -588,6 +600,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       compilationMode: pluginOptions.compilationMode,
       preserveWhitespaces: pluginOptions.preserveWhitespaces,
       enableI18nLegacyMessageIdFormat: pluginOptions.enableI18nLegacyMessageIdFormat,
+      forbidOrphanComponents: pluginOptions.forbidOrphanComponents,
       // Evaluate decorator metadata imported from other files the way
       // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`,
       // `templateUrl: TEMPLATE_URL`). Read files land in
