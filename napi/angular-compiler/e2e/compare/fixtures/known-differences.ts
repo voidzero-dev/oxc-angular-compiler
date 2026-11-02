@@ -45,17 +45,13 @@ const ALIASED_INJECTABLE =
 
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
-const DEBUG_INFO_PATH =
-  'ɵsetClassDebugInfo filePath is the path Oxc was given (absolute here and in the Vite plugin) where Angular emits it relative to the project root'
 
 /**
  * Differences every fixture may have, matched against the labels `KnownDifference` uses. A
  * fixture whose differences are all documented here or in its own entry is reported as a known
  * difference with these reasons. They never go stale.
  */
-export const GLOBAL_KNOWN_DIFFERENCES: Array<{ label: RegExp; reason: string }> = [
-  { label: /^statement ɵsetClassDebugInfo\([^()]+\)(#\d+)? filePath$/, reason: DEBUG_INFO_PATH },
-]
+export const GLOBAL_KNOWN_DIFFERENCES: Array<{ label: RegExp; reason: string }> = []
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'class-metadata/class-metadata-ngmodule': {

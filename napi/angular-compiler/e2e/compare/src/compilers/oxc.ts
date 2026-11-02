@@ -57,6 +57,8 @@ export interface OxcFullFileRawOptions {
   resolvedResources?: ResolvedResources | null
   /** Path to tsconfig.json for resolving path aliases in cross-file analysis */
   tsconfigPath?: string
+  /** Project roots that `ɵsetClassDebugInfo`'s `filePath` is made relative to, like ngtsc's `rootDirs` */
+  rootDirs?: string[]
 }
 
 /**
@@ -90,6 +92,7 @@ export function compileWithOxcFullFileRaw(
     tsconfigPath: options?.tsconfigPath,
     // Enable class metadata for TestBed support (matches Angular's output)
     emitClassMetadata: true,
+    rootDirs: options?.rootDirs,
   }
 
   try {
@@ -247,6 +250,8 @@ export interface OxcProjectOptions {
   resolvedResourcesByFile?: Map<string, PlainResolvedResources>
   /** Path to tsconfig.json for resolving path aliases in cross-file analysis */
   tsconfigPath?: string
+  /** Project roots that `ɵsetClassDebugInfo`'s `filePath` is made relative to, like ngtsc's `rootDirs` */
+  rootDirs?: string[]
 }
 
 /**
