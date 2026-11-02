@@ -414,8 +414,8 @@ export class PkgModule {}
 
     #[test]
     fn unresolved_imports_stay() {
-        // A missing file, an `export *` that doesn't have the name, and an
-        // exported component that isn't in the module's scope.
+        // A missing file and an `export *` that doesn't have the name; the
+        // scope can't be read either, so the exported component stays.
         let dir = TempDir::new().unwrap();
         dep(&dir);
         write(&dir, "src/barrel.ts", "export * from './dep';\n");
@@ -430,6 +430,25 @@ import { StandaloneCmp } from './dep';
 export class M {}
 ",
             &[("M", Some("Missing,NotThere,StandaloneCmp"))],
+            &cross_file(),
+        );
+    }
+
+    #[test]
+    fn an_exported_component_outside_a_readable_scope_stays() {
+        // ngtsc rejects this module, but if the component's own imports give
+        // providers, leaving it out would lose them: it stays.
+        let dir = TempDir::new().unwrap();
+        dep(&dir);
+        check(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { PlainModule, StandaloneCmp } from './dep';
+@NgModule({ imports: [PlainModule], exports: [StandaloneCmp] })
+export class M {}
+",
+            &[("M", Some("PlainModule,StandaloneCmp"))],
             &cross_file(),
         );
     }
