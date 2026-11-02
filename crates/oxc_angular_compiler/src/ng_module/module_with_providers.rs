@@ -70,7 +70,12 @@ pub fn static_method_ng_module<'b, 'a>(
         && let [Statement::ReturnStatement(ret)] = body.statements.as_slice()
     {
         let value = ng_module_value(ret.argument.as_ref()?)?;
-        if let Expression::Identifier(id) = value
+        // `param` or `param.X`: the module comes from the call's argument.
+        let mut root = value;
+        while let Expression::StaticMemberExpression(member) = root {
+            root = member.object.get_inner_expression();
+        }
+        if let Expression::Identifier(id) = root
             && function.params.items.iter().any(|param| {
                 param.pattern.get_binding_identifiers().iter().any(|b| b.name == id.name)
             })

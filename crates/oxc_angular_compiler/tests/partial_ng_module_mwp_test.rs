@@ -160,17 +160,19 @@ fn a_parameter_or_type_parameter_keeps_its_old_output() {
     let code = partial(
         r"
 import { NgModule, ModuleWithProviders, Type } from '@angular/core';
+import * as m from './dep';
 @NgModule({})
 export class AModule {}
 export class Holder {
   static of(ngModule: Type<any>) { return { ngModule, providers: [] }; }
   static generic<T>(): ModuleWithProviders<T> { const m: any = null; return m; }
+  static member(m: { DepModule: Type<any> }) { return { ngModule: m.DepModule }; }
 }
-@NgModule({ imports: [Holder.of(AModule), Holder.generic<AModule>()] })
+@NgModule({ imports: [Holder.of(AModule), Holder.generic<AModule>(), Holder.member({ DepModule: AModule })] })
 export class AppModule {}
 ",
     );
-    assert!(code.contains("type:AppModule,imports:[Holder,Holder]}"), "{code}");
+    assert!(code.contains("type:AppModule,imports:[Holder,Holder,Holder]}"), "{code}");
 }
 
 #[test]
@@ -291,6 +293,37 @@ export class Later {}
         );
         assert!(code.contains("type:M,imports:[Holder,LATER_ROOT]}"), "{code}");
         assert!(!code.contains("imports:[Later"), "{code}");
+    }
+
+    #[test]
+    fn a_member_of_a_parameter_keeps_its_old_output() {
+        // `modules.DepModule` reads the parameter, not the namespace import of
+        // the same name.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "dep.ts", DEP);
+        write(
+            &dir,
+            "holder.ts",
+            r"
+import { Type } from '@angular/core';
+import * as modules from './dep';
+export class Holder {
+  static forRoot(modules: { DepModule: Type<any> }) { return { ngModule: modules.DepModule }; }
+}
+",
+        );
+        let code = compile(
+            &dir,
+            "app.ts",
+            r"
+import { NgModule } from '@angular/core';
+import { Holder } from './holder';
+@NgModule({ imports: [Holder.forRoot({ DepModule: Holder })] })
+export class M {}
+",
+            CompilationMode::Partial,
+        );
+        assert!(code.contains("type:M,imports:[Holder]}"), "{code}");
     }
 
     #[test]
