@@ -194,7 +194,9 @@ export interface PluginOptions {
    * The `rootDirs` compiler option: the project roots that output paths are
    * relative to (`ɵsetClassDebugInfo`'s `filePath`, the `ɵɵattachSourceLocations`
    * path), like ngtsc's `getProjectRelativePath`. Relative entries resolve
-   * against `workspaceRoot`. Default: Vite's resolved `root`.
+   * against `workspaceRoot`. Default: `[workspaceRoot]`, like ngtsc, which falls
+   * back to the working directory (in an Angular CLI build, the workspace root),
+   * so library files of a monorepo outside the app's Vite `root` still get one.
    */
   rootDirs?: string[]
 }
@@ -622,9 +624,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       forbidOrphanComponents: pluginOptions.forbidOrphanComponents,
       enableTemplateSourceLocations: pluginOptions.enableTemplateSourceLocations,
       // ngtsc makes output paths relative to its root dirs (`rootDir`, else the
-      // working directory); Vite's `root` stands in for them by default.
-      rootDirs:
-        pluginOptions.rootDirs ?? (resolvedConfig?.root ? [resolvedConfig.root] : undefined),
+      // working directory); `workspaceRoot` (the working directory by default)
+      // stands in for them.
+      rootDirs: pluginOptions.rootDirs ?? [pluginOptions.workspaceRoot],
       // Evaluate decorator metadata imported from other files the way
       // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`,
       // `templateUrl: TEMPLATE_URL`). Read files land in

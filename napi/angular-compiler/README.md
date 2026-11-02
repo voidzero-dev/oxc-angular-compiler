@@ -182,6 +182,12 @@ interface TransformOptions {
   // Default for components that do not set their own (project-wide option)
   preserveWhitespaces?: boolean
 
+  // Angular compiler options of the same name (default: false / unset)
+  forbidOrphanComponents?: boolean
+  enableTemplateSourceLocations?: boolean // needs rootDirs; full mode only
+  // Roots that ɵsetClassDebugInfo's filePath and source locations are relative to
+  rootDirs?: string[]
+
   // Cross-file elision
   crossFileElision?: boolean
   // Evaluate decorator metadata imported from other files (as ngtsc does)
@@ -227,6 +233,13 @@ interface PluginOptions {
   // Project-wide default (`angularCompilerOptions.preserveWhitespaces`);
   // a component's own `preserveWhitespaces` wins (default: false)
   preserveWhitespaces?: boolean
+
+  // Angular compiler options of the same name (default: false)
+  forbidOrphanComponents?: boolean
+  enableTemplateSourceLocations?: boolean
+  // Roots for ɵsetClassDebugInfo's filePath and source locations,
+  // resolved against workspaceRoot (default: [workspaceRoot], like ngtsc)
+  rootDirs?: string[]
 }
 ```
 
