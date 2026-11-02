@@ -635,41 +635,28 @@ fn get_property_expression<'a>(
 ///
 /// Handles both `function() { return expr; }` and `() => expr` forms.
 fn extract_function_return_source<'a>(expr: &Expression<'a>, source: &'a str) -> Option<&'a str> {
-    match expr {
-        Expression::FunctionExpression(func) => {
-            if let Some(body) = &func.body {
-                for stmt in &body.statements {
-                    if let Statement::ReturnStatement(ret) = stmt {
-                        if let Some(arg) = &ret.argument {
-                            let span = arg.span();
-                            return Some(&source[span.start as usize..span.end as usize]);
-                        }
-                    }
-                }
-            }
-            None
-        }
+    let span = extract_function_return(expr)?.span();
+    Some(&source[span.start as usize..span.end as usize])
+}
+
+/// The value a function expression returns: the first `return` of
+/// `function() { return expr; }` or `() => { return expr; }`, or the body of
+/// `() => expr`.
+fn extract_function_return<'e, 'a>(expr: &'e Expression<'a>) -> Option<&'e Expression<'a>> {
+    let body = match expr {
+        Expression::FunctionExpression(func) => func.body.as_deref()?,
         Expression::ArrowFunctionExpression(arrow) => {
-            // Expression body: () => expr
             if let Some(expr) = arrow.get_expression() {
-                let span = expr.span();
-                return Some(&source[span.start as usize..span.end as usize]);
+                return Some(expr);
             }
-            // Block body: () => { return expr; }
-            if let Some(body) = arrow.get_function_body() {
-                for stmt in &body.statements {
-                    if let Statement::ReturnStatement(ret) = stmt {
-                        if let Some(arg) = &ret.argument {
-                            let span = arg.span();
-                            return Some(&source[span.start as usize..span.end as usize]);
-                        }
-                    }
-                }
-            }
-            None
+            arrow.get_function_body()?
         }
+        _ => return None,
+    };
+    body.statements.iter().find_map(|stmt| match stmt {
+        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
         _ => None,
-    }
+    })
 }
 
 /// Unwrap a `forwardRef(function() { return X; })` or `forwardRef(() => X)` call expression.
@@ -868,9 +855,22 @@ fn uses_legacy_optional_chaining(
     if angular_version.is_some_and(|version| !version.links_native_optional_chaining()) {
         return true;
     }
-    get_string_property(meta, "version")
+    // `version` or `"version"`, read like npm's `semver`: trimmed, with an
+    // optional leading `v`.
+    let version = meta.properties.iter().find_map(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(prop)
+            if prop.key.static_name().is_some_and(|name| name == "version") =>
+        {
+            as_static_string(&prop.value)
+        }
+        _ => None,
+    });
+    version
+        .map(str::trim)
         .filter(|version| *version != "0.0.0-PLACEHOLDER")
-        .and_then(|version| semver::Version::parse(version).ok())
+        .and_then(|version| {
+            semver::Version::parse(version.strip_prefix('v').unwrap_or(version)).ok()
+        })
         .is_some_and(|version| version.major < 22)
 }
 
@@ -1367,14 +1367,25 @@ fn link_ng_module(
         || is_function_wrapped_property(meta, "imports")
         || is_function_wrapped_property(meta, "exports");
 
-    // `() => [...]`, as Angular writes forward declarations.
-    let lazy = |array_source: &str| format!("() => {array_source}");
+    // The list `name` is, unwrapping a function. A function returning it,
+    // `() => [...]`, as Angular writes forward declarations, when `lazy`.
+    let list = |name: &str, lazy: bool| {
+        let expr = get_property_expression(meta, name)?;
+        let list = extract_function_return(expr).unwrap_or(expr);
+        let span = list.span();
+        let list_source = &source[span.start as usize..span.end as usize];
+        Some(match list {
+            _ if !lazy => list_source.to_string(),
+            // Not a block, nor the arrow's last argument.
+            Expression::ObjectExpression(_) | Expression::SequenceExpression(_) => {
+                format!("() => ({list_source})")
+            }
+            _ => format!("() => {list_source}"),
+        })
+    };
 
     // Bootstrap is always emitted inline (not affected by selectorScopeMode).
-    // Unwrap function wrappers to get the inner array source.
-    if let Some(bootstrap) = get_property_source_unwrapping_function(meta, "bootstrap", source) {
-        let bootstrap =
-            if contains_forward_decls { lazy(bootstrap) } else { bootstrap.to_string() };
+    if let Some(bootstrap) = list("bootstrap", contains_forward_decls) {
         parts.push(format!("bootstrap: {bootstrap}"));
     }
 
@@ -1385,8 +1396,8 @@ fn link_ng_module(
     // uses itself. They are read lazily: in an import cycle with a file that declares
     // one of the classes, this file can run before that class exists.
     for field in ["declarations", "imports", "exports"] {
-        if let Some(array) = get_property_source_unwrapping_function(meta, field, source) {
-            parts.push(format!("{field}: {}", lazy(array)));
+        if let Some(list) = list(field, true) {
+            parts.push(format!("{field}: {list}"));
         }
     }
     if let Some(schemas) = get_property_source(meta, "schemas", source) {
@@ -4734,6 +4745,22 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "
             "Should extract all dependency types into dependencies array, got:\n{}",
             result.code
         );
+    }
+
+    #[test]
+    fn test_link_ng_module_lazy_list_keeps_its_value() {
+        // A sequence or an object literal returned is the arrow's value, not its last
+        // argument or its block.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class M {}
+M.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: M, declarations: function() { return foo(), [A]; }, imports: () => { return {a: A}; }, exports: SHARED });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.code.contains("declarations: () => (foo(), [A])"), "{}", result.code);
+        assert!(result.code.contains("imports: () => ({a: A})"), "{}", result.code);
+        assert!(result.code.contains("exports: () => SHARED"), "{}", result.code);
     }
 
     #[test]

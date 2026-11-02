@@ -1239,3 +1239,36 @@ fn test_link_safe_navigation_before_the_linker_option() {
         assert_eq!(linked.matches("?.").count(), 3, "{app}:\n{linked}");
     }
 }
+
+/// An optional chain can't tag a template literal: `(ctx.a?.b)`t``, as Angular's
+/// linker (Babel) prints it.
+#[test]
+fn test_link_native_safe_navigation_tag_is_parenthesized() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class Tag {
+}
+Tag.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.3", type: Tag, isStandalone: true, selector: "x-tag", host: { properties: { "title": "a?.b`t`" } }, ngImport: i0, template: '{{ a?.b`t` }}{{ a?.b?.[0]`x${y}` }}{{ (a?.b).c`t` }}' });
+"#;
+    let linked = link_for_version(code, None);
+    assert!(linked.contains("(ctx.a?.b)`t`"), "{linked}");
+    assert!(linked.contains("(ctx.a?.b?.[0])`x${ctx.y}`"), "{linked}");
+    assert!(linked.contains(r#"ɵɵdomProperty("title",(ctx.a?.b)`t`)"#), "{linked}");
+    assert!(!linked.contains("((ctx.a?.b).c)"), "{linked}");
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, &linked, SourceType::mjs()).parse();
+    assert!(parsed.diagnostics.is_empty(), "does not parse:\n{linked}");
+}
+
+/// The declaration's version is read like Angular's linker reads it, with npm's `semver`:
+/// a quoted key, surrounding spaces and a leading `v` too.
+#[test]
+fn test_link_safe_navigation_version_read_like_npm_semver() {
+    for (version, legacy) in [("v21.0.0", true), (" 21.0.0 ", true), ("v22.0.0", false)] {
+        let linked = link_for_version(&safe_nav_declarations(version), None);
+        assert_eq!(linked.contains("== null)? null:"), legacy, "{version:?}:\n{linked}");
+    }
+    let quoted = safe_nav_declarations("21.0.0").replace("version:", "\"version\":");
+    let linked = link_for_version(&quoted, None);
+    assert_eq!(linked.matches("== null)? null:").count(), 3, "{linked}");
+}
