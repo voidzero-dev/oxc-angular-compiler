@@ -339,10 +339,11 @@ fn build_injector_metadata<'a>(
     // Like ngtsc's local compilation (ng_module/src/handler.ts `analyze`), the
     // injector imports are the raw `imports` followed by the raw `exports`: an
     // array literal adds its elements (keeping `StoreModule.forRoot(...)` calls
-    // and spreads), any other expression is added as is. A full ngtsc build
-    // filters both lists by what each reference resolves to, which needs other
-    // files; the runtime ignores entries that are neither NgModules nor
-    // standalone components.
+    // and spreads), any other expression is added as is. A full or partial
+    // ngtsc build filters both lists by what each reference resolves to; the
+    // transform drops the entries it knows to be directives or pipes from
+    // these expressions first (`injector_imports.rs`). The runtime ignores
+    // entries that are neither NgModules nor standalone components.
     for (raw, names) in [
         (&metadata.raw_imports_expr, &metadata.imports),
         (&metadata.raw_exports_expr, &metadata.exports),

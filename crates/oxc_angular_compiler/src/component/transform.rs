@@ -4721,6 +4721,31 @@ pub fn transform_angular_file(
                         );
                     }
 
+                    // Like ngtsc in full and partial compilation, ɵinj leaves
+                    // out the directives and pipes of `imports` and `exports`
+                    // (#623). A nested class may name a binding of its
+                    // function, so it keeps the lists as written.
+                    if !site.nested
+                        && let Some(entries) =
+                            crate::ng_module::injector_entries(class, &string_consts)
+                    {
+                        #[cfg_attr(not(feature = "cross_file_elision"), allow(unused_mut))]
+                        let mut drops = entries.local_drops(&parser_ret.program, &string_consts);
+                        #[cfg(feature = "cross_file_elision")]
+                        if options.resolve_imported_values
+                            && let Some(analyzer) = &cross_file_analyzer
+                        {
+                            drops.merge(&analyzer.injector_drops(
+                                std::path::Path::new(path),
+                                source,
+                                ng_module_metadata.class_name.as_str(),
+                                entries.imports(),
+                                entries.exports(),
+                            ));
+                        }
+                        entries.apply(allocator, &mut ng_module_metadata, &drops);
+                    }
+
                     // Compile NgModule and generate all definitions as external property assignments
                     if let Some(definition) = generate_full_ng_module_definition(
                         &allocator,

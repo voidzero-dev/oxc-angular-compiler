@@ -11,6 +11,9 @@
 //!
 //! Anything that can't be read statically gives `None`, and the caller emits
 //! what it did before.
+//!
+//! The same reads tell which entries of an NgModule's `imports` and `exports`
+//! are directives or pipes, which its `ɵinj` leaves out (#623).
 
 use std::cell::{OnceCell, RefCell};
 use std::path::Path;
@@ -27,6 +30,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
 use crate::component::metadata::{ComponentScope, ImportedName, ScopeEntry, ScopeKind};
 use crate::directive::{Evaluator, StringConsts, find_angular_class_decorator};
+use crate::ng_module::{InjectorDrops, InjectorEntry};
 
 /// A top-level declaration: the file declaring it and its name there
 /// (`"default"` for an anonymous `export default class`).
@@ -276,6 +280,56 @@ impl CrossFileAnalyzer {
                 Some(entries)
             })
             .collect()
+    }
+
+    /// Which top-level `imports` and `exports` entries of the `@NgModule`
+    /// class `class_name` of `file` its `ɵinj` leaves out (#623), as ngtsc's
+    /// `NgModuleDecoratorHandler.resolve` does: an entry whose classes
+    /// (a `const` list flattened) are all directives or pipes, and in
+    /// `exports` also components. An exported component must be in the
+    /// module's compilation scope, so it stays reachable through `imports`.
+    /// An entry that doesn't resolve, or names an NgModule, stays.
+    pub(crate) fn injector_drops(
+        &self,
+        file: &Path,
+        source: &str,
+        class_name: &str,
+        imports: &[Option<InjectorEntry<'_>>],
+        exports: &[Option<InjectorEntry<'_>>],
+    ) -> InjectorDrops {
+        let file = self.inner.set_compiled_source(file, source);
+        let inner = &self.inner;
+        let module = Decl { file: file.clone(), name: class_name.into() };
+        let scope = OnceCell::new();
+        let drops = |entries: &[Option<InjectorEntry<'_>>], is_exports: bool| -> Vec<bool> {
+            entries
+                .iter()
+                .map(|entry| {
+                    let Some(entry) = entry else { return false };
+                    let raw = RawRef {
+                        file: file.clone(),
+                        namespace: entry.namespace.map(Into::into),
+                        name: entry.name.into(),
+                        method: None,
+                    };
+                    let Some(classes) = inner.resolve_refs(&[raw], None, 0) else { return false };
+                    !classes.is_empty()
+                        && classes.iter().all(|(class, declared)| match &**declared {
+                            Declared::Directive { is_component: false, .. }
+                            | Declared::Pipe { .. } => true,
+                            Declared::Directive { is_component: true, .. } => {
+                                is_exports
+                                    && scope
+                                        .get_or_init(|| inner.compilation_scope(&module))
+                                        .as_ref()
+                                        .is_some_and(|scope| scope.contains(&class.decl))
+                            }
+                            Declared::NgModule { .. } | Declared::List(_) => false,
+                        })
+                })
+                .collect()
+        };
+        InjectorDrops { imports: drops(imports, false), exports: drops(exports, true) }
     }
 }
 
@@ -558,6 +612,31 @@ impl Inner {
             }
         }
         Some(out)
+    }
+
+    /// The classes of the compilation scope of the NgModule `module`: its
+    /// declarations, the standalone classes it imports, and what the
+    /// NgModules it imports export (ngtsc's `LocalModuleScopeRegistry`).
+    fn compilation_scope(&self, module: &Decl) -> Option<FxHashSet<Decl>> {
+        let declared = self.declared(module)?;
+        let Declared::NgModule { declarations, imports, .. } = &*declared else { return None };
+        let mut scope = FxHashSet::default();
+        for (class, _) in self.resolve_refs(declarations, None, 0)? {
+            scope.insert(class.decl);
+        }
+        for (class, declared) in self.resolve_refs(imports, None, 0)? {
+            match &*declared {
+                Declared::NgModule { exports, .. } => scope.extend(
+                    self.exported_scope(&class, exports)?
+                        .iter()
+                        .map(|item| item.class.decl.clone()),
+                ),
+                _ => {
+                    scope.insert(class.decl);
+                }
+            }
+        }
+        Some(scope)
     }
 
     /// The directives and pipes the NgModule `module` exports, with those of
