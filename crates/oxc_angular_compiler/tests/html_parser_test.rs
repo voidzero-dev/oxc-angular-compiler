@@ -3208,6 +3208,31 @@ mod foreign_void_elements {
         );
     }
 
+    /// The errors of a template in selectorless mode.
+    fn selectorless_errors(html: &str) -> Vec<String> {
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_selectorless(&allocator, html, "TestComp").parse();
+        result.errors.iter().map(|e| e.msg.clone()).collect()
+    }
+
+    #[test]
+    fn reads_the_host_tag_of_a_selectorless_component() {
+        // A component passes down its host tag's namespace, `ng-component` without a tag.
+        for html in [
+            "<svg><MyComp:foreignObject><input></MyComp:foreignObject></svg>",
+            "<svg><MyComp:foreignObject><div><input></div></MyComp:foreignObject></svg>",
+            "<svg><MyComp><area></area></MyComp></svg>",
+            "<MyComp:svg:g><area></area></MyComp:svg:g>",
+            "<svg><MyComp:g><br><g></g></br></MyComp:g></svg>",
+        ] {
+            assert_eq!(selectorless_errors(html), Vec::<String>::new(), "{html}");
+        }
+        assert_eq!(
+            selectorless_errors("<MyComp><area></area></MyComp>"),
+            vec!["Void elements do not have end tags \"area\"".to_string()]
+        );
+    }
+
     #[test]
     fn reads_html_void_elements_again_inside_foreign_object() {
         assert_eq!(

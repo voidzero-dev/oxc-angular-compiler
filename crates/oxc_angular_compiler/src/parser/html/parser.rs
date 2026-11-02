@@ -301,14 +301,23 @@ impl<'a> HtmlParser<'a> {
     /// Whether a tag without a prefix inside the open elements takes a namespace from them, as
     /// Angular's `_getElementFullName` names it: `<area>` in `<svg>` is `:svg:area`. The closest
     /// element (blocks are skipped) passes down its own prefix or implicit one, or the one it took
-    /// from its own parent, unless it stops inheritance (`foreignObject`).
+    /// from its own parent, unless it stops inheritance (`foreignObject`). A selectorless component
+    /// passes down its host tag (`<MyComp:foreignObject>`, `ng-component` without one), as
+    /// `_getPrefix` reads a component's `tagName`.
     fn inherits_namespace(&self) -> bool {
         let elements = self.container_stack.iter().rev().filter_map(|container| match container {
-            ContainerIndex::Element(idx) => Some(self.elements[*idx].name.as_str()),
+            ContainerIndex::Element(idx) => Some(&self.elements[*idx]),
             ContainerIndex::Block(_) => None,
         });
-        for name in elements {
-            let (prefix, local_name) = split_ns_name(name);
+        for element in elements {
+            let (prefix, local_name) = if element.is_component {
+                (
+                    element.component_prefix.as_ref().map(|prefix| prefix.as_str()),
+                    element.component_tag_name.as_ref().map_or("ng-component", |tag| tag.as_str()),
+                )
+            } else {
+                split_ns_name(element.name.as_str())
+            };
             let tag_def = get_html_tag_definition(local_name);
             if tag_def.prevent_namespace_inheritance {
                 return false;
