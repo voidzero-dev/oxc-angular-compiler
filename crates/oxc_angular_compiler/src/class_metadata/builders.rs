@@ -6,8 +6,8 @@
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
     BindingPattern, ChainElement, Class, ClassElement, Declaration, Decorator, Expression,
-    FormalParameter, ObjectPropertyKind, PropertyKey, Statement, TSNamespaceDeclarationBody,
-    TSType, TSTypeName, VariableDeclaration,
+    ForStatementInit, ForStatementLeft, FormalParameter, ObjectPropertyKind, PropertyKey,
+    Statement, TSNamespaceDeclarationBody, TSType, TSTypeName, VariableDeclaration,
 };
 use oxc_span::GetSpan;
 use oxc_str::Ident;
@@ -448,8 +448,7 @@ pub fn build_ctor_params_metadata_in<'a>(
     // (issue #563). `consts` carries the program for every in-file call site;
     // without it these checks are skipped.
     let class_type_params = type_param_names_of(class);
-    let local_decls =
-        consts.and_then(StringConsts::program).map(|program| LocalDecls::collect(&program.body));
+    let local_decls = consts.and_then(StringConsts::local_decls);
 
     let mut param_entries = AllocVec::new_in(&allocator);
 
@@ -464,7 +463,7 @@ pub fn build_ctor_params_metadata_in<'a>(
             namespace_registry,
             import_map,
             &class_type_params,
-            local_decls.as_ref(),
+            local_decls,
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -1146,7 +1145,7 @@ pub fn type_param_names_of<'a>(class: &Class<'a>) -> FxHashSet<Ident<'a>> {
 /// `ns.Interface` lookups and for the merged `interface I` + `namespace I`
 /// case — the merged symbol's valueDeclaration is the namespace, so it emits.
 #[derive(Default)]
-struct LocalDecls<'a> {
+pub(crate) struct LocalDecls<'a> {
     type_decls: FxHashSet<&'a str>,
     /// Names with a runtime declaration — classes, enums, functions, vars,
     /// `import X =` aliases. An interface or alias merged with one of these
@@ -1154,13 +1153,16 @@ struct LocalDecls<'a> {
     /// so `type:` emits it (ngtsc: `class Foo` + `interface Foo` → `Foo`).
     value_decls: FxHashSet<&'a str>,
     namespaces: FxHashMap<&'a str, LocalDecls<'a>>,
+    /// Names a `declare global` block declares (root only). See
+    /// [`Self::is_type_only_token`].
+    global_names: FxHashSet<&'a str>,
 }
 
 impl<'a> LocalDecls<'a> {
     /// Collect declarations from a statement list, unwrapping `export` and
     /// hoisting `declare global` bodies to file scope like ngtsc's program
     /// scope — wherever the `declare global` block is nested.
-    fn collect(stmts: &'a [Statement<'a>]) -> Self {
+    pub(crate) fn collect(stmts: &'a [Statement<'a>]) -> Self {
         let mut decls = LocalDecls::default();
         // `declare global` inners bind at file scope, so they are queued and
         // inserted into the root `decls` rather than whichever namespace-level
@@ -1172,6 +1174,11 @@ impl<'a> LocalDecls<'a> {
             let stmt = globals[i];
             i += 1;
             decls.insert_statement(stmt, &mut globals);
+            let mut global = LocalDecls::default();
+            global.insert_statement(stmt, &mut std::vec::Vec::new());
+            decls.global_names.extend(global.type_decls);
+            decls.global_names.extend(global.value_decls);
+            decls.global_names.extend(global.namespaces.into_keys());
         }
         decls
     }
@@ -1248,7 +1255,69 @@ impl<'a> LocalDecls<'a> {
             Statement::TSGlobalDeclaration(global) => {
                 globals.extend(global.body.body.iter());
             }
+            _ => self.insert_hoisted_vars(stmt),
+        }
+    }
+
+    /// The `var`s of a block or loop: they bind in the enclosing scope, so
+    /// `{ var Foo = class {} }` merges with `interface Foo` (a value). Function
+    /// and class bodies have their own scope.
+    fn insert_hoisted_vars(&mut self, stmt: &'a Statement<'a>) {
+        match stmt {
+            Statement::VariableDeclaration(decl) if decl.kind.is_var() => {
+                self.insert_var_names(decl);
+            }
+            Statement::BlockStatement(block) => {
+                block.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+            }
+            Statement::IfStatement(stmt) => {
+                self.insert_hoisted_vars(&stmt.consequent);
+                if let Some(alternate) = &stmt.alternate {
+                    self.insert_hoisted_vars(alternate);
+                }
+            }
+            Statement::ForStatement(stmt) => {
+                if let Some(ForStatementInit::VariableDeclaration(decl)) = &stmt.init
+                    && decl.kind.is_var()
+                {
+                    self.insert_var_names(decl);
+                }
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::ForInStatement(stmt) => {
+                self.insert_loop_left(&stmt.left);
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::ForOfStatement(stmt) => {
+                self.insert_loop_left(&stmt.left);
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::WhileStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::DoWhileStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::LabeledStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::TryStatement(stmt) => {
+                stmt.block.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                if let Some(handler) = &stmt.handler {
+                    handler.body.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+                if let Some(finalizer) = &stmt.finalizer {
+                    finalizer.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+            }
+            Statement::SwitchStatement(stmt) => {
+                for case in &stmt.cases {
+                    case.consequent.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn insert_loop_left(&mut self, left: &'a ForStatementLeft<'a>) {
+        if let ForStatementLeft::VariableDeclaration(decl) = left
+            && decl.kind.is_var()
+        {
+            self.insert_var_names(decl);
         }
     }
 
@@ -1374,7 +1443,7 @@ impl<'a> LocalDecls<'a> {
     /// declaration (interface or type alias) that no same-named namespace
     /// or value declaration merges with. Only that case is `UNAVAILABLE` in
     /// local compilation; everything else emits as written.
-    fn is_type_only(&self, path: &[Ident<'_>]) -> bool {
+    pub(crate) fn is_type_only(&self, path: &[Ident<'_>]) -> bool {
         match path.split_first() {
             None => false,
             // A merged `interface I` + `namespace I` or `interface I` +
@@ -1388,6 +1457,33 @@ impl<'a> LocalDecls<'a> {
             Some((name, rest)) => {
                 self.namespaces.get(name.as_str()).is_some_and(|nested| nested.is_type_only(rest))
             }
+        }
+    }
+
+    /// [`Self::is_type_only`] for a DI token of `class`'s constructor, leaving
+    /// out names one file can't prove have no value:
+    /// - the class's own name: a class nested in a block or function, named
+    ///   like a top-level interface, is what its parameter types read;
+    /// - a name a `declare global` block declares: it merges with values other
+    ///   files declare (lib.dom's `declare var Window`);
+    /// - a member of a namespace merged with a value: a class's statics can
+    ///   hold it (`class NS { static Foo = .. }` + `namespace NS { interface Foo }`).
+    pub(crate) fn is_type_only_token(&self, path: &[Ident<'_>], class: &Class<'_>) -> bool {
+        let Some(root) = path.first() else { return false };
+        class.id.as_ref().is_none_or(|id| id.name.as_str() != root.as_str())
+            && !self.global_names.contains(root.as_str())
+            && !self.merges_a_value(path)
+            && self.is_type_only(path)
+    }
+
+    /// Whether a namespace on `path` (all names but the last) is also a value.
+    fn merges_a_value(&self, path: &[Ident<'_>]) -> bool {
+        match path {
+            [name, rest @ ..] if !rest.is_empty() => {
+                self.value_decls.contains(name.as_str())
+                    || self.namespaces.get(name.as_str()).is_some_and(|ns| ns.merges_a_value(rest))
+            }
+            _ => false,
         }
     }
 }

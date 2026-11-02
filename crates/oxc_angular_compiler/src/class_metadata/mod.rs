@@ -14,11 +14,11 @@ mod builders;
 mod compiler;
 mod metadata;
 
+pub(crate) use builders::{LocalDecls, entity_path, param_type_reference, type_param_names_of};
 pub use builders::{
     build_ctor_params_metadata, build_ctor_params_metadata_in, build_decorator_metadata_array,
     build_prop_decorators_metadata, build_prop_decorators_metadata_in,
 };
-pub(crate) use builders::{entity_path, param_type_reference, type_param_names_of};
 pub use compiler::{
     compile_class_metadata, compile_component_class_metadata,
     compile_component_metadata_async_resolver, compile_deferred_dependency_import,

@@ -737,6 +737,9 @@ fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str>
 /// written, and a default import (`import Foo from './foo'`) stays `Foo`
 /// (`typeToValue`'s LOCAL reference with a `defaultImportStatement`). Import elision
 /// keeps both imports.
+///
+/// A token that is not imported but names an interface or type alias declared in the
+/// file has no value either, so the dep is invalid, as for a type-only import (#653).
 fn resolve_factory_dep_namespaces<'a>(
     allocator: &'a Allocator,
     deps: &mut oxc_allocator::Vec<'a, crate::factory::R3DependencyMetadata<'a>>,
@@ -765,7 +768,20 @@ fn resolve_factory_dep_namespaces<'a>(
         let OutputExpression::ReadVar(var) = root else { continue };
         let name = var.name;
         // Look up this identifier in the import map
-        let Some(import_info) = import_map.get(&name) else { continue };
+        let Some(import_info) = import_map.get(&name) else {
+            // An interface or type alias declared in the file is erased too, so
+            // ngtsc has no value for it either (`interface Foo` → `ɵɵinvalidFactory()`).
+            // See issue #653.
+            if !from_inject
+                && let Some(decls) = string_consts.local_decls()
+                && let Some(path) = dep.token.as_ref().and_then(member_chain_path)
+                && decls.is_type_only_token(&path, class)
+            {
+                dep.token = None;
+                dep.type_only_invalid = true;
+            }
+            continue;
+        };
         if import_info.is_type_only {
             // Type-only imports (`import type { X }` / `import { type X }`) are erased
             // at runtime, so they cannot be used as DI tokens. Flag the dep so the
@@ -802,6 +818,19 @@ fn resolve_factory_dep_namespaces<'a>(
                 &allocator,
             ))
         };
+    }
+}
+
+/// The names of a member chain, from its root: `ns.one.One` → `[ns, one, One]`.
+fn member_chain_path<'a>(expr: &OutputExpression<'a>) -> Option<std::vec::Vec<Ident<'a>>> {
+    match expr {
+        OutputExpression::ReadVar(var) => Some(vec![var.name]),
+        OutputExpression::ReadProp(prop) => {
+            let mut path = member_chain_path(&prop.receiver)?;
+            path.push(prop.name);
+            Some(path)
+        }
+        _ => None,
     }
 }
 

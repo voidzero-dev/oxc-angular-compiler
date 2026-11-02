@@ -4,6 +4,8 @@
 //! - a constructor parameter without a usable token makes the whole factory
 //!   `ɵɵinvalidFactory()` (full) / `deps: "invalid"` (partial), never
 //!   `ɵɵinvalidFactoryDep(n)`
+//! - a parameter typed by an interface or type alias declared in the file has
+//!   no token (#653); a name that is also a value keeps it
 //! - `ɵmod` never lists `schemas` (the NgModule handler passes `schemas: []`)
 //! - a directive's query predicates are pooled (`const _c0 = [...]`)
 //! - a default-imported DI token stays `Foo`, not `i1.default`; its import is
@@ -86,7 +88,190 @@ export class D { constructor(s: string) {} }",
 @Component({ selector: 'c', template: '' })
 export class C { constructor(s: string) {} }",
     ),
+    // A type declared in the file has no value to inject (#653).
+    (
+        "same-file interface",
+        "import { Injectable } from '@angular/core';
+interface Foo { a: number }
+@Injectable()
+export class S { constructor(f: Foo) {} }",
+    ),
+    (
+        "same-file type alias",
+        "import { Injectable } from '@angular/core';
+type Foo = { a: number };
+@Injectable()
+export class S { constructor(f: Foo) {} }",
+    ),
+    (
+        "exported interface",
+        "import { Injectable } from '@angular/core';
+export interface Foo { a: number }
+@Injectable()
+export class S { constructor(f: Foo) {} }",
+    ),
+    (
+        "interface in a namespace",
+        "import { Injectable } from '@angular/core';
+namespace ns { export interface Foo { a: number } }
+@Injectable()
+export class S { constructor(f: ns.Foo) {} }",
+    ),
+    (
+        "same-file interface on a directive",
+        "import { Directive } from '@angular/core';
+interface Foo { a: number }
+@Directive({ selector: '[d]' })
+export class D { constructor(f: Foo) {} }",
+    ),
+    (
+        "same-file interface on a pipe",
+        "import { Pipe } from '@angular/core';
+interface Foo { a: number }
+@Pipe({ name: 'p' })
+export class P { constructor(f: Foo) {} transform() {} }",
+    ),
+    (
+        "same-file interface on an NgModule",
+        "import { NgModule } from '@angular/core';
+interface Foo { a: number }
+@NgModule({})
+export class M { constructor(f: Foo) {} }",
+    ),
+    (
+        "same-file interface on a component",
+        "import { Component } from '@angular/core';
+interface Foo { a: number }
+@Component({ selector: 'c', template: '' })
+export class C { constructor(f: Foo) {} }",
+    ),
 ];
+
+/// A name that is a value as well as a type stays the token, as in ngtsc:
+/// declarations put before a class whose constructor takes `f: Foo`.
+const LOCAL_VALUE_TOKEN_CASES: &[(&str, &str)] = &[
+    ("interface merged with a class", "interface Foo { a: number }\nclass Foo {}"),
+    ("enum", "enum Foo { A }"),
+    (
+        "interface merged with a namespace holding a value",
+        "interface Foo { a: number }\nnamespace Foo { export const x = 1; }",
+    ),
+    // A `var` binds in the enclosing scope, also from a block or a loop.
+    (
+        "interface merged with a var in a block",
+        "interface Foo { a: number }\n{ var Foo = class {}; }",
+    ),
+    (
+        "interface merged with a loop var",
+        "interface Foo { a: number }\nfor (var Foo = class {}; false; ) {}",
+    ),
+];
+
+#[test]
+fn local_value_ctor_dep_stays_the_token() {
+    for (name, decls) in LOCAL_VALUE_TOKEN_CASES {
+        let source = format!(
+            "import {{ Injectable }} from '@angular/core';
+{decls}
+@Injectable()
+export class S {{ constructor(f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
+        assert!(code.contains("new(__ngFactoryType__||S)(i0.ɵɵinject(Foo))"), "{name}:\n{code}");
+        assert!(code.contains("()=>[{type:Foo}]"), "{name} (metadata):\n{code}");
+        let code = compile_partial(&source);
+        assert!(code.contains("deps:[{token:Foo}]"), "{name}:\n{code}");
+
+        let source = format!(
+            "import {{ Component }} from '@angular/core';
+{decls}
+@Component({{ selector: 'c', template: '' }})
+export class C {{ constructor(f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
+        assert!(
+            code.contains("new(__ngFactoryType__||C)(i0.ɵɵdirectiveInject(Foo))"),
+            "{name} (component):\n{code}"
+        );
+        let code = compile_partial(&source);
+        assert!(code.contains("deps:[{token:Foo}]"), "{name} (component):\n{code}");
+    }
+}
+
+/// A `declare global` interface merges with the lib's value of the same name,
+/// so ngtsc keeps the token.
+#[test]
+fn global_interface_ctor_dep_stays_the_token() {
+    let code = compile(
+        "import { Injectable } from '@angular/core';
+declare global { interface Window { a: number } }
+@Injectable()
+export class S { constructor(w: Window) {} }",
+    );
+    assert_contains(&code, "new(__ngFactoryType__||S)(i0.ɵɵinject(Window))");
+    let code = compile_partial(
+        "import { Component } from '@angular/core';
+declare global { interface HTMLElement { a: number } }
+@Component({ selector: 'c', template: '' })
+export class C { constructor(e: HTMLElement) {} }",
+    );
+    assert_contains(&code, "deps:[{token:HTMLElement}]");
+}
+
+/// A nested class named like a top-level interface: its parameter type reads
+/// the class.
+#[test]
+fn nested_class_named_like_an_interface_is_its_own_token() {
+    let source = "import { Injectable, Optional, SkipSelf } from '@angular/core';
+interface Foo { a: number }
+export function make() {
+  @Injectable()
+  class Foo { constructor(@Optional() @SkipSelf() parent: Foo) {} }
+  return Foo;
+}";
+    assert_contains(&compile(source), "i0.ɵɵinject(Foo,12)");
+    assert_contains(&compile_partial(source), "deps:[{token:Foo,optional:true,skipSelf:true}]");
+}
+
+/// `NS.Foo` is a class's static when `NS` is a class merged with a namespace.
+#[test]
+fn class_static_merged_with_a_namespace_interface_is_the_token() {
+    for (decorator, inject) in [
+        ("Injectable()", "ɵɵinject"),
+        ("Component({ selector: 'c', template: '' })", "ɵɵdirectiveInject"),
+    ] {
+        let name = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {name} }} from '@angular/core';
+export class NS {{ static Foo = class {{}}; }}
+export namespace NS {{ export interface Foo {{}} }}
+@{decorator}
+export class S {{ constructor(f: NS.Foo) {{}} }}"
+        );
+        assert_contains(&compile(&source), &format!("i0.{inject}(NS.Foo)"));
+        assert_contains(&compile_partial(&source), "deps:[{token:NS.Foo}]");
+    }
+}
+
+/// An `@Inject` token is used as written, whatever the parameter's type.
+#[test]
+fn inject_token_on_a_local_interface_param_stays_the_token() {
+    for decorator in ["Injectable()", "Component({ selector: 'c', template: '' })"] {
+        let name = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {name}, Inject, InjectionToken }} from '@angular/core';
+interface Foo {{ a: number }}
+const FOO = new InjectionToken<Foo>('foo');
+@{decorator}
+export class S {{ constructor(@Inject(FOO) f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
+        assert_contains(&code, "(FOO))");
+        assert_not_contains(&code, "ɵɵinvalidFactory");
+        let code = compile_partial(&source);
+        assert_contains(&code, "deps:[{token:FOO}]");
+    }
+}
 
 #[test]
 fn invalid_ctor_dep_makes_the_full_factory_invalid() {

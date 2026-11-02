@@ -477,6 +477,9 @@ pub struct StringConsts<'a> {
     program: Option<&'a Program<'a>>,
     /// Built on first use: most files have no decorator metadata to evaluate.
     scope: std::cell::OnceCell<FileScope<'a>>,
+    /// The file's type and value declarations, built on first use and shared
+    /// by every class of the file (see [`Self::local_decls`]).
+    local_decls: std::cell::OnceCell<crate::class_metadata::LocalDecls<'a>>,
     /// Reads the value an imported binding has in its exporting file, like
     /// ngtsc's program-wide checker (`None`: imports stay opaque references).
     /// `Rc`-shared so it can borrow the analyzer that produced it.
@@ -521,6 +524,7 @@ impl<'a> StringConsts<'a> {
             strings: HashMap::default(),
             program: Some(program),
             scope: std::cell::OnceCell::new(),
+            local_decls: std::cell::OnceCell::new(),
             #[cfg(feature = "cross_file_elision")]
             resolver: None,
             host_values: std::cell::RefCell::new(HashMap::default()),
@@ -530,6 +534,16 @@ impl<'a> StringConsts<'a> {
     /// The file's top-level declarations, for the partial evaluator.
     pub(crate) fn scope(&self) -> &FileScope<'a> {
         self.scope.get_or_init(|| self.program.map(FileScope::collect).unwrap_or_default())
+    }
+
+    /// The interfaces, type aliases and values the file declares, to tell a
+    /// type-only name from a value (`None` without the program).
+    pub(crate) fn local_decls(&self) -> Option<&crate::class_metadata::LocalDecls<'a>> {
+        let program = self.program?;
+        Some(
+            self.local_decls
+                .get_or_init(|| crate::class_metadata::LocalDecls::collect(&program.body)),
+        )
     }
 
     /// The program these consts were collected from, when available.
@@ -580,6 +594,7 @@ pub fn collect_string_consts<'a>(
         strings: HashMap::default(),
         program: Some(program),
         scope: std::cell::OnceCell::new(),
+        local_decls: std::cell::OnceCell::new(),
         #[cfg(feature = "cross_file_elision")]
         resolver: None,
         host_values: std::cell::RefCell::new(HashMap::default()),
