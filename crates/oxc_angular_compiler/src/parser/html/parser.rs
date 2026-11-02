@@ -21,7 +21,7 @@ use crate::util::{ParseError, ParseLocation, ParseSourceFile, ParseSourceSpan};
 
 use super::entities::decode_entities_in_string;
 use super::lexer::{HtmlLexer, HtmlToken, HtmlTokenType};
-use super::tags::{get_html_tag_definition, is_void_element};
+use super::tags::{get_html_tag_definition, is_void_element, split_ns_name};
 
 /// Result of parsing an HTML template.
 pub struct HtmlParseResult<'a> {
@@ -298,6 +298,44 @@ impl<'a> HtmlParser<'a> {
         idx
     }
 
+    /// Whether a tag without a prefix inside the open elements takes a namespace from them, as
+    /// Angular's `_getElementFullName` names it: `<area>` in `<svg>` is `:svg:area`. The closest
+    /// element (blocks are skipped) passes down its own prefix or implicit one, or the one it took
+    /// from its own parent, unless it stops inheritance (`foreignObject`). A selectorless component
+    /// passes down its host tag (`<MyComp:foreignObject>`, `ng-component` without one), as
+    /// `_getPrefix` reads a component's `tagName`.
+    fn inherits_namespace(&self) -> bool {
+        let elements = self.container_stack.iter().rev().filter_map(|container| match container {
+            ContainerIndex::Element(idx) => Some(&self.elements[*idx]),
+            ContainerIndex::Block(_) => None,
+        });
+        for element in elements {
+            let (prefix, local_name) = if element.is_component {
+                (
+                    element.component_prefix.as_ref().map(|prefix| prefix.as_str()),
+                    element.component_tag_name.as_ref().map_or("ng-component", |tag| tag.as_str()),
+                )
+            } else {
+                split_ns_name(element.name.as_str())
+            };
+            let tag_def = get_html_tag_definition(local_name);
+            if tag_def.prevent_namespace_inheritance {
+                return false;
+            }
+            if prefix.is_some() || tag_def.implicit_namespace_prefix.is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether a void name is an HTML void element here: not in a namespace, by its own prefix or
+    /// one it inherits (`<area>` in `<svg>` is `:svg:area`, which has children and an end tag).
+    /// Void names have no implicit namespace.
+    fn is_html_void(&self, local_name: &str, has_prefix: bool) -> bool {
+        get_html_tag_definition(local_name).is_void && !has_prefix && !self.inherits_namespace()
+    }
+
     /// Pops a block from the container stack and returns it as an HtmlNode.
     fn pop_block_container(&mut self, end_span: Option<Span>) -> Option<HtmlNode<'a>> {
         // Find the topmost block in the stack
@@ -375,8 +413,11 @@ impl<'a> HtmlParser<'a> {
                     // be implicitly closed silently. Anything else means this end tag is
                     // jumping past a still-open element, which is what Angular's reference
                     // parser flags via `unexpectedCloseTagDetected`.
+                    // An open element with a void name is in a namespace (an HTML void element
+                    // is never pushed), so Angular gives it the default definition.
                     let elem_name = self.elements[idx].name.as_str().to_lowercase();
-                    if !get_html_tag_definition(&elem_name).closed_by_parent {
+                    let tag_def = get_html_tag_definition(&elem_name);
+                    if !tag_def.closed_by_parent || tag_def.is_void {
                         unexpected_close_detected = true;
                     }
                     // Get the element without end_span (implicitly closed)
@@ -678,7 +719,7 @@ impl<'a> HtmlParser<'a> {
         // For self-closing elements, end_span equals start_span
         // For void elements or regular elements, end_span is set later or stays None
         let end_span = if is_self_closing { Some(start_span) } else { None };
-        let is_void = is_void_element(&tag_name);
+        let is_void = self.is_html_void(&local_name, has_ns_prefix);
 
         let element = HtmlElement {
             name: Ident::from_in(tag_name.clone(), &self.allocator),
@@ -727,9 +768,9 @@ impl<'a> HtmlParser<'a> {
         };
         let end_span = self.make_span(start, end);
 
-        // Check if this is a void element - void elements don't have end tags
-        let tag_def = get_html_tag_definition(&local_name);
-        if tag_def.is_void {
+        // Void elements don't have end tags. The open elements pass their namespace down, as to
+        // the start tag.
+        if self.is_html_void(&local_name, tag_name.starts_with(':')) {
             let err = self.make_error(
                 start,
                 format!("Void elements do not have end tags \"{}\"", local_name),
@@ -1837,9 +1878,11 @@ impl<'a> HtmlParser<'a> {
 
 /// Checks if the current element should be auto-closed when a new element is opened.
 /// Uses the tag definitions from tags.rs to match Angular's behavior exactly.
+/// An open element with a void name is in a namespace (an HTML void element is never pushed):
+/// `:svg:area` has the default definition, which no child closes.
 fn should_auto_close(current_tag: &str, new_tag: &str) -> bool {
     let tag_def = get_html_tag_definition(current_tag);
-    tag_def.is_closed_by_child(new_tag)
+    !tag_def.is_void && tag_def.is_closed_by_child(new_tag)
 }
 
 #[cfg(test)]

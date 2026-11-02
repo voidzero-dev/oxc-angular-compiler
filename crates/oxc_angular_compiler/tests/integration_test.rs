@@ -6373,6 +6373,17 @@ fn test_i18n_structural_directive_element_placeholders() {
     assert!(!js.contains("i18nPostprocess"), "No post-processing expected:\n{js}");
 }
 
+/// An HTML void name in svg is no void element, so it gets a start and a close placeholder.
+/// Angular 22.2: `a{$START_TAG__SVG_AREA}b{$CLOSE_TAG__SVG_AREA}c`.
+#[test]
+fn test_i18n_void_name_in_svg_has_a_close_placeholder() {
+    let js = compile_i18n_component(r#"<svg><g i18n>a<area>b</area>c</g></svg>"#);
+    assert_contains(
+        &js,
+        "a${\"\u{FFFD}#3\u{FFFD}\"}:START_TAG__SVG_AREA:b${\"\u{FFFD}/#3\u{FFFD}\"}:CLOSE_TAG__SVG_AREA:c`",
+    );
+}
+
 /// `@if`/`@else` inside an i18n block: each block gets its own start/close placeholder values.
 /// Angular 22.1.5:
 ///   { "closeBlockElse": "�/*3:2�", "closeBlockIf": "�/*2:1�", "closeTagSpan": "�/#1:1�",
