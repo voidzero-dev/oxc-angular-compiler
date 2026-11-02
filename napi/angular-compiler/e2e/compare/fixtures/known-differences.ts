@@ -46,6 +46,9 @@ const ALIASED_INJECTABLE =
 const NG_MODULE_SCOPE =
   'ɵɵsetNgModuleScope runs unguarded where Angular wraps it in `ngJitMode`: Oxc compiles one file at a time and resolves component dependencies at runtime through the scope it registers, so production builds (ngJitMode = false) still need it'
 
+const INJECTOR_EXPORTS =
+  'ɵinj leaves out an `exports` entry that `declarations` also lists, as a full ngtsc build does (a declaration is a component, directive or pipe, which gives no providers); ngtsc local mode keeps it'
+
 /**
  * Differences every fixture may have, matched against the labels `KnownDifference` uses. A
  * fixture whose differences are all documented here or in its own entry is reported as a known
@@ -75,9 +78,9 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
     reasons: [NG_MODULE_SCOPE],
   },
   'injector/injector-with-exports': {
-    fields: [],
+    fields: ['ExportingModule.ɵinj'],
     statements: ['ɵɵsetNgModuleScope(ExportingModule)'],
-    reasons: [NG_MODULE_SCOPE],
+    reasons: [NG_MODULE_SCOPE, INJECTOR_EXPORTS],
   },
   'animations/animation-metadata-with-change-detection': {
     fields: ['AnimationsWithOnPushComponent.ɵcmp'],
