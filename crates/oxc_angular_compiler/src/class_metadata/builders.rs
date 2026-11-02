@@ -1048,10 +1048,11 @@ fn build_param_type_expression<'a>(
         ));
     }
 
-    // A local reference: `undefined` only when the path ends at an interface
-    // or type alias — the type-only declarations local `typeToValue` still
+    // A local reference: `undefined` when the path ends at an interface or
+    // type alias — the type-only declarations local `typeToValue` still
     // rejects (`isLocalCompilation` keeps only those three SyntaxKinds
-    // unavailable). Everything else — const enums, vars, functions, bare
+    // unavailable) — or at a `const enum`, which full and partial
+    // `typeToValue` reject too. Everything else — vars, functions, bare
     // namespace names, missing members, undeclared or global names — emits
     // as written, matching the upstream `/* @ts-ignore */ type: X` fallback.
     if let Some(decls) = local_decls
@@ -1178,10 +1179,11 @@ pub fn type_param_names_of<'a>(class: &Class<'a>) -> FxHashSet<Ident<'a>> {
 /// comparison and single-file transform target — `experimental-local`, which
 /// matches what OXC can know from one file): only `TypeParameter`,
 /// `TypeAliasDeclaration`, and `InterfaceDeclaration` are `UNAVAILABLE`;
-/// everything else — vars, functions, const enums, bare namespace names,
-/// missing members, undeclared names — is emitted as written with an
-/// upstream `/* @ts-ignore */` (comparisons ignore the comment, and `Ident`
-/// output can't carry one anyway). `type_decls` holds interfaces and type
+/// everything else — vars, functions, bare namespace names, missing
+/// members, undeclared names — is emitted as written with an upstream
+/// `/* @ts-ignore */` (comparisons ignore the comment, and `Ident` output
+/// can't carry one anyway). `const_enums` follows full and partial
+/// compilation instead (see [`Self::is_const_enum`]). `type_decls` holds interfaces and type
 /// aliases; `namespaces` records namespace bodies recursively, needed for
 /// `ns.Interface` lookups and for the merged `interface I` + `namespace I`
 /// case — the merged symbol's valueDeclaration is the namespace, so it emits.
