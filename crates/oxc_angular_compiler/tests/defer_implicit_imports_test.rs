@@ -2314,3 +2314,32 @@ export class Top {}
     assert_eager(code, "./lazy");
     assert!(code.contains("import { LazyCmp }"), "{code}");
 }
+
+#[test]
+fn named_deferred_imports_component_keeps_its_imports_eager_for_the_file() {
+    // With block names, ngc defers no `imports` entry of `Named`, so its
+    // `LazyCmp` stays a static reference and `Implicit` can't defer it.
+    let dir = TempDir::new().unwrap();
+    lazy_cmp(&dir);
+    let result = transform(
+        &dir,
+        r"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({ selector: 'app-implicit', imports: [LazyCmp], template: '@defer { <app-lazy/> }' })
+export class Implicit {}
+
+@Component({
+    selector: 'app-named',
+    imports: [LazyCmp],
+    deferredImports: { blk: [] },
+    template: '@defer (name blk) { <app-lazy/> }',
+})
+export class Named {}
+",
+    );
+    let code = &result.code;
+    assert!(code.contains("import { LazyCmp } from './lazy';"), "{code}");
+    assert!(!code.contains("m.LazyCmp"), "{code}");
+}

@@ -6224,7 +6224,12 @@ fn component_deferrable_marks<'a>(
     let (Some(template), _) = resolve_template(&metadata, resolved_resources) else {
         return std::vec::Vec::new();
     };
-    if metadata.import_entry_classes.is_empty() || !template.contains("@defer") {
+    // With block names, no `imports` entry is deferred (`resolve_implicit_defer`
+    // is skipped): each stays a static reference.
+    if metadata.import_entry_classes.is_empty()
+        || !template.contains("@defer")
+        || metadata.deferred_imports_form == Some(super::metadata::DeferredImportsForm::Object)
+    {
         return std::vec::Vec::new();
     }
     let template = allocator.alloc_str(&template);
