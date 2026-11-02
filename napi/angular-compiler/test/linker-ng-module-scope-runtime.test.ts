@@ -70,10 +70,7 @@ const LINKERS = {
  * `lib` ones partially compiled and linked with `linker`, the others fully
  * compiled by Oxc. Returns the directory.
  */
-async function build(
-  files: Record<string, string>,
-  linker: keyof typeof LINKERS,
-): Promise<string> {
+async function build(files: Record<string, string>, linker: keyof typeof LINKERS): Promise<string> {
   const dir = join(TMP, `case-${nextCase++}`)
   mkdirSync(dir, { recursive: true })
   for (const [name, source] of Object.entries(files)) {
