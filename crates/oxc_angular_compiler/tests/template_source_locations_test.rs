@@ -196,6 +196,19 @@ export class Url2Component {}
 }
 
 #[test]
+fn template_url_of_a_bare_file_name_is_relative_to_the_working_directory() {
+    let source = "import { Component } from '@angular/core';
+@Component({ selector: 'app-bare', templateUrl: './bare.component.html' })
+export class BareComponent {}
+";
+    let mut resources = ResolvedResources::default();
+    resources.templates.insert("./bare.component.html".to_string(), "<p>x</p>".to_string());
+    let options = TransformOptions { root_dirs: Some(vec![".".to_string()]), ..options() };
+    let code = compile_with("bare.component.ts", source, &options, Some(&resources));
+    assert_eq!(calls(&code)[0], r#"attachSourceLocations("bare.component.html",[[0,0,0,0]])"#);
+}
+
+#[test]
 fn a_template_not_written_as_one_literal_counts_from_its_start() {
     let source = r"import { Component } from '@angular/core';
 

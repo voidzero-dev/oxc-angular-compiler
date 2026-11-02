@@ -110,8 +110,13 @@ pub(super) fn template_source<'a>(
             return None;
         }
         let file = file_path.replace('\\', "/");
-        let dir = file.rfind('/').map_or("", |i| &file[..i]);
-        let path = project_relative_path(&format!("{dir}/{url}"), root_dirs)?;
+        // A bare file name has no directory: the URL is relative to the
+        // working directory, not to `/`.
+        let template_file = match file.rfind('/') {
+            Some(i) => format!("{}/{url}", &file[..i]),
+            None => url,
+        };
+        let path = project_relative_path(&template_file, root_dirs)?;
         return Some((Ident::from(allocator.alloc_str(&path)), whole(template)));
     }
 
