@@ -255,6 +255,45 @@ export class AppModule {}
 ";
 
     #[test]
+    fn a_module_declared_later_in_this_file_keeps_its_old_output() {
+        // Another file's `ModuleWithProviders<Later>` names a class this file
+        // declares after the NgModule. Listing `Later` would read it before it
+        // is initialized (ngtsc wraps the list in `() => [...]`), so the
+        // entry stays as written.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "holder.ts",
+            r"
+import { ModuleWithProviders } from '@angular/core';
+import type { Later } from './app';
+export class Holder {
+  static forRoot(): ModuleWithProviders<Later> {
+    const providers: any[] = [];
+    return { ngModule: null as any, providers };
+  }
+}
+export const LATER_ROOT = Holder.forRoot();
+",
+        );
+        let code = compile(
+            &dir,
+            "app.ts",
+            r"
+import { NgModule } from '@angular/core';
+import { Holder, LATER_ROOT } from './holder';
+@NgModule({ imports: [Holder.forRoot(), LATER_ROOT] })
+export class M {}
+@NgModule({})
+export class Later {}
+",
+            CompilationMode::Partial,
+        );
+        assert!(code.contains("type:M,imports:[Holder,LATER_ROOT]}"), "{code}");
+        assert!(!code.contains("imports:[Later"), "{code}");
+    }
+
+    #[test]
     fn imported_method_and_constant_name_the_module_through_an_import() {
         // ngtsc partial: `import * as i1 from "./dep"` and
         // `imports: [i1.DepModule, i1.DepModule]`.

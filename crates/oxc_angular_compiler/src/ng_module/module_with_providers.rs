@@ -421,12 +421,20 @@ pub fn partial_imports<'a>(
         }
         if !questions.is_empty() {
             for (index, answer) in asked.into_iter().zip(resolve_imported(&questions)) {
-                resolved[index] = answer.map(|class| match class {
+                resolved[index] = answer.and_then(|module| match module {
+                    // As for a same-file entry: a class declared after this
+                    // NgModule isn't initialized yet when its `ɵmod` is (ngtsc
+                    // wraps the list in `() => [...]` then), and an import
+                    // must stay. Otherwise today's name is kept.
                     NamedClass::Local(name) => {
-                        read_var(oxc_str::Ident::from(allocator.alloc_str(&name)))
+                        let declared_before = top_level_class(program, &name)
+                            .is_some_and(|module| module.span.end <= class.span.start);
+                        let is_kept = matches!(binding(&name), Binding::Import { kept: true });
+                        (declared_before || is_kept)
+                            .then(|| read_var(oxc_str::Ident::from(allocator.alloc_str(&name))))
                     }
                     NamedClass::Module { specifier, name } => {
-                        OutputExpression::ReadProp(Box::new_in(
+                        Some(OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(
                                     read_var(namespace_of(&specifier)),
@@ -437,7 +445,7 @@ pub fn partial_imports<'a>(
                                 source_span: None,
                             },
                             &allocator,
-                        ))
+                        )))
                     }
                 });
             }
