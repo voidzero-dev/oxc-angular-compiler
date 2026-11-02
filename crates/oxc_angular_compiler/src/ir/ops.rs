@@ -1494,18 +1494,30 @@ pub struct ExtractedAttributeOp<'a> {
     pub trusted_value_fn: Option<Ident<'a>>,
 }
 
-/// Source location for debugging.
+/// The source locations of a view's elements, reified into one
+/// `ɵɵattachSourceLocations(path, [[slot, offset, line, column], ...])` call.
+///
+/// Ported from Angular's `SourceLocationOp` in `ir/src/ops/create.ts`.
 #[derive(Debug)]
 pub struct SourceLocationOp<'a> {
     /// Common operation metadata.
     pub base: CreateOpBase<'a>,
-    /// Target element.
-    pub target: XrefId,
-    /// Template URL.
-    pub template_url: Ident<'a>,
-    /// Line number.
+    /// The template's path, relative to the project root.
+    pub template_path: Ident<'a>,
+    /// Where each element of the view starts.
+    pub locations: Vec<'a, SourceLocation>,
+}
+
+/// Where one element starts in the template's source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceLocation {
+    /// The element's slot.
+    pub slot: u32,
+    /// UTF-16 offset in the source.
+    pub offset: u32,
+    /// 0-based line.
     pub line: u32,
-    /// Column number.
+    /// 0-based UTF-16 column.
     pub column: u32,
 }
 

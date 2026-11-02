@@ -182,16 +182,17 @@ pub struct ComponentCompilationJob<'a> {
     pub relative_context_file_path: Option<Ident<'a>>,
     /// Relocation entries.
     pub relocation_entries: Vec<'a, RelocationEntry>,
-    /// Whether to attach debug source locations.
-    /// When enabled, the `attach_source_locations` phase will generate
-    /// `ɵɵsourceLocation` calls for debugging.
+    /// Whether to attach debug source locations (Angular's
+    /// `enableTemplateSourceLocations`). When enabled, the
+    /// `attach_source_locations` phase emits `ɵɵattachSourceLocations` calls.
     pub enable_debug_locations: bool,
-    /// Relative path to the template file for source location debugging.
-    /// Required when `enable_debug_locations` is true.
+    /// The template's path relative to the project root, as ngtsc's
+    /// `getProjectRelativePath` gives it. Required when `enable_debug_locations` is true.
     pub relative_template_path: Option<Ident<'a>>,
-    /// Template source text for computing line/column from byte offsets.
+    /// The text the template's element positions count in.
     /// Required when `enable_debug_locations` is true.
-    pub template_source: Option<&'a str>,
+    pub template_source:
+        Option<crate::pipeline::phases::attach_source_locations::TemplateSource<'a>>,
     /// Defer block metadata.
     ///
     /// Controls how defer block dependencies are emitted (per-block or per-component).

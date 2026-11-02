@@ -253,6 +253,33 @@ pub struct TransformOptions {
     /// Full mode only, like ngtsc: partial output has no class debug info. Default:
     /// `false`, as in ngtsc (`!!options.forbidOrphanComponents`).
     pub forbid_orphan_components: bool,
+
+    /// Angular's `enableTemplateSourceLocations` compiler option: end each
+    /// view's create block with `ɵɵattachSourceLocations(path, [[slot, offset,
+    /// line, column], ...])`, which writes a `data-ng-source-location`
+    /// attribute on each element. The call is not dev-mode guarded, so it
+    /// also runs in production.
+    ///
+    /// Needs `root_dirs`: with no root, nothing is emitted. Full compilation
+    /// only (the linker always turns it off), and Angular 19.1 or later.
+    ///
+    /// Default: `false`, as in ngtsc.
+    pub enable_template_source_locations: bool,
+
+    /// The TypeScript/Angular `rootDirs` option: the project roots that
+    /// paths in the output are made relative to, as ngtsc's
+    /// `getProjectRelativePath` does. Relative entries resolve against the
+    /// working directory.
+    ///
+    /// When set, `ɵsetClassDebugInfo`'s `filePath` is the component file
+    /// relative to the first root that contains it (left out when none
+    /// does), and `ɵɵattachSourceLocations` can name its template.
+    ///
+    /// Default: `None`, which keeps `filePath` as the path given to the
+    /// transform. ngtsc instead falls back to `rootDir`, then the working
+    /// directory, and lowercases paths on a case-insensitive file system;
+    /// oxc never lowercases.
+    pub root_dirs: Option<Vec<String>>,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -310,6 +337,8 @@ impl Default for TransformOptions {
             compilation_mode: crate::CompilationMode::Full,
             enable_i18n_legacy_message_id_format: false,
             forbid_orphan_components: false,
+            enable_template_source_locations: false,
+            root_dirs: None,
         }
     }
 }
@@ -7031,13 +7060,28 @@ fn compile_component_full<'a>(
         DeferBlockDepsEmitMode::PerBlock
     };
 
-    // Enable debug locations when NOT using advanced optimizations
-    // (advanced optimizations strip debug info for smaller output)
-    let enable_debug_locations = !options.advanced_optimizations;
-
-    // Build relative paths for debug locations
-    let relative_template_path =
-        if enable_debug_locations { Some(Ident::from_in(file_path, &allocator)) } else { None };
+    // Angular's `enableTemplateSourceLocations`, which ngtsc reads only for
+    // full compilation (the linker hard-codes it off). The path and source
+    // come from `ComponentDecoratorHandler.analyze`; with neither, the phase
+    // does nothing.
+    let template_source = if options.enable_template_source_locations
+        && matches!(options.compilation_mode, crate::CompilationMode::Full)
+        && super::source_locations::supports_attach_source_locations(options.angular_version)
+    {
+        super::source_locations::template_source(
+            allocator,
+            metadata,
+            template,
+            file_path,
+            source,
+            options.root_dirs.as_deref(),
+            resolved_resources,
+        )
+    } else {
+        None
+    };
+    let enable_debug_locations = template_source.is_some();
+    let (relative_template_path, template_source) = template_source.unzip();
 
     let relative_context_file_path = Some(Ident::from_in(file_path, &allocator));
 
@@ -7048,7 +7092,7 @@ fn compile_component_full<'a>(
         defer_block_deps_emit_mode,
         relative_template_path,
         enable_debug_locations,
-        template_source: if enable_debug_locations { Some(template) } else { None },
+        template_source,
         // PerComponent mode: pass the shared resolver expression so the
         // ingest stage attaches it to every defer block's create op.
         all_deferrable_deps_fn: defer_resolver_fn,
@@ -7318,12 +7362,22 @@ fn compile_component_full<'a>(
         let class_line_number = line_number_at(source, metadata.class_name_pos as usize);
 
         // Build the debug info with the actual class declaration line number
-        let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
-            .with_file_path(Ident::from_in(file_path, &allocator))
+        // ngtsc's `extractClassDebugInfo` gives the path relative to the
+        // project root, and none for a file outside it. With no root dirs,
+        // keep the path as given.
+        let debug_file_path = match &options.root_dirs {
+            Some(roots) => super::source_locations::project_relative_path(file_path, roots)
+                .filter(|path| !path.is_empty()),
+            None => Some(file_path.to_string()),
+        };
+        let mut debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
             .with_line_number(class_line_number)
             // ngtsc's ComponentDecoratorHandler passes `forbidOrphanComponents` to
             // `extractClassDebugInfo` for every component, standalone or not.
             .with_forbid_orphan_rendering(options.forbid_orphan_components);
+        if let Some(path) = debug_file_path {
+            debug_info = debug_info.with_file_path(Ident::from_in(path.as_str(), &allocator));
+        }
 
         // Compile to IIFE-wrapped expression
         let debug_info_expr =
@@ -7754,7 +7808,8 @@ pub fn compile_template_to_js_with_options<'a>(
         DeferBlockDepsEmitMode::PerBlock
     };
 
-    let enable_debug_locations = !options.advanced_optimizations;
+    // No template path here, so `attachSourceLocations` has nothing to emit.
+    let enable_debug_locations = false;
 
     let ingest_options = IngestOptions {
         mode,
@@ -7763,7 +7818,7 @@ pub fn compile_template_to_js_with_options<'a>(
         defer_block_deps_emit_mode,
         relative_template_path: None,
         enable_debug_locations,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks: FxHashMap::default(),
         pool_starting_index: 0, // Standalone template compilation starts from 0
@@ -7959,7 +8014,8 @@ pub fn compile_template_for_hmr<'a>(
     // PerBlock's empty map would have produced anyway.
     let defer_block_deps_emit_mode = DeferBlockDepsEmitMode::PerComponent;
 
-    let enable_debug_locations = !options.advanced_optimizations;
+    // No template path here, so `attachSourceLocations` has nothing to emit.
+    let enable_debug_locations = false;
 
     let ingest_options = IngestOptions {
         mode,
@@ -7968,7 +8024,7 @@ pub fn compile_template_for_hmr<'a>(
         defer_block_deps_emit_mode,
         relative_template_path: None,
         enable_debug_locations,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks: FxHashMap::default(),
         pool_starting_index: 0, // HMR template compilation starts from 0
@@ -8762,7 +8818,7 @@ pub fn compile_template_for_linker<'a>(
         defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,
         relative_template_path: None,
         enable_debug_locations: false,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks,
         pool_starting_index,

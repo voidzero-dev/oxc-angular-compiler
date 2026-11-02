@@ -27,9 +27,9 @@ use crate::ir::expression::{
 };
 use crate::ir::ops::{CreateOp, UpdateOp, XrefId};
 use crate::output::ast::{
-    ArrowFunctionBody, ArrowFunctionExpr, FnParam, FunctionExpr, InvokeFunctionExpr, LiteralExpr,
-    LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement,
-    clone_output_statement,
+    ArrowFunctionBody, ArrowFunctionExpr, FnParam, FunctionExpr, InvokeFunctionExpr,
+    LiteralArrayExpr, LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
+    ReadVarExpr, ReturnStatement, clone_output_statement,
 };
 use crate::pipeline::compilation::{
     ComponentCompilationJob, HostBindingCompilationJob, TemplateCompilationMode,
@@ -1069,6 +1069,46 @@ fn reify_create_op<'a>(
             // Emit ɵɵcontrolCreate instruction for control binding initialization
             Some(create_control_create_stmt(allocator, core_namespace))
         }
+        CreateOp::SourceLocation(op) => {
+            // `ɵɵattachSourceLocations(path, [[slot, offset, line, column], ...])`,
+            // as Angular's reify builds it from `op.locations`.
+            let number = |value: u32| {
+                OutputExpression::Literal(Box::new_in(
+                    LiteralExpr {
+                        value: LiteralValue::Number(f64::from(value)),
+                        source_span: None,
+                    },
+                    &allocator,
+                ))
+            };
+            let mut locations = OxcVec::with_capacity_in(op.locations.len(), &allocator);
+            for location in &op.locations {
+                let mut entries = OxcVec::with_capacity_in(4, &allocator);
+                entries.push(number(location.slot));
+                entries.push(number(location.offset));
+                entries.push(number(location.line));
+                entries.push(number(location.column));
+                locations.push(OutputExpression::LiteralArray(Box::new_in(
+                    LiteralArrayExpr { entries, source_span: None },
+                    &allocator,
+                )));
+            }
+            let mut args = OxcVec::with_capacity_in(2, &allocator);
+            args.push(OutputExpression::Literal(Box::new_in(
+                LiteralExpr { value: LiteralValue::String(op.template_path), source_span: None },
+                &allocator,
+            )));
+            args.push(OutputExpression::LiteralArray(Box::new_in(
+                LiteralArrayExpr { entries: locations, source_span: None },
+                &allocator,
+            )));
+            Some(utils::create_instruction_call_stmt(
+                allocator,
+                core_namespace,
+                Identifiers::ATTACH_SOURCE_LOCATIONS,
+                args,
+            ))
+        }
         // Non-emitting operations
         CreateOp::ListEnd(_)
         | CreateOp::I18nMessage(_)
@@ -1077,7 +1117,6 @@ fn reify_create_op<'a>(
         | CreateOp::IcuEnd(_)
         | CreateOp::IcuPlaceholder(_)
         | CreateOp::ExtractedAttribute(_)
-        | CreateOp::SourceLocation(_)
         | CreateOp::Statement(_) => None,
     }
 }
