@@ -1185,3 +1185,57 @@ Greet.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.0
     assert!(!code.contains("MSG_EXTERNAL_"), "{code}");
     assert!(code.contains("const MSG_"), "{code}");
 }
+
+/// A component (template and host) and a directive (host) reading `item?.label`,
+/// declared at `version`.
+fn safe_nav_declarations(version: &str) -> String {
+    format!(
+        r#"
+import * as i0 from "@angular/core";
+class Item {{
+}}
+Item.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "{version}", type: Item, isStandalone: true, selector: "x-item", host: {{ properties: {{ "title": "item?.label" }} }}, ngImport: i0, template: '<span>{{{{ item?.label }}}}</span>' }});
+class Tip {{
+}}
+Tip.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "{version}", type: Tip, isStandalone: true, selector: "[tip]", host: {{ properties: {{ "title": "item?.[key]" }} }}, ngImport: i0 }});
+"#
+    )
+}
+
+/// Like Angular's linker, `?.` in a declaration of v22 or later links natively
+/// (`undefined`), also a prerelease's; one before v22 the legacy way (`null`).
+/// The placeholder, and a version that doesn't parse, mean the latest.
+#[test]
+fn test_link_safe_navigation_follows_declaration_version() {
+    for version in ["22.0.0", "22.2.3", "22.0.0-next.1", "23.0.0", "0.0.0-PLACEHOLDER", "nope"] {
+        let code = link_for_version(&safe_nav_declarations(version), None);
+        assert!(code.contains("ɵɵtextInterpolate(ctx.item?.label)"), "{version}:\n{code}");
+        assert!(code.contains(r#"ɵɵdomProperty("title",ctx.item?.label)"#), "{version}:\n{code}");
+        assert!(
+            code.contains(r#"ɵɵdomProperty("title",ctx.item?.[ctx.key])"#),
+            "{version}:\n{code}"
+        );
+        assert!(!code.contains("== null"), "{version}:\n{code}");
+    }
+    for version in ["21.2.0", "19.0.0", "14.0.0"] {
+        let code = link_for_version(&safe_nav_declarations(version), None);
+        assert!(!code.contains("?."), "{version}:\n{code}");
+        assert_eq!(code.matches("== null)? null:").count(), 3, "{version}:\n{code}");
+    }
+}
+
+/// A linker before v22.0.0-next.10 has no `legacyOptionalChaining`: it links `?.` the
+/// legacy way whatever the declaration's version.
+#[test]
+fn test_link_safe_navigation_before_the_linker_option() {
+    let code = safe_nav_declarations("22.2.3");
+    for app in ["21.2.0", "22.0.0-next.9"] {
+        let linked = link_for_version(&code, AngularVersion::parse(app));
+        assert!(!linked.contains("?."), "{app}:\n{linked}");
+        assert_eq!(linked.matches("== null)? null:").count(), 3, "{app}:\n{linked}");
+    }
+    for app in ["22.0.0-next.10", "22.0.0-rc.0", "22.0.0", "22.2.3"] {
+        let linked = link_for_version(&code, AngularVersion::parse(app));
+        assert_eq!(linked.matches("?.").count(), 3, "{app}:\n{linked}");
+    }
+}

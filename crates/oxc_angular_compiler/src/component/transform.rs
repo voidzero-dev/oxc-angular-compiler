@@ -8168,6 +8168,7 @@ pub fn compile_host_bindings_for_linker<'a>(
     shared_pool: &mut SharedPool<'a>,
     core_namespace: &str,
     angular_version: Option<crate::AngularVersion>,
+    legacy_optional_chaining: bool,
 ) -> Option<LinkerHostBindingOutput> {
     let (result, next_pool_index) = compile_host_bindings_from_input(
         allocator,
@@ -8178,10 +8179,8 @@ pub fn compile_host_bindings_for_linker<'a>(
         pool_starting_index,
         shared_pool,
         angular_version,
-        // Angular's linker uses native `?.` for declarations at version 22+ (and the
-        // placeholder), which is not modeled here yet: keep legacy, and never let the
-        // application's `angular_version` switch it.
-        Some(true),
+        // The declaration's, not what the application's version defaults to.
+        Some(legacy_optional_chaining),
     )?;
 
     let emitter = JsEmitter::with_core_namespace(core_namespace);
@@ -8246,7 +8245,8 @@ pub struct LinkerTemplateOutput {
 ///
 /// `has_directive_dependencies` is Angular's linker's `!isStandalone` or a directive,
 /// component or NgModule dependency. A `@defer` block with a dependency function counts too,
-/// and without any the template is compiled in DomOnly mode.
+/// and without any the template is compiled in DomOnly mode. `legacy_optional_chaining` is
+/// the declaration's `legacyOptionalChaining`.
 pub fn compile_template_for_linker<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -8257,6 +8257,7 @@ pub fn compile_template_for_linker<'a>(
     angular_version: Option<crate::AngularVersion>,
     defer_block_deps: &[Option<&str>],
     has_directive_dependencies: bool,
+    legacy_optional_chaining: bool,
     pool_starting_index: u32,
     shared_pool: &mut SharedPool<'a>,
 ) -> Result<LinkerTemplateOutput, std::vec::Vec<OxcDiagnostic>> {
@@ -8348,10 +8349,8 @@ pub fn compile_template_for_linker<'a>(
         defer_blocks,
         pool_starting_index,
         angular_version,
-        // Angular's linker uses native `?.` for declarations at version 22+ (and the
-        // placeholder), which is not modeled here yet: keep legacy, and never let the
-        // application's `angular_version` switch it.
-        legacy_optional_chaining: Some(true),
+        // The declaration's, not what the application's version defaults to.
+        legacy_optional_chaining: Some(legacy_optional_chaining),
     };
 
     let component_name_atom = Ident::from_in(component_name, &allocator);
