@@ -156,6 +156,15 @@ const LOCAL_VALUE_TOKEN_CASES: &[(&str, &str)] = &[
         "interface merged with a namespace holding a value",
         "interface Foo { a: number }\nnamespace Foo { export const x = 1; }",
     ),
+    // A `var` binds in the enclosing scope, also from a block or a loop.
+    (
+        "interface merged with a var in a block",
+        "interface Foo { a: number }\n{ var Foo = class {}; }",
+    ),
+    (
+        "interface merged with a loop var",
+        "interface Foo { a: number }\nfor (var Foo = class {}; false; ) {}",
+    ),
 ];
 
 #[test]
@@ -169,6 +178,7 @@ export class S {{ constructor(f: Foo) {{}} }}"
         );
         let code = compile(&source);
         assert!(code.contains("new(__ngFactoryType__||S)(i0.ɵɵinject(Foo))"), "{name}:\n{code}");
+        assert!(code.contains("()=>[{type:Foo}]"), "{name} (metadata):\n{code}");
         let code = compile_partial(&source);
         assert!(code.contains("deps:[{token:Foo}]"), "{name}:\n{code}");
 

@@ -6,8 +6,8 @@
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
     BindingPattern, ChainElement, Class, ClassElement, Declaration, Decorator, Expression,
-    FormalParameter, ObjectPropertyKind, PropertyKey, Statement, TSNamespaceDeclarationBody,
-    TSType, TSTypeName, VariableDeclaration,
+    ForStatementInit, ForStatementLeft, FormalParameter, ObjectPropertyKind, PropertyKey,
+    Statement, TSNamespaceDeclarationBody, TSType, TSTypeName, VariableDeclaration,
 };
 use oxc_span::GetSpan;
 use oxc_str::Ident;
@@ -1255,7 +1255,69 @@ impl<'a> LocalDecls<'a> {
             Statement::TSGlobalDeclaration(global) => {
                 globals.extend(global.body.body.iter());
             }
+            _ => self.insert_hoisted_vars(stmt),
+        }
+    }
+
+    /// The `var`s of a block or loop: they bind in the enclosing scope, so
+    /// `{ var Foo = class {} }` merges with `interface Foo` (a value). Function
+    /// and class bodies have their own scope.
+    fn insert_hoisted_vars(&mut self, stmt: &'a Statement<'a>) {
+        match stmt {
+            Statement::VariableDeclaration(decl) if decl.kind.is_var() => {
+                self.insert_var_names(decl);
+            }
+            Statement::BlockStatement(block) => {
+                block.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+            }
+            Statement::IfStatement(stmt) => {
+                self.insert_hoisted_vars(&stmt.consequent);
+                if let Some(alternate) = &stmt.alternate {
+                    self.insert_hoisted_vars(alternate);
+                }
+            }
+            Statement::ForStatement(stmt) => {
+                if let Some(ForStatementInit::VariableDeclaration(decl)) = &stmt.init
+                    && decl.kind.is_var()
+                {
+                    self.insert_var_names(decl);
+                }
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::ForInStatement(stmt) => {
+                self.insert_loop_left(&stmt.left);
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::ForOfStatement(stmt) => {
+                self.insert_loop_left(&stmt.left);
+                self.insert_hoisted_vars(&stmt.body);
+            }
+            Statement::WhileStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::DoWhileStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::LabeledStatement(stmt) => self.insert_hoisted_vars(&stmt.body),
+            Statement::TryStatement(stmt) => {
+                stmt.block.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                if let Some(handler) = &stmt.handler {
+                    handler.body.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+                if let Some(finalizer) = &stmt.finalizer {
+                    finalizer.body.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+            }
+            Statement::SwitchStatement(stmt) => {
+                for case in &stmt.cases {
+                    case.consequent.iter().for_each(|stmt| self.insert_hoisted_vars(stmt));
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn insert_loop_left(&mut self, left: &'a ForStatementLeft<'a>) {
+        if let ForStatementLeft::VariableDeclaration(decl) = left
+            && decl.kind.is_var()
+        {
+            self.insert_var_names(decl);
         }
     }
 
