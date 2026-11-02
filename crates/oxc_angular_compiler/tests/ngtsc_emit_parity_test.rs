@@ -4,6 +4,8 @@
 //! - a constructor parameter without a usable token makes the whole factory
 //!   `ɵɵinvalidFactory()` (full) / `deps: "invalid"` (partial), never
 //!   `ɵɵinvalidFactoryDep(n)`
+//! - a parameter typed by an interface or type alias declared in the file has
+//!   no token (#653); a name that is also a value keeps it
 //! - `ɵmod` never lists `schemas` (the NgModule handler passes `schemas: []`)
 //! - a directive's query predicates are pooled (`const _c0 = [...]`)
 //! - a default-imported DI token stays `Foo`, not `i1.default`; its import is
@@ -145,32 +147,84 @@ export class C { constructor(f: Foo) {} }",
     ),
 ];
 
-/// A name that is a value as well as a type stays the token, as in ngtsc.
+/// A name that is a value as well as a type stays the token, as in ngtsc:
+/// declarations put before a class whose constructor takes `f: Foo`.
 const LOCAL_VALUE_TOKEN_CASES: &[(&str, &str)] = &[
+    ("interface merged with a class", "interface Foo { a: number }\nclass Foo {}"),
+    ("enum", "enum Foo { A }"),
     (
-        "interface merged with a class",
-        "import { Injectable } from '@angular/core';
-interface Foo { a: number }
-class Foo {}
-@Injectable()
-export class S { constructor(f: Foo) {} }",
-    ),
-    (
-        "enum",
-        "import { Injectable } from '@angular/core';
-enum Foo { A }
-@Injectable()
-export class S { constructor(f: Foo) {} }",
+        "interface merged with a namespace holding a value",
+        "interface Foo { a: number }\nnamespace Foo { export const x = 1; }",
     ),
 ];
 
 #[test]
 fn local_value_ctor_dep_stays_the_token() {
-    for (name, source) in LOCAL_VALUE_TOKEN_CASES {
-        let code = compile(source);
+    for (name, decls) in LOCAL_VALUE_TOKEN_CASES {
+        let source = format!(
+            "import {{ Injectable }} from '@angular/core';
+{decls}
+@Injectable()
+export class S {{ constructor(f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
         assert!(code.contains("new(__ngFactoryType__||S)(i0.ɵɵinject(Foo))"), "{name}:\n{code}");
-        let code = compile_partial(source);
+        let code = compile_partial(&source);
         assert!(code.contains("deps:[{token:Foo}]"), "{name}:\n{code}");
+
+        let source = format!(
+            "import {{ Component }} from '@angular/core';
+{decls}
+@Component({{ selector: 'c', template: '' }})
+export class C {{ constructor(f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
+        assert!(
+            code.contains("new(__ngFactoryType__||C)(i0.ɵɵdirectiveInject(Foo))"),
+            "{name} (component):\n{code}"
+        );
+        let code = compile_partial(&source);
+        assert!(code.contains("deps:[{token:Foo}]"), "{name} (component):\n{code}");
+    }
+}
+
+/// A `declare global` interface merges with the lib's value of the same name,
+/// so ngtsc keeps the token.
+#[test]
+fn global_interface_ctor_dep_stays_the_token() {
+    let code = compile(
+        "import { Injectable } from '@angular/core';
+declare global { interface Window { a: number } }
+@Injectable()
+export class S { constructor(w: Window) {} }",
+    );
+    assert_contains(&code, "new(__ngFactoryType__||S)(i0.ɵɵinject(Window))");
+    let code = compile_partial(
+        "import { Component } from '@angular/core';
+declare global { interface HTMLElement { a: number } }
+@Component({ selector: 'c', template: '' })
+export class C { constructor(e: HTMLElement) {} }",
+    );
+    assert_contains(&code, "deps:[{token:HTMLElement}]");
+}
+
+/// An `@Inject` token is used as written, whatever the parameter's type.
+#[test]
+fn inject_token_on_a_local_interface_param_stays_the_token() {
+    for decorator in ["Injectable()", "Component({ selector: 'c', template: '' })"] {
+        let name = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {name}, Inject, InjectionToken }} from '@angular/core';
+interface Foo {{ a: number }}
+const FOO = new InjectionToken<Foo>('foo');
+@{decorator}
+export class S {{ constructor(@Inject(FOO) f: Foo) {{}} }}"
+        );
+        let code = compile(&source);
+        assert_contains(&code, "(FOO))");
+        assert_not_contains(&code, "ɵɵinvalidFactory");
+        let code = compile_partial(&source);
+        assert_contains(&code, "deps:[{token:FOO}]");
     }
 }
 

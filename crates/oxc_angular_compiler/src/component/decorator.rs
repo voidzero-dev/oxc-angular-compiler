@@ -17,7 +17,6 @@ use super::metadata::{
     TemplateDependency, ViewEncapsulation,
 };
 use super::transform::ImportMap;
-use crate::class_metadata::LocalDecls;
 use crate::directive::{
     HostKey, HostValue, MemberHostBindings, StringConsts, evaluate_host_directives,
     extract_input_metadata_in, extract_output_metadata_in, merge_by_class_property,
@@ -813,19 +812,8 @@ fn extract_constructor_deps<'a>(
             // Constructor found - extract parameters (may be empty)
             let mut deps = Vec::new_in(&allocator);
             let params = &ctor.value.params;
-            let local_decls = consts
-                .program()
-                .filter(|_| !params.items.is_empty())
-                .map(|program| LocalDecls::collect(&program.body));
-
             for param in &params.items {
-                let dep = extract_param_dependency(
-                    allocator,
-                    param,
-                    import_map,
-                    local_decls.as_ref(),
-                    consts,
-                );
+                let dep = extract_param_dependency(allocator, param, import_map, consts);
                 deps.push(dep);
             }
 
@@ -844,15 +832,13 @@ fn extract_constructor_deps<'a>(
 /// Extract dependency metadata from a single constructor parameter.
 ///
 /// The `import_map` is used to look up the source module of the token,
-/// enabling proper tracking of import origins for constructor dependencies,
-/// and `local_decls` to tell a type declared in the file from a value.
+/// enabling proper tracking of import origins for constructor dependencies.
 /// Only Angular's parameter decorators count, imported from `@angular/core`
 /// (see [`crate::directive::angular_param_decorator`]).
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &'a oxc_ast::ast::FormalParameter<'a>,
     import_map: &ImportMap<'a>,
-    local_decls: Option<&LocalDecls<'a>>,
     consts: &StringConsts<'a>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
@@ -951,10 +937,10 @@ fn extract_param_dependency<'a>(
                     d
                 }
             } else if !from_inject
-                && local_decls.is_some_and(|decls| {
+                && consts.local_decls().is_some_and(|decls| {
                     let path: std::vec::Vec<Ident<'a>> =
                         std::iter::once(*token_name).chain(member_path.iter().copied()).collect();
-                    decls.is_type_only(&path)
+                    decls.is_type_only_token(&path)
                 })
             {
                 // An interface or type alias declared in the file is erased like

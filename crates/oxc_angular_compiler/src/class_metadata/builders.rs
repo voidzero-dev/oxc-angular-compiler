@@ -448,8 +448,7 @@ pub fn build_ctor_params_metadata_in<'a>(
     // (issue #563). `consts` carries the program for every in-file call site;
     // without it these checks are skipped.
     let class_type_params = type_param_names_of(class);
-    let local_decls =
-        consts.and_then(StringConsts::program).map(|program| LocalDecls::collect(&program.body));
+    let local_decls = consts.and_then(StringConsts::local_decls);
 
     let mut param_entries = AllocVec::new_in(&allocator);
 
@@ -464,7 +463,7 @@ pub fn build_ctor_params_metadata_in<'a>(
             namespace_registry,
             import_map,
             &class_type_params,
-            local_decls.as_ref(),
+            local_decls,
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -1154,6 +1153,9 @@ pub(crate) struct LocalDecls<'a> {
     /// so `type:` emits it (ngtsc: `class Foo` + `interface Foo` → `Foo`).
     value_decls: FxHashSet<&'a str>,
     namespaces: FxHashMap<&'a str, LocalDecls<'a>>,
+    /// Names a `declare global` block declares (root only). See
+    /// [`Self::is_type_only_token`].
+    global_names: FxHashSet<&'a str>,
 }
 
 impl<'a> LocalDecls<'a> {
@@ -1172,6 +1174,11 @@ impl<'a> LocalDecls<'a> {
             let stmt = globals[i];
             i += 1;
             decls.insert_statement(stmt, &mut globals);
+            let mut global = LocalDecls::default();
+            global.insert_statement(stmt, &mut std::vec::Vec::new());
+            decls.global_names.extend(global.type_decls);
+            decls.global_names.extend(global.value_decls);
+            decls.global_names.extend(global.namespaces.into_keys());
         }
         decls
     }
@@ -1389,6 +1396,15 @@ impl<'a> LocalDecls<'a> {
                 self.namespaces.get(name.as_str()).is_some_and(|nested| nested.is_type_only(rest))
             }
         }
+    }
+
+    /// [`Self::is_type_only`] for an injection token. A name declared in
+    /// `declare global` is not counted: the global interface merges with
+    /// values this file can't see (`declare global { interface Window {..} }`
+    /// with lib.dom's `declare var Window`), so ngtsc keeps such a token.
+    pub(crate) fn is_type_only_token(&self, path: &[Ident<'_>]) -> bool {
+        path.first().is_some_and(|root| !self.global_names.contains(root.as_str()))
+            && self.is_type_only(path)
     }
 }
 
