@@ -17,12 +17,15 @@ const dirs: string[] = []
 function project(version?: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'angular-version-'))
   dirs.push(dir)
-  if (version) {
-    const core = join(dir, 'node_modules/@angular/core')
-    mkdirSync(core, { recursive: true })
-    writeFileSync(join(core, 'package.json'), JSON.stringify({ name: '@angular/core', version }))
-  }
+  if (version) install(dir, version)
   return dir
+}
+
+/** `@angular/core` at `version` in `dir/node_modules`. */
+function install(dir: string, version: string): void {
+  const core = join(dir, 'node_modules/@angular/core')
+  mkdirSync(core, { recursive: true })
+  writeFileSync(join(core, 'package.json'), JSON.stringify({ name: '@angular/core', version }))
 }
 
 afterEach(() => {
@@ -54,6 +57,20 @@ describe('installedAngularVersion', () => {
     const nested = join(root, 'apps/app')
     mkdirSync(nested, { recursive: true })
     expect(installedAngularVersion(nested)).toEqual({ major: 21, minor: 2, patch: 1 })
+  })
+
+  it('resolves a relative root first', () => {
+    // `.` in an app whose packages are hoisted to the workspace above it.
+    const root = project('21.2.1')
+    const nested = join(root, 'apps/app')
+    mkdirSync(nested, { recursive: true })
+    const cwd = process.cwd()
+    process.chdir(nested)
+    try {
+      expect(installedAngularVersion('.')).toEqual({ major: 21, minor: 2, patch: 1 })
+    } finally {
+      process.chdir(cwd)
+    }
   })
 
   it('gives undefined without a readable package', () => {
@@ -125,5 +142,25 @@ describe('angularVersion default', () => {
       root,
     )
     expect(code).not.toContain('ERROR')
+  })
+
+  it("reads the version installed for Vite's root, not the workspace root", async () => {
+    // An app with its own `@angular/core` in a workspace on a newer one.
+    const workspace = project('22.2.0')
+    const app = join(workspace, 'apps/old')
+    install(app, '22.1.0')
+    const code = await transform({ workspaceRoot: workspace }, app)
+    expect(code).not.toContain('ERROR')
+  })
+
+  it('links dependencies for the same version', async () => {
+    const workspace = project('22.2.0')
+    const app = join(workspace, 'apps/old')
+    install(app, '22.1.0')
+    const linker = angular({ workspaceRoot: workspace }).find(
+      (candidate) => candidate.name === '@oxc-angular/vite-linker',
+    ) as any
+    const config = linker.config({ root: app }, { command: 'build', mode: 'production' })
+    expect(config.optimizeDeps.rolldownOptions.plugins[0].name).toBe('angular-linker@22.1.0')
   })
 })

@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import { linkAngularPackage, type AngularVersion } from '#binding'
 import type { Plugin, ResolvedConfig } from 'vite'
 
@@ -100,8 +102,11 @@ async function linkCode(
 }
 
 export interface AngularLinkerPluginOptions {
-  /** Angular version of the application, forwarded to the linker. Assumes latest when unset. */
-  angularVersion?: AngularVersion
+  /**
+   * Angular version of the application, forwarded to the linker, or a function
+   * giving it for Vite's root. Assumes latest when unset.
+   */
+  angularVersion?: AngularVersion | ((root: string) => AngularVersion | undefined)
   /** Return source maps from linked code back to the package file. Default: false */
   sourcemap?: boolean
 }
@@ -124,10 +129,15 @@ function optimizerPluginName(
 }
 
 export function angularLinkerPlugin({
-  angularVersion,
+  angularVersion: angularVersionOption,
   sourcemap = false,
 }: AngularLinkerPluginOptions = {}): Plugin {
   let optimizeDepsExclude: readonly string[] = []
+  // Recomputed for the config's root in `config`.
+  let angularVersion =
+    typeof angularVersionOption === 'function'
+      ? angularVersionOption(process.cwd())
+      : angularVersionOption
 
   return {
     name: '@oxc-angular/vite-linker',
@@ -137,7 +147,13 @@ export function angularLinkerPlugin({
       optimizeDepsExclude = config.optimizeDeps?.exclude ?? []
     },
 
-    config(_, { command }) {
+    config(userConfig, { command }) {
+      if (typeof angularVersionOption === 'function') {
+        // The root Vite resolves the config with (`resolveConfig`).
+        angularVersion = angularVersionOption(
+          userConfig.root ? resolve(userConfig.root) : process.cwd(),
+        )
+      }
       return {
         optimizeDeps: {
           rolldownOptions: {

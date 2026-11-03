@@ -1,17 +1,18 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import type { AngularVersion } from '#binding'
 
 /**
- * The version of `@angular/core` installed for the project at `root`, the
- * default of the `angularVersion` option. `undefined` when it isn't found or
+ * The version of `@angular/core` installed for the project at `root` (Vite's
+ * root), the default of the `angularVersion` option. `undefined` when it isn't found or
  * is a build of Angular's own repository (`0.0.0-...`): the compiler then
  * targets the latest version.
  */
 export function installedAngularVersion(root: string): AngularVersion | undefined {
-  const file = findAngularCorePackageJson(root)
+  // A relative `dirname` chain would stop at `.`.
+  const file = findAngularCorePackageJson(resolve(root))
   if (!file) return undefined
   try {
     return parseAngularVersion(JSON.parse(readFileSync(file, 'utf8')).version)

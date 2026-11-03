@@ -104,9 +104,10 @@ export interface PluginOptions {
    *
    * Also used when linking partially compiled libraries (`ɵɵngDeclare*`).
    *
-   * Default: the version of `@angular/core` installed for `workspaceRoot`
-   * (found in `node_modules` from there up). When none is found, or it is a
-   * `0.0.0-...` build, the latest Angular version is assumed.
+   * Default: the version of `@angular/core` installed for Vite's `root`
+   * (found in `node_modules` from there up), like the package the app
+   * imports. When none is found, or it is a `0.0.0-...` build, the latest
+   * Angular version is assumed.
    *
    * @example
    * ```ts
@@ -325,12 +326,24 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     // object form turns them on; `sourceMap: true` only covers scripts.
     vendorSourceMap: typeof options.sourceMap === 'object' && (options.sourceMap.vendor ?? false),
     fileReplacements,
-    angularVersion: options.angularVersion ?? installedAngularVersion(workspaceRoot),
+    // Without the option, the installed version once Vite's root is known.
+    angularVersion: options.angularVersion,
     emitClassMetadata: options.emitClassMetadata ?? true,
     compilationMode: options.compilationMode ?? 'full',
     preserveWhitespaces: options.preserveWhitespaces,
     enableI18nLegacyMessageIdFormat: options.enableI18nLegacyMessageIdFormat ?? false,
     tsconfig: options.tsconfig,
+  }
+
+  // The `angularVersion` option, else the `@angular/core` version installed
+  // for the Vite root `root` (looked up once per root).
+  let installed: { root: string; version: AngularVersion | undefined } | undefined
+  function angularVersionFor(root: string): AngularVersion | undefined {
+    if (options.angularVersion) return options.angularVersion
+    if (!installed || installed.root !== root) {
+      installed = { root, version: installedAngularVersion(root) }
+    }
+    return installed.version
   }
 
   let resolvedConfig: ResolvedConfig
@@ -746,6 +759,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       },
       configResolved(config) {
         resolvedConfig = config
+        pluginOptions.angularVersion = angularVersionFor(config.root ?? workspaceRoot)
       },
       outputOptions(options) {
         outputMinify = options.minify
@@ -1727,7 +1741,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     angularPlugin(),
     dtsPlugin(),
     angularLinkerPlugin({
-      angularVersion: pluginOptions.angularVersion,
+      angularVersion: angularVersionFor,
       // The linker only sees node_modules files, so it follows the vendor setting
       // (Angular CLI only maps third-party code when both scripts and vendor are on).
       sourcemap: pluginOptions.sourceMap && pluginOptions.vendorSourceMap,
