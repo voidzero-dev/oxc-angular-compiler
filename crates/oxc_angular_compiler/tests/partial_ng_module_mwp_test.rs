@@ -1347,4 +1347,80 @@ export class AppModule {}
         assert!(code.contains("import*asi1from'./dep';"), "{code}");
         assert!(code.contains("type:AppModule,imports:[i1.DepModule]}"), "{code}");
     }
+
+    #[test]
+    fn a_list_from_a_file_that_loads_this_one_keeps_the_wrap() {
+        // `cyc.ts` loads this file back, so `LIST` may not be defined yet
+        // when the NgModule is: full compilation lists `LIST` as written, so
+        // the wrap a `forwardRef` asked for stays (ngtsc full writes
+        // `[EarlyCmp, i1.OtherCmp]`). Partial keeps it too.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "cyc.ts",
+            "import { TITLE } from './app';\nimport { OtherCmp } from './other';\nexport const LIST = [OtherCmp];\nexport const T2 = TITLE;\n",
+        );
+        write(
+            &dir,
+            "other.ts",
+            "import { Component } from '@angular/core';\n@Component({ selector: 'o', template: '', standalone: false })\nexport class OtherCmp {}\n",
+        );
+        let source = r"
+import { NgModule, Component, forwardRef } from '@angular/core';
+import { LIST } from './cyc';
+@Component({ selector: 'e', template: '', standalone: false })
+export class EarlyCmp {}
+export const TITLE = 'x';
+@NgModule({ declarations: [forwardRef(() => EarlyCmp), LIST] })
+export class AppModule {}
+";
+        let code = compile(&dir, "app.ts", source, CompilationMode::Full);
+        assert!(
+            code.contains("ɵɵsetNgModuleScope(AppModule,{declarations:()=>[EarlyCmp,LIST]})"),
+            "{code}"
+        );
+        let code = compile(&dir, "app.ts", source, CompilationMode::Partial);
+        assert!(code.contains("type:AppModule,declarations:()=>[EarlyCmp,i1.OtherCmp]}"), "{code}");
+    }
+
+    #[test]
+    fn a_declaration_file_list_keeps_its_old_output() {
+        // ngtsc reads the tuple type (`[i1.LibModule, i1.LibDir]`); oxc
+        // doesn't here, so `...WRAPPED` keeps its old output instead of
+        // naming the list as a class.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "node_modules/fakelib/package.json",
+            r#"{ "name": "fakelib", "types": "index.d.ts" }"#,
+        );
+        write(
+            &dir,
+            "node_modules/fakelib/index.d.ts",
+            r#"import * as i0 from '@angular/core';
+export declare class LibModule {
+  static ɵmod: i0.ɵɵNgModuleDeclaration<LibModule, never, never, never>;
+  static ɵinj: i0.ɵɵInjectorDeclaration<LibModule>;
+}
+export declare class LibDir {
+  static ɵdir: i0.ɵɵDirectiveDeclaration<LibDir, "[lib]", never, {}, {}, never, never, true, never>;
+}
+export declare const LIB_ALL: [typeof LibModule, typeof LibDir];
+"#,
+        );
+        write(
+            &dir,
+            "lib.ts",
+            "import { LIB_ALL } from 'fakelib';\nexport const WRAPPED = [...LIB_ALL];\n",
+        );
+        let source = r"
+import { NgModule } from '@angular/core';
+import { WRAPPED } from './lib';
+@NgModule({ imports: [...WRAPPED] })
+export class M2 {}
+";
+        let code = compile(&dir, "app.ts", source, CompilationMode::Partial);
+        assert!(code.contains("type:M2}"), "{code}");
+        assert!(!code.contains("LIB_ALL"), "{code}");
+    }
 }

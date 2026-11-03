@@ -826,6 +826,30 @@ import { L } from './dep';
     }
 
     #[test]
+    fn a_package_class_reached_through_a_relative_file_keeps_its_entry() {
+        // `./lib` re-exports the package, so the class has no package
+        // specifier here. ngtsc writes `[i1.LibModule]` with a relative path
+        // into node_modules, which may not resolve and, under a dev server,
+        // loads a second copy of the package: the entry stays. Imported from
+        // the package itself, the class is named through it.
+        let dir = TempDir::new().unwrap();
+        fakelib(&dir);
+        write(&dir, "src/lib.ts", "export * from 'fakelib';\n");
+        let [full, _] = check_modules(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { LIB_LIST } from './lib';
+import { LIB_LIST as PKG_LIST } from 'fakelib';
+@NgModule({ imports: [...LIB_LIST] }) export class M1 {}
+@NgModule({ imports: [...PKG_LIST] }) export class M2 {}
+",
+            &[("M1", Some("...LIB_LIST")), ("M2", Some("i1.LibModule"))],
+        );
+        assert!(!full.contains("node_modules"), "{full}");
+    }
+
+    #[test]
     fn a_list_through_a_local_forward_ref_stays() {
         // This `forwardRef` returns `PlainModule`, not what its callback gives.
         let dir = TempDir::new().unwrap();

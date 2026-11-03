@@ -437,7 +437,7 @@ impl CrossFileAnalyzer {
                 .is_none_or(|name| inner.loads_back(&file, &name, &class.decl))
         };
         let named = |class: &ClassRef| {
-            Some(match inner.imported_name(class, &file)? {
+            Some(match inner.output_name(class, &file)? {
                 ImportedName::Local(name) => NamedClass::Local(name),
                 ImportedName::Module { specifier, name } => NamedClass::Module { specifier, name },
             })
@@ -458,7 +458,10 @@ impl CrossFileAnalyzer {
                 let mut classes = Vec::new();
                 let mut forward_ref = false;
                 inner.flatten_list(&holder, items, &mut classes, &mut forward_ref, 0)?;
-                let unready = classes.iter().any(unready);
+                // Full compilation lists the binding as written, so the file
+                // it is imported from must not load this one back either.
+                let unready = classes.iter().any(unready)
+                    || inner.binding_loads_back(&file, question.namespace.unwrap_or(question.name));
                 let classes = classes.iter().map(named).collect::<Option<_>>()?;
                 Some(Answer::Classes { classes, unready, forward_ref })
             }
@@ -827,6 +830,8 @@ impl Inner {
                     out.push(class);
                     Some(())
                 }
+                // A declaration file's list type is not read here.
+                Declared::TypeList(_) => None,
                 _ if raw.method.is_some() => None,
                 _ => {
                     out.push(class);
@@ -960,7 +965,19 @@ impl Inner {
             let name = self.export_name(&entry, &class.decl)?;
             return Some(ImportedName::Module { specifier: specifier.clone(), name });
         }
-        self.imported_name(class, file)
+        self.output_name(class, file)
+    }
+
+    /// [`Self::imported_name`] for a reference this file's output adds:
+    /// `None` for a relative path into `node_modules`. ngtsc writes one for a
+    /// package class reached through a relative `export *`, but it may not
+    /// resolve (a package's typings and code sit in different files) and,
+    /// under a dev server, loads a second copy of the package.
+    fn output_name(&self, class: &ClassRef, file: &str) -> Option<ImportedName> {
+        let name = self.imported_name(class, file)?;
+        let into_package = matches!(&name, ImportedName::Module { specifier, .. }
+            if is_relative(specifier) && in_node_modules(&class.decl.file));
+        (!into_package).then_some(name)
     }
 
     /// The classes of the compilation scope of the NgModule `module`: its
