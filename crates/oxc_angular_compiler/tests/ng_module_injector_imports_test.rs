@@ -230,6 +230,23 @@ import { Component, NgModule } from '@angular/core';
 }
 
 #[test]
+fn a_component_that_is_not_standalone_stays() {
+    // ngtsc fails here (-992011: not standalone, can't be imported). Oxc
+    // keeps such a component, alone or in a list, as before. `Dir` is left
+    // out.
+    assert_injectors(
+        r"
+import { Component, Directive, NgModule } from '@angular/core';
+@Component({ selector: 'l', template: '', standalone: false }) export class LocalNonStd {}
+@Directive({ selector: '[d]' }) export class Dir {}
+@NgModule({ imports: [LocalNonStd, [Dir, LocalNonStd]] }) export class M {}
+",
+        &[("M", Some("LocalNonStd,LocalNonStd"))],
+        &TransformOptions::default(),
+    );
+}
+
+#[test]
 fn what_is_not_known_to_be_a_directive_or_pipe_stays() {
     // A decorator not imported from `@angular/core`, an imported class (no
     // cross-file analysis), a `forRoot()` call, a const list, a spread and
@@ -867,6 +884,71 @@ export class AppModule {}
             result.dependencies.iter().any(|dep| dep.ends_with("dep.ts")),
             "{:?}",
             result.dependencies
+        );
+    }
+
+    #[test]
+    fn components_that_are_not_standalone_stay() {
+        // ngtsc fails here (-992011: not standalone, can't be imported). Oxc
+        // keeps such a component from another file, a package or a list, as
+        // before. The directives are left out.
+        let dir = TempDir::new().unwrap();
+        dep(&dir);
+        fakelib(&dir);
+        write(
+            &dir,
+            "src/list.ts",
+            "import { NonStdCmp } from './dep';\nexport const NL = [NonStdCmp];\n",
+        );
+        check_modules(
+            &dir,
+            r"
+import { Component, Directive, NgModule } from '@angular/core';
+import { NonStdCmp } from './dep';
+import { NL } from './list';
+import { LibNonStdCmp, LibDir } from 'fakelib';
+@Component({ selector: 'l', template: '', standalone: false }) export class LocalNonStd {}
+@Directive({ selector: '[d]' }) export class Dir {}
+@NgModule({
+  imports: [NonStdCmp, LibNonStdCmp, LocalNonStd, [Dir, LocalNonStd], [LibDir, LibNonStdCmp], ...NL],
+})
+export class M {}
+",
+            &[("M", Some("NonStdCmp,LibNonStdCmp,LocalNonStd,LocalNonStd,LibNonStdCmp,NL"))],
+        );
+    }
+
+    #[test]
+    fn a_component_with_imports_that_cannot_be_read_is_still_known() {
+        // Oxc can't read `mods()`, so `UCmp` stays in the `ɵinj` (ngtsc
+        // reads it and leaves `UCmp` out). `UCmp` is still a known
+        // component: `ACmp` gets its scope, as before.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "src/dep.ts",
+            r"
+import { Component, Directive, NgModule } from '@angular/core';
+@Directive({ selector: '[d]' }) export class Dir {}
+@NgModule({}) export class PlainModule {}
+export function mods() { return [PlainModule]; }
+@Component({ selector: 'u', template: '', imports: [mods()] }) export class UCmp {}
+",
+        );
+        let [_, partial] = check_modules(
+            &dir,
+            r"
+import { Component, NgModule } from '@angular/core';
+import { UCmp, Dir } from './dep';
+@Component({ selector: 'a', template: '<u></u>', standalone: false }) export class ACmp {}
+@NgModule({ declarations: [ACmp], imports: [UCmp, Dir] }) export class M {}
+",
+            &[("M", Some("UCmp"))],
+        );
+        assert!(
+            partial
+                .contains("i0.ɵɵsetComponentScope(ACmp, () => [i1.UCmp, i1.Dir, ACmp], () => []);"),
+            "{partial}"
         );
     }
 
