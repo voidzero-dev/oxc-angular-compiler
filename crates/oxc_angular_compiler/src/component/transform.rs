@@ -3581,6 +3581,13 @@ pub fn transform_angular_file(
         }
         _ => string_consts,
     };
+    // A default import kept only for such a `type:` is not needed now.
+    #[cfg(feature = "cross_file_elision")]
+    import_elision_mut.release_const_enum_ctor_types(
+        &parser_ret.program,
+        &string_consts,
+        options.emit_class_metadata && !options.advanced_optimizations,
+    );
 
     // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
     // other signal APIs get an ngDevMode `debugName` argument named after the

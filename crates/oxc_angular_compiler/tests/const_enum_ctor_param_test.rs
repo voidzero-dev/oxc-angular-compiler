@@ -977,6 +977,95 @@ export class Svc {
     }
 
     #[test]
+    fn default_import_of_a_const_enum_is_removed() {
+        // Nothing reads the import once `type:` is `undefined`. ngtsc drops
+        // it, and `./typed` has no JS file to load. A const enum through a
+        // default namespace (`KD.Inner`) too.
+        let typed = "declare const enum E { A = 1 }\nexport default E;\n";
+        let ns_keys = "enum E { A = 1 }
+namespace E { export const enum Inner { B = 2 } }
+export default E;
+";
+        let cases = [
+            ("keys.ts", "const enum KeyCodes { A = 1 }\nexport { KeyCodes as default };\n", "KD"),
+            ("typed.d.ts", typed, "KD"),
+            ("keys.ts", ns_keys, "KD.Inner"),
+        ];
+        for (file, content, param_type) in cases {
+            let module = file.trim_end_matches(".d.ts").trim_end_matches(".ts");
+            let source = format!(
+                "import {{ Injectable, Inject }} from '@angular/core';
+import KD from './{module}';
+@Injectable()
+export class Svc {{
+  constructor(@Inject('KD') kd: {param_type}) {{}}
+}}"
+            );
+            for mode in MODES {
+                let code =
+                    compile_files(&[(file, content), ("a.ts", &source)], &options(mode, true));
+                assert_eq!(
+                    ctor_params(&code),
+                    "[{type:undefined,decorators:[{type:Inject,args:[\"KD\"]}]}]",
+                    "{file} {mode:?}"
+                );
+                assert_not_contains(&code, "importKD");
+            }
+        }
+    }
+
+    #[test]
+    fn default_import_of_a_const_enum_stays_while_the_output_names_it() {
+        // Today's output, kept: the factory names it (no `@Inject`; ngtsc
+        // writes `ɵɵinvalidFactory()` there), and so does a nested class's
+        // metadata, which keeps `type: KD`.
+        let keys = "const enum KeyCodes { A = 1 }\nexport { KeyCodes as default };\n";
+        let factory = "import { Injectable } from '@angular/core';
+import KD from './keys';
+@Injectable()
+export class Svc { constructor(kd: KD) {} }";
+        let nested = "import { Injectable, Inject } from '@angular/core';
+import KD from './keys';
+@Injectable()
+export class Svc { constructor(@Inject('KD') kd: KD) {} }
+export function make() {
+  @Injectable()
+  class Nested { constructor(@Inject('KD') kd: KD) {} }
+  return Nested;
+}";
+        for source in [factory, nested] {
+            for mode in MODES {
+                let code =
+                    compile_files(&[("keys.ts", keys), ("a.ts", source)], &options(mode, true));
+                assert_contains(&code, "importKDfrom'./keys'");
+            }
+        }
+    }
+
+    #[test]
+    fn locally_type_exported_const_enum_has_no_type() {
+        // `export type { KeyCodes }` of a local const enum. ngtsc:
+        // `undefined`, `i1.Plain`, and the `./keys` import stays for it.
+        let source = "import { Injectable, Inject } from '@angular/core';
+import { KeyCodes, Plain } from './keys';
+@Injectable()
+export class Svc {
+  constructor(@Inject('K') a: KeyCodes, @Inject('P') p: Plain) {}
+}";
+        let keys = "const enum KeyCodes { A = 1 }\nexport type { KeyCodes };\nexport enum Plain { X = 1 }\n";
+        for mode in MODES {
+            let code = compile_files(&[("keys.ts", keys), ("a.ts", source)], &options(mode, true));
+            assert_eq!(
+                ctor_params(&code),
+                "[{type:undefined,decorators:[{type:Inject,args:[\"K\"]}]},\
+                 {type:i1.Plain,decorators:[{type:Inject,args:[\"P\"]}]}]",
+                "{mode:?}"
+            );
+            assert_contains(&code, "import*asi1from'./keys'");
+        }
+    }
+
+    #[test]
     fn const_enum_member_keeps_its_type() {
         // An enum member is no `ConstEnum` symbol. ngtsc: `Local.A`,
         // `i1.KeyCodes.A`, `i1.KeyCodes.A`.
