@@ -519,7 +519,7 @@ fn real_path(file: &Path) -> String {
 }
 
 /// Whether `file` is in a package rather than the workspace.
-fn in_node_modules(file: &str) -> bool {
+pub(super) fn in_node_modules(file: &str) -> bool {
     Path::new(file).components().any(|part| part.as_os_str() == "node_modules")
 }
 

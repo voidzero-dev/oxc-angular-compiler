@@ -109,7 +109,7 @@ struct Inner {
     scope: ng_module_scope::ScopeState,
     /// File path -> what the `const enum` lookups read of it (see
     /// [`const_enums`]).
-    enum_shapes: RefCell<FxHashMap<String, Rc<const_enums::EnumShape>>>,
+    enum_shapes: RefCell<FxHashMap<String, std::sync::Arc<const_enums::EnumShape>>>,
 }
 
 /// A file parsed once per analyzer: its program, and the consts the

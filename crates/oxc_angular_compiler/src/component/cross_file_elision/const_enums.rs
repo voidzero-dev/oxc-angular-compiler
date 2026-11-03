@@ -9,9 +9,14 @@
 //! namespaces and exports. A type name is followed through them the way
 //! TypeScript resolves its symbol. Anything that can't be followed gives
 //! `false`, and the caller keeps today's output.
+//!
+//! The shapes of package files are also kept for the whole process (see
+//! [`PACKAGE_SHAPES`]): each transform call has its own analyzer, and a
+//! package's typings are large (`@angular/core` reads about 670 KB).
 
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::time::SystemTime;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
@@ -22,7 +27,22 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::ng_module_scope::in_node_modules;
 use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
+
+/// The shapes of the package files (under `node_modules`) any analyzer has
+/// read, by path, with the [`FileStamp`] they were read at. A file whose
+/// stamp changed is read again.
+static PACKAGE_SHAPES: LazyLock<Mutex<PackageShapes>> = LazyLock::new(Mutex::default);
+
+type PackageShapes = FxHashMap<String, (FileStamp, Arc<EnumShape>)>;
+
+/// When a file was last changed, and its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
 
 /// Names in one scope: a file's top level, or the exported members of the
 /// namespaces of one name.
@@ -182,22 +202,50 @@ impl Inner {
 
     /// The [`EnumShape`] of `file`, read on first use. `None` when it can't
     /// be read or parsed.
-    fn enum_shape(&self, file: &str) -> Option<Rc<EnumShape>> {
+    fn enum_shape(&self, file: &str) -> Option<Arc<EnumShape>> {
         if let Some(shape) = self.enum_shapes.borrow().get(file) {
-            return Some(Rc::clone(shape));
-        }
-        let source = std::fs::read_to_string(file).ok()?;
-        let allocator = Allocator::default();
-        let source_type = SourceType::from_path(file).unwrap_or_default();
-        let parsed = Parser::new(&allocator, &source, source_type).parse();
-        if parsed.fatal_error {
-            return None;
+            return Some(Arc::clone(shape));
         }
         let shape =
-            Rc::new(collect_enum_shape(&parsed.program, source_type.is_typescript_definition()));
-        self.enum_shapes.borrow_mut().insert(file.to_string(), Rc::clone(&shape));
+            if in_node_modules(file) { package_shape(file)? } else { Arc::new(read_shape(file)?) };
+        self.enum_shapes.borrow_mut().insert(file.to_string(), Arc::clone(&shape));
         Some(shape)
     }
+}
+
+/// The [`EnumShape`] of the package file `file`, from [`PACKAGE_SHAPES`]
+/// while the file is unchanged.
+fn package_shape(file: &str) -> Option<Arc<EnumShape>> {
+    let meta = std::fs::metadata(file).ok()?;
+    let stamp = FileStamp { modified: meta.modified().ok(), len: meta.len() };
+    let cached = PACKAGE_SHAPES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(file)
+        .filter(|(read_at, _)| *read_at == stamp)
+        .map(|(_, shape)| Arc::clone(shape));
+    if cached.is_some() {
+        return cached;
+    }
+    // Read without the lock: another thread may read the same file too.
+    let shape = Arc::new(read_shape(file)?);
+    PACKAGE_SHAPES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(file.to_string(), (stamp, Arc::clone(&shape)));
+    Some(shape)
+}
+
+/// Read and parse `file` into its [`EnumShape`].
+fn read_shape(file: &str) -> Option<EnumShape> {
+    let source = std::fs::read_to_string(file).ok()?;
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(file).unwrap_or_default();
+    let parsed = Parser::new(&allocator, &source, source_type).parse();
+    if parsed.fatal_error {
+        return None;
+    }
+    Some(collect_enum_shape(&parsed.program, source_type.is_typescript_definition()))
 }
 
 impl Binding {

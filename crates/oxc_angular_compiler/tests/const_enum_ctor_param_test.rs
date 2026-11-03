@@ -858,6 +858,31 @@ export { Chunked, ChunkPlain, ChunkConst };
     }
 
     #[test]
+    fn a_changed_package_file_is_read_again() {
+        // Package typings are kept for the whole process while unchanged.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "node_modules/pkge/package.json",
+            r#"{ "name": "pkge", "types": "index.d.ts" }"#,
+        );
+        let typings = "node_modules/pkge/index.d.ts";
+        let source = "import { Injectable, Inject } from '@angular/core';
+import { E } from 'pkge';
+@Injectable()
+export class Svc {
+  constructor(@Inject('E') e: E) {}
+}";
+        let file = write(&dir, "a.ts", source);
+        let options = options(CompilationMode::Full, true);
+        write(&dir, typings, "export declare const enum E { A = 1 }\n");
+        assert_contains(&compile_at(&file, source, &options), "type:undefined");
+        assert_contains(&compile_at(&file, source, &options), "type:undefined");
+        write(&dir, typings, "export declare enum E { A = 1 }\n");
+        assert_contains(&compile_at(&file, source, &options), "type:i1.E");
+    }
+
+    #[test]
     fn exported_merges_through_a_namespace_import_have_no_type() {
         // ngtsc: `undefined` four times, and no `./keys` import.
         let keys = "export const enum T1 { A = 1 }
