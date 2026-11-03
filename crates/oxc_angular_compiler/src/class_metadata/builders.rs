@@ -6,7 +6,7 @@
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
     BindingPattern, ChainElement, Class, ClassElement, Declaration, Decorator, Expression,
-    ForStatementInit, ForStatementLeft, FormalParameter, ObjectPropertyKind, PropertyKey,
+    ForStatementInit, ForStatementLeft, FormalParameter, ObjectPropertyKind, Program, PropertyKey,
     Statement, TSNamespaceDeclarationBody, TSType, TSTypeName, VariableDeclaration,
 };
 use oxc_span::GetSpan;
@@ -449,6 +449,13 @@ pub fn build_ctor_params_metadata_in<'a>(
     // without it these checks are skipped.
     let class_type_params = type_param_names_of(class);
     let local_decls = consts.and_then(StringConsts::local_decls);
+    // A `const enum` is read by its name only for a class declared at the
+    // file top level: a class nested in a function or block may see another
+    // declaration of that name, which one file's top-level scan can't rule
+    // out, so it keeps today's output.
+    let const_enums_visible = consts
+        .and_then(StringConsts::program)
+        .is_some_and(|program| is_top_level_class(program, class));
 
     let mut param_entries = AllocVec::new_in(&allocator);
 
@@ -464,6 +471,7 @@ pub fn build_ctor_params_metadata_in<'a>(
             import_map,
             &class_type_params,
             local_decls,
+            const_enums_visible,
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -951,11 +959,18 @@ fn string_literal<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpre
 /// `TSTypeReference` after `T | null` narrowing (parens, other unions,
 /// `typeof`, primitives, `this`), it's a bare class type parameter, a
 /// type-only or bare namespace import, or it ends at an interface or type
-/// alias declared in the file. In local mode other value-less names (const
-/// enums, vars, bare namespaces, missing members, undeclared names) emit as
-/// written — upstream wraps them in `/* @ts-ignore */` rather than emitting
+/// alias declared in the file. In local mode other value-less names (vars,
+/// bare namespaces, missing members, undeclared names) emit as written —
+/// upstream wraps them in `/* @ts-ignore */` rather than emitting
 /// `undefined`. The DI dependency is not consulted: upstream derives `type:`
 /// purely from the type annotation.
+///
+/// `const enum`s follow full and partial compilation instead, the modes the
+/// Angular CLI and ng-packagr run: there `typeToValue` gives
+/// `noValueDeclaration` for a `ConstEnum` symbol, so `type:` is `undefined`.
+/// That holds for one declared in the file and for a named import the
+/// cross-file analysis found to be one ([`crate::ImportInfo::is_const_enum`]),
+/// when `const_enums_visible` says the class sees the file-scope names.
 fn build_param_type_expression<'a>(
     allocator: &'a Allocator,
     param: &FormalParameter<'a>,
@@ -963,6 +978,7 @@ fn build_param_type_expression<'a>(
     import_map: &ImportMap<'a>,
     type_params: &FxHashSet<Ident<'a>>,
     local_decls: Option<&LocalDecls<'a>>,
+    const_enums_visible: bool,
 ) -> Option<OutputExpression<'a>> {
     // Upstream's getConstructorParameters first narrows `T | null` to `T`
     // (typescript.ts); `typeToValue` then requires a bare `TypeReferenceNode`
@@ -991,6 +1007,11 @@ fn build_param_type_expression<'a>(
     // ImportedTypeValueReference nestedPath handling.
     if let Some(import_info) = import_map.get(&leftmost) {
         if import_info.is_type_only || path.len() == 1 && !import_info.is_named_import {
+            return None;
+        }
+        // An imported `const enum` (`import { KeyCodes }`): no value in full
+        // or partial `typeToValue`, so no `i1` import either.
+        if const_enums_visible && path.len() == 1 && import_info.is_const_enum {
             return None;
         }
         // `import Foo from 'm'`: upstream emits the local name itself (LOCAL
@@ -1027,14 +1048,15 @@ fn build_param_type_expression<'a>(
         ));
     }
 
-    // A local reference: `undefined` only when the path ends at an interface
-    // or type alias — the type-only declarations local `typeToValue` still
+    // A local reference: `undefined` when the path ends at an interface or
+    // type alias — the type-only declarations local `typeToValue` still
     // rejects (`isLocalCompilation` keeps only those three SyntaxKinds
-    // unavailable). Everything else — const enums, vars, functions, bare
+    // unavailable) — or at a `const enum`, which full and partial
+    // `typeToValue` reject too. Everything else — vars, functions, bare
     // namespace names, missing members, undeclared or global names — emits
     // as written, matching the upstream `/* @ts-ignore */ type: X` fallback.
     if let Some(decls) = local_decls
-        && decls.is_type_only(&path)
+        && (decls.is_type_only(&path) || const_enums_visible && decls.is_const_enum(&path))
     {
         return None;
     }
@@ -1046,6 +1068,26 @@ fn build_param_type_expression<'a>(
         )),
         &path[1..],
     ))
+}
+
+/// Whether `class` is declared in `program`'s body, not in a function, block
+/// or namespace.
+fn is_top_level_class(program: &Program<'_>, class: &Class<'_>) -> bool {
+    program.body.iter().any(|stmt| {
+        let top = match stmt {
+            Statement::ClassDeclaration(top) => top,
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(top) => top,
+                _ => return false,
+            },
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(top) => top,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        std::ptr::eq(top.as_ref(), class)
+    })
 }
 
 /// The `TSTypeReference` a ctor-param annotation narrows to, mirroring
@@ -1137,10 +1179,11 @@ pub fn type_param_names_of<'a>(class: &Class<'a>) -> FxHashSet<Ident<'a>> {
 /// comparison and single-file transform target — `experimental-local`, which
 /// matches what OXC can know from one file): only `TypeParameter`,
 /// `TypeAliasDeclaration`, and `InterfaceDeclaration` are `UNAVAILABLE`;
-/// everything else — vars, functions, const enums, bare namespace names,
-/// missing members, undeclared names — is emitted as written with an
-/// upstream `/* @ts-ignore */` (comparisons ignore the comment, and `Ident`
-/// output can't carry one anyway). `type_decls` holds interfaces and type
+/// everything else — vars, functions, bare namespace names, missing
+/// members, undeclared names — is emitted as written with an upstream
+/// `/* @ts-ignore */` (comparisons ignore the comment, and `Ident` output
+/// can't carry one anyway). `const_enums` follows full and partial
+/// compilation instead (see [`Self::is_const_enum`]). `type_decls` holds interfaces and type
 /// aliases; `namespaces` records namespace bodies recursively, needed for
 /// `ns.Interface` lookups and for the merged `interface I` + `namespace I`
 /// case — the merged symbol's valueDeclaration is the namespace, so it emits.
@@ -1156,6 +1199,9 @@ pub(crate) struct LocalDecls<'a> {
     /// Names a `declare global` block declares (root only). See
     /// [`Self::is_type_only_token`].
     global_names: FxHashSet<&'a str>,
+    /// Names declared by a `const enum` (also in `value_decls`). See
+    /// [`Self::is_const_enum`].
+    const_enums: FxHashSet<&'a str>,
 }
 
 impl<'a> LocalDecls<'a> {
@@ -1242,6 +1288,9 @@ impl<'a> LocalDecls<'a> {
             }
             Statement::TSEnumDeclaration(decl) => {
                 self.value_decls.insert(decl.id.name.as_str());
+                if decl.r#const {
+                    self.const_enums.insert(decl.id.name.as_str());
+                }
             }
             Statement::TSImportEqualsDeclaration(decl) => {
                 if decl.import_kind.is_type() {
@@ -1350,6 +1399,9 @@ impl<'a> LocalDecls<'a> {
             }
             Declaration::TSEnumDeclaration(d) => {
                 self.value_decls.insert(d.id.name.as_str());
+                if d.r#const {
+                    self.const_enums.insert(d.id.name.as_str());
+                }
             }
             Declaration::TSImportEqualsDeclaration(d) => {
                 if d.import_kind.is_type() {
@@ -1403,20 +1455,36 @@ impl<'a> LocalDecls<'a> {
         decl: &'a oxc_ast::ast::TSNamespaceDeclaration<'a>,
         globals: &mut std::vec::Vec<&'a Statement<'a>>,
     ) {
-        self.namespaces
-            .entry(decl.id.name.as_str())
-            .or_default()
-            .merge(Self::from_namespace_body(&decl.body, globals));
+        self.namespaces.entry(decl.id.name.as_str()).or_default().merge(Self::from_namespace_body(
+            &decl.body,
+            decl.declare,
+            globals,
+        ));
     }
 
+    /// `ambient` is whether the namespace is `declare`d, where every member
+    /// is visible from outside it.
     fn from_namespace_body(
         body: &'a TSNamespaceDeclarationBody<'a>,
+        ambient: bool,
         globals: &mut std::vec::Vec<&'a Statement<'a>>,
     ) -> Self {
         match body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => {
                 let mut decls = LocalDecls::default();
                 decls.insert_all(&block.body, globals);
+                // `NS.E` reads an exported member only: a const enum the block
+                // keeps to itself must not hide an exported `E` that another
+                // `namespace NS` block declares.
+                if !ambient {
+                    decls.const_enums.retain(|name| {
+                        block.body.iter().any(|stmt| {
+                            matches!(stmt, Statement::ExportDeclaration(export)
+                                if matches!(&export.declaration,
+                                    Declaration::TSEnumDeclaration(e) if e.id.name == *name))
+                        })
+                    });
+                }
                 decls
             }
             // `namespace Outer.Inner { ... }` nests by qualified name.
@@ -1424,7 +1492,7 @@ impl<'a> LocalDecls<'a> {
                 let mut decls = LocalDecls::default();
                 decls.namespaces.insert(
                     nested.id.name.as_str(),
-                    Self::from_namespace_body(&nested.body, globals),
+                    Self::from_namespace_body(&nested.body, ambient || nested.declare, globals),
                 );
                 decls
             }
@@ -1434,6 +1502,7 @@ impl<'a> LocalDecls<'a> {
     fn merge(&mut self, other: LocalDecls<'a>) {
         self.type_decls.extend(other.type_decls);
         self.value_decls.extend(other.value_decls);
+        self.const_enums.extend(other.const_enums);
         for (name, nested) in other.namespaces {
             self.namespaces.entry(name).or_default().merge(nested);
         }
@@ -1456,6 +1525,33 @@ impl<'a> LocalDecls<'a> {
             }
             Some((name, rest)) => {
                 self.namespaces.get(name.as_str()).is_some_and(|nested| nested.is_type_only(rest))
+            }
+        }
+    }
+
+    /// Whether `path` — `["ns", ..., "Name"]` — ends at a `const enum`
+    /// (`declare const enum` too). ngtsc's `typeToValue` has no value for
+    /// it outside local compilation (`decl.flags & ts.SymbolFlags.ConstEnum`
+    /// gives `noValueDeclaration`), so full and partial metadata write
+    /// `type: undefined`. A name a namespace, interface, type alias or
+    /// `declare global` block also declares is left out: one file can't be
+    /// sure what it merges with, so it keeps today's output.
+    pub(crate) fn is_const_enum(&self, path: &[Ident<'_>]) -> bool {
+        match path.split_first() {
+            None => false,
+            Some((name, [])) => {
+                let name = name.as_str();
+                self.const_enums.contains(name)
+                    && !self.namespaces.contains_key(name)
+                    && !self.type_decls.contains(name)
+                    && !self.global_names.contains(name)
+            }
+            Some((name, rest)) => {
+                !self.global_names.contains(name.as_str())
+                    && self
+                        .namespaces
+                        .get(name.as_str())
+                        .is_some_and(|nested| nested.is_const_enum(rest))
             }
         }
     }

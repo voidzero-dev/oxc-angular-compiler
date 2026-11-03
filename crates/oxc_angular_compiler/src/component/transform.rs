@@ -244,6 +244,42 @@ pub struct TransformOptions {
     /// Default: `false`, as in the `tsconfig.json` that `ng new` generates. ngtsc itself
     /// defaults to `true` when the option is not set.
     pub enable_i18n_legacy_message_id_format: bool,
+
+    /// Angular's `forbidOrphanComponents` compiler option: every component's
+    /// `ɵsetClassDebugInfo` call gets `forbidOrphanRendering: true`, so that in dev
+    /// mode (with JIT support) the runtime throws NG0981 when a non-standalone
+    /// component is rendered before its NgModule was loaded.
+    ///
+    /// Full mode only, like ngtsc: partial output has no class debug info. Default:
+    /// `false`, as in ngtsc (`!!options.forbidOrphanComponents`).
+    pub forbid_orphan_components: bool,
+
+    /// Angular's `enableTemplateSourceLocations` compiler option: end each
+    /// view's create block with `ɵɵattachSourceLocations(path, [[slot, offset,
+    /// line, column], ...])`, which writes a `data-ng-source-location`
+    /// attribute on each element. The call is not dev-mode guarded, so it
+    /// also runs in production.
+    ///
+    /// Needs `root_dirs`: with no root, nothing is emitted. Full compilation
+    /// only (the linker always turns it off), and Angular 19.1 or later.
+    ///
+    /// Default: `false`, as in ngtsc.
+    pub enable_template_source_locations: bool,
+
+    /// The TypeScript/Angular `rootDirs` option: the project roots that
+    /// paths in the output are made relative to, as ngtsc's
+    /// `getProjectRelativePath` does. Relative entries resolve against the
+    /// working directory.
+    ///
+    /// When set, `ɵsetClassDebugInfo`'s `filePath` is the component file
+    /// relative to the first root that contains it (left out when none
+    /// does), and `ɵɵattachSourceLocations` can name its template.
+    ///
+    /// Default: `None`, which keeps `filePath` as the path given to the
+    /// transform. ngtsc instead falls back to `rootDir`, then the working
+    /// directory, and lowercases paths on a case-insensitive file system;
+    /// oxc never lowercases.
+    pub root_dirs: Option<Vec<String>>,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -300,6 +336,9 @@ impl Default for TransformOptions {
             minify_component_styles: false,
             compilation_mode: crate::CompilationMode::Full,
             enable_i18n_legacy_message_id_format: false,
+            forbid_orphan_components: false,
+            enable_template_source_locations: false,
+            root_dirs: None,
         }
     }
 }
@@ -543,6 +582,12 @@ pub struct ImportInfo<'a> {
     /// declaration) while `{ default as Foo }` resolves IMPORTED
     /// (`i1.default`).
     pub is_default_import: bool,
+    /// Whether this named import is a `const enum` in the file it comes from,
+    /// as far as the cross-file analysis can tell (only with
+    /// `resolve_imported_values`). Read only by the class metadata `type:` of
+    /// a constructor parameter, which ngtsc writes as `undefined` for one.
+    /// DI tokens, `imports:` and `@defer` don't read it.
+    pub is_const_enum: bool,
 }
 
 /// Map from local identifier name to its import information.
@@ -643,6 +688,7 @@ pub fn build_import_map<'a>(
                             is_type_only,
                             imported_name,
                             is_default_import: false,
+                            is_const_enum: false,
                         },
                     );
                 }
@@ -671,6 +717,7 @@ pub fn build_import_map<'a>(
                             // binding name.
                             imported_name: Some(Ident::from("default")),
                             is_default_import: true,
+                            is_const_enum: false,
                         },
                     );
                 }
@@ -696,6 +743,7 @@ pub fn build_import_map<'a>(
                             is_type_only: decl_is_type_only,
                             imported_name: None,
                             is_default_import: false,
+                            is_const_enum: false,
                         },
                     );
                 }
@@ -3509,6 +3557,18 @@ pub fn transform_angular_file(
         }
     }
 
+    // A named import used as a constructor parameter type that the other
+    // file declares as a `const enum`: class metadata writes `type: undefined`
+    // for it, like ngtsc's full and partial `typeToValue`. Gated like the
+    // other cross-file reads of `resolve_imported_values`, and only the
+    // names a constructor parameter type uses are looked up.
+    #[cfg(feature = "cross_file_elision")]
+    if options.resolve_imported_values
+        && let Some(analyzer) = &cross_file_analyzer
+    {
+        mark_const_enum_imports(&parser_ret.program, &mut import_map, analyzer, path);
+    }
+
     // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
     // other signal APIs get an ngDevMode `debugName` argument named after the
     // binding they initialize. ngtsc adds it to the `before` emit transforms
@@ -4700,6 +4760,54 @@ pub fn transform_angular_file(
                         );
                     }
 
+                    // A partial declaration lists the NgModule of each
+                    // `ModuleWithProviders` import, like ngtsc. A class in a
+                    // function may see local bindings: it stays as before.
+                    if matches!(options.compilation_mode, crate::CompilationMode::Partial)
+                        && !site.nested
+                    {
+                        ng_module_metadata.partial_imports = partial_module_with_providers_imports(
+                            allocator,
+                            &parser_ret.program,
+                            class,
+                            &ng_module_metadata,
+                            &string_consts,
+                            &import_map,
+                            &import_elision_mut,
+                            #[cfg(feature = "cross_file_elision")]
+                            cross_file_analyzer
+                                .as_ref()
+                                .filter(|_| options.resolve_imported_values)
+                                .map(|analyzer| (analyzer, path, source)),
+                            &mut file_namespace_registry,
+                        );
+                    }
+
+                    // Like ngtsc in full and partial compilation, ɵinj leaves
+                    // out the directives and pipes of `imports` and `exports`
+                    // (#623). A nested class may name a binding of its
+                    // function, so it keeps the lists as written.
+                    if !site.nested
+                        && let Some(entries) =
+                            crate::ng_module::injector_entries(class, &string_consts)
+                    {
+                        #[cfg_attr(not(feature = "cross_file_elision"), allow(unused_mut))]
+                        let mut drops = entries.local_drops(&parser_ret.program, &string_consts);
+                        #[cfg(feature = "cross_file_elision")]
+                        if options.resolve_imported_values
+                            && let Some(analyzer) = &cross_file_analyzer
+                        {
+                            drops.merge(&analyzer.injector_drops(
+                                std::path::Path::new(path),
+                                source,
+                                ng_module_metadata.class_name.as_str(),
+                                entries.imports(),
+                                entries.exports(),
+                            ));
+                        }
+                        entries.apply(allocator, &mut ng_module_metadata, &drops);
+                    }
+
                     // Compile NgModule and generate all definitions as external property assignments
                     if let Some(definition) = generate_full_ng_module_definition(
                         &allocator,
@@ -5467,6 +5575,75 @@ fn scope_dependencies<'a>(
     Some(dependencies)
 }
 
+/// The partial `ɵɵngDeclareNgModule` imports of the NgModule `class`, with
+/// each `ModuleWithProviders` entry listed as its NgModule (see
+/// `ng_module::module_with_providers`), or `None` to list them as before.
+/// With cross-file analysis, a method or constant of another file is read
+/// too, and its NgModule is named through a namespace import, like
+/// `ɵɵsetComponentScope` names classes.
+#[expect(clippy::too_many_arguments)]
+fn partial_module_with_providers_imports<'a>(
+    allocator: &'a Allocator,
+    program: &Program<'_>,
+    class: &oxc_ast::ast::Class<'_>,
+    metadata: &crate::ng_module::NgModuleMetadata<'a>,
+    string_consts: &crate::directive::StringConsts<'_>,
+    import_map: &ImportMap<'_>,
+    import_elision: &ImportElisionAnalyzer<'_>,
+    #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
+    registry: &mut NamespaceRegistry<'a>,
+) -> Option<oxc_allocator::Vec<'a, OutputExpression<'a>>> {
+    use crate::ng_module::module_with_providers::{Binding, partial_imports};
+    #[cfg(feature = "cross_file_elision")]
+    use crate::ng_module::module_with_providers::{NamedClass, ResolveImported};
+    // Gives the closure the signature for every lifetime of its entries.
+    #[cfg(feature = "cross_file_elision")]
+    fn resolver<F>(f: F) -> F
+    where
+        F: Fn(&[(Option<&str>, &str, Option<&str>)]) -> Vec<Option<NamedClass>>,
+    {
+        f
+    }
+    let binding = |name: &str| match import_map.get(&Ident::from(name)) {
+        Some(info) if info.is_type_only => Binding::Other,
+        Some(info) if !info.is_named_import => Binding::Namespace,
+        Some(_) => Binding::Import { kept: !import_elision.should_elide(name) },
+        None => Binding::Other,
+    };
+    #[cfg(feature = "cross_file_elision")]
+    let resolve = analyzer.map(|(analyzer, path, source)| {
+        resolver(move |entries| {
+            use super::metadata::ImportedName;
+            analyzer
+                .module_with_providers_imports(std::path::Path::new(path), source, entries)
+                .into_iter()
+                .map(|name| {
+                    name.map(|name| match name {
+                        ImportedName::Local(name) => NamedClass::Local(name),
+                        ImportedName::Module { specifier, name } => {
+                            NamedClass::Module { specifier, name }
+                        }
+                    })
+                })
+                .collect()
+        })
+    });
+    #[cfg(feature = "cross_file_elision")]
+    let resolve_imported = resolve.as_ref().map(|resolve| resolve as ResolveImported<'_>);
+    #[cfg(not(feature = "cross_file_elision"))]
+    let resolve_imported = None;
+    partial_imports(
+        allocator,
+        program,
+        class,
+        string_consts,
+        &metadata.imports,
+        binding,
+        resolve_imported,
+        |specifier| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier))),
+    )
+}
+
 /// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for
 /// `scope`, with the modules its classes come from imported as namespaces.
 /// The lists are read when the component first renders: a module in an
@@ -5501,6 +5678,50 @@ fn set_component_scope_statement<'a>(
         directives.join(", "),
         pipes.join(", ")
     )
+}
+
+/// Set [`ImportInfo::is_const_enum`] on the named imports a constructor
+/// parameter of `program` names as its whole type (`kc: KeyCodes`, after
+/// `T | null` narrowing) when `analyzer` finds a `const enum` behind them.
+/// Type-only and default imports are left alone: their `type:` is decided
+/// without this.
+#[cfg(feature = "cross_file_elision")]
+fn mark_const_enum_imports<'a>(
+    program: &Program<'a>,
+    import_map: &mut ImportMap<'a>,
+    analyzer: &CrossFileAnalyzer,
+    path: &str,
+) {
+    let mut checked: rustc_hash::FxHashSet<Ident<'a>> = rustc_hash::FxHashSet::default();
+    for site in crate::util::declared_classes(program) {
+        let Some(ctor) = crate::util::find_constructor(site.class) else { continue };
+        for param in &ctor.value.params.items {
+            let Some(name) = param
+                .type_annotation
+                .as_ref()
+                .and_then(|annotation| {
+                    crate::class_metadata::param_type_reference(&annotation.type_annotation)
+                })
+                .and_then(|type_ref| crate::class_metadata::entity_path(&type_ref.type_name))
+                .and_then(|path| if let [name] = path[..] { Some(name) } else { None })
+            else {
+                continue;
+            };
+            if !checked.insert(name) {
+                continue;
+            }
+            let Some(info) = import_map.get_mut(&name) else { continue };
+            if !info.is_named_import || info.is_type_only || info.is_default_import {
+                continue;
+            }
+            let export_name = info.imported_name.unwrap_or(name);
+            info.is_const_enum = analyzer.is_const_enum_import(
+                info.source_module.as_str(),
+                export_name.as_str(),
+                std::path::Path::new(path),
+            );
+        }
+    }
 }
 
 /// The analyzer behind both cross-file features (`cross_file_elision`'s
@@ -6839,13 +7060,28 @@ fn compile_component_full<'a>(
         DeferBlockDepsEmitMode::PerBlock
     };
 
-    // Enable debug locations when NOT using advanced optimizations
-    // (advanced optimizations strip debug info for smaller output)
-    let enable_debug_locations = !options.advanced_optimizations;
-
-    // Build relative paths for debug locations
-    let relative_template_path =
-        if enable_debug_locations { Some(Ident::from_in(file_path, &allocator)) } else { None };
+    // Angular's `enableTemplateSourceLocations`, which ngtsc reads only for
+    // full compilation (the linker hard-codes it off). The path and source
+    // come from `ComponentDecoratorHandler.analyze`; with neither, the phase
+    // does nothing.
+    let template_source = if options.enable_template_source_locations
+        && matches!(options.compilation_mode, crate::CompilationMode::Full)
+        && super::source_locations::supports_attach_source_locations(options.angular_version)
+    {
+        super::source_locations::template_source(
+            allocator,
+            metadata,
+            template,
+            file_path,
+            source,
+            options.root_dirs.as_deref(),
+            resolved_resources,
+        )
+    } else {
+        None
+    };
+    let enable_debug_locations = template_source.is_some();
+    let (relative_template_path, template_source) = template_source.unzip();
 
     let relative_context_file_path = Some(Ident::from_in(file_path, &allocator));
 
@@ -6856,7 +7092,7 @@ fn compile_component_full<'a>(
         defer_block_deps_emit_mode,
         relative_template_path,
         enable_debug_locations,
-        template_source: if enable_debug_locations { Some(template) } else { None },
+        template_source,
         // PerComponent mode: pass the shared resolver expression so the
         // ingest stage attaches it to every defer block's create op.
         all_deferrable_deps_fn: defer_resolver_fn,
@@ -7126,9 +7362,22 @@ fn compile_component_full<'a>(
         let class_line_number = line_number_at(source, metadata.class_name_pos as usize);
 
         // Build the debug info with the actual class declaration line number
-        let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
-            .with_file_path(Ident::from_in(file_path, &allocator))
-            .with_line_number(class_line_number);
+        // ngtsc's `extractClassDebugInfo` gives the path relative to the
+        // project root, and none for a file outside it. With no root dirs,
+        // keep the path as given.
+        let debug_file_path = match &options.root_dirs {
+            Some(roots) => super::source_locations::project_relative_path(file_path, roots)
+                .filter(|path| !path.is_empty()),
+            None => Some(file_path.to_string()),
+        };
+        let mut debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
+            .with_line_number(class_line_number)
+            // ngtsc's ComponentDecoratorHandler passes `forbidOrphanComponents` to
+            // `extractClassDebugInfo` for every component, standalone or not.
+            .with_forbid_orphan_rendering(options.forbid_orphan_components);
+        if let Some(path) = debug_file_path {
+            debug_info = debug_info.with_file_path(Ident::from_in(path.as_str(), &allocator));
+        }
 
         // Compile to IIFE-wrapped expression
         let debug_info_expr =
@@ -7559,7 +7808,8 @@ pub fn compile_template_to_js_with_options<'a>(
         DeferBlockDepsEmitMode::PerBlock
     };
 
-    let enable_debug_locations = !options.advanced_optimizations;
+    // No template path here, so `attachSourceLocations` has nothing to emit.
+    let enable_debug_locations = false;
 
     let ingest_options = IngestOptions {
         mode,
@@ -7568,7 +7818,7 @@ pub fn compile_template_to_js_with_options<'a>(
         defer_block_deps_emit_mode,
         relative_template_path: None,
         enable_debug_locations,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks: FxHashMap::default(),
         pool_starting_index: 0, // Standalone template compilation starts from 0
@@ -7764,7 +8014,8 @@ pub fn compile_template_for_hmr<'a>(
     // PerBlock's empty map would have produced anyway.
     let defer_block_deps_emit_mode = DeferBlockDepsEmitMode::PerComponent;
 
-    let enable_debug_locations = !options.advanced_optimizations;
+    // No template path here, so `attachSourceLocations` has nothing to emit.
+    let enable_debug_locations = false;
 
     let ingest_options = IngestOptions {
         mode,
@@ -7773,7 +8024,7 @@ pub fn compile_template_for_hmr<'a>(
         defer_block_deps_emit_mode,
         relative_template_path: None,
         enable_debug_locations,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks: FxHashMap::default(),
         pool_starting_index: 0, // HMR template compilation starts from 0
@@ -8567,7 +8818,7 @@ pub fn compile_template_for_linker<'a>(
         defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,
         relative_template_path: None,
         enable_debug_locations: false,
-        template_source: Some(template),
+        template_source: None,
         all_deferrable_deps_fn: None,
         defer_blocks,
         pool_starting_index,

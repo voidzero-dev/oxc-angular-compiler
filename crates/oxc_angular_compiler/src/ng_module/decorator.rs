@@ -57,6 +57,12 @@ pub struct NgModuleMetadata<'a> {
     /// See [`Self::declarations_scope_expr`].
     pub exports_scope_expr: Option<OutputExpression<'a>>,
 
+    /// The partial `ɵɵngDeclareNgModule` imports with each
+    /// `ModuleWithProviders` listed as its NgModule, set by the transform
+    /// when it could read one (see `module_with_providers`). `None` lists
+    /// [`Self::imports`]. Full mode never reads it.
+    pub partial_imports: Option<Vec<'a, OutputExpression<'a>>>,
+
     /// Providers expression as OutputExpression.
     pub providers: Option<OutputExpression<'a>>,
 
@@ -92,6 +98,7 @@ impl<'a> NgModuleMetadata<'a> {
             declarations_scope_expr: None,
             imports_scope_expr: None,
             exports_scope_expr: None,
+            partial_imports: None,
             providers: None,
             bootstrap: Vec::new_in(&allocator),
             schemas: Vec::new_in(&allocator),

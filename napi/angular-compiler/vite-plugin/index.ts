@@ -169,6 +169,36 @@ export interface PluginOptions {
    * `tsconfig.json` that `ng new` generates.
    */
   enableI18nLegacyMessageIdFormat?: boolean
+
+  /**
+   * Angular's `forbidOrphanComponents` compiler option: each component's
+   * `ɵsetClassDebugInfo` call gets `forbidOrphanRendering: true`, so in dev mode
+   * (with JIT support) the runtime throws NG0981 when a non-standalone component
+   * is rendered before its NgModule was loaded.
+   *
+   * Only affects `compilationMode: 'full'` (partial output has no class debug
+   * info). Default: `false`, as in ngtsc.
+   */
+  forbidOrphanComponents?: boolean
+
+  /**
+   * Angular's `enableTemplateSourceLocations` compiler option: each template view
+   * calls `ɵɵattachSourceLocations`, which puts a `data-ng-source-location`
+   * attribute (`path@o:offset,l:line,c:column`) on every element. The call is not
+   * dev-mode guarded, so it also runs in production builds. Full compilation and
+   * Angular 19.1+ only. Default: `false`, as in ngtsc.
+   */
+  enableTemplateSourceLocations?: boolean
+
+  /**
+   * The `rootDirs` compiler option: the project roots that output paths are
+   * relative to (`ɵsetClassDebugInfo`'s `filePath`, the `ɵɵattachSourceLocations`
+   * path), like ngtsc's `getProjectRelativePath`. Relative entries resolve
+   * against `workspaceRoot`. Default: `[workspaceRoot]`, like ngtsc, which falls
+   * back to the working directory (in an Angular CLI build, the workspace root),
+   * so library files of a monorepo outside the app's Vite `root` still get one.
+   */
+  rootDirs?: string[]
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -327,6 +357,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     compilationMode: options.compilationMode ?? 'full',
     preserveWhitespaces: options.preserveWhitespaces,
     enableI18nLegacyMessageIdFormat: options.enableI18nLegacyMessageIdFormat ?? false,
+    forbidOrphanComponents: options.forbidOrphanComponents ?? false,
+    enableTemplateSourceLocations: options.enableTemplateSourceLocations ?? false,
+    rootDirs: options.rootDirs?.map((dir) => resolve(workspaceRoot, dir)),
     tsconfig: options.tsconfig,
   }
 
@@ -588,6 +621,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       compilationMode: pluginOptions.compilationMode,
       preserveWhitespaces: pluginOptions.preserveWhitespaces,
       enableI18nLegacyMessageIdFormat: pluginOptions.enableI18nLegacyMessageIdFormat,
+      forbidOrphanComponents: pluginOptions.forbidOrphanComponents,
+      enableTemplateSourceLocations: pluginOptions.enableTemplateSourceLocations,
+      // ngtsc makes output paths relative to its root dirs (`rootDir`, else the
+      // working directory); `workspaceRoot` (the working directory by default)
+      // stands in for them.
+      rootDirs: pluginOptions.rootDirs ?? [pluginOptions.workspaceRoot],
       // Evaluate decorator metadata imported from other files the way
       // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`,
       // `templateUrl: TEMPLATE_URL`). Read files land in

@@ -169,6 +169,33 @@ pub struct TransformOptions {
     #[napi(js_name = "enableI18nLegacyMessageIdFormat")]
     pub enable_i18n_legacy_message_id_format: Option<bool>,
 
+    /// The `forbidOrphanComponents` Angular compiler option
+    /// (`angularCompilerOptions.forbidOrphanComponents` in `tsconfig.json`).
+    ///
+    /// When `true`, each component's `ɵsetClassDebugInfo` call gets
+    /// `forbidOrphanRendering: true`, so in dev mode (with JIT support) the runtime
+    /// throws NG0981 when a non-standalone component is rendered before its NgModule
+    /// was loaded. Full compilation mode only. Defaults to `false`, as in ngtsc.
+    pub forbid_orphan_components: Option<bool>,
+
+    /// The `enableTemplateSourceLocations` Angular compiler option: end each
+    /// template view with `ɵɵattachSourceLocations(path, [[slot, offset, line,
+    /// column], ...])`, which writes a `data-ng-source-location` attribute on
+    /// each element (in production too). Full compilation only, Angular 19.1+.
+    ///
+    /// Needs `rootDirs`: with no root, nothing is emitted. Defaults to `false`.
+    pub enable_template_source_locations: Option<bool>,
+
+    /// The `rootDirs` compiler option: the project roots that output paths are
+    /// relative to, like ngtsc's `getProjectRelativePath`. Relative entries
+    /// resolve against the working directory.
+    ///
+    /// When set, `ɵsetClassDebugInfo`'s `filePath` is relative to the first
+    /// root that contains the file (and left out when none does). When unset,
+    /// `filePath` is the path given to the transform. Paths are never
+    /// lowercased (ngtsc lowercases them on case-insensitive file systems).
+    pub root_dirs: Option<Vec<String>>,
+
     // Component metadata fields for full compilation testing
     // These mirror Angular's @Component decorator options.
     /// The CSS selector that identifies this component in a template.
@@ -277,6 +304,11 @@ impl From<TransformOptions> for RustTransformOptions {
             enable_i18n_legacy_message_id_format: options
                 .enable_i18n_legacy_message_id_format
                 .unwrap_or(false),
+            forbid_orphan_components: options.forbid_orphan_components.unwrap_or(false),
+            enable_template_source_locations: options
+                .enable_template_source_locations
+                .unwrap_or(false),
+            root_dirs: options.root_dirs,
             // Component metadata overrides
             selector: options.selector,
             standalone: options.standalone,

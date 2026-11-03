@@ -13,7 +13,7 @@ mod allocate_slots;
 mod any_cast;
 mod apply_i18n_expressions;
 mod assign_i18n_slot_dependencies;
-mod attach_source_locations;
+pub(crate) mod attach_source_locations;
 mod attribute_extraction;
 mod binding_specialization;
 mod chaining;

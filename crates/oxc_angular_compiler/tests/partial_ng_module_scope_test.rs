@@ -765,3 +765,130 @@ export class App {}
     );
     assert!(compact(&result.code).contains("import*asi1from'./d.mjs';"), "{}", result.code);
 }
+
+/// The scope `src/app.ts` gives `App` when its NgModule imports
+/// `Holder.forRoot(...)` of this `src/holder.ts`, `None` when unread.
+fn scope_through_holder(holder: &str, call: &str) -> Option<String> {
+    let dir = TempDir::new().unwrap();
+    dep_module(&dir);
+    write(&dir, "src/holder.ts", holder);
+    let source = format!(
+        r"
+import {{ Component, NgModule }} from '@angular/core';
+import {{ Holder, EmptyModule }} from './holder.js';
+@Component({{ selector: 'app', template: '<div d></div>', standalone: false }})
+export class App {{}}
+@NgModule({{ declarations: [App], imports: [{call}] }})
+export class AppModule {{}}
+"
+    );
+    let code = compact(&compile(&dir, "src/app.ts", &source, &partial()).code);
+    let start = code.find("i0.ɵɵsetComponentScope(App,")?;
+    Some(code[start..].split(';').next().unwrap().to_string())
+}
+
+const HOLDER_HEAD: &str = r"
+import { NgModule, ModuleWithProviders, Type } from '@angular/core';
+import * as modules from './dep.js';
+import { DepModule } from './dep.js';
+@NgModule({}) export class EmptyModule {}
+";
+
+#[test]
+fn a_module_from_a_parameter_member_is_not_read_as_the_namespace() {
+    // `modules.DepModule` is the argument's `EmptyModule`, not the import.
+    let holder = format!(
+        "{HOLDER_HEAD}export class Holder {{
+  static forRoot(modules: {{ DepModule: Type<any> }}) {{ return {{ ngModule: modules.DepModule }}; }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot({ DepModule: EmptyModule })");
+    assert_eq!(scope, None);
+}
+
+#[test]
+fn a_single_return_is_read_before_the_return_type() {
+    // ngtsc runs the body first: the module is `EmptyModule`.
+    let holder = format!(
+        "{HOLDER_HEAD}export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule> {{ return {{ ngModule: EmptyModule as any }}; }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot()");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[App],()=>[])"));
+}
+
+#[test]
+fn a_type_parameter_module_is_not_read() {
+    let holder = format!(
+        "{HOLDER_HEAD}export class Holder {{
+  static forRoot<DepModule>(): ModuleWithProviders<DepModule> {{ const m: any = null; return m; }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot<DepModule>()");
+    assert_eq!(scope, None);
+}
+
+#[test]
+fn overloads_read_the_first_declaration() {
+    // ngtsc reads the first signature, whatever the arguments.
+    let holder = format!(
+        "{HOLDER_HEAD}export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule>;
+  static forRoot(x: number): ModuleWithProviders<EmptyModule>;
+  static forRoot(x?: number): any {{ return {{ ngModule: EmptyModule }}; }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot(1)");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
+}
+
+#[test]
+fn a_returned_call_is_followed() {
+    // ngtsc evaluates `Inner.forRoot()`, also over this method's own type.
+    let holder = format!(
+        "{HOLDER_HEAD}export class Inner {{
+  static forRoot() {{ return {{ ngModule: DepModule, providers: [] }}; }}
+}}
+export class Holder {{
+  static forRoot(): ModuleWithProviders<EmptyModule> {{ return Inner.forRoot(); }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot()");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
+}
+
+#[test]
+fn a_call_ngtsc_cannot_evaluate_reads_the_return_type() {
+    let holder = format!(
+        "{HOLDER_HEAD}export class Inner {{
+  static forRoot(): any {{ const p: any[] = []; return {{ ngModule: EmptyModule, providers: p }}; }}
+}}
+export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule> {{ return Inner.forRoot(); }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot()");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
+}
+
+#[test]
+fn a_body_ngtsc_cannot_evaluate_reads_the_return_type() {
+    // `satisfies` and a getter make ngtsc give up on the returned object.
+    for body in [
+        "return { ngModule: EmptyModule } satisfies ModuleWithProviders<EmptyModule>;",
+        "return { ngModule: EmptyModule as any, get providers() { return []; } };",
+    ] {
+        let holder = format!(
+            "{HOLDER_HEAD}export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule> {{ {body} }}
+}}"
+        );
+        let scope = scope_through_holder(&holder, "Holder.forRoot()");
+        assert_eq!(
+            scope.as_deref(),
+            Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"),
+            "{body}"
+        );
+    }
+}

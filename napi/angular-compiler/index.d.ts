@@ -1107,6 +1107,36 @@ export interface TransformOptions {
    * Defaults to `false`, as in the `tsconfig.json` that `ng new` generates.
    */
   enableI18nLegacyMessageIdFormat?: boolean
+  /**
+   * The `forbidOrphanComponents` Angular compiler option
+   * (`angularCompilerOptions.forbidOrphanComponents` in `tsconfig.json`).
+   *
+   * When `true`, each component's `ɵsetClassDebugInfo` call gets
+   * `forbidOrphanRendering: true`, so in dev mode (with JIT support) the runtime
+   * throws NG0981 when a non-standalone component is rendered before its NgModule
+   * was loaded. Full compilation mode only. Defaults to `false`, as in ngtsc.
+   */
+  forbidOrphanComponents?: boolean
+  /**
+   * The `enableTemplateSourceLocations` Angular compiler option: end each
+   * template view with `ɵɵattachSourceLocations(path, [[slot, offset, line,
+   * column], ...])`, which writes a `data-ng-source-location` attribute on
+   * each element (in production too). Full compilation only, Angular 19.1+.
+   *
+   * Needs `rootDirs`: with no root, nothing is emitted. Defaults to `false`.
+   */
+  enableTemplateSourceLocations?: boolean
+  /**
+   * The `rootDirs` compiler option: the project roots that output paths are
+   * relative to, like ngtsc's `getProjectRelativePath`. Relative entries
+   * resolve against the working directory.
+   *
+   * When set, `ɵsetClassDebugInfo`'s `filePath` is relative to the first
+   * root that contains the file (and left out when none does). When unset,
+   * `filePath` is the path given to the transform. Paths are never
+   * lowercased (ngtsc lowercases them on case-insensitive file systems).
+   */
+  rootDirs?: Array<string>
   /** The CSS selector that identifies this component in a template. */
   selector?: string
   /**

@@ -11,6 +11,9 @@
 //!
 //! Anything that can't be read statically gives `None`, and the caller emits
 //! what it did before.
+//!
+//! The same reads tell which entries of an NgModule's `imports` and `exports`
+//! are directives or pipes, which its `ɵinj` leaves out (#623).
 
 use std::cell::{OnceCell, RefCell};
 use std::path::Path;
@@ -27,6 +30,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
 use crate::component::metadata::{ComponentScope, ImportedName, ScopeEntry, ScopeKind};
 use crate::directive::{Evaluator, StringConsts, find_angular_class_decorator};
+use crate::ng_module::module_with_providers::{
+    MwpInit, MwpModule, MwpRead, MwpType, module_with_providers_init, static_method_ng_module,
+    top_level_const_init,
+};
+use crate::ng_module::{InjectorDrops, InjectorEntry};
 
 /// A top-level declaration: the file declaring it and its name there
 /// (`"default"` for an anonymous `export default class`).
@@ -277,6 +285,95 @@ impl CrossFileAnalyzer {
             })
             .collect()
     }
+
+    /// Which top-level `imports` and `exports` entries of the `@NgModule`
+    /// class `class_name` of `file` its `ɵinj` leaves out (#623), as ngtsc's
+    /// `NgModuleDecoratorHandler.resolve` does: an entry whose classes
+    /// (a `const` list flattened) are all directives or pipes, and in
+    /// `exports` also components. An exported component must be in the
+    /// module's compilation scope, so it stays reachable through `imports`.
+    /// An entry that doesn't resolve, or names an NgModule, stays.
+    pub(crate) fn injector_drops(
+        &self,
+        file: &Path,
+        source: &str,
+        class_name: &str,
+        imports: &[Option<InjectorEntry<'_>>],
+        exports: &[Option<InjectorEntry<'_>>],
+    ) -> InjectorDrops {
+        let file = self.inner.set_compiled_source(file, source);
+        let inner = &self.inner;
+        let module = Decl { file: file.clone(), name: class_name.into() };
+        let scope = OnceCell::new();
+        let drops = |entries: &[Option<InjectorEntry<'_>>], is_exports: bool| -> Vec<bool> {
+            entries
+                .iter()
+                .map(|entry| {
+                    let Some(entry) = entry else { return false };
+                    let raw = RawRef {
+                        file: file.clone(),
+                        namespace: entry.namespace.map(Into::into),
+                        name: entry.name.into(),
+                        method: None,
+                    };
+                    let Some(classes) = inner.resolve_refs(&[raw], None, 0) else { return false };
+                    !classes.is_empty()
+                        && classes.iter().all(|(class, declared)| match &**declared {
+                            Declared::Directive { is_component: false, .. }
+                            | Declared::Pipe { .. } => true,
+                            Declared::Directive { is_component: true, .. } => {
+                                is_exports
+                                    && scope
+                                        .get_or_init(|| inner.compilation_scope(&module))
+                                        .as_ref()
+                                        .is_some_and(|scope| scope.contains(&class.decl))
+                            }
+                            Declared::NgModule { .. } | Declared::List(_) => false,
+                        })
+                })
+                .collect()
+        };
+        InjectorDrops { imports: drops(imports, false), exports: drops(exports, true) }
+    }
+}
+
+impl CrossFileAnalyzer {
+    /// For each `ModuleWithProviders` entry of an NgModule's `imports` in
+    /// `file` (`source` is its text), the NgModule it names, as `file`
+    /// would import it, like ngtsc's `resolveTypeList`. An entry is
+    /// `(namespace, name, method)`: `name.method(...)` (or
+    /// `namespace.name.method(...)`), or with no method a constant `name`
+    /// holding one. The method or constant may be in another file; the
+    /// NgModule is named through an import of the file it comes from, as
+    /// ngtsc names a class it found in another file (`i1.DepModule`).
+    /// `None` for an entry that can't be read, or that names no NgModule.
+    pub(crate) fn module_with_providers_imports(
+        &self,
+        file: &Path,
+        source: &str,
+        entries: &[(Option<&str>, &str, Option<&str>)],
+    ) -> Vec<Option<ImportedName>> {
+        let file = self.inner.set_compiled_source(file, source);
+        entries
+            .iter()
+            .map(|(namespace, name, method)| {
+                let raw = RawRef {
+                    file: file.clone(),
+                    namespace: namespace.map(Into::into),
+                    name: (*name).into(),
+                    method: None,
+                };
+                let holder = self.inner.resolve_ref(&raw, None, 0)?;
+                let module = match method {
+                    Some(method) => self.inner.mwp_method_module(&holder, method)?,
+                    None => self.inner.mwp_const_module(&holder)?,
+                };
+                let declared = self.inner.declared(&module.decl)?;
+                let Declared::NgModule { .. } = &*declared else { return None };
+                self.inner.imported_name(&module, &file)
+            })
+            .collect()
+    }
 }
 
 /// `items` with each class once, where it first appears.
@@ -476,48 +573,100 @@ impl Inner {
         let class = ClassRef { decl, owner };
         match &raw.method {
             None => Some(class),
-            Some(method) => {
-                let module = self.module_with_providers(&class.decl, method)?;
-                self.resolve_ref(&module, class.owner.as_deref(), depth + 1)
+            Some(method) => self.mwp_method_read(&class, method, depth + 1).known(),
+        }
+    }
+
+    /// What `holder.method(...)` gives: the NgModule of the
+    /// `ModuleWithProviders` it returns, read in ngtsc's order (see
+    /// `static_method_ng_module`), following a call it returns.
+    fn mwp_method_read(&self, holder: &ClassRef, method: &str, depth: u16) -> MwpRead<ClassRef> {
+        enum Found {
+            Module(RawRef),
+            Call { holder: RawRef, method: String, fallback: MwpRead<RawRef> },
+            Dynamic,
+        }
+        if depth > MAX_EXPORT_CHAIN {
+            return MwpRead::Unknown;
+        }
+        let file = &holder.decl.file;
+        let found = self.parsed_file(file).and_then(|parsed| {
+            parsed.with(|_, program, _| {
+                let class = find_class(program, &holder.decl.name)?;
+                Some(match static_method_ng_module(class, method)? {
+                    MwpModule::Value(value) => Found::Module(value_ref(value, file)?),
+                    MwpModule::Type(name) => Found::Module(type_name_ref(file, name)?),
+                    MwpModule::Dynamic => Found::Dynamic,
+                    MwpModule::Call { namespace, class, method, fallback } => Found::Call {
+                        holder: RawRef {
+                            file: file.clone(),
+                            namespace: namespace.map(Into::into),
+                            name: class.into(),
+                            method: None,
+                        },
+                        method: method.into(),
+                        fallback: match fallback {
+                            Some(MwpType::Module(name)) => {
+                                type_name_ref(file, name).map_or(MwpRead::Unknown, MwpRead::Known)
+                            }
+                            Some(MwpType::Dynamic) => MwpRead::Dynamic,
+                            None => MwpRead::Unknown,
+                        },
+                    },
+                })
+            })
+        });
+        let owner = holder.owner.as_deref();
+        let resolve = |raw: &RawRef| {
+            self.resolve_ref(raw, owner, depth + 1).map_or(MwpRead::Unknown, MwpRead::Known)
+        };
+        match found {
+            None => MwpRead::Unknown,
+            Some(Found::Module(raw)) => resolve(&raw),
+            Some(Found::Dynamic) => MwpRead::Dynamic,
+            Some(Found::Call { holder, method, fallback }) => {
+                let MwpRead::Known(holder) = resolve(&holder) else { return MwpRead::Unknown };
+                match self.mwp_method_read(&holder, &method, depth + 1) {
+                    MwpRead::Dynamic => match fallback {
+                        MwpRead::Known(raw) => resolve(&raw),
+                        MwpRead::Dynamic => MwpRead::Dynamic,
+                        MwpRead::Unknown => MwpRead::Unknown,
+                    },
+                    read => read,
+                }
             }
         }
     }
 
-    /// The NgModule the static method `method` of the class `decl` returns
-    /// a `ModuleWithProviders` of: its return type's argument, or the
-    /// `ngModule` of the object it returns.
-    fn module_with_providers(&self, decl: &Decl, method: &str) -> Option<RawRef> {
-        let parsed = self.parsed_file(&decl.file)?;
-        parsed.with(|_, program, _| {
-            let class = find_class(program, &decl.name)?;
-            let function = class.body.body.iter().find_map(|element| match element {
-                ClassElement::MethodDefinition(m)
-                    if m.r#static && m.key.static_name().is_some_and(|key| key == method) =>
-                {
-                    Some(&m.value)
-                }
-                _ => None,
-            })?;
-            if let Some(return_type) = &function.return_type
-                && let TSType::TSTypeReference(reference) = &return_type.type_annotation
-                && type_name_ends_with(&reference.type_name, "ModuleWithProviders")
-            {
-                let argument = reference.type_arguments.as_ref()?.params.first()?;
-                let TSType::TSTypeReference(module) = argument else { return None };
-                return type_name_ref(&decl.file, &module.type_name);
+    /// The NgModule `holder.method(...)` returns a `ModuleWithProviders`
+    /// of.
+    fn mwp_method_module(&self, holder: &ClassRef, method: &str) -> Option<ClassRef> {
+        self.mwp_method_read(holder, method, 1).known()
+    }
+
+    /// The NgModule the top-level `const` `decl` holds a
+    /// `ModuleWithProviders` of: `Class.method(...)` or `{ ngModule: T }`.
+    fn mwp_const_module(&self, decl: &ClassRef) -> Option<ClassRef> {
+        let file = &decl.decl.file;
+        let (raw, method) = self.parsed_file(file)?.with(|_, program, _| {
+            match module_with_providers_init(top_level_const_init(program, &decl.decl.name)?)? {
+                MwpInit::Call { namespace, class, method } => Some((
+                    RawRef {
+                        file: file.clone(),
+                        namespace: namespace.map(Into::into),
+                        name: class.into(),
+                        method: None,
+                    },
+                    Some(method.to_string()),
+                )),
+                MwpInit::Module(value) => Some((value_ref(value, file)?, None)),
             }
-            let body = function.body.as_ref()?;
-            let returned = body.statements.iter().rev().find_map(|stmt| match stmt {
-                Statement::ReturnStatement(ret) => ret.argument.as_ref(),
-                _ => None,
-            })?;
-            let mut refs = Vec::new();
-            collect_refs(returned, &decl.file, &mut refs, 0)?;
-            match <[RawRef; 1]>::try_from(refs) {
-                Ok([module]) => Some(module),
-                Err(_) => None,
-            }
-        })
+        })?;
+        let class = self.resolve_ref(&raw, decl.owner.as_deref(), 1)?;
+        match method {
+            Some(method) => self.mwp_method_module(&class, &method),
+            None => Some(class),
+        }
     }
 
     /// What the declaration `decl` is to a module scope.
@@ -558,6 +707,31 @@ impl Inner {
             }
         }
         Some(out)
+    }
+
+    /// The classes of the compilation scope of the NgModule `module`: its
+    /// declarations, the standalone classes it imports, and what the
+    /// NgModules it imports export (ngtsc's `LocalModuleScopeRegistry`).
+    fn compilation_scope(&self, module: &Decl) -> Option<FxHashSet<Decl>> {
+        let declared = self.declared(module)?;
+        let Declared::NgModule { declarations, imports, .. } = &*declared else { return None };
+        let mut scope = FxHashSet::default();
+        for (class, _) in self.resolve_refs(declarations, None, 0)? {
+            scope.insert(class.decl);
+        }
+        for (class, declared) in self.resolve_refs(imports, None, 0)? {
+            match &*declared {
+                Declared::NgModule { exports, .. } => scope.extend(
+                    self.exported_scope(&class, exports)?
+                        .iter()
+                        .map(|item| item.class.decl.clone()),
+                ),
+                _ => {
+                    scope.insert(class.decl);
+                }
+            }
+        }
+        Some(scope)
     }
 
     /// The directives and pipes the NgModule `module` exports, with those of
@@ -882,7 +1056,7 @@ fn read_declared<'a>(
             return None;
         }
         let mut refs = Vec::new();
-        collect_refs(var.init.as_ref()?, &decl.file, &mut refs, 0)?;
+        collect_refs(var.init.as_ref()?, consts, &decl.file, &mut refs, 0)?;
         Some(Declared::List(refs))
     })
 }
@@ -958,13 +1132,19 @@ fn type_name_ref(file: &str, name: &TSTypeName<'_>) -> Option<RawRef> {
     Some(RawRef { file: file.into(), namespace, name, method: None })
 }
 
-/// Whether a type name is `name` or `ns.name`.
-fn type_name_ends_with(type_name: &TSTypeName<'_>, name: &str) -> bool {
-    match type_name {
-        TSTypeName::IdentifierReference(id) => id.name == name,
-        TSTypeName::QualifiedName(qualified) => qualified.right.name == name,
-        TSTypeName::ThisExpression(_) => false,
-    }
+/// The class a value names: `A` or `ns.A`.
+fn value_ref(value: &Expression<'_>, file: &str) -> Option<RawRef> {
+    let (namespace, name) = match value.get_inner_expression() {
+        Expression::Identifier(id) => (None, id.name.to_string()),
+        Expression::StaticMemberExpression(member) => {
+            let Expression::Identifier(ns) = member.object.get_inner_expression() else {
+                return None;
+            };
+            (Some(ns.name.to_string()), member.property.name.to_string())
+        }
+        _ => return None,
+    };
+    Some(RawRef { file: file.into(), namespace, name, method: None })
 }
 
 /// The scope the Angular decorator of a source `class` gives it.
@@ -1007,7 +1187,7 @@ fn read_decorator<'a>(
             let list = |key: &str| -> Option<Vec<RawRef>> {
                 let mut refs = Vec::new();
                 if let Some(value) = field(key) {
-                    collect_refs(value, file, &mut refs, 0)?;
+                    collect_refs(value, consts, file, &mut refs, 0)?;
                 }
                 Some(refs)
             };
@@ -1026,6 +1206,7 @@ fn read_decorator<'a>(
 /// anything else.
 fn collect_refs(
     expr: &Expression<'_>,
+    consts: &StringConsts<'_>,
     file: &str,
     out: &mut Vec<RawRef>,
     depth: u16,
@@ -1044,10 +1225,10 @@ fn collect_refs(
             for element in &array.elements {
                 match element {
                     ArrayExpressionElement::SpreadElement(spread) => {
-                        collect_refs(&spread.argument, file, out, depth + 1)?;
+                        collect_refs(&spread.argument, consts, file, out, depth + 1)?;
                     }
                     ArrayExpressionElement::Elision(_) => return None,
-                    _ => collect_refs(element.as_expression()?, file, out, depth + 1)?,
+                    _ => collect_refs(element.as_expression()?, consts, file, out, depth + 1)?,
                 }
             }
         }
@@ -1059,8 +1240,16 @@ fn collect_refs(
             out.push(raw(Some(&object.name), &member.property.name, None));
         }
         Expression::CallExpression(call) => match call.callee.get_inner_expression() {
-            // `forwardRef(() => A)`
-            Expression::Identifier(callee) if callee.name == "forwardRef" => {
+            // `forwardRef(() => A)`, with `forwardRef` imported from
+            // `@angular/core`: another function may return anything.
+            Expression::Identifier(callee)
+                if crate::directive::angular_core_identifier(
+                    &callee.name,
+                    Some(consts),
+                    &["forwardRef"],
+                )
+                .is_some() =>
+            {
                 let returned = match call.arguments.first()?.as_expression()?.get_inner_expression()
                 {
                     Expression::ArrowFunctionExpression(arrow) => arrow.get_expression()?,
@@ -1072,7 +1261,7 @@ fn collect_refs(
                     }
                     _ => return None,
                 };
-                collect_refs(returned, file, out, depth + 1)?;
+                collect_refs(returned, consts, file, out, depth + 1)?;
             }
             // `A.forRoot()`, `ns.A.forRoot()`
             Expression::StaticMemberExpression(member) => {
@@ -1099,7 +1288,7 @@ fn collect_refs(
                 }
                 _ => None,
             })?;
-            collect_refs(module, file, out, depth + 1)?;
+            collect_refs(module, consts, file, out, depth + 1)?;
         }
         _ => return None,
     }

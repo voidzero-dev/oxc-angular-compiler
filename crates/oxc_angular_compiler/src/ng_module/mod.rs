@@ -14,7 +14,9 @@
 mod compiler;
 mod decorator;
 mod definition;
+mod injector_imports;
 mod metadata;
+pub(crate) mod module_with_providers;
 
 pub use compiler::{NgModuleCompileResult, compile_ng_module, compile_ng_module_from_metadata};
 pub use decorator::{NgModuleMetadata, extract_ng_module_metadata, find_ng_module_decorator_span};
@@ -24,6 +26,9 @@ pub use definition::{
     emit_ng_module_definition, generate_full_ng_module_definition, generate_ng_module_definition,
     generate_ng_module_definition_from_decorator,
 };
+pub(crate) use injector_imports::injector_entries;
+#[cfg(feature = "cross_file_elision")]
+pub(crate) use injector_imports::{InjectorDrops, InjectorEntry};
 pub use metadata::{
     R3NgModuleMetadata, R3NgModuleMetadataBuilder, R3Reference, R3SelectorScopeMode,
 };

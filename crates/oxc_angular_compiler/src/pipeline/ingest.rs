@@ -85,18 +85,19 @@ pub struct IngestOptions<'a> {
     /// PerComponent is used in local/JIT compilation.
     pub defer_block_deps_emit_mode: DeferBlockDepsEmitMode,
 
-    /// Relative path to the template file for source location debugging.
+    /// The template's path relative to the project root, for source locations.
     pub relative_template_path: Option<Ident<'a>>,
 
-    /// Whether to enable debug source locations.
+    /// Whether to enable debug source locations (Angular's `enableTemplateSourceLocations`).
     ///
-    /// When enabled, the compiler generates `ɵɵsourceLocation` calls for debugging.
+    /// When enabled, the compiler generates `ɵɵattachSourceLocations` calls for debugging.
     pub enable_debug_locations: bool,
 
-    /// Template source text for computing line/column from byte offsets.
+    /// The text the template's element positions count in.
     ///
     /// Required when `enable_debug_locations` is true.
-    pub template_source: Option<&'a str>,
+    pub template_source:
+        Option<crate::pipeline::phases::attach_source_locations::TemplateSource<'a>>,
 
     /// Reference to the deferrable dependencies function for PerComponent mode.
     ///

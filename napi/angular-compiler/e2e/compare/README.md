@@ -143,7 +143,8 @@ its own like Oxc does. Where that differs from a real build (for example `change
 class that also has a non-Angular decorator), a fixture sets `ngtscMode: 'full'`.
 
 ngtsc compiles each fixture under the project root (the compare directory), as a real build
-does, so that its `ɵsetClassDebugInfo` calls carry `filePath` and `lineNumber`.
+does, so that its `ɵsetClassDebugInfo` calls carry `filePath` and `lineNumber`. Oxc gets the
+`rootDirs` that make its `filePath` the same project-relative path.
 
 ### Known Differences (Not Bugs)
 
