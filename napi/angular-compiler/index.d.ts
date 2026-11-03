@@ -1133,10 +1133,17 @@ export interface TransformOptions {
    *
    * When set, `ɵsetClassDebugInfo`'s `filePath` is relative to the first
    * root that contains the file (and left out when none does). When unset,
-   * `filePath` is the path given to the transform. Paths are never
-   * lowercased (ngtsc lowercases them on case-insensitive file systems).
+   * `filePath` is the path given to the transform.
    */
   rootDirs?: Array<string>
+  /**
+   * TypeScript's `ts.sys.useCaseSensitiveFileNames`. When `false` (macOS
+   * and Windows by default), the paths made relative to `rootDirs` are
+   * lowercased, like ngtsc does: `ɵsetClassDebugInfo`'s `filePath` and the
+   * `ɵɵattachSourceLocations` path. The HMR id keeps its case. Defaults to
+   * `true`.
+   */
+  useCaseSensitiveFileNames?: boolean
   /** The CSS selector that identifies this component in a template. */
   selector?: string
   /**

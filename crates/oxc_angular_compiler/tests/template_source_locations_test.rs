@@ -354,3 +354,131 @@ fn needs_angular_19_1() {
     );
     assert!(new.contains("attachSourceLocations"), "{new}");
 }
+
+/// `/w/MyApp/Src/App.Component.ts`, with capitals in its directories and name.
+const MY_APP: &str = "/w/MyApp/Src/App.Component.ts";
+const MY_APP_SRC: &str = "import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-root',
+  template: '<div i18n>Hello</div><span>{{ x }}</span>',
+})
+export class AppComponent {
+  x = 1;
+}
+";
+
+/// Options for a case-insensitive file system (macOS, Windows) with `roots`.
+fn insensitive(roots: &[&str]) -> TransformOptions {
+    TransformOptions {
+        root_dirs: Some(roots.iter().map(ToString::to_string).collect()),
+        use_case_sensitive_file_names: false,
+        ..options()
+    }
+}
+
+/// The two calls for `MY_APP` when its path relative to the root is `path`.
+fn my_app_calls(path: &str) -> [String; 2] {
+    [
+        format!(r#"attachSourceLocations("{path}",[[0,94,4,13],[2,115,4,34]])"#),
+        format!(
+            r#"ɵsetClassDebugInfo(AppComponent,{{className:"AppComponent",filePath:"{path}",lineNumber:7}})"#
+        ),
+    ]
+}
+
+#[test]
+fn paths_are_lowercased_on_a_case_insensitive_file_system() {
+    // As ngtsc 22.2.3 gives them on macOS (`ts.sys.useCaseSensitiveFileNames`
+    // is `false`): the root and the file are compared in lowercase.
+    let compile = |roots: &[&str]| compile_with(MY_APP, MY_APP_SRC, &insensitive(roots), None);
+    assert_eq!(calls(&compile(&["/w/MyApp"])), my_app_calls("src/app.component.ts"));
+    assert_eq!(calls(&compile(&["/w/myapp"])), my_app_calls("src/app.component.ts"));
+    assert_eq!(calls(&compile(&["/w/MyApp/"])), my_app_calls("src/app.component.ts"));
+    assert_eq!(calls(&compile(&["/w"])), my_app_calls("myapp/src/app.component.ts"));
+    // The first root that holds the file wins, not the closest one.
+    assert_eq!(calls(&compile(&["/w/MyApp/Src", "/w/MyApp"])), my_app_calls("app.component.ts"));
+    assert_eq!(
+        calls(&compile(&["/w/MyApp", "/w/MyApp/Src"])),
+        my_app_calls("src/app.component.ts")
+    );
+    // Outside every root: no source locations and no `filePath`.
+    assert_eq!(
+        calls(&compile(&["/w/Other"])),
+        [r#"ɵsetClassDebugInfo(AppComponent,{className:"AppComponent"})"#]
+    );
+}
+
+#[test]
+fn template_url_is_lowercased_on_a_case_insensitive_file_system() {
+    let source = "import { NgModule, Component } from '@angular/core';
+import { FancyWidget } from './Widgets/Fancy.Widget';
+
+@Component({ selector: 'app-shell', templateUrl: './Shell.View.html', standalone: false })
+export class ShellComponent {}
+
+@NgModule({ declarations: [ShellComponent, FancyWidget] })
+export class AppModule {}
+";
+    let mut resources = ResolvedResources::default();
+    resources.templates.insert(
+        "./Shell.View.html".to_string(),
+        "<fancy-widget></fancy-widget><p>x</p>\n".to_string(),
+    );
+    let code = compile_with(
+        "/w/Mod/Src/App.Module.ts",
+        source,
+        &insensitive(&["/w/Mod"]),
+        Some(&resources),
+    );
+    assert_eq!(
+        calls(&code),
+        [
+            r#"attachSourceLocations("src/shell.view.html",[[0,0,0,0],[1,29,0,29]])"#,
+            r#"ɵsetClassDebugInfo(ShellComponent,{className:"ShellComponent",filePath:"src/app.module.ts",lineNumber:5})"#,
+        ]
+    );
+}
+
+#[test]
+fn case_is_kept_by_default() {
+    // Like ngtsc on a case-sensitive file system (Linux): a root in another
+    // case does not hold the file.
+    let compile = |roots: &[&str]| {
+        let options = TransformOptions {
+            root_dirs: Some(roots.iter().map(ToString::to_string).collect()),
+            ..options()
+        };
+        compile_with(MY_APP, MY_APP_SRC, &options, None)
+    };
+    assert_eq!(calls(&compile(&["/w/MyApp"])), my_app_calls("Src/App.Component.ts"));
+    assert_eq!(
+        calls(&compile(&["/w/myapp"])),
+        [r#"ɵsetClassDebugInfo(AppComponent,{className:"AppComponent"})"#]
+    );
+}
+
+#[test]
+fn the_hmr_id_and_i18n_names_keep_their_case() {
+    // Both as oxc wrote them before. The Vite plugin finds a component by its
+    // HMR id, so the id stays the path given to the transform; the i18n name
+    // suffix is still made from that path too.
+    let options = TransformOptions { hmr: true, ..insensitive(&["/w/MyApp"]) };
+    let code = compile_with(MY_APP, MY_APP_SRC, &options, None);
+    assert!(
+        code.contains(r#"constid="%2Fw%2FMyApp%2FSrc%2FApp.Component.ts%40AppComponent""#),
+        "{code}"
+    );
+    assert!(code.contains("$$_W_MYAPP_SRC_APP_COMPONENT_TS_0"), "{code}");
+}
+
+#[test]
+fn partial_mode_writes_no_paths_on_a_case_insensitive_file_system() {
+    let options = TransformOptions {
+        compilation_mode: CompilationMode::Partial,
+        ..insensitive(&["/w/MyApp"])
+    };
+    let code = compile_with(MY_APP, MY_APP_SRC, &options, None);
+    assert!(!code.contains("attachSourceLocations"), "{code}");
+    assert!(!code.contains("setClassDebugInfo"), "{code}");
+}

@@ -23,20 +23,68 @@ pub(super) fn supports_attach_source_locations(version: Option<AngularVersion>) 
 ///
 /// Mirrors ngtsc's `getProjectRelativePath` (compiler-cli `util/src/path.ts`),
 /// with root dirs resolved against the working directory like `getRootDirs`.
-/// Unlike ngtsc, the path is never lowercased: ngtsc's `getCanonicalFileName`
-/// lowercases it on a case-insensitive file system (macOS, Windows), so the
-/// two only match there for lowercase paths.
-pub(super) fn project_relative_path(file: &str, root_dirs: &[String]) -> Option<String> {
-    let file = resolve(file);
+/// When `case_sensitive` is `false`, both paths are compared and given in
+/// lowercase, like ngtsc's `getCanonicalFileName` on a case-insensitive file
+/// system (macOS, Windows).
+pub(super) fn project_relative_path(
+    file: &str,
+    root_dirs: &[String],
+    case_sensitive: bool,
+) -> Option<String> {
+    let cwd = || std::env::current_dir().ok().map(|cwd| cwd.to_string_lossy().into_owned());
+    project_relative_path_in(file, root_dirs, case_sensitive, &cwd)
+}
+
+/// [`project_relative_path`] with the working directory from `cwd`.
+fn project_relative_path_in(
+    file: &str,
+    root_dirs: &[String],
+    case_sensitive: bool,
+    cwd: &dyn Fn() -> Option<String>,
+) -> Option<String> {
+    // ngtsc lowercases after the path is made absolute, so the working
+    // directory part is lowercased too.
+    let canonical = |path: &str| {
+        let segments = resolve(path, cwd);
+        if case_sensitive {
+            segments
+        } else {
+            segments.iter().map(|segment| to_file_name_lower_case(segment)).collect()
+        }
+    };
+    let file = canonical(file);
     root_dirs.iter().find_map(|root| {
-        let rel = relative(&resolve(root), &file);
+        let rel = relative(&canonical(root), &file);
         (!rel.starts_with("..")).then_some(rel)
     })
 }
 
-/// The path segments of `path` made absolute against the working directory,
-/// with `.` and `..` resolved and `\` read as `/`.
-fn resolve(path: &str) -> Vec<String> {
+/// TypeScript's `toFileNameLowerCase`, the `getCanonicalFileName` of its
+/// compiler host on a case-insensitive file system. Only runs of characters
+/// other than `İ`, `ı`, `ß`, `a-z`, `0-9`, `\`, `/`, `:`, `-`, `_`, `.` and
+/// space are lowercased, each on its own: `İ` stays, and `ΑΣa` gives `αςa`
+/// (a final sigma), not `ασa`.
+fn to_file_name_lower_case(path: &str) -> String {
+    let kept = |c: char| {
+        matches!(c, '\u{130}' | '\u{131}' | 'ß' | 'a'..='z' | '0'..='9')
+            || matches!(c, '\\' | '/' | ':' | '-' | '_' | '.' | ' ')
+    };
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(start) = rest.find(|c| !kept(c)) {
+        out.push_str(&rest[..start]);
+        let run = &rest[start..];
+        let end = run.find(kept).unwrap_or(run.len());
+        out.push_str(&run[..end].to_lowercase());
+        rest = &run[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The path segments of `path` made absolute against the working directory
+/// from `cwd`, with `.` and `..` resolved and `\` read as `/`.
+fn resolve(path: &str, cwd: &dyn Fn() -> Option<String>) -> Vec<String> {
     let path = path.replace('\\', "/");
     let bytes = path.as_bytes();
     let is_absolute = path.starts_with('/')
@@ -46,9 +94,9 @@ fn resolve(path: &str) -> Vec<String> {
     } else {
         // Without a working directory (wasm), a relative path stays relative:
         // two such paths still compare against the same unknown base.
-        match std::env::current_dir() {
-            Ok(cwd) => format!("{}/{path}", cwd.to_string_lossy().replace('\\', "/")),
-            Err(_) => path,
+        match cwd() {
+            Some(cwd) => format!("{}/{path}", cwd.replace('\\', "/")),
+            None => path,
         }
     };
     let mut segments: Vec<String> = Vec::new();
@@ -93,6 +141,7 @@ pub(super) fn template_source<'a>(
     file_path: &str,
     source: &str,
     root_dirs: Option<&[String]>,
+    case_sensitive: bool,
     resolved_resources: Option<&ResolvedResources>,
 ) -> Option<(Ident<'a>, TemplateSource<'a>)> {
     let root_dirs = root_dirs?;
@@ -116,14 +165,18 @@ pub(super) fn template_source<'a>(
             Some(i) => format!("{}/{url}", &file[..i]),
             None => url,
         };
-        let path = project_relative_path(&template_file, root_dirs)?;
+        let path = project_relative_path(&template_file, root_dirs, case_sensitive)?;
         return Some((Ident::from(allocator.alloc_str(&path)), whole(template)));
     }
 
     if metadata.template.as_ref().is_none_or(|inline| inline.as_str() != template) {
         return None;
     }
-    let path = Ident::from(allocator.alloc_str(&project_relative_path(file_path, root_dirs)?));
+    let path = Ident::from(allocator.alloc_str(&project_relative_path(
+        file_path,
+        root_dirs,
+        case_sensitive,
+    )?));
     let Some(span) = metadata.template_span else {
         return Some((path, whole(template)));
     };
@@ -244,14 +297,64 @@ mod tests {
     #[test]
     fn relative_to_the_first_root_that_contains_the_file() {
         let roots = ["/w/lib".to_string(), "/w".to_string()];
-        assert_eq!(project_relative_path("/w/src/a.ts", &roots).as_deref(), Some("src/a.ts"));
-        assert_eq!(project_relative_path("/w/lib/b.ts", &roots).as_deref(), Some("b.ts"));
-        assert_eq!(project_relative_path("/x/a.ts", &roots), None);
-        assert_eq!(project_relative_path("/w/./src/../a.ts", &roots).as_deref(), Some("a.ts"));
+        let rel = |file| project_relative_path(file, &roots, true);
+        assert_eq!(rel("/w/src/a.ts").as_deref(), Some("src/a.ts"));
+        assert_eq!(rel("/w/lib/b.ts").as_deref(), Some("b.ts"));
+        assert_eq!(rel("/x/a.ts"), None);
+        assert_eq!(rel("/w/./src/../a.ts").as_deref(), Some("a.ts"));
         assert_eq!(
-            project_relative_path("C:\\w\\src\\a.ts", &["C:/w".to_string()]).as_deref(),
+            project_relative_path("C:\\w\\src\\a.ts", &["C:/w".to_string()], true).as_deref(),
             Some("src/a.ts")
         );
+    }
+
+    /// `project_relative_path` on a case-insensitive file system, with the
+    /// working directory `/W/Proj`.
+    fn insensitive(file: &str, roots: &[&str]) -> Option<String> {
+        let roots: Vec<String> = roots.iter().map(ToString::to_string).collect();
+        project_relative_path_in(file, &roots, false, &|| Some("/W/Proj".to_string()))
+    }
+
+    #[test]
+    fn lowercased_on_a_case_insensitive_file_system() {
+        // As ngtsc 22.2.3 gives them on macOS.
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["/W/Proj"]).as_deref(), Some("src/a.ts"));
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["/w/proj"]).as_deref(), Some("src/a.ts"));
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["/W/Proj/"]).as_deref(), Some("src/a.ts"));
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["/W/Other"]), None);
+        // A relative root resolves against the working directory, and the
+        // whole path is lowercased after that.
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["Src"]).as_deref(), Some("a.ts"));
+        assert_eq!(insensitive("/W/Proj/Src/A.ts", &["src"]).as_deref(), Some("a.ts"));
+        assert_eq!(insensitive("/w/proj/src/A.ts", &["src"]).as_deref(), Some("a.ts"));
+        // With the case kept, a root in another case holds nothing.
+        let cwd = || Some("/W/Proj".to_string());
+        assert_eq!(
+            project_relative_path_in("/W/Proj/Src/A.ts", &["src".to_string()], true, &cwd),
+            None
+        );
+    }
+
+    #[test]
+    fn lowercased_windows_paths() {
+        // The drive letter is compared without case too.
+        assert_eq!(insensitive("C:\\W\\Src\\A.ts", &["C:/W"]).as_deref(), Some("src/a.ts"));
+        assert_eq!(insensitive("c:/w/src/a.ts", &["C:/W"]).as_deref(), Some("src/a.ts"));
+        assert_eq!(insensitive("C:\\W\\Src\\A.ts", &["c:\\w"]).as_deref(), Some("src/a.ts"));
+        // With the case kept, as before.
+        assert_eq!(project_relative_path("C:\\W\\Src\\A.ts", &["c:/W".to_string()], true), None);
+    }
+
+    #[test]
+    fn lowercased_like_typescript() {
+        // ngtsc 22.2.3 output on macOS. TypeScript keeps `İ` and lowercases
+        // each run between `a-z`, `0-9`, `.`, `/` and the like on its own.
+        let rel = |file| insensitive(file, &["/w"]);
+        assert_eq!(rel("/w/Ä/App.ts").as_deref(), Some("ä/app.ts"));
+        assert_eq!(rel("/w/ΑΣ/X.ts").as_deref(), Some("ας/x.ts"));
+        assert_eq!(rel("/w/ΑΣ.ts").as_deref(), Some("ας.ts"));
+        assert_eq!(rel("/w/ΑΣa/Y.ts").as_deref(), Some("αςa/y.ts"));
+        assert_eq!(rel("/w/İx/D.ts").as_deref(), Some("İx/d.ts"));
     }
 
     #[test]

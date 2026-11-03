@@ -12,6 +12,7 @@ import {
   transformSync as oxcTransformSync,
   type TransformOptions as OxcTransformOptions,
 } from 'oxc-transform'
+import ts from 'typescript'
 
 import type { CompilerOutput, ProjectCompilationResult } from '../types.js'
 
@@ -93,6 +94,9 @@ export function compileWithOxcFullFileRaw(
     // Enable class metadata for TestBed support (matches Angular's output)
     emitClassMetadata: true,
     rootDirs: options?.rootDirs,
+    // ngtsc lowercases paths relative to its roots on a case-insensitive file
+    // system (macOS, Windows); tell Oxc the same file system.
+    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
   }
 
   try {

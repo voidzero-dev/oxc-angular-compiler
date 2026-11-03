@@ -277,9 +277,19 @@ pub struct TransformOptions {
     ///
     /// Default: `None`, which keeps `filePath` as the path given to the
     /// transform. ngtsc instead falls back to `rootDir`, then the working
-    /// directory, and lowercases paths on a case-insensitive file system;
-    /// oxc never lowercases.
+    /// directory.
     pub root_dirs: Option<Vec<String>>,
+
+    /// TypeScript's `useCaseSensitiveFileNames` (`ts.sys`): whether the file
+    /// system tells `App.ts` from `app.ts`. When `false` (macOS and Windows
+    /// by default), the paths made relative to `root_dirs` are compared and
+    /// written in lowercase, as ngtsc's `getCanonicalFileName` does:
+    /// `ɵsetClassDebugInfo`'s `filePath` and the `ɵɵattachSourceLocations`
+    /// path. The HMR id and import paths keep their case, as in ngtsc.
+    ///
+    /// Default: `true`, which keeps the case (and the only safe value
+    /// without a file system to check, as in wasm).
+    pub use_case_sensitive_file_names: bool,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -339,6 +349,7 @@ impl Default for TransformOptions {
             forbid_orphan_components: false,
             enable_template_source_locations: false,
             root_dirs: None,
+            use_case_sensitive_file_names: true,
         }
     }
 }
@@ -7075,6 +7086,7 @@ fn compile_component_full<'a>(
             file_path,
             source,
             options.root_dirs.as_deref(),
+            options.use_case_sensitive_file_names,
             resolved_resources,
         )
     } else {
@@ -7366,8 +7378,12 @@ fn compile_component_full<'a>(
         // project root, and none for a file outside it. With no root dirs,
         // keep the path as given.
         let debug_file_path = match &options.root_dirs {
-            Some(roots) => super::source_locations::project_relative_path(file_path, roots)
-                .filter(|path| !path.is_empty()),
+            Some(roots) => super::source_locations::project_relative_path(
+                file_path,
+                roots,
+                options.use_case_sensitive_file_names,
+            )
+            .filter(|path| !path.is_empty()),
             None => Some(file_path.to_string()),
         };
         let mut debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())

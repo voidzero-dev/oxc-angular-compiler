@@ -192,9 +192,15 @@ pub struct TransformOptions {
     ///
     /// When set, `ɵsetClassDebugInfo`'s `filePath` is relative to the first
     /// root that contains the file (and left out when none does). When unset,
-    /// `filePath` is the path given to the transform. Paths are never
-    /// lowercased (ngtsc lowercases them on case-insensitive file systems).
+    /// `filePath` is the path given to the transform.
     pub root_dirs: Option<Vec<String>>,
+
+    /// TypeScript's `ts.sys.useCaseSensitiveFileNames`. When `false` (macOS
+    /// and Windows by default), the paths made relative to `rootDirs` are
+    /// lowercased, like ngtsc does: `ɵsetClassDebugInfo`'s `filePath` and the
+    /// `ɵɵattachSourceLocations` path. The HMR id keeps its case. Defaults to
+    /// `true`.
+    pub use_case_sensitive_file_names: Option<bool>,
 
     // Component metadata fields for full compilation testing
     // These mirror Angular's @Component decorator options.
@@ -309,6 +315,7 @@ impl From<TransformOptions> for RustTransformOptions {
                 .enable_template_source_locations
                 .unwrap_or(false),
             root_dirs: options.root_dirs,
+            use_case_sensitive_file_names: options.use_case_sensitive_file_names.unwrap_or(true),
             // Component metadata overrides
             selector: options.selector,
             standalone: options.standalone,

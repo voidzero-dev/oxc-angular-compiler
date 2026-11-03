@@ -1,8 +1,10 @@
 import { resolve } from 'node:path'
 
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { angular, type PluginOptions } from '../vite-plugin/index.js'
+import { isFileSystemCaseSensitive, swapCase } from '../vite-plugin/utils/case-sensitive.js'
 
 const SOURCE = `import { Component } from '@angular/core';
 
@@ -80,5 +82,48 @@ describe('@oxc-angular/vite project-relative paths', () => {
       abs('/proj/src/app.component.ts'),
     )
     expect(code).toContain('ɵɵattachSourceLocations("src/app.component.ts",[[0,90,2,46]]);')
+  })
+
+  it('lowercases the paths with caseSensitiveFileNames: false', async () => {
+    // As ngtsc 22.2.3 emits it on macOS, with the root in either case.
+    for (const root of ['/Proj', '/proj']) {
+      const code = await transform(
+        {
+          enableTemplateSourceLocations: true,
+          workspaceRoot: abs('/Proj'),
+          rootDirs: [abs(root)],
+          caseSensitiveFileNames: false,
+        },
+        abs('/Proj'),
+        abs('/Proj/Src/App.Component.ts'),
+      )
+      expect(code).toContain('ɵɵattachSourceLocations("src/app.component.ts",[[0,90,2,46]]);')
+      expect(code).toContain('filePath:"src/app.component.ts",lineNumber:4')
+    }
+  })
+
+  it('keeps the case with caseSensitiveFileNames: true', async () => {
+    const code = await transform(
+      { workspaceRoot: abs('/Proj'), caseSensitiveFileNames: true },
+      abs('/Proj'),
+      abs('/Proj/Src/App.Component.ts'),
+    )
+    expect(code).toContain('filePath:"Src/App.Component.ts",lineNumber:4')
+  })
+
+  it('checks the file system like TypeScript by default', async () => {
+    const lowercased = !ts.sys.useCaseSensitiveFileNames
+    expect(isFileSystemCaseSensitive(process.cwd())).toBe(!lowercased)
+    const code = await transform(
+      { workspaceRoot: abs('/Proj') },
+      abs('/Proj'),
+      abs('/Proj/Src/App.Component.ts'),
+    )
+    const path = lowercased ? 'src/app.component.ts' : 'Src/App.Component.ts'
+    expect(code).toContain(`filePath:"${path}",lineNumber:4`)
+  })
+
+  it('swaps the case like TypeScript', () => {
+    expect(swapCase('/Users/a_B/x9.TS')).toBe('/uSERS/A_b/X9.ts')
   })
 })
