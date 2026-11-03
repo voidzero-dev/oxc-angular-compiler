@@ -28,7 +28,9 @@ pub use definition::{
 };
 pub(crate) use injector_imports::injector_entries;
 #[cfg(feature = "cross_file_elision")]
-pub(crate) use injector_imports::{InjectorDrops, InjectorEntry};
+pub(crate) use injector_imports::{
+    EntryPlan, InjectorEntry, InjectorPlans, ResolvedRef, exports_plan, imports_plan,
+};
 pub use metadata::{
     R3NgModuleMetadata, R3NgModuleMetadataBuilder, R3Reference, R3SelectorScopeMode,
 };

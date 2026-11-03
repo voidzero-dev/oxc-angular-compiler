@@ -4804,28 +4804,39 @@ pub fn transform_angular_file(
                     }
 
                     // Like ngtsc in full and partial compilation, ɵinj leaves
-                    // out the directives and pipes of `imports` and `exports`
-                    // (#623). A nested class may name a binding of its
-                    // function, so it keeps the lists as written.
+                    // out the directives, pipes and provider-less standalone
+                    // components of `imports`, and lists what it keeps of a
+                    // partly left out entry one by one (#623). A nested class
+                    // may name a binding of its function, so it keeps the
+                    // lists as written.
                     if !site.nested
                         && let Some(entries) =
                             crate::ng_module::injector_entries(class, &string_consts)
                     {
                         #[cfg_attr(not(feature = "cross_file_elision"), allow(unused_mut))]
-                        let mut drops = entries.local_drops(&parser_ret.program, &string_consts);
+                        let mut plans = entries.local_plans(&parser_ret.program, &string_consts);
                         #[cfg(feature = "cross_file_elision")]
                         if options.resolve_imported_values
                             && let Some(analyzer) = &cross_file_analyzer
                         {
-                            drops.merge(&analyzer.injector_drops(
+                            plans.merge(&analyzer.injector_plans(
                                 std::path::Path::new(path),
                                 source,
                                 ng_module_metadata.class_name.as_str(),
+                                &string_consts,
                                 entries.imports(),
                                 entries.exports(),
                             ));
                         }
-                        entries.apply(allocator, &mut ng_module_metadata, &drops);
+                        entries.apply(
+                            allocator,
+                            &mut ng_module_metadata,
+                            &plans,
+                            &mut |specifier| {
+                                file_namespace_registry
+                                    .get_or_assign(&Ident::from(allocator.alloc_str(specifier)))
+                            },
+                        );
                     }
 
                     // Compile NgModule and generate all definitions as external property assignments

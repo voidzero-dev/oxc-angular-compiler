@@ -353,9 +353,9 @@ fn build_injector_metadata<'a>(
     // array literal adds its elements (keeping `StoreModule.forRoot(...)` calls
     // and spreads), any other expression is added as is. A full or partial
     // ngtsc build filters both lists by what each reference resolves to; the
-    // transform drops the entries it knows to be directives or pipes from
-    // these expressions first (`injector_imports.rs`). The runtime ignores
-    // entries that are neither NgModules nor standalone components.
+    // transform rewrites these expressions first the same way, where it can
+    // (`injector_imports.rs`). The runtime ignores entries that are neither
+    // NgModules nor standalone components.
     for (raw, names) in [
         (&metadata.raw_imports_expr, &metadata.imports),
         (&metadata.raw_exports_expr, &metadata.exports),

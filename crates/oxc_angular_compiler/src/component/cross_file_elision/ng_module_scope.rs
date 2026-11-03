@@ -22,7 +22,7 @@ use std::rc::Rc;
 use oxc_ast::ast::{
     ArrayExpressionElement, Class, ClassElement, Declaration, ExportDefaultDeclarationKind,
     Expression, ImportDeclarationSpecifier, ObjectPropertyKind, Program, PropertyKey, Statement,
-    TSLiteral, TSTupleElement, TSType, TSTypeName,
+    TSLiteral, TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator,
 };
 use oxc_span::GetSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -34,7 +34,9 @@ use crate::ng_module::module_with_providers::{
     MwpInit, MwpModule, MwpRead, MwpType, module_with_providers_init, static_method_ng_module,
     top_level_const_init,
 };
-use crate::ng_module::{InjectorDrops, InjectorEntry};
+use crate::ng_module::{
+    EntryPlan, InjectorEntry, InjectorPlans, ResolvedRef, exports_plan, imports_plan,
+};
 
 /// A top-level declaration: the file declaring it and its name there
 /// (`"default"` for an anonymous `export default class`).
@@ -46,12 +48,28 @@ struct Decl {
 
 /// A reference to a class as some file writes it: `name`, `namespace.name`,
 /// or `name.method(...)`, a static method returning `ModuleWithProviders`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RawRef {
     file: String,
     namespace: Option<String>,
     name: String,
     method: Option<String>,
+    /// The `ngModule` of a `{ ngModule: X }` literal.
+    is_mwp: bool,
+    /// Written in a `forwardRef`.
+    forward: bool,
+}
+
+/// A class a list names, after `const` lists are flattened: the reference
+/// that names it, where it was found.
+struct Flat {
+    raw: RawRef,
+    class: ClassRef,
+    declared: Rc<Declared>,
+    /// Reached through a `ModuleWithProviders`.
+    is_mwp: bool,
+    /// Reached through a `forwardRef`.
+    forward: bool,
 }
 
 /// A class a reference resolves to, and the non-relative module specifier
@@ -69,6 +87,11 @@ enum Declared {
     Directive {
         selector: Option<String>,
         is_component: bool,
+        /// What a standalone source component imports. `None` when it is
+        /// taken to bring in providers: a component of a declaration file
+        /// (ngtsc's `assumedToExportProviders`), one not known to be
+        /// standalone, or one whose imports can't be read.
+        imports: Option<Vec<RawRef>>,
     },
     Pipe {
         name: Option<String>,
@@ -77,9 +100,15 @@ enum Declared {
         declarations: Vec<RawRef>,
         imports: Vec<RawRef>,
         exports: Vec<RawRef>,
+        /// A declaration file's NgModule, or one with a `providers` key (any
+        /// value), as ngtsc's `mayDeclareProviders`.
+        may_declare_providers: bool,
     },
     /// A `const` list of references, spread or named in a module's lists.
     List(Vec<RawRef>),
+    /// A `declare const X: readonly [typeof A, typeof B]` list, by its type.
+    /// Only `ɵinj` reads it.
+    TypeList(Vec<RawRef>),
 }
 
 /// A directive or pipe of a scope, before it's named for the compiled file.
@@ -245,7 +274,7 @@ impl CrossFileAnalyzer {
                     file: file.clone(),
                     namespace: namespace.map(Into::into),
                     name: (*name).into(),
-                    method: None,
+                    ..RawRef::default()
                 };
                 let class = self.inner.resolve_ref(&raw, None, 0)?;
                 let declared = self.inner.declared(&class.decl)?;
@@ -286,54 +315,84 @@ impl CrossFileAnalyzer {
             .collect()
     }
 
-    /// Which top-level `imports` and `exports` entries of the `@NgModule`
-    /// class `class_name` of `file` its `ɵinj` leaves out (#623), as ngtsc's
-    /// `NgModuleDecoratorHandler.resolve` does: an entry whose classes
-    /// (a `const` list flattened) are all directives or pipes, and in
-    /// `exports` also components. An exported component must be in the
-    /// module's compilation scope, so it stays reachable through `imports`.
-    /// An entry that doesn't resolve, or names an NgModule, stays.
-    pub(crate) fn injector_drops(
+    /// What the `ɵinj` of the `@NgModule` class `class_name` of `file` does
+    /// with each top-level `imports` and `exports` entry (#623), as ngtsc's
+    /// `NgModuleDecoratorHandler.resolve` does (see `injector_imports`).
+    /// `consts` are those of `source`, the text of `file` the entries are
+    /// read from. In `imports`, a directive or pipe is left out, and so is a
+    /// standalone component that brings in no providers. In `exports`, so
+    /// is a component of the module's compilation scope, where it stays
+    /// reachable through `imports`. An entry that doesn't resolve stays.
+    pub(crate) fn injector_plans(
         &self,
         file: &Path,
         source: &str,
         class_name: &str,
+        consts: &StringConsts<'_>,
         imports: &[Option<InjectorEntry<'_>>],
         exports: &[Option<InjectorEntry<'_>>],
-    ) -> InjectorDrops {
+    ) -> InjectorPlans {
         let file = self.inner.set_compiled_source(file, source);
         let inner = &self.inner;
         let module = Decl { file: file.clone(), name: class_name.into() };
         let scope = OnceCell::new();
-        let drops = |entries: &[Option<InjectorEntry<'_>>], is_exports: bool| -> Vec<bool> {
-            entries
+        // The classes `entry` names, `kept` telling which stay.
+        let resolve = |entry: &InjectorEntry<'_>, kept: &dyn Fn(&Flat) -> Option<bool>| {
+            let mut raws = Vec::new();
+            collect_refs(entry.expr, consts, &file, &mut raws, 0, false, false)?;
+            let refs = inner
+                .flatten(&raws, None, 0, false, true)?
                 .iter()
-                .map(|entry| {
-                    let Some(entry) = entry else { return false };
-                    let raw = RawRef {
-                        file: file.clone(),
-                        namespace: entry.namespace.map(Into::into),
-                        name: entry.name.into(),
-                        method: None,
-                    };
-                    let Some(classes) = inner.resolve_refs(&[raw], None, 0) else { return false };
-                    !classes.is_empty()
-                        && classes.iter().all(|(class, declared)| match &**declared {
-                            Declared::Directive { is_component: false, .. }
-                            | Declared::Pipe { .. } => true,
-                            Declared::Directive { is_component: true, .. } => {
-                                is_exports
-                                    && scope
-                                        .get_or_init(|| inner.compilation_scope(&module))
-                                        .as_ref()
-                                        .is_some_and(|scope| scope.contains(&class.decl))
-                            }
-                            Declared::NgModule { .. } | Declared::List(_) => false,
-                        })
+                .map(|flat| {
+                    let kept = kept(flat);
+                    ResolvedRef {
+                        kept,
+                        name: kept
+                            .filter(|kept| *kept)
+                            .and_then(|_| inner.injector_name(flat, &file)),
+                        is_mwp: flat.is_mwp,
+                        forward: flat.forward,
+                    }
                 })
-                .collect()
+                .collect::<Vec<_>>();
+            Some(refs)
         };
-        InjectorDrops { imports: drops(imports, false), exports: drops(exports, true) }
+        let imports = imports
+            .iter()
+            .map(|entry| {
+                let Some(entry) = entry else { return EntryPlan::Keep };
+                let refs = resolve(entry, &|flat| match &*flat.declared {
+                    Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => {
+                        Some(false)
+                    }
+                    Declared::Directive { .. } => Some(inner.may_export_providers(&flat.class)),
+                    Declared::NgModule { .. } => Some(true),
+                    Declared::List(_) | Declared::TypeList(_) => None,
+                });
+                imports_plan(refs.as_deref(), entry.is_spread)
+            })
+            .collect();
+        let exports = exports
+            .iter()
+            .map(|entry| {
+                let Some(entry) = entry else { return EntryPlan::Keep };
+                let refs = resolve(entry, &|flat| match &*flat.declared {
+                    Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => {
+                        Some(false)
+                    }
+                    Declared::Directive { .. } => Some(
+                        !scope
+                            .get_or_init(|| inner.compilation_scope(&module))
+                            .as_ref()
+                            .is_some_and(|scope| scope.contains(&flat.class.decl)),
+                    ),
+                    Declared::NgModule { .. } => Some(true),
+                    Declared::List(_) | Declared::TypeList(_) => None,
+                });
+                exports_plan(refs.as_deref())
+            })
+            .collect();
+        InjectorPlans { imports, exports }
     }
 }
 
@@ -361,7 +420,7 @@ impl CrossFileAnalyzer {
                     file: file.clone(),
                     namespace: namespace.map(Into::into),
                     name: (*name).into(),
-                    method: None,
+                    ..RawRef::default()
                 };
                 let holder = self.inner.resolve_ref(&raw, None, 0)?;
                 let module = match method {
@@ -385,11 +444,11 @@ fn dedupe(items: Vec<ScopeItem>) -> Vec<ScopeItem> {
 /// The scope kind of a directive or pipe.
 fn scope_kind(declared: &Declared) -> Option<ScopeKind> {
     match declared {
-        Declared::Directive { selector, is_component } => {
+        Declared::Directive { selector, is_component, .. } => {
             Some(ScopeKind::Directive { selector: selector.clone(), is_component: *is_component })
         }
         Declared::Pipe { name } => Some(ScopeKind::Pipe { name: name.clone() }),
-        Declared::NgModule { .. } | Declared::List(_) => None,
+        Declared::NgModule { .. } | Declared::List(_) | Declared::TypeList(_) => None,
     }
 }
 
@@ -602,7 +661,7 @@ impl Inner {
                             file: file.clone(),
                             namespace: namespace.map(Into::into),
                             name: class.into(),
-                            method: None,
+                            ..RawRef::default()
                         },
                         method: method.into(),
                         fallback: match fallback {
@@ -655,7 +714,7 @@ impl Inner {
                         file: file.clone(),
                         namespace: namespace.map(Into::into),
                         name: class.into(),
-                        method: None,
+                        ..RawRef::default()
                     },
                     Some(method.to_string()),
                 )),
@@ -688,6 +747,21 @@ impl Inner {
         owner: Option<&str>,
         depth: u16,
     ) -> Option<Vec<(ClassRef, Rc<Declared>)>> {
+        let flat = self.flatten(refs, owner, depth, false, false)?;
+        Some(flat.into_iter().map(|flat| (flat.class, flat.declared)).collect())
+    }
+
+    /// The classes `refs` name, with `const` lists flattened, each with the
+    /// reference that names it. `forward`: `refs` are read through a
+    /// `forwardRef`. `types`: read [`Declared::TypeList`]s too.
+    fn flatten(
+        &self,
+        refs: &[RawRef],
+        owner: Option<&str>,
+        depth: u16,
+        forward: bool,
+        types: bool,
+    ) -> Option<Vec<Flat>> {
         if depth > MAX_EXPORT_CHAIN {
             return None;
         }
@@ -695,18 +769,78 @@ impl Inner {
         for raw in refs {
             let class = self.resolve_ref(raw, owner, 0)?;
             let declared = self.declared(&class.decl)?;
-            if let Declared::List(items) = &*declared {
+            let forward = forward || raw.forward;
+            let items = match &*declared {
+                Declared::List(items) => Some(items),
+                Declared::TypeList(items) if types => Some(items),
+                Declared::TypeList(_) => return None,
+                _ => None,
+            };
+            if let Some(items) = items {
                 if !self.scope.flattening.borrow_mut().insert(class.decl.clone()) {
                     return None;
                 }
-                let items = self.resolve_refs(items, class.owner.as_deref(), depth + 1);
+                let items = self.flatten(items, class.owner.as_deref(), depth + 1, forward, types);
                 self.scope.flattening.borrow_mut().remove(&class.decl);
                 out.extend(items?);
             } else {
-                out.push((class, declared));
+                let is_mwp = raw.is_mwp || raw.method.is_some();
+                out.push(Flat { raw: raw.clone(), class, declared, is_mwp, forward });
             }
         }
         Some(out)
+    }
+
+    /// Whether the class may bring providers into an NgModule's injector,
+    /// like ngtsc's `mayExportProviders`: whether it reaches an NgModule
+    /// with providers through the `imports` of standalone components and
+    /// NgModules. A component's own providers don't count, and the
+    /// providers of a `ModuleWithProviders` an NgModule imports aren't read
+    /// either: its NgModule is. A class that can't be read may.
+    fn may_export_providers(&self, class: &ClassRef) -> bool {
+        // ngtsc stops at a class it is already looking at, so from the top
+        // this is whether such a class can be reached.
+        let mut seen = FxHashSet::default();
+        let mut pending = vec![class.clone()];
+        while let Some(class) = pending.pop() {
+            if !seen.insert(class.decl.clone()) {
+                continue;
+            }
+            let Some(declared) = self.declared(&class.decl) else { return true };
+            let imports = match &*declared {
+                Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => continue,
+                Declared::Directive { imports: Some(imports), .. }
+                | Declared::NgModule { may_declare_providers: false, imports, .. } => imports,
+                Declared::Directive { imports: None, .. }
+                | Declared::NgModule { .. }
+                | Declared::List(_)
+                | Declared::TypeList(_) => return true,
+            };
+            let Some(flat) = self.flatten(imports, class.owner.as_deref(), 0, false, true) else {
+                return true;
+            };
+            pending.extend(flat.into_iter().map(|flat| flat.class));
+        }
+        false
+    }
+
+    /// How the compiled `file` writes the class `flat` names, by itself,
+    /// like ngtsc's `ReferenceEmitter`: the identifier `file` wrote for it,
+    /// else its name when `file` declares it, else an import of it.
+    fn injector_name(&self, flat: &Flat, file: &str) -> Option<ImportedName> {
+        let raw = &flat.raw;
+        if raw.file == file && raw.namespace.is_none() && raw.method.is_none() && !raw.is_mwp {
+            return Some(ImportedName::Local(raw.name.clone()));
+        }
+        let class = &flat.class;
+        // A class reached through a package is imported from it, or not at
+        // all (ngtsc: "Unable to import class").
+        if let Some(specifier) = class.owner.as_ref().filter(|_| class.decl.file != file) {
+            let entry = self.resolve_types(file, specifier)?;
+            let name = self.export_name(&entry, &class.decl)?;
+            return Some(ImportedName::Module { specifier: specifier.clone(), name });
+        }
+        self.imported_name(class, file)
     }
 
     /// The classes of the compilation scope of the NgModule `module`: its
@@ -1055,8 +1189,23 @@ fn read_declared<'a>(
         if !vars.kind.is_const() {
             return None;
         }
+        let Some(init) = &var.init else {
+            // `declare const X: readonly [typeof A, typeof B]`, as a
+            // declaration file writes a list.
+            if !vars.declare {
+                return None;
+            }
+            let mut ty = &var.type_annotation.as_ref()?.type_annotation;
+            if let TSType::TSTypeOperatorType(operator) = ty
+                && operator.operator == TSTypeOperatorOperator::Readonly
+            {
+                ty = &operator.type_annotation;
+            }
+            let TSType::TSTupleType(_) = ty else { return None };
+            return Some(Declared::TypeList(type_list(ty, &decl.file)?));
+        };
         let mut refs = Vec::new();
-        collect_refs(var.init.as_ref()?, consts, &decl.file, &mut refs, 0)?;
+        collect_refs(init, consts, &decl.file, &mut refs, 0, false, false)?;
         Some(Declared::List(refs))
     })
 }
@@ -1084,8 +1233,18 @@ fn read_declaration_type(class: &Class<'_>, file: &str) -> Option<Declared> {
             _ => None,
         };
         match key.name.as_str() {
-            "ɵcmp" => Some(Declared::Directive { selector: string_at(1), is_component: true }),
-            "ɵdir" => Some(Declared::Directive { selector: string_at(1), is_component: false }),
+            // ngtsc takes a component of a declaration file to bring in
+            // providers.
+            "ɵcmp" => Some(Declared::Directive {
+                selector: string_at(1),
+                is_component: true,
+                imports: None,
+            }),
+            "ɵdir" => Some(Declared::Directive {
+                selector: string_at(1),
+                is_component: false,
+                imports: None,
+            }),
             "ɵpipe" => Some(Declared::Pipe { name: string_at(1) }),
             "ɵmod" => {
                 let list = |index: usize| type_list(arguments.get(index)?, file);
@@ -1093,6 +1252,7 @@ fn read_declaration_type(class: &Class<'_>, file: &str) -> Option<Declared> {
                     declarations: list(1)?,
                     imports: list(2)?,
                     exports: list(3)?,
+                    may_declare_providers: true,
                 })
             }
             _ => None,
@@ -1129,7 +1289,7 @@ fn type_name_ref(file: &str, name: &TSTypeName<'_>) -> Option<RawRef> {
         },
         TSTypeName::ThisExpression(_) => return None,
     };
-    Some(RawRef { file: file.into(), namespace, name, method: None })
+    Some(RawRef { file: file.into(), namespace, name, ..RawRef::default() })
 }
 
 /// The class a value names: `A` or `ns.A`.
@@ -1144,7 +1304,7 @@ fn value_ref(value: &Expression<'_>, file: &str) -> Option<RawRef> {
         }
         _ => return None,
     };
-    Some(RawRef { file: file.into(), namespace, name, method: None })
+    Some(RawRef { file: file.into(), namespace, name, ..RawRef::default() })
 }
 
 /// The scope the Angular decorator of a source `class` gives it.
@@ -1177,17 +1337,35 @@ fn read_decorator<'a>(
     };
     match kind {
         "Component" => {
-            Some(Declared::Directive { selector: string("selector"), is_component: true })
+            // A component that is not standalone is an error in `imports`:
+            // it is kept.
+            let standalone = field("standalone").is_none_or(|value| {
+                matches!(value.get_inner_expression(), Expression::BooleanLiteral(b) if b.value)
+            });
+            let imports = standalone.then(|| {
+                let mut refs = Vec::new();
+                if let Some(value) = field("imports") {
+                    collect_refs(value, consts, file, &mut refs, 0, false, false)?;
+                }
+                Some(refs)
+            });
+            Some(Declared::Directive {
+                selector: string("selector"),
+                is_component: true,
+                imports: imports.flatten(),
+            })
         }
-        "Directive" => {
-            Some(Declared::Directive { selector: string("selector"), is_component: false })
-        }
+        "Directive" => Some(Declared::Directive {
+            selector: string("selector"),
+            is_component: false,
+            imports: None,
+        }),
         "Pipe" => Some(Declared::Pipe { name: string("name") }),
         _ => {
             let list = |key: &str| -> Option<Vec<RawRef>> {
                 let mut refs = Vec::new();
                 if let Some(value) = field(key) {
-                    collect_refs(value, consts, file, &mut refs, 0)?;
+                    collect_refs(value, consts, file, &mut refs, 0, false, false)?;
                 }
                 Some(refs)
             };
@@ -1195,6 +1373,7 @@ fn read_decorator<'a>(
                 declarations: list("declarations")?,
                 imports: list("imports")?,
                 exports: list("exports")?,
+                may_declare_providers: field("providers").is_some(),
             })
         }
     }
@@ -1203,13 +1382,15 @@ fn read_decorator<'a>(
 /// Collect the references `expr` lists into `out`: a class (`A`, `ns.A`,
 /// `forwardRef(() => A)`), a `ModuleWithProviders` (`A.forRoot()`,
 /// `{ ngModule: A }`), or an array of those, spread or nested. `None` for
-/// anything else.
+/// anything else. `is_mwp` and `forward` mark what `expr` is inside of.
 fn collect_refs(
     expr: &Expression<'_>,
     consts: &StringConsts<'_>,
     file: &str,
     out: &mut Vec<RawRef>,
     depth: u16,
+    is_mwp: bool,
+    forward: bool,
 ) -> Option<()> {
     if depth > MAX_EXPORT_CHAIN {
         return None;
@@ -1219,16 +1400,34 @@ fn collect_refs(
         namespace: namespace.map(Into::into),
         name: name.into(),
         method: method.map(Into::into),
+        is_mwp,
+        forward,
     };
     match expr.get_inner_expression() {
         Expression::ArrayExpression(array) => {
             for element in &array.elements {
                 match element {
                     ArrayExpressionElement::SpreadElement(spread) => {
-                        collect_refs(&spread.argument, consts, file, out, depth + 1)?;
+                        collect_refs(
+                            &spread.argument,
+                            consts,
+                            file,
+                            out,
+                            depth + 1,
+                            is_mwp,
+                            forward,
+                        )?;
                     }
                     ArrayExpressionElement::Elision(_) => return None,
-                    _ => collect_refs(element.as_expression()?, consts, file, out, depth + 1)?,
+                    _ => collect_refs(
+                        element.as_expression()?,
+                        consts,
+                        file,
+                        out,
+                        depth + 1,
+                        is_mwp,
+                        forward,
+                    )?,
                 }
             }
         }
@@ -1261,7 +1460,7 @@ fn collect_refs(
                     }
                     _ => return None,
                 };
-                collect_refs(returned, consts, file, out, depth + 1)?;
+                collect_refs(returned, consts, file, out, depth + 1, is_mwp, true)?;
             }
             // `A.forRoot()`, `ns.A.forRoot()`
             Expression::StaticMemberExpression(member) => {
@@ -1288,7 +1487,7 @@ fn collect_refs(
                 }
                 _ => None,
             })?;
-            collect_refs(module, consts, file, out, depth + 1)?;
+            collect_refs(module, consts, file, out, depth + 1, true, forward)?;
         }
         _ => return None,
     }
