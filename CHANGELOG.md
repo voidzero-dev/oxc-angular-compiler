@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.43 - 2026-11-03
+
+- Supported named `deferredImports` blocks (Angular 22.2), and kept native `?.` when linking v22 declarations.
+- Defaulted the Vite plugin's `angularVersion` to the installed `@angular/core` version.
+- Added `transformForBrowser`: TypeScript with Angular's settings, matching tsc, with async lowered for zone.js.
+- Downleveled async/await for zone.js in the Vite plugin like the Angular CLI, and respected package `sideEffects` when marking top-level calls pure.
+- Merged compile passes and moved more plugin logic to Rust.
+- Closed many ngtsc output gaps: shared long strings and literals in the constant pool, implicit signal `debugName`, the sanitizers added in 22.0.1, dynamic host attribute values, project-wide `preserveWhitespaces`, and legacy i18n message ids.
+- Fixed DI tokens: namespace-qualified and same-file interface/type-alias param types, string `@Inject` tokens, `@Attribute()` outside components, flag arrays in `useFactory`/`useClass` deps, and constructor overloads.
+- Gave each `@defer` block its own deps function, lazy-loaded `forwardRef(() => X)` imports, deferred imports used only inside `@defer`, and emitted `ɵɵenableIncrementalHydrationRuntime` for incremental hydration.
+- Fixed partial output and the linker: NgModule component scope, pipe ctor deps and inherited factories in `ɵɵngDeclareFactory`, escaped metadata strings, `@defer` dependencies, lazy NgModule lists, and declarations in any position.
+- Fixed import elision to keep imports the output still uses, and the optimizer's pure wrapping of classes with static members or blocks.
+- Read decorator metadata with the partial evaluator, folded number consts in template literals, and wrapped signal query predicates in `forwardRef`.
+- Compiled every stacked `@HostListener`/`@HostBinding` on a member, and `animate.enter`/`animate.leave` listeners.
+- Fixed parser and lexer cases: a hang on NUL, HTML void names in svg/math, non-ASCII selectors, `<` inside `@let`, escaped strings, and key spans.
+- Kept the Vite dev server from serving a stale file while its component fails to compile.
+- Updated Oxc to 0.157, napi-rs to 3.16, and other dependencies.
+
 ## 0.0.42 - 2026-10-20
 
 - Linked with the application's `angularVersion`, so `img`/`video` `[src]` keeps `ɵɵsanitizeUrl` on runtimes before 22.2.2.
