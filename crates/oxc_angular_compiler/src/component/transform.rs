@@ -593,8 +593,8 @@ pub struct ImportInfo<'a> {
     /// declaration) while `{ default as Foo }` resolves IMPORTED
     /// (`i1.default`).
     pub is_default_import: bool,
-    /// Whether this named import is a `const enum` in the file it comes from,
-    /// as far as the cross-file analysis can tell (only with
+    /// Whether this named or default import is a `const enum` where it is
+    /// declared, as far as the cross-file analysis can tell (only with
     /// `resolve_imported_values`). Read only by the class metadata `type:` of
     /// a constructor parameter, which ngtsc writes as `undefined` for one.
     /// DI tokens, `imports:` and `@defer` don't read it.
@@ -3568,17 +3568,19 @@ pub fn transform_angular_file(
         }
     }
 
-    // A named import used as a constructor parameter type that the other
-    // file declares as a `const enum`: class metadata writes `type: undefined`
-    // for it, like ngtsc's full and partial `typeToValue`. Gated like the
-    // other cross-file reads of `resolve_imported_values`, and only the
-    // names a constructor parameter type uses are looked up.
+    // A constructor parameter type that starts at an import and ends at a
+    // `const enum` where it is declared: class metadata writes
+    // `type: undefined` for it, like ngtsc's full and partial `typeToValue`.
+    // Gated like the other cross-file reads of `resolve_imported_values`,
+    // and only the types a constructor parameter uses are looked up.
     #[cfg(feature = "cross_file_elision")]
-    if options.resolve_imported_values
-        && let Some(analyzer) = &cross_file_analyzer
-    {
-        mark_const_enum_imports(&parser_ret.program, &mut import_map, analyzer, path);
-    }
+    let string_consts = match &cross_file_analyzer {
+        Some(analyzer) if options.resolve_imported_values => {
+            let found = imported_const_enums(&parser_ret.program, &mut import_map, analyzer, path);
+            string_consts.with_imported_const_enums(found)
+        }
+        _ => string_consts,
+    };
 
     // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
     // other signal APIs get an ngDevMode `debugName` argument named after the
@@ -5691,48 +5693,63 @@ fn set_component_scope_statement<'a>(
     )
 }
 
-/// Set [`ImportInfo::is_const_enum`] on the named imports a constructor
-/// parameter of `program` names as its whole type (`kc: KeyCodes`, after
-/// `T | null` narrowing) when `analyzer` finds a `const enum` behind them.
-/// Type-only and default imports are left alone: their `type:` is decided
-/// without this.
+/// The constructor parameter types of `program` (`kc: KeyCodes`,
+/// `k.KeyCodes`, `NS.Inner`, after `T | null` narrowing) that start at an
+/// import and that `analyzer` follows to a `const enum`, as written. Also
+/// sets [`ImportInfo::is_const_enum`] on an import used as the whole type.
+/// Type-only imports are left alone: their `type:` is `undefined` anyway.
 #[cfg(feature = "cross_file_elision")]
-fn mark_const_enum_imports<'a>(
+fn imported_const_enums<'a>(
     program: &Program<'a>,
     import_map: &mut ImportMap<'a>,
     analyzer: &CrossFileAnalyzer,
     path: &str,
-) {
-    let mut checked: rustc_hash::FxHashSet<Ident<'a>> = rustc_hash::FxHashSet::default();
+) -> rustc_hash::FxHashSet<Vec<Ident<'a>>> {
+    let mut checked: rustc_hash::FxHashSet<Vec<Ident<'a>>> = rustc_hash::FxHashSet::default();
+    let mut found = rustc_hash::FxHashSet::default();
     for site in crate::util::declared_classes(program) {
         let Some(ctor) = crate::util::find_constructor(site.class) else { continue };
         for param in &ctor.value.params.items {
-            let Some(name) = param
+            let Some(type_path) = param
                 .type_annotation
                 .as_ref()
                 .and_then(|annotation| {
                     crate::class_metadata::param_type_reference(&annotation.type_annotation)
                 })
                 .and_then(|type_ref| crate::class_metadata::entity_path(&type_ref.type_name))
-                .and_then(|path| if let [name] = path[..] { Some(name) } else { None })
             else {
                 continue;
             };
-            if !checked.insert(name) {
+            if !checked.insert(type_path.clone()) {
                 continue;
             }
-            let Some(info) = import_map.get_mut(&name) else { continue };
-            if !info.is_named_import || info.is_type_only || info.is_default_import {
+            let Some(info) = import_map.get_mut(&type_path[0]) else { continue };
+            if info.is_type_only {
                 continue;
             }
-            let export_name = info.imported_name.unwrap_or(name);
-            info.is_const_enum = analyzer.is_const_enum_import(
-                info.source_module.as_str(),
-                export_name.as_str(),
-                std::path::Path::new(path),
-            );
+            // The path in the module: from the export name for a named or
+            // default import, from the first member for `import * as k`.
+            let mut export_path: Vec<&str> = Vec::with_capacity(type_path.len());
+            if info.is_named_import {
+                export_path.push(info.imported_name.unwrap_or(type_path[0]).as_str());
+            }
+            export_path.extend(type_path[1..].iter().map(Ident::as_str));
+            if export_path.is_empty()
+                || !analyzer.is_const_enum_path(
+                    info.source_module.as_str(),
+                    &export_path,
+                    std::path::Path::new(path),
+                )
+            {
+                continue;
+            }
+            if type_path.len() == 1 {
+                info.is_const_enum = true;
+            }
+            found.insert(type_path);
         }
     }
+    found
 }
 
 /// The analyzer behind both cross-file features (`cross_file_elision`'s

@@ -439,7 +439,7 @@ impl Inner {
 
     /// Resolve `spec` the way TypeScript does from `from_file`: `.d.ts`
     /// files for packages, `.ts` for `./x.js`.
-    fn resolve_types(&self, from_file: &str, spec: &str) -> Option<String> {
+    pub(super) fn resolve_types(&self, from_file: &str, spec: &str) -> Option<String> {
         let resolver = self.scope.resolver.get_or_init(|| {
             // A package's `types` export, as `tsc` reads it.
             let options = oxc_resolver::ResolveOptions {

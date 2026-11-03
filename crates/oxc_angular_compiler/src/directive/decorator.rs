@@ -485,6 +485,10 @@ pub struct StringConsts<'a> {
     /// `Rc`-shared so it can borrow the analyzer that produced it.
     #[cfg(feature = "cross_file_elision")]
     resolver: Option<std::rc::Rc<dyn super::evaluator::ImportValueResolver>>,
+    /// The constructor parameter types, as written (`k.KeyCodes` is
+    /// `["k", "KeyCodes"]`), whose import the cross-file analysis followed
+    /// to a `const enum` (see [`Self::is_imported_const_enum`]).
+    imported_const_enums: rustc_hash::FxHashSet<std::vec::Vec<Ident<'a>>>,
     /// `host:` expressions already run through [`evaluate_host_metadata`],
     /// keyed by the expression's address and the decorator's name: the
     /// diagnostic pass (`decorator_io_errors`) and the metadata extraction
@@ -527,6 +531,7 @@ impl<'a> StringConsts<'a> {
             local_decls: std::cell::OnceCell::new(),
             #[cfg(feature = "cross_file_elision")]
             resolver: None,
+            imported_const_enums: rustc_hash::FxHashSet::default(),
             host_values: std::cell::RefCell::new(HashMap::default()),
         }
     }
@@ -544,6 +549,24 @@ impl<'a> StringConsts<'a> {
             self.local_decls
                 .get_or_init(|| crate::class_metadata::LocalDecls::collect(&program.body)),
         )
+    }
+
+    /// Record the imported `const enum` types (see
+    /// [`Self::is_imported_const_enum`]).
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn with_imported_const_enums(
+        mut self,
+        paths: rustc_hash::FxHashSet<std::vec::Vec<Ident<'a>>>,
+    ) -> Self {
+        self.imported_const_enums = paths;
+        self
+    }
+
+    /// Whether the type name `path`, which starts at an import, ends at a
+    /// `const enum` in the file the import reads (only with
+    /// `resolve_imported_values`).
+    pub(crate) fn is_imported_const_enum(&self, path: &[Ident<'a>]) -> bool {
+        self.imported_const_enums.contains(path)
     }
 
     /// The program these consts were collected from, when available.
@@ -597,6 +620,7 @@ pub fn collect_string_consts<'a>(
         local_decls: std::cell::OnceCell::new(),
         #[cfg(feature = "cross_file_elision")]
         resolver: None,
+        imported_const_enums: rustc_hash::FxHashSet::default(),
         host_values: std::cell::RefCell::new(HashMap::default()),
     };
     loop {
