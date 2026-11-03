@@ -129,8 +129,6 @@ fn unsure_entries_keep_their_old_output() {
     //   read it before it exists (ngtsc wraps the list in `() => [...]`).
     // - `typeOnly`: `DepModule` is only a type here, so its import is
     //   removed; ngtsc names it anyway and drops the import.
-    // - `chained`: the body returns another call, which ngtsc evaluates
-    //   further.
     let code = partial(
         r"
 import { NgModule, ModuleWithProviders } from '@angular/core';
@@ -138,18 +136,14 @@ import { DepModule } from './dep';
 export class Holder {
   static later(): ModuleWithProviders<LaterModule> { const p: any[] = []; return { ngModule: LaterModule, providers: p }; }
   static typeOnly(): ModuleWithProviders<DepModule> { const p: any[] = []; return { ngModule: null as any, providers: p }; }
-  static chained() { return Other.forRoot(); }
 }
-export class Other { static forRoot(): ModuleWithProviders<AModule> { return { ngModule: AModule, providers: [] }; } }
-@NgModule({})
-export class AModule {}
-@NgModule({ imports: [Holder.later(), Holder.typeOnly(), Holder.chained()] })
+@NgModule({ imports: [Holder.later(), Holder.typeOnly()] })
 export class AppModule {}
 @NgModule({})
 export class LaterModule {}
 ",
     );
-    assert!(code.contains("type:AppModule,imports:[Holder,Holder,Holder]}"), "{code}");
+    assert!(code.contains("type:AppModule,imports:[Holder,Holder]}"), "{code}");
     assert!(!code.contains("'./dep'"), "the type-only import stays removed:\n{code}");
 }
 
@@ -193,6 +187,45 @@ export class M {}
 ",
     );
     assert!(code.contains("type:M,imports:[AMod]}"), "{code}");
+}
+
+/// Holders whose single `return` ngtsc reads through, follows, or gives up
+/// on (then reading the `ModuleWithProviders<T>` return type).
+const SHAPES: &str = r"
+import { NgModule, ModuleWithProviders } from '@angular/core';
+@NgModule({}) export class DepModule {}
+@NgModule({}) export class EmptyModule {}
+@NgModule({}) export class OtherModule {}
+export class Inner { static forRoot(): ModuleWithProviders<OtherModule> { return { ngModule: OtherModule }; } }
+export class NoType { static forRoot(): any { const p: any[] = []; return { ngModule: OtherModule, providers: p }; } }
+export class H {
+  static sat(): ModuleWithProviders<DepModule> { return { ngModule: EmptyModule } satisfies ModuleWithProviders<EmptyModule>; }
+  static cast(): ModuleWithProviders<DepModule> { return <ModuleWithProviders<EmptyModule>>{ ngModule: EmptyModule }; }
+  static getter(): ModuleWithProviders<DepModule> { return { ngModule: EmptyModule as any, get providers() { return []; } }; }
+  static method(): ModuleWithProviders<DepModule> { return { ngModule: EmptyModule as any, foo() {} } as any; }
+  static paren(): ModuleWithProviders<DepModule> { return ({ ngModule: EmptyModule } as any)!; }
+  static wrapTyped(): ModuleWithProviders<DepModule> { return Inner.forRoot(); }
+  static wrapUntyped() { return Inner.forRoot(); }
+  static wrapDynamic(): ModuleWithProviders<DepModule> { return NoType.forRoot(); }
+}
+";
+
+#[test]
+fn a_returned_call_is_followed_and_an_unreadable_body_reads_the_type() {
+    // ngtsc partial, entry by entry: `satisfies`, `<T>x`, a getter and a
+    // method give up on the body (`DepModule`); `()`, `as` and `!` are read
+    // through (`EmptyModule`); a returned call is evaluated, also over the
+    // return type (`OtherModule`), and falls back to it when ngtsc can't
+    // evaluate the call (`DepModule`).
+    let code = partial(&format!(
+        "{SHAPES}@NgModule({{ imports: [H.sat(), H.cast(), H.getter(), H.method(), H.paren(), H.wrapTyped(), H.wrapUntyped(), H.wrapDynamic()] }})\nexport class AppModule {{}}\n"
+    ));
+    assert!(
+        code.contains(
+            "type:AppModule,imports:[DepModule,DepModule,DepModule,DepModule,EmptyModule,OtherModule,OtherModule,DepModule]}"
+        ),
+        "{code}"
+    );
 }
 
 #[test]
@@ -392,6 +425,30 @@ export class M {}
             CompilationMode::Partial,
         );
         assert!(code.contains("type:M,imports:[i1.AMod,i2.AMod]}"), "{code}");
+    }
+
+    #[test]
+    fn imported_returned_calls_and_unreadable_bodies() {
+        // ngtsc partial gives the same list as in one file, through `i1`.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "holder.ts", super::SHAPES);
+        let code = compile(
+            &dir,
+            "app.ts",
+            r"
+import { NgModule } from '@angular/core';
+import { H } from './holder';
+@NgModule({ imports: [H.sat(), H.cast(), H.getter(), H.method(), H.paren(), H.wrapTyped(), H.wrapUntyped(), H.wrapDynamic()] })
+export class M {}
+",
+            CompilationMode::Partial,
+        );
+        assert!(
+            code.contains(
+                "type:M,imports:[i1.DepModule,i1.DepModule,i1.DepModule,i1.DepModule,i1.EmptyModule,i1.OtherModule,i1.OtherModule,i1.DepModule]}"
+            ),
+            "{code}"
+        );
     }
 
     #[test]

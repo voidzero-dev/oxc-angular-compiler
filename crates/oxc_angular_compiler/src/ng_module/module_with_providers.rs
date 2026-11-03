@@ -37,16 +37,56 @@ pub enum MwpModule<'b, 'a> {
     Value(&'b Expression<'a>),
     /// `T` of a `ModuleWithProviders<T>` return type.
     Type(&'b TSTypeName<'a>),
+    /// `return Class.method(...)` (or `ns.Class.method(...)`): what that
+    /// call gives. When ngtsc can't evaluate it either, it reads this
+    /// method's return type instead: `fallback`, `None` when unsure.
+    Call {
+        namespace: Option<&'b str>,
+        class: &'b str,
+        method: &'b str,
+        fallback: Option<MwpType<'b, 'a>>,
+    },
+    /// ngtsc can't evaluate the method, and its return type names no
+    /// module. A method returning a call of it falls back to its own type.
+    Dynamic,
+}
+
+/// What ngtsc reads from a method's return type.
+#[derive(Clone, Copy)]
+pub enum MwpType<'b, 'a> {
+    /// `T` of `ModuleWithProviders<T>`.
+    Module(&'b TSTypeName<'a>),
+    /// No return type, or one that isn't a `ModuleWithProviders`.
+    Dynamic,
+}
+
+/// What a call to a `ModuleWithProviders` method gives: a module, a value
+/// ngtsc can't evaluate (`Dynamic`), or one Oxc can't tell (`Unknown`).
+pub enum MwpRead<T> {
+    Known(T),
+    Dynamic,
+    Unknown,
+}
+
+impl<T> MwpRead<T> {
+    /// The module, if known.
+    pub fn known(self) -> Option<T> {
+        match self {
+            Self::Known(module) => Some(module),
+            Self::Dynamic | Self::Unknown => None,
+        }
+    }
 }
 
 /// The NgModule the static method `method` of `class` returns a
 /// `ModuleWithProviders` of, read in ngtsc's order. Its evaluator first
-/// runs a body that is a single `return` (`visitFunctionBody`), and an
-/// object literal with `ngModule` there is the answer. Any other body gives
-/// a dynamic value, and then `createModuleWithProvidersResolver` reads the
-/// `ModuleWithProviders<T>` return type. `None` when unsure: a single
-/// `return` of something else (ngtsc would evaluate it further), a
-/// parameter or type parameter in place of the module.
+/// runs a body that is a single `return` (`visitFunctionBody`): an object
+/// literal with `ngModule` there is the answer, and a call is evaluated the
+/// same way. When that gives a dynamic value (any other body, `satisfies`,
+/// a getter in the object...), `createModuleWithProvidersResolver` reads
+/// the `ModuleWithProviders<T>` return type. `None` when unsure: a
+/// parameter or type parameter in place of the module, or a value ngtsc
+/// would evaluate further.
 ///
 /// With overloads, ngtsc reads only the first declaration (the symbol's
 /// `valueDeclaration`), whatever the call's arguments: a signature has no
@@ -71,33 +111,62 @@ pub fn static_method_ng_module<'b, 'a>(
         })
         .filter(|m| m.kind == MethodDefinitionKind::Method)?
         .value;
+    let is_param = |expr: &Expression<'_>| {
+        // `param`, `param.X`: the value comes from the call's argument.
+        let mut root = expr;
+        while let Expression::StaticMemberExpression(member) = root {
+            root = evaluated(&member.object);
+        }
+        matches!(root, Expression::Identifier(id) if function.params.items.iter().any(|param| {
+            param.pattern.get_binding_identifiers().iter().any(|b| b.name == id.name)
+        }))
+    };
+    let return_type = || return_type_module(class, function);
     if let Some(body) = &function.body
         && let [Statement::ReturnStatement(ret)] = body.statements.as_slice()
     {
-        let value = ng_module_value(ret.argument.as_ref()?)?;
-        // `param` or `param.X`: the module comes from the call's argument.
-        let mut root = value;
-        while let Expression::StaticMemberExpression(member) = root {
-            root = member.object.get_inner_expression();
+        match evaluated(ret.argument.as_ref()?) {
+            Expression::ObjectExpression(object) => match object_ng_module(object)? {
+                ObjectModule::Value(value) if is_param(value) => return None,
+                ObjectModule::Value(value) => return Some(MwpModule::Value(value)),
+                ObjectModule::Dynamic => {}
+            },
+            Expression::CallExpression(call) => {
+                let (namespace, class, method) = static_call(call)?;
+                if is_param(evaluated(&call.callee)) {
+                    return None;
+                }
+                return Some(MwpModule::Call { namespace, class, method, fallback: return_type() });
+            }
+            Expression::TSSatisfiesExpression(_)
+            | Expression::TSTypeAssertion(_)
+            | Expression::TSInstantiationExpression(_) => {}
+            _ => return None,
         }
-        if let Expression::Identifier(id) = root
-            && function.params.items.iter().any(|param| {
-                param.pattern.get_binding_identifiers().iter().any(|b| b.name == id.name)
-            })
-        {
-            return None;
-        }
-        return Some(MwpModule::Value(value));
     }
-    let return_type = &function.return_type.as_ref()?.type_annotation;
-    let TSType::TSTypeReference(reference) = return_type else { return None };
+    match return_type()? {
+        MwpType::Module(name) => Some(MwpModule::Type(name)),
+        MwpType::Dynamic => Some(MwpModule::Dynamic),
+    }
+}
+
+/// What ngtsc reads from the return type of `function`, a method of
+/// `class`; `None` for a type parameter in place of the module.
+fn return_type_module<'b, 'a>(
+    class: &'b Class<'a>,
+    function: &'b oxc_ast::ast::Function<'a>,
+) -> Option<MwpType<'b, 'a>> {
+    let Some(return_type) = &function.return_type else { return Some(MwpType::Dynamic) };
+    let TSType::TSTypeReference(reference) = &return_type.type_annotation else {
+        return Some(MwpType::Dynamic);
+    };
     let is_mwp = match &reference.type_name {
         TSTypeName::IdentifierReference(id) => id.name == "ModuleWithProviders",
         TSTypeName::QualifiedName(name) => name.right.name == "ModuleWithProviders",
         TSTypeName::ThisExpression(_) => false,
     };
     if !is_mwp {
-        return None;
+        return Some(MwpType::Dynamic);
     }
     let [TSType::TSTypeReference(module)] = reference.type_arguments.as_ref()?.params.as_slice()
     else {
@@ -112,24 +181,68 @@ pub fn static_method_ng_module<'b, 'a>(
             return None;
         }
     }
-    Some(MwpModule::Type(&module.type_name))
+    Some(MwpType::Module(&module.type_name))
 }
 
-/// The `ngModule` value of an object literal, `None` for anything else or
-/// when a spread or computed key could set it.
-fn ng_module_value<'b, 'a>(expr: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
-    let Expression::ObjectExpression(object) = expr.get_inner_expression() else { return None };
+/// `expr` without what ngtsc's evaluator looks through: parentheses, `as`
+/// and `!` (`visitExpression`). It can't evaluate `satisfies`, `<T>x` or
+/// `x<T>`.
+fn evaluated<'b, 'a>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    loop {
+        expr = match expr {
+            Expression::ParenthesizedExpression(e) => &e.expression,
+            Expression::TSAsExpression(e) => &e.expression,
+            Expression::TSNonNullExpression(e) => &e.expression,
+            _ => return expr,
+        };
+    }
+}
+
+/// `(namespace, class, method)` of a `Class.method(...)` or
+/// `ns.Class.method(...)` call.
+fn static_call<'b>(
+    call: &'b oxc_ast::ast::CallExpression<'_>,
+) -> Option<(Option<&'b str>, &'b str, &'b str)> {
+    let Expression::StaticMemberExpression(member) = evaluated(&call.callee) else { return None };
+    let method = member.property.name.as_str();
+    match evaluated(&member.object) {
+        Expression::Identifier(class) => Some((None, class.name.as_str(), method)),
+        Expression::StaticMemberExpression(class) => {
+            let Expression::Identifier(ns) = evaluated(&class.object) else { return None };
+            Some((Some(ns.name.as_str()), class.property.name.as_str(), method))
+        }
+        _ => None,
+    }
+}
+
+/// What ngtsc reads from a returned object literal.
+enum ObjectModule<'b, 'a> {
+    /// Its `ngModule` value.
+    Value(&'b Expression<'a>),
+    /// Nothing: a getter or method makes it give up on the object
+    /// (`visitObjectLiteralExpression`).
+    Dynamic,
+}
+
+/// The `ngModule` of an object literal, `None` when unsure: a spread or
+/// computed key could set it, or there is none.
+fn object_ng_module<'b, 'a>(
+    object: &'b oxc_ast::ast::ObjectExpression<'a>,
+) -> Option<ObjectModule<'b, 'a>> {
     let mut value = None;
     for property in &object.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
+        if property.kind != oxc_ast::ast::PropertyKind::Init || property.method {
+            return Some(ObjectModule::Dynamic);
+        }
         if property.computed {
             return None;
         }
         if property.key.static_name().is_some_and(|key| key == "ngModule") {
-            value = Some(property.value.get_inner_expression());
+            value = Some(evaluated(&property.value));
         }
     }
-    value
+    value.map(ObjectModule::Value)
 }
 
 /// How a constant's initializer gives a `ModuleWithProviders`.
@@ -143,31 +256,15 @@ pub enum MwpInit<'b, 'a> {
 /// How `init` gives a `ModuleWithProviders`, if it is one of the shapes
 /// ngtsc can evaluate to one.
 pub fn module_with_providers_init<'b, 'a>(init: &'b Expression<'a>) -> Option<MwpInit<'b, 'a>> {
-    match init.get_inner_expression() {
+    match evaluated(init) {
         Expression::CallExpression(call) => {
-            let Expression::StaticMemberExpression(member) = call.callee.get_inner_expression()
-            else {
-                return None;
-            };
-            let method = member.property.name.as_str();
-            match member.object.get_inner_expression() {
-                Expression::Identifier(class) => {
-                    Some(MwpInit::Call { namespace: None, class: class.name.as_str(), method })
-                }
-                Expression::StaticMemberExpression(class) => {
-                    let Expression::Identifier(ns) = class.object.get_inner_expression() else {
-                        return None;
-                    };
-                    Some(MwpInit::Call {
-                        namespace: Some(ns.name.as_str()),
-                        class: class.property.name.as_str(),
-                        method,
-                    })
-                }
-                _ => None,
-            }
+            let (namespace, class, method) = static_call(call)?;
+            Some(MwpInit::Call { namespace, class, method })
         }
-        expr @ Expression::ObjectExpression(_) => ng_module_value(expr).map(MwpInit::Module),
+        Expression::ObjectExpression(object) => match object_ng_module(object)? {
+            ObjectModule::Value(value) => Some(MwpInit::Module(value)),
+            ObjectModule::Dynamic => None,
+        },
         _ => None,
     }
 }
@@ -327,10 +424,40 @@ pub fn resolve_local_entry<'b>(
 /// The name `program` writes the NgModule of `class.method(...)` by, when
 /// `class` is declared there.
 fn method_module<'b>(program: &'b Program<'_>, class: &str, method: &str) -> Option<&'b str> {
-    match static_method_ng_module(top_level_class(program, class)?, method)? {
-        MwpModule::Value(Expression::Identifier(id))
-        | MwpModule::Type(TSTypeName::IdentifierReference(id)) => Some(id.name.as_str()),
-        _ => None,
+    method_read(program, class, method, 0).known()
+}
+
+/// What `class.method(...)` gives, `class` and the methods it calls
+/// declared in `program`.
+fn method_read<'b>(
+    program: &'b Program<'_>,
+    class: &str,
+    method: &str,
+    depth: u8,
+) -> MwpRead<&'b str> {
+    const MAX_CALLS: u8 = 8;
+    let Some(class) = top_level_class(program, class).filter(|_| depth <= MAX_CALLS) else {
+        return MwpRead::Unknown;
+    };
+    let name = |name: &'b TSTypeName<'_>| match name {
+        TSTypeName::IdentifierReference(id) => MwpRead::Known(id.name.as_str()),
+        _ => MwpRead::Unknown,
+    };
+    match static_method_ng_module(class, method) {
+        Some(MwpModule::Value(Expression::Identifier(id))) => MwpRead::Known(id.name.as_str()),
+        Some(MwpModule::Type(type_name)) => name(type_name),
+        Some(MwpModule::Dynamic) => MwpRead::Dynamic,
+        Some(MwpModule::Call { namespace: None, class, method, fallback }) => {
+            match method_read(program, class, method, depth + 1) {
+                MwpRead::Dynamic => match fallback {
+                    Some(MwpType::Module(type_name)) => name(type_name),
+                    Some(MwpType::Dynamic) => MwpRead::Dynamic,
+                    None => MwpRead::Unknown,
+                },
+                read => read,
+            }
+        }
+        _ => MwpRead::Unknown,
     }
 }
 

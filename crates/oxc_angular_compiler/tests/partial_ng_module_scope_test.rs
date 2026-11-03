@@ -842,3 +842,53 @@ fn overloads_read_the_first_declaration() {
     let scope = scope_through_holder(&holder, "Holder.forRoot(1)");
     assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
 }
+
+#[test]
+fn a_returned_call_is_followed() {
+    // ngtsc evaluates `Inner.forRoot()`, also over this method's own type.
+    let holder = format!(
+        "{HOLDER_HEAD}export class Inner {{
+  static forRoot() {{ return {{ ngModule: DepModule, providers: [] }}; }}
+}}
+export class Holder {{
+  static forRoot(): ModuleWithProviders<EmptyModule> {{ return Inner.forRoot(); }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot()");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
+}
+
+#[test]
+fn a_call_ngtsc_cannot_evaluate_reads_the_return_type() {
+    let holder = format!(
+        "{HOLDER_HEAD}export class Inner {{
+  static forRoot(): any {{ const p: any[] = []; return {{ ngModule: EmptyModule, providers: p }}; }}
+}}
+export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule> {{ return Inner.forRoot(); }}
+}}"
+    );
+    let scope = scope_through_holder(&holder, "Holder.forRoot()");
+    assert_eq!(scope.as_deref(), Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"));
+}
+
+#[test]
+fn a_body_ngtsc_cannot_evaluate_reads_the_return_type() {
+    // `satisfies` and a getter make ngtsc give up on the returned object.
+    for body in [
+        "return { ngModule: EmptyModule } satisfies ModuleWithProviders<EmptyModule>;",
+        "return { ngModule: EmptyModule as any, get providers() { return []; } };",
+    ] {
+        let holder = format!(
+            "{HOLDER_HEAD}export class Holder {{
+  static forRoot(): ModuleWithProviders<DepModule> {{ {body} }}
+}}"
+        );
+        let scope = scope_through_holder(&holder, "Holder.forRoot()");
+        assert_eq!(
+            scope.as_deref(),
+            Some("i0.ɵɵsetComponentScope(App,()=>[i1.D,App],()=>[i1.P])"),
+            "{body}"
+        );
+    }
+}

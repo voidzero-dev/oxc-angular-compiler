@@ -31,7 +31,8 @@ use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
 use crate::component::metadata::{ComponentScope, ImportedName, ScopeEntry, ScopeKind};
 use crate::directive::{Evaluator, StringConsts, find_angular_class_decorator};
 use crate::ng_module::module_with_providers::{
-    MwpInit, MwpModule, module_with_providers_init, static_method_ng_module, top_level_const_init,
+    MwpInit, MwpModule, MwpRead, MwpType, module_with_providers_init, static_method_ng_module,
+    top_level_const_init,
 };
 use crate::ng_module::{InjectorDrops, InjectorEntry};
 
@@ -572,32 +573,75 @@ impl Inner {
         let class = ClassRef { decl, owner };
         match &raw.method {
             None => Some(class),
-            Some(method) => {
-                let module = self.module_with_providers(&class.decl, method)?;
-                self.resolve_ref(&module, class.owner.as_deref(), depth + 1)
-            }
+            Some(method) => self.mwp_method_read(&class, method, depth + 1).known(),
         }
     }
 
-    /// The NgModule the static method `method` of the class `decl` returns
-    /// a `ModuleWithProviders` of, read in ngtsc's order (see
-    /// `static_method_ng_module`).
-    fn module_with_providers(&self, decl: &Decl, method: &str) -> Option<RawRef> {
-        let file = &decl.file;
-        self.parsed_file(file)?.with(|_, program, _| {
-            let class = find_class(program, &decl.name)?;
-            match static_method_ng_module(class, method)? {
-                MwpModule::Value(value) => value_ref(value, file),
-                MwpModule::Type(name) => type_name_ref(file, name),
+    /// What `holder.method(...)` gives: the NgModule of the
+    /// `ModuleWithProviders` it returns, read in ngtsc's order (see
+    /// `static_method_ng_module`), following a call it returns.
+    fn mwp_method_read(&self, holder: &ClassRef, method: &str, depth: u16) -> MwpRead<ClassRef> {
+        enum Found {
+            Module(RawRef),
+            Call { holder: RawRef, method: String, fallback: MwpRead<RawRef> },
+            Dynamic,
+        }
+        if depth > MAX_EXPORT_CHAIN {
+            return MwpRead::Unknown;
+        }
+        let file = &holder.decl.file;
+        let found = self.parsed_file(file).and_then(|parsed| {
+            parsed.with(|_, program, _| {
+                let class = find_class(program, &holder.decl.name)?;
+                Some(match static_method_ng_module(class, method)? {
+                    MwpModule::Value(value) => Found::Module(value_ref(value, file)?),
+                    MwpModule::Type(name) => Found::Module(type_name_ref(file, name)?),
+                    MwpModule::Dynamic => Found::Dynamic,
+                    MwpModule::Call { namespace, class, method, fallback } => Found::Call {
+                        holder: RawRef {
+                            file: file.clone(),
+                            namespace: namespace.map(Into::into),
+                            name: class.into(),
+                            method: None,
+                        },
+                        method: method.into(),
+                        fallback: match fallback {
+                            Some(MwpType::Module(name)) => {
+                                type_name_ref(file, name).map_or(MwpRead::Unknown, MwpRead::Known)
+                            }
+                            Some(MwpType::Dynamic) => MwpRead::Dynamic,
+                            None => MwpRead::Unknown,
+                        },
+                    },
+                })
+            })
+        });
+        let owner = holder.owner.as_deref();
+        let resolve = |raw: &RawRef| {
+            self.resolve_ref(raw, owner, depth + 1).map_or(MwpRead::Unknown, MwpRead::Known)
+        };
+        match found {
+            None => MwpRead::Unknown,
+            Some(Found::Module(raw)) => resolve(&raw),
+            Some(Found::Dynamic) => MwpRead::Dynamic,
+            Some(Found::Call { holder, method, fallback }) => {
+                let MwpRead::Known(holder) = resolve(&holder) else { return MwpRead::Unknown };
+                match self.mwp_method_read(&holder, &method, depth + 1) {
+                    MwpRead::Dynamic => match fallback {
+                        MwpRead::Known(raw) => resolve(&raw),
+                        MwpRead::Dynamic => MwpRead::Dynamic,
+                        MwpRead::Unknown => MwpRead::Unknown,
+                    },
+                    read => read,
+                }
             }
-        })
+        }
     }
 
     /// The NgModule `holder.method(...)` returns a `ModuleWithProviders`
     /// of.
     fn mwp_method_module(&self, holder: &ClassRef, method: &str) -> Option<ClassRef> {
-        let raw = self.module_with_providers(&holder.decl, method)?;
-        self.resolve_ref(&raw, holder.owner.as_deref(), 1)
+        self.mwp_method_read(holder, method, 1).known()
     }
 
     /// The NgModule the top-level `const` `decl` holds a
