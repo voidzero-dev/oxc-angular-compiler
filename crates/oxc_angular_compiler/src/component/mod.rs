@@ -35,6 +35,7 @@ pub use dependency::{
 };
 pub use hmr_fingerprint::{ComponentHmrFingerprint, component_hmr_fingerprint};
 pub use import_elision::ImportElisionAnalyzer;
+pub(crate) use metadata::ImportedName;
 pub use metadata::{
     AngularVersion, ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode,
     HostDirectiveMetadata, HostMetadata, ImportRef, LifecycleMetadata, Prerelease,

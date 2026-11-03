@@ -187,6 +187,9 @@ interface TransformOptions {
   enableTemplateSourceLocations?: boolean // needs rootDirs; full mode only
   // Roots that ɵsetClassDebugInfo's filePath and source locations are relative to
   rootDirs?: string[]
+  // ts.sys.useCaseSensitiveFileNames; false lowercases those paths, like ngtsc
+  // (default: true)
+  useCaseSensitiveFileNames?: boolean
 
   // Cross-file elision
   crossFileElision?: boolean
@@ -241,6 +244,9 @@ interface PluginOptions {
   // Roots for ɵsetClassDebugInfo's filePath and source locations,
   // resolved against workspaceRoot (default: [workspaceRoot], like ngtsc)
   rootDirs?: string[]
+  // false lowercases those paths, like ngtsc on macOS and Windows
+  // (default: checked on the project's file system, like ts.sys)
+  caseSensitiveFileNames?: boolean
 }
 ```
 

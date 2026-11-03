@@ -1,26 +1,30 @@
-//! `ModuleWithProviders` entries in a partial `ɵɵngDeclareNgModule`'s
-//! `imports`.
+//! The `declarations`, `imports` and `exports` of a partial
+//! `ɵɵngDeclareNgModule`, read like ngtsc's `resolveTypeList`.
 //!
-//! ngtsc evaluates each `imports` entry, and an entry that gives a
-//! `ModuleWithProviders` (`Dep.forRoot()`, or a constant holding one) is
-//! listed as the NgModule it names, not as written: `imports: [mwp,
-//! Holder.forRoot()]` becomes `imports: [DepModule, DepModule]`. See
+//! ngtsc evaluates each list: nested arrays, spreads and `const` lists are
+//! flattened, and an entry that gives a `ModuleWithProviders`
+//! (`Dep.forRoot()`, or a constant holding one) is listed as the NgModule it
+//! names, not as written: `imports: [mwp, Holder.forRoot()]` becomes
+//! `imports: [DepModule, DepModule]`. See
 //! `NgModuleDecoratorHandler.resolveTypeList` and
 //! `createModuleWithProvidersResolver` in
 //! `packages/compiler-cli/src/ngtsc/annotations/ng_module/src/`.
 //!
 //! Oxc used to list the class a method is called on (`Holder`), which is
-//! not an NgModule at all when another class holds the method. When a JIT
-//! linker inlines that list into `ɵɵdefineNgModule`, the runtime gets a
-//! class that is no module and a `ModuleWithProviders` object.
+//! not an NgModule at all when another class holds the method, and to drop
+//! spreads and namespace members. When a JIT linker inlines that list into
+//! `ɵɵdefineNgModule`, the runtime gets a class that is no module and a
+//! `ModuleWithProviders` object.
 //!
-//! Only the partial declaration changes: the injector keeps the raw
+//! Only the partial declaration lists change: the injector keeps the raw
 //! entries (it needs their providers), and the full-mode
-//! `ɵɵsetNgModuleScope` keeps the raw list, which the runtime unwraps.
+//! `ɵɵsetNgModuleScope` keeps the raw list, which the runtime unwraps. In
+//! both modes, the lists are wrapped in `() => [...]` like ngtsc does: when
+//! one names a class this file declares after the NgModule.
 //!
-//! This file reads what one file can tell. With cross-file analysis, a
-//! method or constant of another file is read by
-//! `CrossFileAnalyzer::module_with_providers_imports`.
+//! A top-level entry that can't be read keeps its old output. This file
+//! reads what one file can tell. With cross-file analysis, a name of
+//! another file is read by `CrossFileAnalyzer::read_imported_ref`.
 
 use oxc_ast::ast::{
     ArrayExpressionElement, Class, ClassElement, Declaration, Expression, MethodDefinitionKind,
@@ -187,7 +191,7 @@ fn return_type_module<'b, 'a>(
 /// `expr` without what ngtsc's evaluator looks through: parentheses, `as`
 /// and `!` (`visitExpression`). It can't evaluate `satisfies`, `<T>x` or
 /// `x<T>`.
-fn evaluated<'b, 'a>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+pub fn evaluated<'b, 'a>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
         expr = match expr {
             Expression::ParenthesizedExpression(e) => &e.expression,
@@ -310,117 +314,6 @@ fn top_level_class<'b, 'a>(program: &'b Program<'a>, name: &str) -> Option<&'b C
     })
 }
 
-/// One `imports` entry, in the order and shape the decorator parser lists
-/// them (`extract_reference_array`): its spreads and other expressions are
-/// left out.
-pub struct ImportEntry<'b> {
-    /// The name the partial declaration lists for it today.
-    pub name: &'b str,
-    /// The `method` of `name.method(...)`, `None` for a plain name or a
-    /// `forwardRef`.
-    pub method: Option<&'b str>,
-    /// Whether it is written as `forwardRef(() => name)`.
-    pub forward_ref: bool,
-}
-
-/// The `imports` entries of the `@NgModule` of `class`, `None` when its
-/// `imports` is not an array literal.
-pub fn ng_module_import_entries<'b>(
-    class: &'b Class<'_>,
-    consts: &StringConsts<'_>,
-) -> Option<Vec<ImportEntry<'b>>> {
-    let decorator = find_ng_module_decorator(&class.decorators, Some(consts))?;
-    let Expression::CallExpression(call) = &decorator.expression else { return None };
-    let Some(oxc_ast::ast::Argument::ObjectExpression(config)) = call.arguments.first() else {
-        return None;
-    };
-    // The parser keeps the last `imports` key.
-    let imports = config.properties.iter().rev().find_map(|property| {
-        let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
-        let key = match &property.key {
-            PropertyKey::StaticIdentifier(id) => id.name.as_str(),
-            PropertyKey::StringLiteral(lit) => lit.value.as_str()?,
-            _ => return None,
-        };
-        (crate::util::is_metadata_property(property) && key == "imports").then_some(&property.value)
-    })?;
-    let Expression::ArrayExpression(array) = imports else { return None };
-    let mut entries = Vec::new();
-    for element in &array.elements {
-        match element {
-            ArrayExpressionElement::Identifier(id) => {
-                entries.push(ImportEntry {
-                    name: id.name.as_str(),
-                    method: None,
-                    forward_ref: false,
-                });
-            }
-            ArrayExpressionElement::CallExpression(call) => match &call.callee {
-                Expression::Identifier(id) if id.name == "forwardRef" => {
-                    if let Some(oxc_ast::ast::Argument::ArrowFunctionExpression(arrow)) =
-                        call.arguments.first()
-                        && let Some(Expression::Identifier(inner)) = arrow.get_expression()
-                    {
-                        entries.push(ImportEntry {
-                            name: inner.name.as_str(),
-                            method: None,
-                            forward_ref: true,
-                        });
-                    }
-                }
-                Expression::StaticMemberExpression(member) => {
-                    if let Expression::Identifier(id) = &member.object {
-                        entries.push(ImportEntry {
-                            name: id.name.as_str(),
-                            method: Some(member.property.name.as_str()),
-                            forward_ref: false,
-                        });
-                    }
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-    Some(entries)
-}
-
-/// The NgModule a `ModuleWithProviders` entry names, when this file alone
-/// tells it: the entry is `Class.method(...)` or a top-level `const` of one
-/// (or of `{ ngModule: T }`), `Class` is declared in this file, and `T` is
-/// a class this file declares before `module_class`, or a binding whose
-/// import the output keeps anyway (`is_kept_import`). ngtsc then names `T`
-/// as this file writes it (`DepModule`, not `i1.DepModule`).
-///
-/// A class declared later would be read before it exists, and an import
-/// only used as a type is removed, so those stay as they were.
-pub fn resolve_local_entry<'b>(
-    program: &'b Program<'_>,
-    module_class: &Class<'_>,
-    entry: &ImportEntry<'_>,
-    is_kept_import: impl Fn(&str) -> bool,
-) -> Option<&'b str> {
-    if entry.forward_ref {
-        return None;
-    }
-    let module = match entry.method {
-        Some(method) => method_module(program, entry.name, method)?,
-        None => match module_with_providers_init(top_level_const_init(program, entry.name)?)? {
-            MwpInit::Call { namespace: None, class, method } => {
-                method_module(program, class, method)?
-            }
-            MwpInit::Call { namespace: Some(_), .. } => return None,
-            MwpInit::Module(value) => match value {
-                Expression::Identifier(id) => id.name.as_str(),
-                _ => return None,
-            },
-        },
-    };
-    let declared_before = top_level_class(program, module)
-        .is_some_and(|class| class.span.end <= module_class.span.start);
-    (declared_before || is_kept_import(module)).then_some(module)
-}
-
 /// The name `program` writes the NgModule of `class.method(...)` by, when
 /// `class` is declared there.
 fn method_module<'b>(program: &'b Program<'_>, class: &str, method: &str) -> Option<&'b str> {
@@ -480,123 +373,464 @@ pub enum NamedClass {
     Module { specifier: String, name: String },
 }
 
-/// Cross-file analysis of `(namespace, name, method)` entries: the
-/// NgModule each one names, if it can tell.
-pub type ResolveImported<'r> =
-    &'r dyn Fn(&[(Option<&str>, &str, Option<&str>)]) -> std::vec::Vec<Option<NamedClass>>;
+/// A question to cross-file analysis about a binding the compiled file
+/// imports: what `name` (or `namespace.name`) is, or what
+/// `name.method(...)` gives.
+#[cfg_attr(not(feature = "cross_file_elision"), expect(dead_code))]
+pub struct Question<'s> {
+    pub namespace: Option<&'s str>,
+    pub name: &'s str,
+    pub method: Option<&'s str>,
+    /// Written `...name`: only a `const` array counts.
+    pub spread: bool,
+}
 
-/// The partial `ɵɵngDeclareNgModule` imports of the `@NgModule` `class`
-/// with each `ModuleWithProviders` entry listed as its NgModule, or `None`
-/// when none was read (or the entries don't line up with `current`, the
-/// names listed today). An entry this file can't settle goes to
-/// `resolve_imported` (cross-file analysis: `(namespace, name, method)`
-/// entries), and an entry no one settles keeps today's name.
-#[expect(clippy::too_many_arguments)]
-pub fn partial_imports<'a>(
-    allocator: &'a oxc_allocator::Allocator,
+/// What cross-file analysis read for a [`Question`]. `unready` is set when
+/// a class may not be defined yet as the NgModule is: its file, or the one
+/// it is imported through, loads this one back.
+#[cfg_attr(not(feature = "cross_file_elision"), expect(dead_code))]
+pub enum Answer {
+    /// A class the file imports by this name: it is listed as written.
+    AsWritten { unready: bool },
+    /// The classes it gives, a `const` list flattened and each
+    /// `ModuleWithProviders` as its NgModule. `forward_ref` is set when
+    /// the list writes a `forwardRef`.
+    Classes { classes: Vec<NamedClass>, unready: bool, forward_ref: bool },
+}
+
+/// Cross-file analysis of a [`Question`]; `None` when it can't tell.
+pub type ResolveImported<'r> = &'r dyn Fn(&Question<'_>) -> Option<Answer>;
+
+/// A class a list entry names.
+enum Ref {
+    /// By a name of the compiled file.
+    Local(String),
+    /// The export `name` of `specifier`, through a namespace import.
+    Module { specifier: String, name: String },
+}
+
+/// A top-level entry of a list.
+struct Entry {
+    /// The name the decorator parser lists for it (`extract_reference_array`).
+    fallback: Option<String>,
+    /// The classes it gives, `None` when unsure.
+    refs: Option<Vec<Ref>>,
+}
+
+/// A list of an `@NgModule` the partial declaration names.
+#[derive(Clone, Copy)]
+pub enum ListKey {
+    Declarations,
+    Imports,
+    Exports,
+}
+
+/// The `declarations`, `imports` and `exports` of an `@NgModule`, read like
+/// ngtsc's `resolveTypeList`: nested arrays and `const` lists flattened,
+/// each `ModuleWithProviders` listed as its NgModule, duplicates kept.
+pub struct ModuleLists {
+    lists: [Vec<Entry>; 3],
+    /// Whether the lists must be read lazily (`() => [...]`): one names a
+    /// class of this file declared after the NgModule (ngtsc's
+    /// `isExpressionForwardReference`), or a `forwardRef` target that may
+    /// not be initialized yet.
+    pub wrap: bool,
+}
+
+/// How deep `const` lists and nested arrays are followed.
+const MAX_DEPTH: u8 = 8;
+
+/// Read the lists of the `@NgModule` `class`. `current` is what the
+/// decorator parser read for `bootstrap`, `declarations`, `imports` and
+/// `exports`: `None` when the entries don't line up with it. `bootstrap`
+/// is only read for `wrap`. `forward_refs` is whether the parser saw a
+/// `forwardRef`: it wrapped every list then, so the wrap stays unless every
+/// entry is known to be defined.
+pub fn read_module_lists(
     program: &Program<'_>,
     class: &Class<'_>,
     consts: &StringConsts<'_>,
-    current: &[oxc_str::Ident<'a>],
+    current: [&[oxc_str::Ident<'_>]; 4],
+    forward_refs: bool,
     binding: impl Fn(&str) -> Binding,
     resolve_imported: Option<ResolveImported<'_>>,
-    mut namespace_of: impl FnMut(&str) -> oxc_str::Ident<'a>,
-) -> Option<oxc_allocator::Vec<'a, crate::output::ast::OutputExpression<'a>>> {
-    use crate::output::ast::{OutputExpression, ReadPropExpr, ReadVarExpr};
-    use oxc_allocator::Box;
-
-    let entries = ng_module_import_entries(class, consts)?;
-    if entries.len() != current.len()
-        || entries.iter().zip(current).any(|(entry, name)| entry.name != name.as_str())
-    {
+) -> Option<ModuleLists> {
+    let decorator = find_ng_module_decorator(&class.decorators, Some(consts))?;
+    let Expression::CallExpression(call) = &decorator.expression else { return None };
+    let Some(oxc_ast::ast::Argument::ObjectExpression(config)) = call.arguments.first() else {
         return None;
-    }
-    let read_var = |name: oxc_str::Ident<'a>| {
-        OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, &allocator))
     };
-    let mut resolved: std::vec::Vec<Option<OutputExpression<'a>>> = entries
-        .iter()
-        .map(|entry| {
-            let is_kept = |name: &str| matches!(binding(name), Binding::Import { kept: true });
-            resolve_local_entry(program, class, entry, is_kept)
-                .map(|name| read_var(oxc_str::Ident::from(allocator.alloc_str(name))))
-        })
-        .collect();
-
-    // The entries whose method or constant may be in another file.
-    if let Some(resolve_imported) = resolve_imported {
-        let is_import = |name: &str| matches!(binding(name), Binding::Import { .. });
-        let mut asked = std::vec::Vec::new();
-        let mut questions = std::vec::Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
-            if resolved[index].is_some() || entry.forward_ref {
-                continue;
-            }
-            let question = match entry.method {
-                Some(method) if is_import(entry.name) => (None, entry.name, Some(method)),
-                Some(_) => continue,
-                None if is_import(entry.name) => (None, entry.name, None),
-                None => {
-                    let Some(MwpInit::Call { namespace, class, method }) =
-                        top_level_const_init(program, entry.name)
-                            .and_then(module_with_providers_init)
-                    else {
-                        continue;
-                    };
-                    let imported = match namespace {
-                        Some(ns) => matches!(binding(ns), Binding::Namespace),
-                        None => is_import(class),
-                    };
-                    if !imported {
-                        continue;
-                    }
-                    (namespace, class, Some(method))
-                }
+    // The parser keeps the last key.
+    let field = |name: &str| {
+        config.properties.iter().rev().find_map(|property| {
+            let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
+            let key = match &property.key {
+                PropertyKey::StaticIdentifier(id) => id.name.as_str(),
+                PropertyKey::StringLiteral(lit) => lit.value.as_str()?,
+                _ => return None,
             };
-            asked.push(index);
-            questions.push(question);
+            (crate::util::is_metadata_property(property) && key == name).then_some(&property.value)
+        })
+    };
+    let mut walker =
+        Walker { program, module: class, binding, resolve_imported, wrap: false, unsure: false };
+    let mut lists = ["bootstrap", "declarations", "imports", "exports"]
+        .into_iter()
+        .zip(current)
+        .map(|(key, current)| {
+            let entries = field(key).map(|value| walker.entries(value)).unwrap_or_default();
+            let fallbacks = entries.iter().filter_map(|entry| entry.fallback.as_deref());
+            fallbacks.eq(current.iter().map(oxc_str::Ident::as_str)).then_some(entries)
+        })
+        .collect::<Option<std::vec::Vec<_>>>()?
+        .into_iter();
+    lists.next(); // bootstrap
+    let mut next = || lists.next().unwrap_or_default();
+    let wrap = walker.wrap || (forward_refs && walker.unsure);
+    Some(ModuleLists { lists: [next(), next(), next()], wrap })
+}
+
+impl ModuleLists {
+    /// The partial declaration's `key` list, `None` to list it as before.
+    /// `namespace_of` gives the namespace import of a module specifier; it
+    /// is called in the order the classes are listed.
+    pub fn emit<'a>(
+        &self,
+        allocator: &'a oxc_allocator::Allocator,
+        key: ListKey,
+        mut namespace_of: impl FnMut(&str) -> oxc_str::Ident<'a>,
+    ) -> Option<oxc_allocator::Vec<'a, crate::output::ast::OutputExpression<'a>>> {
+        use crate::output::ast::{OutputExpression, ReadPropExpr, ReadVarExpr};
+        use oxc_allocator::Box;
+
+        let entries = &self.lists[key as usize];
+        if entries.iter().all(|entry| entry.refs.is_none()) {
+            return None;
         }
-        if !questions.is_empty() {
-            for (index, answer) in asked.into_iter().zip(resolve_imported(&questions)) {
-                resolved[index] = answer.and_then(|module| match module {
-                    // As for a same-file entry: a class declared after this
-                    // NgModule isn't initialized yet when its `ɵmod` is (ngtsc
-                    // wraps the list in `() => [...]` then), and an import
-                    // must stay. Otherwise today's name is kept.
-                    NamedClass::Local(name) => {
-                        let declared_before = top_level_class(program, &name)
-                            .is_some_and(|module| module.span.end <= class.span.start);
-                        let is_kept = matches!(binding(&name), Binding::Import { kept: true });
-                        (declared_before || is_kept)
-                            .then(|| read_var(oxc_str::Ident::from(allocator.alloc_str(&name))))
-                    }
-                    NamedClass::Module { specifier, name } => {
-                        Some(OutputExpression::ReadProp(Box::new_in(
+        let name = |name: &str| oxc_str::Ident::from(allocator.alloc_str(name));
+        let read_var = |name: oxc_str::Ident<'a>| {
+            OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name, source_span: None },
+                &allocator,
+            ))
+        };
+        let mut list = oxc_allocator::Vec::new_in(&allocator);
+        for entry in entries {
+            let Some(refs) = &entry.refs else {
+                list.extend(entry.fallback.as_deref().map(|fallback| read_var(name(fallback))));
+                continue;
+            };
+            for class in refs {
+                list.push(match class {
+                    Ref::Local(local) => read_var(name(local)),
+                    Ref::Module { specifier, name: export } => {
+                        OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(
-                                    read_var(namespace_of(&specifier)),
+                                    read_var(namespace_of(specifier)),
                                     &allocator,
                                 ),
-                                name: oxc_str::Ident::from(allocator.alloc_str(&name)),
+                                name: name(export),
                                 optional: false,
                                 source_span: None,
                             },
                             &allocator,
-                        )))
+                        ))
                     }
                 });
             }
         }
+        Some(list)
+    }
+}
+
+/// The name the decorator parser lists for a top-level entry (see
+/// `extract_reference_array`).
+fn fallback_name(element: &ArrayExpressionElement<'_>) -> Option<String> {
+    let name = match element {
+        ArrayExpressionElement::Identifier(id) => &id.name,
+        ArrayExpressionElement::CallExpression(call) => match &call.callee {
+            Expression::Identifier(id) if id.name == "forwardRef" => {
+                let Some(oxc_ast::ast::Argument::ArrowFunctionExpression(arrow)) =
+                    call.arguments.first()
+                else {
+                    return None;
+                };
+                let Some(Expression::Identifier(inner)) = arrow.get_expression() else {
+                    return None;
+                };
+                &inner.name
+            }
+            Expression::StaticMemberExpression(member) => match &member.object {
+                Expression::Identifier(id) => &id.name,
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(name.to_string())
+}
+
+/// Reads list entries in the compiled file.
+struct Walker<'p, 'a, 'r, B> {
+    program: &'p Program<'a>,
+    module: &'p Class<'a>,
+    binding: B,
+    resolve_imported: Option<ResolveImported<'r>>,
+    wrap: bool,
+    /// Set when an entry is unread, or may not be defined yet. The
+    /// decorator parser wraps every list once one writes a `forwardRef`,
+    /// so the wrap stays then.
+    unsure: bool,
+}
+
+impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
+    /// The top-level entries of a list. A value that is not an array
+    /// literal (`imports: MODS`) is one entry, which lists nothing today.
+    fn entries(&mut self, value: &Expression<'_>) -> std::vec::Vec<Entry> {
+        let Expression::ArrayExpression(array) = value else {
+            let refs = self.spread(value, 0);
+            self.unsure |= refs.is_none();
+            return vec![Entry { fallback: None, refs }];
+        };
+        array
+            .elements
+            .iter()
+            .map(|element| {
+                let refs = self.element(element, 0);
+                self.unsure |= refs.is_none();
+                Entry { fallback: fallback_name(element), refs }
+            })
+            .collect()
     }
 
-    if resolved.iter().all(Option::is_none) {
-        return None;
+    fn element(
+        &mut self,
+        element: &ArrayExpressionElement<'_>,
+        depth: u8,
+    ) -> Option<std::vec::Vec<Ref>> {
+        match element {
+            ArrayExpressionElement::SpreadElement(spread) => self.spread(&spread.argument, depth),
+            ArrayExpressionElement::Elision(_) => None,
+            _ => self.value(element.to_expression(), depth),
+        }
     }
-    Some(oxc_allocator::Vec::from_iter_in(
-        resolved
+
+    /// Every element of `array` must resolve. All are read, so a later
+    /// class is seen in each.
+    fn array(
+        &mut self,
+        array: &oxc_ast::ast::ArrayExpression<'_>,
+        depth: u8,
+    ) -> Option<std::vec::Vec<Ref>> {
+        let mut refs = Some(std::vec::Vec::new());
+        for element in &array.elements {
+            match (self.element(element, depth + 1), &mut refs) {
+                (Some(read), Some(refs)) => refs.extend(read),
+                _ => refs = None,
+            }
+        }
+        refs
+    }
+
+    /// `...expr`: an array literal or a `const` array.
+    fn spread(&mut self, expr: &Expression<'_>, depth: u8) -> Option<std::vec::Vec<Ref>> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        match evaluated(expr) {
+            Expression::ArrayExpression(array) => self.array(array, depth),
+            Expression::Identifier(id) => match top_level_const_init(self.program, &id.name) {
+                Some(init) => match evaluated(init) {
+                    Expression::ArrayExpression(array) => self.array(array, depth + 1),
+                    _ => None,
+                },
+                None => self.ask_import(&id.name, true),
+            },
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(ns) = evaluated(&member.object) else { return None };
+                self.ask_namespace(&ns.name, &member.property.name, None, true)
+            }
+            _ => None,
+        }
+    }
+
+    fn value(&mut self, expr: &Expression<'_>, depth: u8) -> Option<std::vec::Vec<Ref>> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        match evaluated(expr) {
+            Expression::ArrayExpression(array) => self.array(array, depth),
+            Expression::Identifier(id) => self.name(&id.name, depth),
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(ns) = evaluated(&member.object) else { return None };
+                self.ask_namespace(&ns.name, &member.property.name, None, false)
+            }
+            Expression::CallExpression(call) => match &call.callee {
+                Expression::Identifier(id) if id.name == "forwardRef" => self.forward_ref(call),
+                _ => {
+                    let (namespace, class, method) = static_call(call)?;
+                    self.mwp_call(namespace, class, method)
+                }
+            },
+            Expression::ObjectExpression(object) => match object_ng_module(object)? {
+                ObjectModule::Value(Expression::Identifier(id)) => self.class_name(&id.name),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// A name: a class, a `const` (a list, an alias, a
+    /// `ModuleWithProviders`), or an import.
+    fn name(&mut self, name: &str, depth: u8) -> Option<std::vec::Vec<Ref>> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        if self.local_class(name) {
+            return Some(vec![Ref::Local(name.into())]);
+        }
+        let Some(init) = top_level_const_init(self.program, name) else {
+            return self.ask_import(name, false);
+        };
+        match evaluated(init) {
+            Expression::ArrayExpression(array) => self.array(array, depth + 1),
+            Expression::Identifier(alias) => self.name(&alias.name, depth + 1),
+            init => match module_with_providers_init(init)? {
+                MwpInit::Call { namespace, class, method } => {
+                    self.mwp_call(namespace, class, method)
+                }
+                MwpInit::Module(Expression::Identifier(id)) => self.class_name(&id.name),
+                MwpInit::Module(_) => None,
+            },
+        }
+    }
+
+    /// `class.method(...)` or `namespace.class.method(...)`.
+    fn mwp_call(
+        &mut self,
+        namespace: Option<&str>,
+        class: &str,
+        method: &str,
+    ) -> Option<std::vec::Vec<Ref>> {
+        let program = self.program;
+        match namespace {
+            None if top_level_class(program, class).is_some() => {
+                self.class_name(method_module(program, class, method)?)
+            }
+            None => {
+                if !matches!((self.binding)(class), Binding::Import { .. }) {
+                    return None;
+                }
+                let question =
+                    Question { namespace: None, name: class, method: Some(method), spread: false };
+                let answer = self.ask(&question)?;
+                self.classes(answer)
+            }
+            Some(namespace) => self.ask_namespace(namespace, class, Some(method), false),
+        }
+    }
+
+    /// `forwardRef(() => name)`. The wrap stays unless the target is known
+    /// to be initialized when the NgModule is defined.
+    fn forward_ref(
+        &mut self,
+        call: &oxc_ast::ast::CallExpression<'_>,
+    ) -> Option<std::vec::Vec<Ref>> {
+        let target = match call.arguments.first() {
+            Some(oxc_ast::ast::Argument::ArrowFunctionExpression(arrow)) => {
+                arrow.get_expression().map(evaluated)
+            }
+            _ => None,
+        };
+        let Some(Expression::Identifier(id)) = target else {
+            self.wrap = true;
+            return None;
+        };
+        let name = id.name.as_str();
+        if self.local_class(name) {
+            return Some(vec![Ref::Local(name.into())]);
+        }
+        let Binding::Import { kept } = (self.binding)(name) else {
+            self.wrap = true;
+            return None;
+        };
+        let question = Question { namespace: None, name, method: None, spread: false };
+        match self.ask(&question) {
+            Some(Answer::AsWritten { unready }) => self.wrap |= unready,
+            Some(Answer::Classes { .. }) => {
+                self.wrap = true;
+                return None;
+            }
+            None => self.wrap = true,
+        }
+        kept.then(|| vec![Ref::Local(name.into())])
+    }
+
+    /// A name this file imports.
+    fn ask_import(&mut self, name: &str, spread: bool) -> Option<std::vec::Vec<Ref>> {
+        let Binding::Import { kept } = (self.binding)(name) else { return None };
+        let question = Question { namespace: None, name, method: None, spread };
+        match self.ask(&question)? {
+            Answer::AsWritten { unready } => {
+                self.unsure |= unready;
+                (kept && !spread).then(|| vec![Ref::Local(name.into())])
+            }
+            answer @ Answer::Classes { .. } => self.classes(answer),
+        }
+    }
+
+    /// `namespace.name`, or `namespace.name.method(...)`.
+    fn ask_namespace(
+        &mut self,
+        namespace: &str,
+        name: &str,
+        method: Option<&str>,
+        spread: bool,
+    ) -> Option<std::vec::Vec<Ref>> {
+        if !matches!((self.binding)(namespace), Binding::Namespace) {
+            return None;
+        }
+        let question = Question { namespace: Some(namespace), name, method, spread };
+        let answer = self.ask(&question)?;
+        self.classes(answer)
+    }
+
+    fn ask(&self, question: &Question<'_>) -> Option<Answer> {
+        (self.resolve_imported?)(question)
+    }
+
+    fn classes(&mut self, answer: Answer) -> Option<std::vec::Vec<Ref>> {
+        let Answer::Classes { classes, unready, forward_ref } = answer else { return None };
+        // A `forwardRef` in the list asks for the wrap; see `Walker::unsure`
+        // for the others.
+        self.wrap |= forward_ref && unready;
+        self.unsure |= unready;
+        classes
             .into_iter()
-            .zip(current)
-            .map(|(resolved, name)| resolved.unwrap_or_else(|| read_var(*name))),
-        &allocator,
-    ))
+            .map(|class| match class {
+                NamedClass::Local(name) => self.local_class(&name).then_some(Ref::Local(name)),
+                NamedClass::Module { specifier, name } => Some(Ref::Module { specifier, name }),
+            })
+            .collect()
+    }
+
+    /// A class this file declares or a kept import, listed by `name`.
+    fn class_name(&mut self, name: &str) -> Option<std::vec::Vec<Ref>> {
+        let listed = self.local_class(name)
+            || matches!((self.binding)(name), Binding::Import { kept: true });
+        listed.then(|| vec![Ref::Local(name.into())])
+    }
+
+    /// Whether `name` is a top-level class of this file. One declared after
+    /// the NgModule isn't initialized when its definition is: the lists
+    /// are wrapped then, like ngtsc does.
+    fn local_class(&mut self, name: &str) -> bool {
+        let Some(class) = top_level_class(self.program, name) else { return false };
+        if class.span.start > self.module.span.start {
+            self.wrap = true;
+        }
+        true
+    }
 }

@@ -37,6 +37,7 @@ import { jitPlugin } from './angular-jit-plugin.js'
 import { angularLinkerPlugin } from './angular-linker-plugin.js'
 import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 import { installedAngularVersion } from './utils/angular-version.js'
+import { isFileSystemCaseSensitive } from './utils/case-sensitive.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
 /**
@@ -203,6 +204,15 @@ export interface PluginOptions {
    * so library files of a monorepo outside the app's Vite `root` still get one.
    */
   rootDirs?: string[]
+
+  /**
+   * Whether the file system tells `App.ts` from `app.ts`, like TypeScript's
+   * `ts.sys.useCaseSensitiveFileNames`. When `false`, the paths made relative to
+   * `rootDirs` (`ɵsetClassDebugInfo`'s `filePath`, the `ɵɵattachSourceLocations`
+   * path) are lowercased, as ngtsc does. Default: checked on the project's file
+   * system the way TypeScript checks it, so `false` on macOS and Windows by default.
+   */
+  caseSensitiveFileNames?: boolean
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -366,6 +376,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     enableTemplateSourceLocations: options.enableTemplateSourceLocations ?? false,
     rootDirs: options.rootDirs?.map((dir) => resolve(workspaceRoot, dir)),
     tsconfig: options.tsconfig,
+  }
+
+  // The `caseSensitiveFileNames` option, else checked once on first use.
+  let caseSensitiveFileNames = options.caseSensitiveFileNames
+  function useCaseSensitiveFileNames(): boolean {
+    caseSensitiveFileNames ??= isFileSystemCaseSensitive(workspaceRoot)
+    return caseSensitiveFileNames
   }
 
   // The `angularVersion` option, else the `@angular/core` version installed
@@ -643,6 +660,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       // working directory); `workspaceRoot` (the working directory by default)
       // stands in for them.
       rootDirs: pluginOptions.rootDirs ?? [pluginOptions.workspaceRoot],
+      useCaseSensitiveFileNames: useCaseSensitiveFileNames(),
       // Evaluate decorator metadata imported from other files the way
       // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`,
       // `templateUrl: TEMPLATE_URL`). Read files land in

@@ -64,6 +64,10 @@ pub struct ImportElisionAnalyzer<'a> {
     /// doesn't (see [`Self::preserve`] and the post-passes in
     /// [`Self::analyze`]), so `@defer` can't remove them.
     kept_by_output: FxHashSet<Ident<'a>>,
+    /// Default imports the source only names in types, kept because a ctor
+    /// param `type:` names them (see [`Self::release_const_enum_ctor_types`]).
+    #[cfg(feature = "cross_file_elision")]
+    kept_for_ctor_types: FxHashSet<Ident<'a>>,
     /// The non-`type` specifiers of each import declaration, by local name.
     declaration_specifiers: Vec<Vec<Ident<'a>>>,
     /// Index into `declaration_specifiers` of each non-`type` specifier.
@@ -206,8 +210,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
         // `Foo` would dangle.
         let ctor_type_names =
             Self::collect_ctor_param_type_leftmost_names(program, &consts, emit_metadata);
+        #[cfg(feature = "cross_file_elision")]
+        let mut kept_for_ctor_types = FxHashSet::default();
         for name in &ctor_type_names {
-            type_only_specifiers.remove(name);
+            if type_only_specifiers.remove(name) {
+                #[cfg(feature = "cross_file_elision")]
+                kept_for_ctor_types.insert(*name);
+            }
         }
         kept_by_output.extend(ctor_type_names);
 
@@ -215,9 +224,39 @@ impl<'a> ImportElisionAnalyzer<'a> {
             type_only_specifiers,
             value_reference_counts,
             kept_by_output,
+            #[cfg(feature = "cross_file_elision")]
+            kept_for_ctor_types,
             declaration_specifiers,
             declaration_of,
         }
+    }
+
+    /// Remove again the default imports kept only for a ctor param type
+    /// that is an imported `const enum`: the metadata writes `type: undefined`
+    /// for it (see [`crate::directive::StringConsts::is_imported_const_enum`]),
+    /// so nothing reads the import any more. ngtsc drops it too.
+    ///
+    /// `consts` must hold the imported const enums.
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn release_const_enum_ctor_types(
+        &mut self,
+        program: &'a Program<'a>,
+        consts: &crate::directive::StringConsts<'a>,
+        emit_metadata: bool,
+    ) {
+        if self.kept_for_ctor_types.is_empty() {
+            return;
+        }
+        let still_named =
+            Self::collect_ctor_param_type_leftmost_names(program, consts, emit_metadata);
+        self.kept_for_ctor_types.retain(|name| {
+            if still_named.contains(name) {
+                return true;
+            }
+            self.type_only_specifiers.insert(*name);
+            self.kept_by_output.remove(name);
+            false
+        });
     }
 
     /// Local names of **default imports** that a decorated class's constructor
@@ -262,6 +301,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
         for declared in crate::util::declared_classes(program) {
             Self::collect_ctor_type_uses_from_class(
                 declared.class,
+                !declared.nested,
                 &default_imports,
                 consts,
                 emit_metadata,
@@ -277,6 +317,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// emit the local name.
     fn collect_ctor_type_uses_from_class(
         class: &'a oxc_ast::ast::Class<'a>,
+        top_level: bool,
         default_imports: &FxHashSet<&'a str>,
         consts: &crate::directive::StringConsts<'a>,
         emit_metadata: bool,
@@ -296,14 +337,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 // factory's token (`getConstructorDependencies` in
                 // `annotations/common/src/di.ts`), so only the metadata's
                 // `type:` still names it.
-                if !emit_metadata
-                    && param.decorators.iter().any(|d| {
-                        matches!(
-                            crate::directive::angular_param_decorator(d, Some(consts)),
-                            Some("Inject" | "Attribute")
-                        )
-                    })
-                {
+                let token_replaced = param.decorators.iter().any(|d| {
+                    matches!(
+                        crate::directive::angular_param_decorator(d, Some(consts)),
+                        Some("Inject" | "Attribute")
+                    )
+                });
+                if !emit_metadata && token_replaced {
                     continue;
                 }
                 let Some(annotation) = &param.type_annotation else {
@@ -320,6 +360,12 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 let Some(leftmost) = path.first() else {
                     continue;
                 };
+                // Here only the metadata names the type, and it writes
+                // `type: undefined` for an imported `const enum` in a
+                // top-level class (see `build_param_type_expression`).
+                if token_replaced && top_level && consts.is_imported_const_enum(&path) {
+                    continue;
+                }
                 if !type_params.contains(leftmost) && default_imports.contains(leftmost.as_str()) {
                     names.insert(*leftmost);
                 }

@@ -471,7 +471,7 @@ pub fn build_ctor_params_metadata_in<'a>(
             import_map,
             &class_type_params,
             local_decls,
-            const_enums_visible,
+            const_enums_visible.then_some(consts).flatten(),
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -968,9 +968,11 @@ fn string_literal<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpre
 /// `const enum`s follow full and partial compilation instead, the modes the
 /// Angular CLI and ng-packagr run: there `typeToValue` gives
 /// `noValueDeclaration` for a `ConstEnum` symbol, so `type:` is `undefined`.
-/// That holds for one declared in the file and for a named import the
-/// cross-file analysis found to be one ([`crate::ImportInfo::is_const_enum`]),
-/// when `const_enums_visible` says the class sees the file-scope names.
+/// That holds for one declared in the file and for an import the cross-file
+/// analysis followed to one ([`crate::ImportInfo::is_const_enum`],
+/// [`StringConsts::is_imported_const_enum`]). `const_enum_scope` holds the
+/// file's consts when the class sees the file-scope names (`None` for a
+/// class nested in a function or block).
 fn build_param_type_expression<'a>(
     allocator: &'a Allocator,
     param: &FormalParameter<'a>,
@@ -978,8 +980,9 @@ fn build_param_type_expression<'a>(
     import_map: &ImportMap<'a>,
     type_params: &FxHashSet<Ident<'a>>,
     local_decls: Option<&LocalDecls<'a>>,
-    const_enums_visible: bool,
+    const_enum_scope: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
+    let const_enums_visible = const_enum_scope.is_some();
     // Upstream's getConstructorParameters first narrows `T | null` to `T`
     // (typescript.ts); `typeToValue` then requires a bare `TypeReferenceNode`
     // — `(X)`, `X | undefined`, `X | Y`, `typeof`, `this`, primitives are
@@ -1009,9 +1012,13 @@ fn build_param_type_expression<'a>(
         if import_info.is_type_only || path.len() == 1 && !import_info.is_named_import {
             return None;
         }
-        // An imported `const enum` (`import { KeyCodes }`): no value in full
-        // or partial `typeToValue`, so no `i1` import either.
-        if const_enums_visible && path.len() == 1 && import_info.is_const_enum {
+        // An imported `const enum` (`import { KeyCodes }`, `k.KeyCodes`,
+        // `NS.Inner`): no value in full or partial `typeToValue`, so no `i1`
+        // import either. An enum member (`k.KeyCodes.A`) keeps its reference.
+        if let Some(consts) = const_enum_scope
+            && (path.len() == 1 && import_info.is_const_enum
+                || consts.is_imported_const_enum(&path))
+        {
             return None;
         }
         // `import Foo from 'm'`: upstream emits the local name itself (LOCAL
@@ -1173,6 +1180,31 @@ pub fn type_param_names_of<'a>(class: &Class<'a>) -> FxHashSet<Ident<'a>> {
         .unwrap_or_default()
 }
 
+/// Whether a namespace body holds only types: interfaces, type aliases,
+/// local `import X = A.B` aliases and namespaces like it (TypeScript's
+/// `NonInstantiated` module state). Anything else counts as instantiated,
+/// a nested `const enum` and an empty statement too.
+fn declares_only_types(body: &TSNamespaceDeclarationBody<'_>) -> bool {
+    match body {
+        TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+            block.body.iter().all(|stmt| match stmt {
+                Statement::TSInterfaceDeclaration(_)
+                | Statement::TSTypeAliasDeclaration(_)
+                | Statement::TSImportEqualsDeclaration(_) => true,
+                Statement::TSNamespaceDeclaration(ns) => declares_only_types(&ns.body),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::TSInterfaceDeclaration(_)
+                    | Declaration::TSTypeAliasDeclaration(_) => true,
+                    Declaration::TSNamespaceDeclaration(ns) => declares_only_types(&ns.body),
+                    _ => false,
+                },
+                _ => false,
+            })
+        }
+        TSNamespaceDeclarationBody::TSNamespaceDeclaration(ns) => declares_only_types(&ns.body),
+    }
+}
+
 /// Names declared in the file, nested under their namespaces.
 ///
 /// This models the local-compilation `typeToValue` (the mode the e2e
@@ -1202,6 +1234,10 @@ pub(crate) struct LocalDecls<'a> {
     /// Names declared by a `const enum` (also in `value_decls`). See
     /// [`Self::is_const_enum`].
     const_enums: FxHashSet<&'a str>,
+    /// Names of namespaces that hold more than types (see
+    /// [`declares_only_types`]). A `const enum` merged with one of them is a
+    /// TypeScript error, so [`Self::is_const_enum`] keeps today's output.
+    instantiated_namespaces: FxHashSet<&'a str>,
 }
 
 impl<'a> LocalDecls<'a> {
@@ -1455,6 +1491,9 @@ impl<'a> LocalDecls<'a> {
         decl: &'a oxc_ast::ast::TSNamespaceDeclaration<'a>,
         globals: &mut std::vec::Vec<&'a Statement<'a>>,
     ) {
+        if !declares_only_types(&decl.body) {
+            self.instantiated_namespaces.insert(decl.id.name.as_str());
+        }
         self.namespaces.entry(decl.id.name.as_str()).or_default().merge(Self::from_namespace_body(
             &decl.body,
             decl.declare,
@@ -1476,6 +1515,8 @@ impl<'a> LocalDecls<'a> {
                 // `NS.E` reads an exported member only: a const enum the block
                 // keeps to itself must not hide an exported `E` that another
                 // `namespace NS` block declares.
+                // The same goes for a namespace the block keeps to itself: it
+                // doesn't merge with an exported `const enum` of another block.
                 if !ambient {
                     decls.const_enums.retain(|name| {
                         block.body.iter().any(|stmt| {
@@ -1484,12 +1525,22 @@ impl<'a> LocalDecls<'a> {
                                     Declaration::TSEnumDeclaration(e) if e.id.name == *name))
                         })
                     });
+                    decls.instantiated_namespaces.retain(|name| {
+                        block.body.iter().any(|stmt| {
+                            matches!(stmt, Statement::ExportDeclaration(export)
+                                if matches!(&export.declaration,
+                                    Declaration::TSNamespaceDeclaration(ns) if ns.id.name == *name))
+                        })
+                    });
                 }
                 decls
             }
             // `namespace Outer.Inner { ... }` nests by qualified name.
             TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
                 let mut decls = LocalDecls::default();
+                if !declares_only_types(&nested.body) {
+                    decls.instantiated_namespaces.insert(nested.id.name.as_str());
+                }
                 decls.namespaces.insert(
                     nested.id.name.as_str(),
                     Self::from_namespace_body(&nested.body, ambient || nested.declare, globals),
@@ -1503,6 +1554,7 @@ impl<'a> LocalDecls<'a> {
         self.type_decls.extend(other.type_decls);
         self.value_decls.extend(other.value_decls);
         self.const_enums.extend(other.const_enums);
+        self.instantiated_namespaces.extend(other.instantiated_namespaces);
         for (name, nested) in other.namespaces {
             self.namespaces.entry(name).or_default().merge(nested);
         }
@@ -1533,16 +1585,18 @@ impl<'a> LocalDecls<'a> {
     /// (`declare const enum` too). ngtsc's `typeToValue` has no value for
     /// it outside local compilation (`decl.flags & ts.SymbolFlags.ConstEnum`
     /// gives `noValueDeclaration`), so full and partial metadata write
-    /// `type: undefined`. A name a namespace, interface, type alias or
-    /// `declare global` block also declares is left out: one file can't be
-    /// sure what it merges with, so it keeps today's output.
+    /// `type: undefined`. That holds when it merges with namespaces that
+    /// only hold types too. A name an instantiated namespace, interface,
+    /// type alias or `declare global` block also declares is left out: that
+    /// is a TypeScript error, or one file can't be sure what it merges with,
+    /// so it keeps today's output.
     pub(crate) fn is_const_enum(&self, path: &[Ident<'_>]) -> bool {
         match path.split_first() {
             None => false,
             Some((name, [])) => {
                 let name = name.as_str();
                 self.const_enums.contains(name)
-                    && !self.namespaces.contains_key(name)
+                    && !self.instantiated_namespaces.contains(name)
                     && !self.type_decls.contains(name)
                     && !self.global_names.contains(name)
             }

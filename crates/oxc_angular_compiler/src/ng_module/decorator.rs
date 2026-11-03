@@ -57,11 +57,16 @@ pub struct NgModuleMetadata<'a> {
     /// See [`Self::declarations_scope_expr`].
     pub exports_scope_expr: Option<OutputExpression<'a>>,
 
-    /// The partial `ɵɵngDeclareNgModule` imports with each
-    /// `ModuleWithProviders` listed as its NgModule, set by the transform
-    /// when it could read one (see `module_with_providers`). `None` lists
-    /// [`Self::imports`]. Full mode never reads it.
+    /// The partial `ɵɵngDeclareNgModule` declarations, read like ngtsc
+    /// (lists flattened, each `ModuleWithProviders` as its NgModule), set
+    /// by the transform when it could read an entry (see
+    /// `module_with_providers`). `None` lists [`Self::declarations`]. Full
+    /// mode never reads it.
+    pub partial_declarations: Option<Vec<'a, OutputExpression<'a>>>,
+    /// See [`Self::partial_declarations`]; `None` lists [`Self::imports`].
     pub partial_imports: Option<Vec<'a, OutputExpression<'a>>>,
+    /// See [`Self::partial_declarations`]; `None` lists [`Self::exports`].
+    pub partial_exports: Option<Vec<'a, OutputExpression<'a>>>,
 
     /// Providers expression as OutputExpression.
     pub providers: Option<OutputExpression<'a>>,
@@ -75,7 +80,9 @@ pub struct NgModuleMetadata<'a> {
     /// Module ID for registration.
     pub id: Option<Ident<'a>>,
 
-    /// Whether any declarations/imports/exports contain forward references.
+    /// Whether the lists are wrapped in `() => [...]`. The parser sets it
+    /// for a `forwardRef`; the transform replaces it with ngtsc's rule (see
+    /// `module_with_providers`).
     pub contains_forward_decls: bool,
 
     /// Constructor dependencies for factory generation.
@@ -98,7 +105,9 @@ impl<'a> NgModuleMetadata<'a> {
             declarations_scope_expr: None,
             imports_scope_expr: None,
             exports_scope_expr: None,
+            partial_declarations: None,
             partial_imports: None,
+            partial_exports: None,
             providers: None,
             bootstrap: Vec::new_in(&allocator),
             schemas: Vec::new_in(&allocator),

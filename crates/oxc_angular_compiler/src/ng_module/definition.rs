@@ -224,16 +224,26 @@ pub fn generate_full_ng_module_definition<'a>(
             // scoping at link time if needed. See
             // `compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts:971`.
             //
-            // Like ngtsc's `resolveTypeList`, the declaration lists the
-            // NgModule of each `ModuleWithProviders` entry when the transform
-            // read it. Only here: the full-mode scope keeps the raw list.
-            if let Some(imports) = &metadata.partial_imports {
-                r3_metadata.imports = OxcVec::from_iter_in(
-                    imports.iter().map(|import| {
-                        crate::ng_module::R3Reference::value_only(import.clone_in(allocator))
+            // Like ngtsc's `resolveTypeList`, the declaration lists what
+            // the transform read: lists flattened, and the NgModule of each
+            // `ModuleWithProviders`. Only here: the full-mode scope keeps
+            // the raw lists.
+            let resolved = |list: &OxcVec<'a, OutputExpression<'a>>| {
+                OxcVec::from_iter_in(
+                    list.iter().map(|item| {
+                        crate::ng_module::R3Reference::value_only(item.clone_in(allocator))
                     }),
                     &allocator,
-                );
+                )
+            };
+            if let Some(list) = &metadata.partial_declarations {
+                r3_metadata.declarations = resolved(list);
+            }
+            if let Some(list) = &metadata.partial_imports {
+                r3_metadata.imports = resolved(list);
+            }
+            if let Some(list) = &metadata.partial_exports {
+                r3_metadata.exports = resolved(list);
             }
             let fac_definition = compile_declare_factory_for_ng_module(
                 allocator,
@@ -353,9 +363,9 @@ fn build_injector_metadata<'a>(
     // array literal adds its elements (keeping `StoreModule.forRoot(...)` calls
     // and spreads), any other expression is added as is. A full or partial
     // ngtsc build filters both lists by what each reference resolves to; the
-    // transform drops the entries it knows to be directives or pipes from
-    // these expressions first (`injector_imports.rs`). The runtime ignores
-    // entries that are neither NgModules nor standalone components.
+    // transform rewrites these expressions first the same way, where it can
+    // (`injector_imports.rs`). The runtime ignores entries that are neither
+    // NgModules nor standalone components.
     for (raw, names) in [
         (&metadata.raw_imports_expr, &metadata.imports),
         (&metadata.raw_exports_expr, &metadata.exports),

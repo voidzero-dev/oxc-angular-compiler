@@ -32,6 +32,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::defer_resolver::{ClassUse, decorated_class_selector};
 use crate::directive::{ImportValueResolver, StringConsts};
 
+mod const_enums;
 mod ng_module_scope;
 
 /// `(file, exported_name, local_name, implicit_standalone)` -> how a
@@ -106,9 +107,9 @@ struct Inner {
     this: Weak<Inner>,
     /// Memoized NgModule scope reads (see [`ng_module_scope`]).
     scope: ng_module_scope::ScopeState,
-    /// File path -> the names it exports a `const enum` under, filled by
-    /// `analyze_file` (see [`const_enum_export_names`]).
-    const_enum_exports: RefCell<FxHashMap<String, FxHashSet<String>>>,
+    /// File path -> what the `const enum` lookups read of it (see
+    /// [`const_enums`]).
+    enum_shapes: RefCell<FxHashMap<String, std::sync::Arc<const_enums::EnumShape>>>,
 }
 
 /// A file parsed once per analyzer: its program, and the consts the
@@ -258,7 +259,7 @@ impl CrossFileAnalyzer {
                 value_dependencies: RefCell::new(FxHashSet::default()),
                 this: this.clone(),
                 scope: ng_module_scope::ScopeState::default(),
-                const_enum_exports: RefCell::new(FxHashMap::default()),
+                enum_shapes: RefCell::new(FxHashMap::default()),
             }),
         }
     }
@@ -274,20 +275,6 @@ impl CrossFileAnalyzer {
         from_file: &Path,
     ) -> bool {
         self.inner.is_type_only_import(import_source, import_name, from_file)
-    }
-
-    /// Whether `import_name`, imported from `import_source` in `from_file`,
-    /// is a `const enum` where it is declared, following `export { X } from`
-    /// and `export *` chains. `false` when unsure (packages, `.d.ts`-only
-    /// modules, unresolvable paths, `export * as ns`). Files read are
-    /// recorded in [`Self::take_value_dependencies`].
-    pub(crate) fn is_const_enum_import(
-        &self,
-        import_source: &str,
-        import_name: &str,
-        from_file: &Path,
-    ) -> bool {
-        self.inner.is_const_enum_import(import_source, import_name, from_file)
     }
 
     /// Resolve the actual source file path for an import, tracing through barrel exports.
@@ -500,68 +487,6 @@ impl Inner {
             self.analyze_file(&resolved);
         }
         self.export_value_at(&resolved, import_name, 0)
-    }
-
-    /// See [`CrossFileAnalyzer::is_const_enum_import`].
-    fn is_const_enum_import(
-        &self,
-        import_source: &str,
-        import_name: &str,
-        from_file: &Path,
-    ) -> bool {
-        let Some(parent) = from_file.parent() else { return false };
-        let Some(resolved) = self.resolve_module_spec(parent, import_source) else {
-            return false;
-        };
-        self.const_enum_at(&resolved, import_name, 0)
-    }
-
-    /// Whether `export_name` of `file_path` is a `const enum`, direct or
-    /// through re-exports, like [`Self::export_value_at`] follows them.
-    fn const_enum_at(&self, file_path: &str, export_name: &str, depth: u16) -> bool {
-        // A package's sources aren't read, like `is_type_only_import`.
-        if depth > MAX_EXPORT_CHAIN
-            || Path::new(file_path).components().any(|c| c.as_os_str() == "node_modules")
-        {
-            return false;
-        }
-        self.value_dependencies.borrow_mut().insert(file_path.to_string());
-        if !self.cache.borrow().contains_key(file_path) {
-            if self.analyzing.borrow().contains(file_path) {
-                return false; // Circular import
-            }
-            self.analyze_file(file_path);
-        }
-        let export_info = {
-            let cache = self.cache.borrow();
-            cache.get(file_path).and_then(|exports| exports.get(export_name).cloned())
-        };
-        let Some(export_info) =
-            export_info.or_else(|| self.find_in_star_exports(file_path, export_name))
-        else {
-            return false;
-        };
-        match export_info.re_export_source {
-            // `export * as ns` names a namespace, not one declaration.
-            Some((_, original_name)) if original_name == "*" => false,
-            Some((source_module, original_name)) => {
-                let Some(resolved) = Path::new(file_path)
-                    .parent()
-                    .and_then(|parent| self.resolve_module_spec(parent, &source_module))
-                else {
-                    return false;
-                };
-                self.const_enum_at(&resolved, &original_name, depth + 1)
-            }
-            None => {
-                !export_info.is_type_only
-                    && self
-                        .const_enum_exports
-                        .borrow()
-                        .get(file_path)
-                        .is_some_and(|names| names.contains(export_name))
-            }
-        }
     }
 
     fn standalone_directive_selector(
@@ -1104,9 +1029,6 @@ impl Inner {
         let source_type = SourceType::from_path(file_path).unwrap_or_default();
         let parser_ret = Parser::new(&allocator, &source, source_type).parse();
         self.analyze_program(&parser_ret.program, &mut exports);
-        self.const_enum_exports
-            .borrow_mut()
-            .insert(file_path.to_string(), const_enum_export_names(&parser_ret.program));
 
         self.cache.borrow_mut().insert(file_path.to_string(), exports);
         self.analyzing.borrow_mut().remove(file_path);
@@ -1392,54 +1314,13 @@ impl Inner {
         self.parsed.borrow_mut().clear();
         self.value_memo.borrow_mut().clear();
         self.selector_memo.borrow_mut().clear();
-        self.const_enum_exports.borrow_mut().clear();
+        self.enum_shapes.borrow_mut().clear();
     }
 
     /// Get the number of cached files.
     pub fn cache_size(&self) -> usize {
         self.cache.borrow().len()
     }
-}
-
-/// The names `program` exports a top-level `const enum` under:
-/// `export const enum E`, `export declare const enum E`, and `export { E }` /
-/// `export { E as F }` of a top-level one. Empty when the file has a bare
-/// `namespace`, `declare module` or `declare global` block: `analyze_statement`
-/// lists their members as the file's own exports, so a name could mean either.
-fn const_enum_export_names(program: &Program) -> FxHashSet<String> {
-    let mut names = FxHashSet::default();
-    let mut const_enums = FxHashSet::default();
-    for stmt in &program.body {
-        match stmt {
-            Statement::TSNamespaceDeclaration(_)
-            | Statement::TSExternalModuleDeclaration(_)
-            | Statement::TSGlobalDeclaration(_) => return FxHashSet::default(),
-            Statement::TSEnumDeclaration(e) if e.r#const => {
-                const_enums.insert(e.id.name.as_str());
-            }
-            Statement::ExportDeclaration(export) => {
-                if let Declaration::TSEnumDeclaration(e) = &export.declaration
-                    && e.r#const
-                {
-                    const_enums.insert(e.id.name.as_str());
-                    names.insert(e.id.name.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    for stmt in &program.body {
-        if let Statement::ExportNamedDeclaration(export) = stmt
-            && !export.export_kind.is_type()
-        {
-            for spec in &export.specifiers {
-                if !spec.export_kind.is_type() && const_enums.contains(spec.local.name().as_str()) {
-                    names.insert(spec.exported.name().to_string());
-                }
-            }
-        }
-    }
-    names
 }
 
 #[cfg(test)]

@@ -277,9 +277,19 @@ pub struct TransformOptions {
     ///
     /// Default: `None`, which keeps `filePath` as the path given to the
     /// transform. ngtsc instead falls back to `rootDir`, then the working
-    /// directory, and lowercases paths on a case-insensitive file system;
-    /// oxc never lowercases.
+    /// directory.
     pub root_dirs: Option<Vec<String>>,
+
+    /// TypeScript's `useCaseSensitiveFileNames` (`ts.sys`): whether the file
+    /// system tells `App.ts` from `app.ts`. When `false` (macOS and Windows
+    /// by default), the paths made relative to `root_dirs` are compared and
+    /// written in lowercase, as ngtsc's `getCanonicalFileName` does:
+    /// `ɵsetClassDebugInfo`'s `filePath` and the `ɵɵattachSourceLocations`
+    /// path. The HMR id and import paths keep their case, as in ngtsc.
+    ///
+    /// Default: `true`, which keeps the case (and the only safe value
+    /// without a file system to check, as in wasm).
+    pub use_case_sensitive_file_names: bool,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -339,6 +349,7 @@ impl Default for TransformOptions {
             forbid_orphan_components: false,
             enable_template_source_locations: false,
             root_dirs: None,
+            use_case_sensitive_file_names: true,
         }
     }
 }
@@ -582,8 +593,8 @@ pub struct ImportInfo<'a> {
     /// declaration) while `{ default as Foo }` resolves IMPORTED
     /// (`i1.default`).
     pub is_default_import: bool,
-    /// Whether this named import is a `const enum` in the file it comes from,
-    /// as far as the cross-file analysis can tell (only with
+    /// Whether this named or default import is a `const enum` where it is
+    /// declared, as far as the cross-file analysis can tell (only with
     /// `resolve_imported_values`). Read only by the class metadata `type:` of
     /// a constructor parameter, which ngtsc writes as `undefined` for one.
     /// DI tokens, `imports:` and `@defer` don't read it.
@@ -3557,17 +3568,26 @@ pub fn transform_angular_file(
         }
     }
 
-    // A named import used as a constructor parameter type that the other
-    // file declares as a `const enum`: class metadata writes `type: undefined`
-    // for it, like ngtsc's full and partial `typeToValue`. Gated like the
-    // other cross-file reads of `resolve_imported_values`, and only the
-    // names a constructor parameter type uses are looked up.
+    // A constructor parameter type that starts at an import and ends at a
+    // `const enum` where it is declared: class metadata writes
+    // `type: undefined` for it, like ngtsc's full and partial `typeToValue`.
+    // Gated like the other cross-file reads of `resolve_imported_values`,
+    // and only the types a constructor parameter uses are looked up.
     #[cfg(feature = "cross_file_elision")]
-    if options.resolve_imported_values
-        && let Some(analyzer) = &cross_file_analyzer
-    {
-        mark_const_enum_imports(&parser_ret.program, &mut import_map, analyzer, path);
-    }
+    let string_consts = match &cross_file_analyzer {
+        Some(analyzer) if options.resolve_imported_values => {
+            let found = imported_const_enums(&parser_ret.program, &mut import_map, analyzer, path);
+            string_consts.with_imported_const_enums(found)
+        }
+        _ => string_consts,
+    };
+    // A default import kept only for such a `type:` is not needed now.
+    #[cfg(feature = "cross_file_elision")]
+    import_elision_mut.release_const_enum_ctor_types(
+        &parser_ret.program,
+        &string_consts,
+        options.emit_class_metadata && !options.advanced_optimizations,
+    );
 
     // ngtsc's implicit signal `debugName` transform: `signal(0)` and the
     // other signal APIs get an ngDevMode `debugName` argument named after the
@@ -4760,17 +4780,17 @@ pub fn transform_angular_file(
                         );
                     }
 
-                    // A partial declaration lists the NgModule of each
-                    // `ModuleWithProviders` import, like ngtsc. A class in a
-                    // function may see local bindings: it stays as before.
-                    if matches!(options.compilation_mode, crate::CompilationMode::Partial)
-                        && !site.nested
-                    {
-                        ng_module_metadata.partial_imports = partial_module_with_providers_imports(
+                    // Read the lists like ngtsc: in partial mode the
+                    // declaration lists what they give, and in both modes
+                    // they are wrapped when one names a class declared
+                    // later. A class in a function may see local bindings:
+                    // it stays as before.
+                    if !site.nested {
+                        resolve_ng_module_lists(
                             allocator,
                             &parser_ret.program,
                             class,
-                            &ng_module_metadata,
+                            &mut ng_module_metadata,
                             &string_consts,
                             &import_map,
                             &import_elision_mut,
@@ -4779,33 +4799,45 @@ pub fn transform_angular_file(
                                 .as_ref()
                                 .filter(|_| options.resolve_imported_values)
                                 .map(|analyzer| (analyzer, path, source)),
-                            &mut file_namespace_registry,
+                            matches!(options.compilation_mode, crate::CompilationMode::Partial)
+                                .then_some(&mut file_namespace_registry),
                         );
                     }
 
                     // Like ngtsc in full and partial compilation, ɵinj leaves
-                    // out the directives and pipes of `imports` and `exports`
-                    // (#623). A nested class may name a binding of its
-                    // function, so it keeps the lists as written.
+                    // out the directives, pipes and provider-less standalone
+                    // components of `imports`, and lists what it keeps of a
+                    // partly left out entry one by one (#623). A nested class
+                    // may name a binding of its function, so it keeps the
+                    // lists as written.
                     if !site.nested
                         && let Some(entries) =
                             crate::ng_module::injector_entries(class, &string_consts)
                     {
                         #[cfg_attr(not(feature = "cross_file_elision"), allow(unused_mut))]
-                        let mut drops = entries.local_drops(&parser_ret.program, &string_consts);
+                        let mut plans = entries.local_plans(&parser_ret.program, &string_consts);
                         #[cfg(feature = "cross_file_elision")]
                         if options.resolve_imported_values
                             && let Some(analyzer) = &cross_file_analyzer
                         {
-                            drops.merge(&analyzer.injector_drops(
+                            plans.merge(&analyzer.injector_plans(
                                 std::path::Path::new(path),
                                 source,
                                 ng_module_metadata.class_name.as_str(),
+                                &string_consts,
                                 entries.imports(),
                                 entries.exports(),
                             ));
                         }
-                        entries.apply(allocator, &mut ng_module_metadata, &drops);
+                        entries.apply(
+                            allocator,
+                            &mut ng_module_metadata,
+                            &plans,
+                            &mut |specifier| {
+                                file_namespace_registry
+                                    .get_or_assign(&Ident::from(allocator.alloc_str(specifier)))
+                            },
+                        );
                     }
 
                     // Compile NgModule and generate all definitions as external property assignments
@@ -5575,32 +5607,33 @@ fn scope_dependencies<'a>(
     Some(dependencies)
 }
 
-/// The partial `ɵɵngDeclareNgModule` imports of the NgModule `class`, with
-/// each `ModuleWithProviders` entry listed as its NgModule (see
-/// `ng_module::module_with_providers`), or `None` to list them as before.
-/// With cross-file analysis, a method or constant of another file is read
-/// too, and its NgModule is named through a namespace import, like
-/// `ɵɵsetComponentScope` names classes.
+/// Read the `declarations`, `imports` and `exports` of the NgModule
+/// `class` like ngtsc (see `ng_module::module_with_providers`), and set
+/// whether its lists are wrapped in `() => [...]`. With a `registry`
+/// (partial mode), the declaration lists what they give. With cross-file
+/// analysis, a name of another file is read too, and a class found there
+/// is named through a namespace import, like `ɵɵsetComponentScope` names
+/// classes. Anything unread keeps its old output.
 #[expect(clippy::too_many_arguments)]
-fn partial_module_with_providers_imports<'a>(
+fn resolve_ng_module_lists<'a>(
     allocator: &'a Allocator,
     program: &Program<'_>,
     class: &oxc_ast::ast::Class<'_>,
-    metadata: &crate::ng_module::NgModuleMetadata<'a>,
+    metadata: &mut crate::ng_module::NgModuleMetadata<'a>,
     string_consts: &crate::directive::StringConsts<'_>,
     import_map: &ImportMap<'_>,
     import_elision: &ImportElisionAnalyzer<'_>,
     #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
-    registry: &mut NamespaceRegistry<'a>,
-) -> Option<oxc_allocator::Vec<'a, OutputExpression<'a>>> {
-    use crate::ng_module::module_with_providers::{Binding, partial_imports};
+    registry: Option<&mut NamespaceRegistry<'a>>,
+) {
     #[cfg(feature = "cross_file_elision")]
-    use crate::ng_module::module_with_providers::{NamedClass, ResolveImported};
-    // Gives the closure the signature for every lifetime of its entries.
+    use crate::ng_module::module_with_providers::{Answer, Question, ResolveImported};
+    use crate::ng_module::module_with_providers::{Binding, ListKey, read_module_lists};
+    // Gives the closure the signature for every lifetime of its question.
     #[cfg(feature = "cross_file_elision")]
     fn resolver<F>(f: F) -> F
     where
-        F: Fn(&[(Option<&str>, &str, Option<&str>)]) -> Vec<Option<NamedClass>>,
+        F: Fn(&Question<'_>) -> Option<Answer>,
     {
         f
     }
@@ -5612,36 +5645,40 @@ fn partial_module_with_providers_imports<'a>(
     };
     #[cfg(feature = "cross_file_elision")]
     let resolve = analyzer.map(|(analyzer, path, source)| {
-        resolver(move |entries| {
-            use super::metadata::ImportedName;
-            analyzer
-                .module_with_providers_imports(std::path::Path::new(path), source, entries)
-                .into_iter()
-                .map(|name| {
-                    name.map(|name| match name {
-                        ImportedName::Local(name) => NamedClass::Local(name),
-                        ImportedName::Module { specifier, name } => {
-                            NamedClass::Module { specifier, name }
-                        }
-                    })
-                })
-                .collect()
+        resolver(move |question| {
+            analyzer.read_imported_ref(std::path::Path::new(path), source, question)
         })
     });
     #[cfg(feature = "cross_file_elision")]
     let resolve_imported = resolve.as_ref().map(|resolve| resolve as ResolveImported<'_>);
     #[cfg(not(feature = "cross_file_elision"))]
     let resolve_imported = None;
-    partial_imports(
-        allocator,
+    let current = [
+        &metadata.bootstrap[..],
+        &metadata.declarations[..],
+        &metadata.imports[..],
+        &metadata.exports[..],
+    ];
+    let Some(lists) = read_module_lists(
         program,
         class,
         string_consts,
-        &metadata.imports,
+        current,
+        metadata.contains_forward_decls,
         binding,
         resolve_imported,
-        |specifier| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier))),
-    )
+    ) else {
+        return;
+    };
+    metadata.contains_forward_decls = lists.wrap;
+    let Some(registry) = registry else { return };
+    // In the order the declaration lists them, so namespaces are numbered
+    // like ngtsc's.
+    let mut namespace_of =
+        |specifier: &str| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
+    metadata.partial_declarations = lists.emit(allocator, ListKey::Declarations, &mut namespace_of);
+    metadata.partial_imports = lists.emit(allocator, ListKey::Imports, &mut namespace_of);
+    metadata.partial_exports = lists.emit(allocator, ListKey::Exports, &mut namespace_of);
 }
 
 /// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for
@@ -5680,48 +5717,63 @@ fn set_component_scope_statement<'a>(
     )
 }
 
-/// Set [`ImportInfo::is_const_enum`] on the named imports a constructor
-/// parameter of `program` names as its whole type (`kc: KeyCodes`, after
-/// `T | null` narrowing) when `analyzer` finds a `const enum` behind them.
-/// Type-only and default imports are left alone: their `type:` is decided
-/// without this.
+/// The constructor parameter types of `program` (`kc: KeyCodes`,
+/// `k.KeyCodes`, `NS.Inner`, after `T | null` narrowing) that start at an
+/// import and that `analyzer` follows to a `const enum`, as written. Also
+/// sets [`ImportInfo::is_const_enum`] on an import used as the whole type.
+/// Type-only imports are left alone: their `type:` is `undefined` anyway.
 #[cfg(feature = "cross_file_elision")]
-fn mark_const_enum_imports<'a>(
+fn imported_const_enums<'a>(
     program: &Program<'a>,
     import_map: &mut ImportMap<'a>,
     analyzer: &CrossFileAnalyzer,
     path: &str,
-) {
-    let mut checked: rustc_hash::FxHashSet<Ident<'a>> = rustc_hash::FxHashSet::default();
+) -> rustc_hash::FxHashSet<Vec<Ident<'a>>> {
+    let mut checked: rustc_hash::FxHashSet<Vec<Ident<'a>>> = rustc_hash::FxHashSet::default();
+    let mut found = rustc_hash::FxHashSet::default();
     for site in crate::util::declared_classes(program) {
         let Some(ctor) = crate::util::find_constructor(site.class) else { continue };
         for param in &ctor.value.params.items {
-            let Some(name) = param
+            let Some(type_path) = param
                 .type_annotation
                 .as_ref()
                 .and_then(|annotation| {
                     crate::class_metadata::param_type_reference(&annotation.type_annotation)
                 })
                 .and_then(|type_ref| crate::class_metadata::entity_path(&type_ref.type_name))
-                .and_then(|path| if let [name] = path[..] { Some(name) } else { None })
             else {
                 continue;
             };
-            if !checked.insert(name) {
+            if !checked.insert(type_path.clone()) {
                 continue;
             }
-            let Some(info) = import_map.get_mut(&name) else { continue };
-            if !info.is_named_import || info.is_type_only || info.is_default_import {
+            let Some(info) = import_map.get_mut(&type_path[0]) else { continue };
+            if info.is_type_only {
                 continue;
             }
-            let export_name = info.imported_name.unwrap_or(name);
-            info.is_const_enum = analyzer.is_const_enum_import(
-                info.source_module.as_str(),
-                export_name.as_str(),
-                std::path::Path::new(path),
-            );
+            // The path in the module: from the export name for a named or
+            // default import, from the first member for `import * as k`.
+            let mut export_path: Vec<&str> = Vec::with_capacity(type_path.len());
+            if info.is_named_import {
+                export_path.push(info.imported_name.unwrap_or(type_path[0]).as_str());
+            }
+            export_path.extend(type_path[1..].iter().map(Ident::as_str));
+            if export_path.is_empty()
+                || !analyzer.is_const_enum_path(
+                    info.source_module.as_str(),
+                    &export_path,
+                    std::path::Path::new(path),
+                )
+            {
+                continue;
+            }
+            if type_path.len() == 1 {
+                info.is_const_enum = true;
+            }
+            found.insert(type_path);
         }
     }
+    found
 }
 
 /// The analyzer behind both cross-file features (`cross_file_elision`'s
@@ -7075,6 +7127,7 @@ fn compile_component_full<'a>(
             file_path,
             source,
             options.root_dirs.as_deref(),
+            options.use_case_sensitive_file_names,
             resolved_resources,
         )
     } else {
@@ -7366,8 +7419,12 @@ fn compile_component_full<'a>(
         // project root, and none for a file outside it. With no root dirs,
         // keep the path as given.
         let debug_file_path = match &options.root_dirs {
-            Some(roots) => super::source_locations::project_relative_path(file_path, roots)
-                .filter(|path| !path.is_empty()),
+            Some(roots) => super::source_locations::project_relative_path(
+                file_path,
+                roots,
+                options.use_case_sensitive_file_names,
+            )
+            .filter(|path| !path.is_empty()),
             None => Some(file_path.to_string()),
         };
         let mut debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
