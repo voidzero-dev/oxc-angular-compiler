@@ -465,6 +465,31 @@ const MODS2 = [StandaloneDir, LocalMod];
     );
 }
 
+#[test]
+fn a_component_whose_providers_cannot_be_read_keeps_its_entry() {
+    // ngtsc reads `mods()` and `FLAG`, finds no providers and leaves both
+    // lists out (`ɵinj` without `imports`). Oxc can't read either, so the
+    // lists stay as written rather than turning into `[UCmp]` / `[FCmp]`.
+    assert_module_imports(
+        "app.ts",
+        r"
+import { Component, Directive, NgModule } from '@angular/core';
+const FLAG = true;
+@Directive({ selector: '[d]' }) export class Dir {}
+@NgModule({}) export class PlainModule {}
+function mods() { return [PlainModule]; }
+@Component({ selector: 'u', template: '', imports: [mods()] }) export class UCmp {}
+@Component({ selector: 'f', template: '', standalone: FLAG }) export class FCmp {}
+const L = [Dir, UCmp];
+const LF = [Dir, FCmp];
+@NgModule({ imports: [...L] }) export class M1 {}
+@NgModule({ imports: [...LF] }) export class M2 {}
+",
+        &[("PlainModule", None), ("M1", Some("...L")), ("M2", Some("...LF"))],
+        &TransformOptions::default(),
+    );
+}
+
 #[cfg(feature = "cross_file_elision")]
 mod cross_file {
     //! With cross-file analysis, imported classes, `const` lists and package
@@ -737,6 +762,66 @@ export class M {}
 ",
             &[("M", Some("PlainModule,StandaloneCmp"))],
             &cross_file(),
+        );
+    }
+
+    #[test]
+    fn exports_stay_when_the_scope_cannot_be_read() {
+        // Oxc can't read `decls()`, so it doesn't know whether `CmpA` is in
+        // the module's scope: `...EXP` stays as written. ngtsc reads it and
+        // writes `[SharedModule, i1.SharedModule]`.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "src/dep.ts",
+            r"
+import { Component, Directive, NgModule } from '@angular/core';
+@Component({ selector: 'a', template: '', standalone: false }) export class CmpA {}
+@Component({ selector: 'b', template: '', standalone: false }) export class CmpB {}
+@Directive({ selector: '[b]', standalone: false }) export class DirB {}
+@NgModule({}) export class SharedModule {}
+export const DECLS = [CmpA, DirB];
+export function decls() { return [CmpB]; }
+export const EXP = [CmpA, DirB, SharedModule];
+",
+        );
+        check_modules(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { DECLS, EXP, SharedModule, decls } from './dep';
+@NgModule({ declarations: [...DECLS, decls()], imports: [SharedModule], exports: [...EXP] })
+export class M {}
+",
+            &[("M", Some("SharedModule,...EXP"))],
+        );
+    }
+
+    #[test]
+    fn a_component_whose_providers_cannot_be_read_keeps_its_list() {
+        // Oxc can't read `mods()`: `UCmp` may bring in providers, so `...L`
+        // stays as written. ngtsc reads it and leaves the list out.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "src/dep.ts",
+            r"
+import { Component, Directive, NgModule } from '@angular/core';
+@Directive({ selector: '[d]' }) export class Dir {}
+@NgModule({}) export class PlainModule {}
+export function mods() { return [PlainModule]; }
+@Component({ selector: 'u', template: '', imports: [mods()] }) export class UCmp {}
+export const L = [Dir, UCmp];
+",
+        );
+        check_modules(
+            &dir,
+            r"
+import { NgModule } from '@angular/core';
+import { L } from './dep';
+@NgModule({ imports: [...L] }) export class M {}
+",
+            &[("M", Some("...L"))],
         );
     }
 

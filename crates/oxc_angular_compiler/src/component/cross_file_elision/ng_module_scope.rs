@@ -87,11 +87,8 @@ enum Declared {
     Directive {
         selector: Option<String>,
         is_component: bool,
-        /// What a standalone source component imports. `None` when it is
-        /// taken to bring in providers: a component of a declaration file
-        /// (ngtsc's `assumedToExportProviders`), one not known to be
-        /// standalone, or one whose imports can't be read.
-        imports: Option<Vec<RawRef>>,
+        /// What a component brings into an injector through its imports.
+        imports: CmpImports,
     },
     Pipe {
         name: Option<String>,
@@ -109,6 +106,21 @@ enum Declared {
     /// A `declare const X: readonly [typeof A, typeof B]` list, by its type.
     /// Only `ɵinj` reads it.
     TypeList(Vec<RawRef>),
+}
+
+/// What a component brings into an NgModule's injector through its
+/// imports (ngtsc's `mayExportProviders`).
+#[derive(Debug)]
+enum CmpImports {
+    /// A standalone source component's imports.
+    Read(Vec<RawRef>),
+    /// Taken to bring in providers: a component of a declaration file
+    /// (ngtsc's `assumedToExportProviders`), or one that is not standalone
+    /// (an error in `imports`, so it is kept).
+    Providers,
+    /// Not known: its `standalone` or `imports` can't be read. Also used
+    /// for a directive, which never brings in providers.
+    Unknown,
 }
 
 /// A directive or pipe of a scope, before it's named for the compiled file.
@@ -365,7 +377,7 @@ impl CrossFileAnalyzer {
                     Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => {
                         Some(false)
                     }
-                    Declared::Directive { .. } => Some(inner.may_export_providers(&flat.class)),
+                    Declared::Directive { .. } => inner.may_export_providers(&flat.class),
                     Declared::NgModule { .. } => Some(true),
                     Declared::List(_) | Declared::TypeList(_) => None,
                 });
@@ -380,12 +392,11 @@ impl CrossFileAnalyzer {
                     Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => {
                         Some(false)
                     }
-                    Declared::Directive { .. } => Some(
-                        !scope
-                            .get_or_init(|| inner.compilation_scope(&module))
-                            .as_ref()
-                            .is_some_and(|scope| scope.contains(&flat.class.decl)),
-                    ),
+                    // Not known without the module's scope.
+                    Declared::Directive { .. } => scope
+                        .get_or_init(|| inner.compilation_scope(&module))
+                        .as_ref()
+                        .map(|scope| !scope.contains(&flat.class.decl)),
                     Declared::NgModule { .. } => Some(true),
                     Declared::List(_) | Declared::TypeList(_) => None,
                 });
@@ -895,32 +906,42 @@ impl Inner {
     /// with providers through the `imports` of standalone components and
     /// NgModules. A component's own providers don't count, and the
     /// providers of a `ModuleWithProviders` an NgModule imports aren't read
-    /// either: its NgModule is. A class that can't be read may.
-    fn may_export_providers(&self, class: &ClassRef) -> bool {
+    /// either: its NgModule is. `None` when a class it reaches can't be
+    /// read and none is known to bring in providers.
+    fn may_export_providers(&self, class: &ClassRef) -> Option<bool> {
         // ngtsc stops at a class it is already looking at, so from the top
         // this is whether such a class can be reached.
         let mut seen = FxHashSet::default();
         let mut pending = vec![class.clone()];
+        let mut unknown = false;
         while let Some(class) = pending.pop() {
             if !seen.insert(class.decl.clone()) {
                 continue;
             }
-            let Some(declared) = self.declared(&class.decl) else { return true };
+            let Some(declared) = self.declared(&class.decl) else {
+                unknown = true;
+                continue;
+            };
             let imports = match &*declared {
                 Declared::Directive { is_component: false, .. } | Declared::Pipe { .. } => continue,
-                Declared::Directive { imports: Some(imports), .. }
+                Declared::Directive { imports: CmpImports::Read(imports), .. }
                 | Declared::NgModule { may_declare_providers: false, imports, .. } => imports,
-                Declared::Directive { imports: None, .. }
-                | Declared::NgModule { .. }
+                Declared::Directive { imports: CmpImports::Providers, .. }
+                | Declared::NgModule { .. } => return Some(true),
+                Declared::Directive { imports: CmpImports::Unknown, .. }
                 | Declared::List(_)
-                | Declared::TypeList(_) => return true,
+                | Declared::TypeList(_) => {
+                    unknown = true;
+                    continue;
+                }
             };
             let Some(flat) = self.flatten(imports, class.owner.as_deref(), 0, false, true) else {
-                return true;
+                unknown = true;
+                continue;
             };
             pending.extend(flat.into_iter().map(|flat| flat.class));
         }
-        false
+        (!unknown).then_some(false)
     }
 
     /// How the compiled `file` writes the class `flat` names, by itself,
@@ -1337,12 +1358,12 @@ fn read_declaration_type(class: &Class<'_>, file: &str) -> Option<Declared> {
             "ɵcmp" => Some(Declared::Directive {
                 selector: string_at(1),
                 is_component: true,
-                imports: None,
+                imports: CmpImports::Providers,
             }),
             "ɵdir" => Some(Declared::Directive {
                 selector: string_at(1),
                 is_component: false,
-                imports: None,
+                imports: CmpImports::Unknown,
             }),
             "ɵpipe" => Some(Declared::Pipe { name: string_at(1) }),
             "ɵmod" => {
@@ -1438,26 +1459,31 @@ fn read_decorator<'a>(
         "Component" => {
             // A component that is not standalone is an error in `imports`:
             // it is kept.
-            let standalone = field("standalone").is_none_or(|value| {
-                matches!(value.get_inner_expression(), Expression::BooleanLiteral(b) if b.value)
-            });
-            let imports = standalone.then(|| {
-                let mut refs = Vec::new();
-                if let Some(value) = field("imports") {
-                    collect_refs(value, consts, file, &mut refs, 0, false, false)?;
+            let standalone = match field("standalone").map(Expression::get_inner_expression) {
+                None => Some(true),
+                Some(Expression::BooleanLiteral(b)) => Some(b.value),
+                Some(_) => None,
+            };
+            let imports = match standalone {
+                Some(true) => {
+                    let mut refs = Vec::new();
+                    match field("imports") {
+                        Some(value) => {
+                            collect_refs(value, consts, file, &mut refs, 0, false, false)
+                                .map_or(CmpImports::Unknown, |()| CmpImports::Read(refs))
+                        }
+                        None => CmpImports::Read(refs),
+                    }
                 }
-                Some(refs)
-            });
-            Some(Declared::Directive {
-                selector: string("selector"),
-                is_component: true,
-                imports: imports.flatten(),
-            })
+                Some(false) => CmpImports::Providers,
+                None => CmpImports::Unknown,
+            };
+            Some(Declared::Directive { selector: string("selector"), is_component: true, imports })
         }
         "Directive" => Some(Declared::Directive {
             selector: string("selector"),
             is_component: false,
-            imports: None,
+            imports: CmpImports::Unknown,
         }),
         "Pipe" => Some(Declared::Pipe { name: string("name") }),
         _ => {

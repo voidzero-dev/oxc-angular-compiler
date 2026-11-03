@@ -122,7 +122,8 @@ pub fn imports_plan(refs: Option<&[ResolvedRef]>, is_spread: bool) -> EntryPlan 
 /// writes each class that stays by itself.
 pub fn exports_plan(refs: Option<&[ResolvedRef]>) -> EntryPlan {
     let Some(refs) = refs else { return EntryPlan::Keep };
-    // A `ModuleWithProviders` is not valid here: keep it, with its providers.
+    // A `ModuleWithProviders` is a type error here (ngtsc gives its NgModule
+    // when the list is cast): keep it, with its providers.
     if refs.iter().any(|r| r.kept.is_none() || r.is_mwp) {
         return EntryPlan::Keep;
     }
@@ -439,12 +440,14 @@ impl<'s> LocalGraph<'s, '_, '_> {
     /// Whether the class may bring in providers, like ngtsc's
     /// `mayExportProviders`: a standalone component or an NgModule that
     /// reaches an NgModule with a `providers` key (any value). A component's
-    /// own providers don't count. A class it can't read may.
-    fn may_export_providers(&self, class: &'s Class<'s>) -> bool {
+    /// own providers don't count. `None` when a class it reaches can't be
+    /// read and none is known to bring in providers.
+    fn may_export_providers(&self, class: &'s Class<'s>) -> Option<bool> {
         // ngtsc stops at a class it is already looking at, so from the top
         // this is whether such a module can be reached.
         let mut seen = FxHashSet::default();
         let mut pending = vec![class];
+        let mut unknown = false;
         while let Some(class) = pending.pop() {
             if !seen.insert(class.span.start) {
                 continue;
@@ -453,26 +456,38 @@ impl<'s> LocalGraph<'s, '_, '_> {
                 Some(LocalKind::DirectiveOrPipe) => continue,
                 Some(LocalKind::Component(decorator)) => (decorator, true),
                 Some(LocalKind::NgModule(decorator)) => (decorator, false),
-                None => return true,
+                None => {
+                    unknown = true;
+                    continue;
+                }
             };
-            let Some(fields) = decorator_fields(decorator) else { return true };
+            let Some(fields) = decorator_fields(decorator) else {
+                unknown = true;
+                continue;
+            };
             if is_component {
                 // A component that is not standalone is an error in
                 // `imports`: keep it.
-                let standalone = field(&fields, "standalone").is_none_or(|value| {
-                    matches!(value.get_inner_expression(), Expression::BooleanLiteral(b) if b.value)
-                });
-                if !standalone {
-                    return true;
+                match field(&fields, "standalone").map(Expression::get_inner_expression) {
+                    None => {}
+                    Some(Expression::BooleanLiteral(b)) if b.value => {}
+                    Some(Expression::BooleanLiteral(_)) => return Some(true),
+                    Some(_) => {
+                        unknown = true;
+                        continue;
+                    }
                 }
             } else if field(&fields, "providers").is_some() {
-                return true;
+                return Some(true);
             }
             let Some(imports) = field(&fields, "imports") else { continue };
-            let Some(refs) = self.refs(imports) else { return true };
+            let Some(refs) = self.refs(imports) else {
+                unknown = true;
+                continue;
+            };
             pending.extend(refs.iter().map(|r| r.class));
         }
-        false
+        (!unknown).then_some(false)
     }
 
     /// `refs` as `ɵinj` sees them, `kept` telling what stays of a class
@@ -480,11 +495,11 @@ impl<'s> LocalGraph<'s, '_, '_> {
     fn resolved(
         &self,
         refs: &[LocalRef<'s>],
-        kept: impl Fn(&LocalRef<'s>, LocalKind<'s>) -> bool,
+        kept: impl Fn(&LocalRef<'s>, LocalKind<'s>) -> Option<bool>,
     ) -> Vec<ResolvedRef> {
         refs.iter()
             .map(|r| ResolvedRef {
-                kept: local_kind(r.class, self.consts).map(|kind| kept(r, kind)),
+                kept: local_kind(r.class, self.consts).and_then(|kind| kept(r, kind)),
                 name: r.class.id.as_ref().map(|id| ImportedName::Local(id.name.to_string())),
                 is_mwp: r.is_mwp,
                 forward: r.forward,
@@ -527,9 +542,9 @@ impl<'s> InjectorEntries<'s> {
             .map(|entry| {
                 let resolved = refs(entry).map(|refs| {
                     graph.resolved(&refs, |r, kind| match kind {
-                        LocalKind::DirectiveOrPipe => false,
+                        LocalKind::DirectiveOrPipe => Some(false),
                         LocalKind::Component(_) => graph.may_export_providers(r.class),
-                        LocalKind::NgModule(_) => true,
+                        LocalKind::NgModule(_) => Some(true),
                     })
                 });
                 imports_plan(resolved.as_deref(), entry.is_some_and(|entry| entry.is_spread))
@@ -555,9 +570,9 @@ impl<'s> InjectorEntries<'s> {
                 }
                 let resolved = refs(entry).map(|refs| {
                     graph.resolved(&refs, |r, kind| match kind {
-                        LocalKind::DirectiveOrPipe => false,
-                        LocalKind::Component(_) => !in_scope.contains(&r.class.span.start),
-                        LocalKind::NgModule(_) => true,
+                        LocalKind::DirectiveOrPipe => Some(false),
+                        LocalKind::Component(_) => Some(!in_scope.contains(&r.class.span.start)),
+                        LocalKind::NgModule(_) => Some(true),
                     })
                 });
                 exports_plan(resolved.as_deref())

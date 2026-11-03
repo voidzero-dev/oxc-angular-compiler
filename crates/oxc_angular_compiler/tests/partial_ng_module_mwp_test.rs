@@ -445,9 +445,30 @@ export class ExportSpreadModule {}
         ),
         "{code}"
     );
-    assert!(
-        code.contains("type:SpreadModule,imports:[...MODS,AModule]}"),
-        "ɵinj stays raw:\n{code}"
+    // `ɵinj`, as ngtsc writes it: a list holding a `ModuleWithProviders` is
+    // written as is, without its spread. In `exports` such a list is a type
+    // error (here cast away): Oxc keeps it, with its providers, where ngtsc
+    // writes `[AModule, AModule, BModule, BModule]`.
+    let injectors: Vec<&str> = code
+        .split("ɵɵngDeclareInjector(")
+        .skip(1)
+        .map(|rest| {
+            let init = &rest[..rest.find(");").unwrap()];
+            &init[init.find("type:").unwrap()..]
+        })
+        .collect();
+    assert_eq!(
+        injectors,
+        [
+            "type:AModule}",
+            "type:BModule}",
+            "type:SpreadModule,imports:[MODS,AModule]}",
+            "type:NestedModule,imports:[[Holder.forRoot(),AModule],BModule]}",
+            "type:BareModule,imports:[MODS]}",
+            "type:DeepModule,imports:[NESTED,[mwp]]}",
+            "type:ExportSpreadModule,imports:[AModule,...(MODS)]}",
+        ],
+        "{code}"
     );
 }
 
