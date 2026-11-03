@@ -5659,9 +5659,15 @@ fn resolve_ng_module_lists<'a>(
         &metadata.imports[..],
         &metadata.exports[..],
     ];
-    let Some(lists) =
-        read_module_lists(program, class, string_consts, current, binding, resolve_imported)
-    else {
+    let Some(lists) = read_module_lists(
+        program,
+        class,
+        string_consts,
+        current,
+        metadata.contains_forward_decls,
+        binding,
+        resolve_imported,
+    ) else {
         return;
     };
     metadata.contains_forward_decls = lists.wrap;

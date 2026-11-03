@@ -419,6 +419,12 @@ impl CrossFileAnalyzer {
             ..RawRef::default()
         };
         let holder = inner.resolve_ref(&raw, None, 0)?;
+        // Whether a class may not be defined yet when this file runs.
+        let unready = |class: &ClassRef| {
+            inner
+                .imported_name(class, &file)
+                .is_none_or(|name| inner.loads_back(&file, &name, &class.decl))
+        };
         let named = |class: &ClassRef| {
             Some(match inner.imported_name(class, &file)? {
                 ImportedName::Local(name) => NamedClass::Local(name),
@@ -428,7 +434,8 @@ impl CrossFileAnalyzer {
         // A `ModuleWithProviders` names an NgModule.
         let ng_module = |module: ClassRef| {
             let Declared::NgModule { .. } = &*inner.declared(&module.decl)? else { return None };
-            Some(Answer::Classes { classes: vec![named(&module)?], lazy: false })
+            let unready = unready(&module);
+            Some(Answer::Classes { classes: vec![named(&module)?], unready, forward_ref: false })
         };
         if let Some(method) = question.method {
             return ng_module(inner.mwp_method_module(&holder, method)?);
@@ -440,27 +447,27 @@ impl CrossFileAnalyzer {
                 let mut classes = Vec::new();
                 let mut forward_ref = false;
                 inner.flatten_list(&holder, items, &mut classes, &mut forward_ref, 0)?;
-                let lazy = forward_ref
-                    && classes.iter().any(|class| {
-                        inner
-                            .imported_name(class, &file)
-                            .is_none_or(|name| inner.loads_back(&file, &name, &class.decl))
-                    });
+                let unready = classes.iter().any(unready);
                 let classes = classes.iter().map(named).collect::<Option<_>>()?;
-                Some(Answer::Classes { classes, lazy })
+                Some(Answer::Classes { classes, unready, forward_ref })
             }
             _ if question.spread => None,
             // A constant holding a `ModuleWithProviders`.
             Some(Declared::List(_)) | None => ng_module(inner.mwp_const_module(&holder)?),
             // A class.
             Some(_) => {
-                let lazy = question.forward_ref
-                    && inner
-                        .imported_name(&holder, &file)
-                        .is_none_or(|name| inner.loads_back(&file, &name, &holder.decl));
+                let unready = unready(&holder);
                 Some(match question.namespace {
-                    None => Answer::AsWritten { lazy },
-                    Some(_) => Answer::Classes { classes: vec![named(&holder)?], lazy },
+                    // Read through the binding, so the file it is imported
+                    // from (a barrel, say) must not load this one back.
+                    None => Answer::AsWritten {
+                        unready: unready || inner.binding_loads_back(&file, question.name),
+                    },
+                    Some(_) => Answer::Classes {
+                        classes: vec![named(&holder)?],
+                        unready,
+                        forward_ref: false,
+                    },
                 })
             }
         }
@@ -558,6 +565,15 @@ impl Inner {
         };
         loaded.iter().chain([&decl.file]).any(|from| {
             from != file && real_path(Path::new(from)) != file && self.imports_file(from, file)
+        })
+    }
+
+    /// Whether the file `file` imports `binding` from loads `file` back.
+    fn binding_loads_back(&self, file: &str, binding: &str) -> bool {
+        let Some(exports) = self.file_exports(file) else { return true };
+        let Some(Local::Import { spec, .. }) = exports.locals.get(binding) else { return false };
+        self.resolve_types(file, spec).is_none_or(|from| {
+            from != file && real_path(Path::new(&from)) != file && self.imports_file(&from, file)
         })
     }
 

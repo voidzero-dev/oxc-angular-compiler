@@ -383,20 +383,19 @@ pub struct Question<'s> {
     pub method: Option<&'s str>,
     /// Written `...name`: only a `const` array counts.
     pub spread: bool,
-    /// Written `forwardRef(() => name)`.
-    pub forward_ref: bool,
 }
 
-/// What cross-file analysis read for a [`Question`]. `lazy` is set when
-/// reading the classes as the NgModule is defined may read one before it
-/// is initialized: a `forwardRef` to a file that loads this one back.
+/// What cross-file analysis read for a [`Question`]. `unready` is set when
+/// a class may not be defined yet as the NgModule is: its file, or the one
+/// it is imported through, loads this one back.
 #[cfg_attr(not(feature = "cross_file_elision"), expect(dead_code))]
 pub enum Answer {
     /// A class the file imports by this name: it is listed as written.
-    AsWritten { lazy: bool },
+    AsWritten { unready: bool },
     /// The classes it gives, a `const` list flattened and each
-    /// `ModuleWithProviders` as its NgModule.
-    Classes { classes: Vec<NamedClass>, lazy: bool },
+    /// `ModuleWithProviders` as its NgModule. `forward_ref` is set when
+    /// the list writes a `forwardRef`.
+    Classes { classes: Vec<NamedClass>, unready: bool, forward_ref: bool },
 }
 
 /// Cross-file analysis of a [`Question`]; `None` when it can't tell.
@@ -444,12 +443,15 @@ const MAX_DEPTH: u8 = 8;
 /// Read the lists of the `@NgModule` `class`. `current` is what the
 /// decorator parser read for `bootstrap`, `declarations`, `imports` and
 /// `exports`: `None` when the entries don't line up with it. `bootstrap`
-/// is only read for `wrap`.
+/// is only read for `wrap`. `forward_refs` is whether the parser saw a
+/// `forwardRef`: it wrapped every list then, so the wrap stays unless every
+/// entry is known to be defined.
 pub fn read_module_lists(
     program: &Program<'_>,
     class: &Class<'_>,
     consts: &StringConsts<'_>,
     current: [&[oxc_str::Ident<'_>]; 4],
+    forward_refs: bool,
     binding: impl Fn(&str) -> Binding,
     resolve_imported: Option<ResolveImported<'_>>,
 ) -> Option<ModuleLists> {
@@ -470,7 +472,8 @@ pub fn read_module_lists(
             (crate::util::is_metadata_property(property) && key == name).then_some(&property.value)
         })
     };
-    let mut walker = Walker { program, module: class, binding, resolve_imported, wrap: false };
+    let mut walker =
+        Walker { program, module: class, binding, resolve_imported, wrap: false, unsure: false };
     let mut lists = ["bootstrap", "declarations", "imports", "exports"]
         .into_iter()
         .zip(current)
@@ -483,7 +486,8 @@ pub fn read_module_lists(
         .into_iter();
     lists.next(); // bootstrap
     let mut next = || lists.next().unwrap_or_default();
-    Some(ModuleLists { lists: [next(), next(), next()], wrap: walker.wrap })
+    let wrap = walker.wrap || (forward_refs && walker.unsure);
+    Some(ModuleLists { lists: [next(), next(), next()], wrap })
 }
 
 impl ModuleLists {
@@ -575,6 +579,10 @@ struct Walker<'p, 'a, 'r, B> {
     binding: B,
     resolve_imported: Option<ResolveImported<'r>>,
     wrap: bool,
+    /// Set when an entry is unread, or may not be defined yet. The
+    /// decorator parser wraps every list once one writes a `forwardRef`,
+    /// so the wrap stays then.
+    unsure: bool,
 }
 
 impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
@@ -582,14 +590,17 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
     /// literal (`imports: MODS`) is one entry, which lists nothing today.
     fn entries(&mut self, value: &Expression<'_>) -> std::vec::Vec<Entry> {
         let Expression::ArrayExpression(array) = value else {
-            return vec![Entry { fallback: None, refs: self.spread(value, 0) }];
+            let refs = self.spread(value, 0);
+            self.unsure |= refs.is_none();
+            return vec![Entry { fallback: None, refs }];
         };
         array
             .elements
             .iter()
-            .map(|element| Entry {
-                fallback: fallback_name(element),
-                refs: self.element(element, 0),
+            .map(|element| {
+                let refs = self.element(element, 0);
+                self.unsure |= refs.is_none();
+                Entry { fallback: fallback_name(element), refs }
             })
             .collect()
     }
@@ -712,13 +723,8 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
                 if !matches!((self.binding)(class), Binding::Import { .. }) {
                     return None;
                 }
-                let question = Question {
-                    namespace: None,
-                    name: class,
-                    method: Some(method),
-                    spread: false,
-                    forward_ref: false,
-                };
+                let question =
+                    Question { namespace: None, name: class, method: Some(method), spread: false };
                 let answer = self.ask(&question)?;
                 self.classes(answer)
             }
@@ -750,10 +756,9 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
             self.wrap = true;
             return None;
         };
-        let question =
-            Question { namespace: None, name, method: None, spread: false, forward_ref: true };
+        let question = Question { namespace: None, name, method: None, spread: false };
         match self.ask(&question) {
-            Some(Answer::AsWritten { lazy }) => self.wrap |= lazy,
+            Some(Answer::AsWritten { unready }) => self.wrap |= unready,
             Some(Answer::Classes { .. }) => {
                 self.wrap = true;
                 return None;
@@ -766,10 +771,10 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
     /// A name this file imports.
     fn ask_import(&mut self, name: &str, spread: bool) -> Option<std::vec::Vec<Ref>> {
         let Binding::Import { kept } = (self.binding)(name) else { return None };
-        let question = Question { namespace: None, name, method: None, spread, forward_ref: false };
+        let question = Question { namespace: None, name, method: None, spread };
         match self.ask(&question)? {
-            Answer::AsWritten { lazy } => {
-                self.wrap |= lazy;
+            Answer::AsWritten { unready } => {
+                self.unsure |= unready;
                 (kept && !spread).then(|| vec![Ref::Local(name.into())])
             }
             answer @ Answer::Classes { .. } => self.classes(answer),
@@ -787,8 +792,7 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         if !matches!((self.binding)(namespace), Binding::Namespace) {
             return None;
         }
-        let question =
-            Question { namespace: Some(namespace), name, method, spread, forward_ref: false };
+        let question = Question { namespace: Some(namespace), name, method, spread };
         let answer = self.ask(&question)?;
         self.classes(answer)
     }
@@ -798,8 +802,11 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
     }
 
     fn classes(&mut self, answer: Answer) -> Option<std::vec::Vec<Ref>> {
-        let Answer::Classes { classes, lazy } = answer else { return None };
-        self.wrap |= lazy;
+        let Answer::Classes { classes, unready, forward_ref } = answer else { return None };
+        // A `forwardRef` in the list asks for the wrap; see `Walker::unsure`
+        // for the others.
+        self.wrap |= forward_ref && unready;
+        self.unsure |= unready;
         classes
             .into_iter()
             .map(|class| match class {

@@ -367,6 +367,39 @@ fn a_forward_ref_to_an_earlier_class_is_not_wrapped() {
     assert!(code.contains("ɵɵsetNgModuleScope(ViaImport,{imports:()=>[DepModule]})"), "{code}");
 }
 
+/// `CycCmp` comes from `cyc.ts`, which imports this file back.
+const APP_EARLY_FORWARD_REF: &str = r"
+import { NgModule, Component, forwardRef } from '@angular/core';
+import { CycCmp } from './cyc';
+@Component({ selector: 'e', template: '', standalone: false })
+export class EarlyCmp {}
+export const TITLE = 'x';
+@NgModule({ declarations: [forwardRef(() => EarlyCmp), CycCmp] })
+export class AppModule {}
+";
+
+#[cfg_attr(not(feature = "cross_file_elision"), expect(dead_code))]
+const CYCLIC_CMP: &str = r"
+import { Component } from '@angular/core';
+import { TITLE } from './app';
+@Component({ selector: 'c', template: '', standalone: false })
+export class CycCmp { t = TITLE; }
+";
+
+#[test]
+fn a_forward_ref_keeps_the_wrap_next_to_an_unread_import() {
+    // A `forwardRef` wrapped every list before. Without cross-file analysis
+    // oxc can't tell whether `./cyc` loads this file back, so the wrap
+    // stays (ngtsc: `declarations: [EarlyCmp, CycCmp]`).
+    let code = partial(APP_EARLY_FORWARD_REF);
+    assert!(code.contains("type:AppModule,declarations:()=>[EarlyCmp,CycCmp]}"), "{code}");
+    let code = full(APP_EARLY_FORWARD_REF);
+    assert!(
+        code.contains("ɵɵsetNgModuleScope(AppModule,{declarations:()=>[EarlyCmp,CycCmp]})"),
+        "{code}"
+    );
+}
+
 #[test]
 fn spreads_nested_arrays_and_const_lists_are_flattened() {
     let code = partial(
@@ -1195,6 +1228,67 @@ export const PLAIN_MODS = [OtherModule];
         assert!(code.contains("type:PlainListModule,imports:[i1.OtherModule]}"), "{code}");
         let code = compile(&dir, "app.ts", APP_FORWARD_REFS, CompilationMode::Full);
         assert!(code.contains("ɵɵsetNgModuleScope(AppModule,{imports:()=>[DepModule]})"), "{code}");
+    }
+
+    #[test]
+    fn a_forward_ref_through_a_barrel_that_loads_this_one_stays_wrapped() {
+        // The class is imported through `./index`, which loads this file
+        // first, so it isn't defined yet when this file runs. ngtsc gives
+        // `declarations: [FooCmp], exports: [FooCmp]`, which reads it too
+        // early; oxc keeps the lists lazy.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "index.ts",
+            "export * from './feature.module';\nexport * from './foo.component';\n",
+        );
+        write(
+            &dir,
+            "foo.component.ts",
+            "import { Component } from '@angular/core';\n@Component({ selector: 'foo', template: '', standalone: false })\nexport class FooCmp {}\n",
+        );
+        let source = r"
+import { NgModule, forwardRef } from '@angular/core';
+import { FooCmp } from './index';
+@NgModule({ declarations: [forwardRef(() => FooCmp)], exports: [forwardRef(() => FooCmp)] })
+export class FeatureModule {}
+";
+        let code = compile(&dir, "feature.module.ts", source, CompilationMode::Partial);
+        assert!(
+            code.contains("type:FeatureModule,declarations:()=>[FooCmp],exports:()=>[FooCmp]}"),
+            "{code}"
+        );
+        let code = compile(&dir, "feature.module.ts", source, CompilationMode::Full);
+        assert!(
+            code.contains(
+                "ɵɵsetNgModuleScope(FeatureModule,{declarations:()=>[FooCmp],exports:()=>[FooCmp]})"
+            ),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn a_plain_entry_from_a_file_that_loads_this_one_keeps_the_wrap() {
+        // A `forwardRef` wrapped every list before. `cyc.ts` loads this file
+        // back, so `CycCmp` may not be defined yet: the wrap stays (ngtsc:
+        // `declarations: [EarlyCmp, CycCmp]`).
+        let dir = TempDir::new().unwrap();
+        write(&dir, "cyc.ts", CYCLIC_CMP);
+        let code = compile(&dir, "app.ts", APP_EARLY_FORWARD_REF, CompilationMode::Partial);
+        assert!(code.contains("type:AppModule,declarations:()=>[EarlyCmp,CycCmp]}"), "{code}");
+        let code = compile(&dir, "app.ts", APP_EARLY_FORWARD_REF, CompilationMode::Full);
+        assert!(
+            code.contains("ɵɵsetNgModuleScope(AppModule,{declarations:()=>[EarlyCmp,CycCmp]})"),
+            "{code}"
+        );
+        // When it doesn't, the lists are read in place like ngtsc's.
+        write(
+            &dir,
+            "cyc.ts",
+            &CYCLIC_CMP.replace("import { TITLE } from './app';", "const TITLE = 'x';"),
+        );
+        let code = compile(&dir, "app.ts", APP_EARLY_FORWARD_REF, CompilationMode::Partial);
+        assert!(code.contains("type:AppModule,declarations:[EarlyCmp,CycCmp]}"), "{code}");
     }
 
     #[test]
