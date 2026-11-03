@@ -36,6 +36,7 @@ import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
 import { jitPlugin } from './angular-jit-plugin.js'
 import { angularLinkerPlugin } from './angular-linker-plugin.js'
 import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
+import { installedAngularVersion } from './utils/angular-version.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
 /**
@@ -103,7 +104,9 @@ export interface PluginOptions {
    *
    * Also used when linking partially compiled libraries (`ɵɵngDeclare*`).
    *
-   * When not set, assumes latest Angular version (v20+ behavior).
+   * Default: the version of `@angular/core` installed for `workspaceRoot`
+   * (found in `node_modules` from there up). When none is found, or it is a
+   * `0.0.0-...` build, the latest Angular version is assumed.
    *
    * @example
    * ```ts
@@ -322,7 +325,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     // object form turns them on; `sourceMap: true` only covers scripts.
     vendorSourceMap: typeof options.sourceMap === 'object' && (options.sourceMap.vendor ?? false),
     fileReplacements,
-    angularVersion: options.angularVersion,
+    angularVersion: options.angularVersion ?? installedAngularVersion(workspaceRoot),
     emitClassMetadata: options.emitClassMetadata ?? true,
     compilationMode: options.compilationMode ?? 'full',
     preserveWhitespaces: options.preserveWhitespaces,

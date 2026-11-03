@@ -198,7 +198,8 @@ interface PluginOptions {
   // Project configuration
   tsconfig?: string
   workspaceRoot?: string
-  // Application's Angular version, used for app code and linked libraries (default: latest)
+  // Application's Angular version, used for app code and linked libraries
+  // (default: the installed @angular/core version, else latest)
   angularVersion?: { major: number; minor: number; patch: number }
 
   // Features
