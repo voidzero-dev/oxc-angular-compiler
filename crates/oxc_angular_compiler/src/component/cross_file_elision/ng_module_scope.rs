@@ -31,8 +31,8 @@ use super::{CrossFileAnalyzer, Inner, MAX_EXPORT_CHAIN};
 use crate::component::metadata::{ComponentScope, ImportedName, ScopeEntry, ScopeKind};
 use crate::directive::{Evaluator, StringConsts, find_angular_class_decorator};
 use crate::ng_module::module_with_providers::{
-    MwpInit, MwpModule, MwpRead, MwpType, module_with_providers_init, static_method_ng_module,
-    top_level_const_init,
+    Answer, MwpInit, MwpModule, MwpRead, MwpType, NamedClass, Question, evaluated,
+    module_with_providers_init, static_method_ng_module, top_level_const_init,
 };
 use crate::ng_module::{
     EntryPlan, InjectorEntry, InjectorPlans, ResolvedRef, exports_plan, imports_plan,
@@ -397,41 +397,73 @@ impl CrossFileAnalyzer {
 }
 
 impl CrossFileAnalyzer {
-    /// For each `ModuleWithProviders` entry of an NgModule's `imports` in
-    /// `file` (`source` is its text), the NgModule it names, as `file`
-    /// would import it, like ngtsc's `resolveTypeList`. An entry is
-    /// `(namespace, name, method)`: `name.method(...)` (or
-    /// `namespace.name.method(...)`), or with no method a constant `name`
-    /// holding one. The method or constant may be in another file; the
-    /// NgModule is named through an import of the file it comes from, as
-    /// ngtsc names a class it found in another file (`i1.DepModule`).
-    /// `None` for an entry that can't be read, or that names no NgModule.
-    pub(crate) fn module_with_providers_imports(
+    /// What a binding `file` imports gives in an NgModule's lists (`source`
+    /// is the text of `file`), like ngtsc's `resolveTypeList`: a class, a
+    /// `const` list (flattened), or a `ModuleWithProviders` (a method call
+    /// or a constant), whose NgModule is named through an import of the
+    /// file it comes from, as ngtsc names a class it found in another file
+    /// (`i1.DepModule`). `None` when it can't be read, or a
+    /// `ModuleWithProviders` names no NgModule.
+    pub(crate) fn read_imported_ref(
         &self,
         file: &Path,
         source: &str,
-        entries: &[(Option<&str>, &str, Option<&str>)],
-    ) -> Vec<Option<ImportedName>> {
+        question: &Question<'_>,
+    ) -> Option<Answer> {
         let file = self.inner.set_compiled_source(file, source);
-        entries
-            .iter()
-            .map(|(namespace, name, method)| {
-                let raw = RawRef {
-                    file: file.clone(),
-                    namespace: namespace.map(Into::into),
-                    name: (*name).into(),
-                    ..RawRef::default()
-                };
-                let holder = self.inner.resolve_ref(&raw, None, 0)?;
-                let module = match method {
-                    Some(method) => self.inner.mwp_method_module(&holder, method)?,
-                    None => self.inner.mwp_const_module(&holder)?,
-                };
-                let declared = self.inner.declared(&module.decl)?;
-                let Declared::NgModule { .. } = &*declared else { return None };
-                self.inner.imported_name(&module, &file)
+        let inner = &self.inner;
+        let raw = RawRef {
+            file: file.clone(),
+            namespace: question.namespace.map(Into::into),
+            name: question.name.into(),
+            ..RawRef::default()
+        };
+        let holder = inner.resolve_ref(&raw, None, 0)?;
+        let named = |class: &ClassRef| {
+            Some(match inner.imported_name(class, &file)? {
+                ImportedName::Local(name) => NamedClass::Local(name),
+                ImportedName::Module { specifier, name } => NamedClass::Module { specifier, name },
             })
-            .collect()
+        };
+        // A `ModuleWithProviders` names an NgModule.
+        let ng_module = |module: ClassRef| {
+            let Declared::NgModule { .. } = &*inner.declared(&module.decl)? else { return None };
+            Some(Answer::Classes { classes: vec![named(&module)?], lazy: false })
+        };
+        if let Some(method) = question.method {
+            return ng_module(inner.mwp_method_module(&holder, method)?);
+        }
+        match inner.declared(&holder.decl).as_deref() {
+            // A spread must be of an array (`read_declared` also gives a
+            // list for `const X = A` or `const X = A.forRoot()`).
+            Some(Declared::List(items)) if inner.is_const_array(&holder) => {
+                let mut classes = Vec::new();
+                let mut forward_ref = false;
+                inner.flatten_list(&holder, items, &mut classes, &mut forward_ref, 0)?;
+                let lazy = forward_ref
+                    && classes.iter().any(|class| {
+                        inner
+                            .imported_name(class, &file)
+                            .is_none_or(|name| inner.loads_back(&file, &name, &class.decl))
+                    });
+                let classes = classes.iter().map(named).collect::<Option<_>>()?;
+                Some(Answer::Classes { classes, lazy })
+            }
+            _ if question.spread => None,
+            // A constant holding a `ModuleWithProviders`.
+            Some(Declared::List(_)) | None => ng_module(inner.mwp_const_module(&holder)?),
+            // A class.
+            Some(_) => {
+                let lazy = question.forward_ref
+                    && inner
+                        .imported_name(&holder, &file)
+                        .is_none_or(|name| inner.loads_back(&file, &name, &holder.decl));
+                Some(match question.namespace {
+                    None => Answer::AsWritten { lazy },
+                    Some(_) => Answer::Classes { classes: vec![named(&holder)?], lazy },
+                })
+            }
+        }
     }
 }
 
@@ -726,6 +758,57 @@ impl Inner {
             Some(method) => self.mwp_method_module(&class, &method),
             None => Some(class),
         }
+    }
+
+    /// Whether `decl` is a `const` whose value is an array literal.
+    fn is_const_array(&self, decl: &ClassRef) -> bool {
+        self.parsed_file(&decl.decl.file).is_some_and(|parsed| {
+            parsed.with(|_, program, _| {
+                top_level_const_init(program, &decl.decl.name)
+                    .is_some_and(|init| matches!(evaluated(init), Expression::ArrayExpression(_)))
+            })
+        })
+    }
+
+    /// The classes of the `const` list `list` (its `items`), flattened, each
+    /// `ModuleWithProviders` as its NgModule. `forward_ref` is set when a
+    /// list writes a `forwardRef`.
+    fn flatten_list(
+        &self,
+        list: &ClassRef,
+        items: &[RawRef],
+        out: &mut Vec<ClassRef>,
+        forward_ref: &mut bool,
+        depth: u16,
+    ) -> Option<()> {
+        if depth > MAX_EXPORT_CHAIN || !self.scope.flattening.borrow_mut().insert(list.decl.clone())
+        {
+            return None;
+        }
+        *forward_ref |= self.parsed_file(&list.decl.file).is_some_and(|parsed| {
+            parsed.with(|_, program, _| {
+                top_level_const_init(program, &list.decl.name).is_some_and(writes_forward_ref)
+            })
+        });
+        let read = items.iter().try_for_each(|raw| {
+            let class = self.resolve_ref(raw, list.owner.as_deref(), 0)?;
+            match &*self.declared(&class.decl)? {
+                Declared::List(items) if raw.method.is_none() => {
+                    self.flatten_list(&class, items, out, forward_ref, depth + 1)
+                }
+                Declared::NgModule { .. } => {
+                    out.push(class);
+                    Some(())
+                }
+                _ if raw.method.is_some() => None,
+                _ => {
+                    out.push(class);
+                    Some(())
+                }
+            }
+        });
+        self.scope.flattening.borrow_mut().remove(&list.decl);
+        read
     }
 
     /// What the declaration `decl` is to a module scope.
@@ -1376,6 +1459,20 @@ fn read_decorator<'a>(
                 may_declare_providers: field("providers").is_some(),
             })
         }
+    }
+}
+
+/// Whether a list writes `forwardRef(...)`, in it or in an array it holds.
+fn writes_forward_ref(expr: &Expression<'_>) -> bool {
+    match expr.get_inner_expression() {
+        Expression::ArrayExpression(array) => array.elements.iter().any(|element| match element {
+            ArrayExpressionElement::SpreadElement(spread) => writes_forward_ref(&spread.argument),
+            _ => element.as_expression().is_some_and(writes_forward_ref),
+        }),
+        Expression::CallExpression(call) => {
+            matches!(call.callee.get_inner_expression(), Expression::Identifier(id) if id.name == "forwardRef")
+        }
+        _ => false,
     }
 }
 
