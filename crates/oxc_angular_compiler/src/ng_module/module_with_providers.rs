@@ -45,27 +45,32 @@ pub enum MwpModule<'b, 'a> {
 /// object literal with `ngModule` there is the answer. Any other body gives
 /// a dynamic value, and then `createModuleWithProvidersResolver` reads the
 /// `ModuleWithProviders<T>` return type. `None` when unsure: a single
-/// `return` of something else (ngtsc would evaluate it further), overloads,
-/// a parameter or type parameter in place of the module.
+/// `return` of something else (ngtsc would evaluate it further), a
+/// parameter or type parameter in place of the module.
+///
+/// With overloads, ngtsc reads only the first declaration (the symbol's
+/// `valueDeclaration`), whatever the call's arguments: a signature has no
+/// body, so its return type decides.
 pub fn static_method_ng_module<'b, 'a>(
     class: &'b Class<'a>,
     method: &str,
 ) -> Option<MwpModule<'b, 'a>> {
-    let mut found = class.body.body.iter().filter_map(|element| match element {
-        ClassElement::MethodDefinition(m)
-            if m.r#static
-                && m.kind == MethodDefinitionKind::Method
-                && !m.computed
-                && m.key.static_name().is_some_and(|key| key == method) =>
-        {
-            Some(m)
-        }
-        _ => None,
-    });
-    let function = &found.next()?.value;
-    if found.next().is_some() {
-        return None;
-    }
+    let function = &class
+        .body
+        .body
+        .iter()
+        .find_map(|element| match element {
+            ClassElement::MethodDefinition(m)
+                if m.r#static
+                    && !m.computed
+                    && m.key.static_name().is_some_and(|key| key == method) =>
+            {
+                Some(m)
+            }
+            _ => None,
+        })
+        .filter(|m| m.kind == MethodDefinitionKind::Method)?
+        .value;
     if let Some(body) = &function.body
         && let [Statement::ReturnStatement(ret)] = body.statements.as_slice()
     {

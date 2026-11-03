@@ -580,53 +580,23 @@ impl Inner {
     }
 
     /// The NgModule the static method `method` of the class `decl` returns
-    /// a `ModuleWithProviders` of: its return type's argument, or the
-    /// `ngModule` of the object it returns.
+    /// a `ModuleWithProviders` of, read in ngtsc's order (see
+    /// `static_method_ng_module`).
     fn module_with_providers(&self, decl: &Decl, method: &str) -> Option<RawRef> {
-        let parsed = self.parsed_file(&decl.file)?;
-        parsed.with(|_, program, consts| {
+        let file = &decl.file;
+        self.parsed_file(file)?.with(|_, program, _| {
             let class = find_class(program, &decl.name)?;
-            let function = class.body.body.iter().find_map(|element| match element {
-                ClassElement::MethodDefinition(m)
-                    if m.r#static && m.key.static_name().is_some_and(|key| key == method) =>
-                {
-                    Some(&m.value)
-                }
-                _ => None,
-            })?;
-            if let Some(return_type) = &function.return_type
-                && let TSType::TSTypeReference(reference) = &return_type.type_annotation
-                && type_name_ends_with(&reference.type_name, "ModuleWithProviders")
-            {
-                let argument = reference.type_arguments.as_ref()?.params.first()?;
-                let TSType::TSTypeReference(module) = argument else { return None };
-                return type_name_ref(&decl.file, &module.type_name);
-            }
-            let body = function.body.as_ref()?;
-            let returned = body.statements.iter().rev().find_map(|stmt| match stmt {
-                Statement::ReturnStatement(ret) => ret.argument.as_ref(),
-                _ => None,
-            })?;
-            let mut refs = Vec::new();
-            collect_refs(returned, consts, &decl.file, &mut refs, 0)?;
-            match <[RawRef; 1]>::try_from(refs) {
-                Ok([module]) => Some(module),
-                Err(_) => None,
+            match static_method_ng_module(class, method)? {
+                MwpModule::Value(value) => value_ref(value, file),
+                MwpModule::Type(name) => type_name_ref(file, name),
             }
         })
     }
 
     /// The NgModule `holder.method(...)` returns a `ModuleWithProviders`
-    /// of, read in ngtsc's order (see `static_method_ng_module`).
+    /// of.
     fn mwp_method_module(&self, holder: &ClassRef, method: &str) -> Option<ClassRef> {
-        let file = &holder.decl.file;
-        let raw = self.parsed_file(file)?.with(|_, program, _| {
-            let class = find_class(program, &holder.decl.name)?;
-            match static_method_ng_module(class, method)? {
-                MwpModule::Value(value) => value_ref(value, file),
-                MwpModule::Type(name) => type_name_ref(file, name),
-            }
-        })?;
+        let raw = self.module_with_providers(&holder.decl, method)?;
         self.resolve_ref(&raw, holder.owner.as_deref(), 1)
     }
 
@@ -1131,15 +1101,6 @@ fn value_ref(value: &Expression<'_>, file: &str) -> Option<RawRef> {
         _ => return None,
     };
     Some(RawRef { file: file.into(), namespace, name, method: None })
-}
-
-/// Whether a type name is `name` or `ns.name`.
-fn type_name_ends_with(type_name: &TSTypeName<'_>, name: &str) -> bool {
-    match type_name {
-        TSTypeName::IdentifierReference(id) => id.name == name,
-        TSTypeName::QualifiedName(qualified) => qualified.right.name == name,
-        TSTypeName::ThisExpression(_) => false,
-    }
 }
 
 /// The scope the Angular decorator of a source `class` gives it.

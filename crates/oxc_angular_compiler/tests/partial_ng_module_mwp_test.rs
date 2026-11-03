@@ -176,6 +176,26 @@ export class AppModule {}
 }
 
 #[test]
+fn overloads_read_the_first_declaration() {
+    // ngtsc partial: `imports: [AMod]`, whatever the arguments or body.
+    let code = partial(
+        r"
+import { NgModule, ModuleWithProviders } from '@angular/core';
+@NgModule({}) export class AMod {}
+@NgModule({}) export class BMod {}
+export class Holder {
+  static forRoot(): ModuleWithProviders<AMod>;
+  static forRoot(x: number): ModuleWithProviders<BMod>;
+  static forRoot(x?: number): any { return { ngModule: BMod, providers: [] }; }
+}
+@NgModule({ imports: [Holder.forRoot(1)] })
+export class M {}
+",
+    );
+    assert!(code.contains("type:M,imports:[AMod]}"), "{code}");
+}
+
+#[test]
 fn a_class_in_a_function_keeps_its_old_output() {
     let code = partial(
         r"
@@ -324,6 +344,54 @@ export class M {}
             CompilationMode::Partial,
         );
         assert!(code.contains("type:M,imports:[Holder]}"), "{code}");
+    }
+
+    #[test]
+    fn imported_overloads_read_the_first_declaration() {
+        // ngtsc partial: `imports: [i1.AMod, i1.AMod]`, for a source file
+        // and for a declaration file alike.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "lib.ts",
+            r"
+import { NgModule, ModuleWithProviders } from '@angular/core';
+@NgModule({}) export class AMod {}
+@NgModule({}) export class BMod {}
+@NgModule({}) export class CMod {}
+export class Holder {
+  static forRoot(): ModuleWithProviders<AMod>;
+  static forRoot(x: number): ModuleWithProviders<BMod>;
+  static forRoot(x?: number): any { return { ngModule: CMod, providers: [] }; }
+}
+",
+        );
+        write(
+            &dir,
+            "types.d.ts",
+            r"
+import * as i0 from '@angular/core';
+export declare class AMod { static ɵmod: i0.ɵɵNgModuleDeclaration<AMod, never, never, never>; }
+export declare class BMod { static ɵmod: i0.ɵɵNgModuleDeclaration<BMod, never, never, never>; }
+export declare class Typed {
+  static forRoot(): i0.ModuleWithProviders<AMod>;
+  static forRoot(x: number): i0.ModuleWithProviders<BMod>;
+}
+",
+        );
+        let code = compile(
+            &dir,
+            "app.ts",
+            r"
+import { NgModule } from '@angular/core';
+import { Holder } from './lib';
+import { Typed } from './types';
+@NgModule({ imports: [Holder.forRoot(1), Typed.forRoot(1)] })
+export class M {}
+",
+            CompilationMode::Partial,
+        );
+        assert!(code.contains("type:M,imports:[i1.AMod,i2.AMod]}"), "{code}");
     }
 
     #[test]
