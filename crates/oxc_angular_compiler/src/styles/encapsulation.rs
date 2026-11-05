@@ -1599,10 +1599,12 @@ fn convert_shadow_dom_selectors(css: &str) -> String {
 // Selector scoping
 // =============================================================================
 
-/// At-rules that should NOT have scoping selectors applied (e.g., @font-face, @page).
-/// These rules define global resources that shouldn't be component-scoped.
-/// All other at-rules (@media, @supports, @layer, @container, etc.) have their contents scoped.
-const NO_SCOPE_AT_RULES: &[&str] = &["@font-face", "@page"];
+/// At-rules whose contents are style rules, which are scoped. Every other at-rule
+/// (@font-face, @page, @property, @counter-style, ...) defines a global resource or
+/// holds declarations, so its contents are kept. Mirrors Angular's
+/// `scopedAtRuleIdentifiers`.
+const SCOPED_AT_RULES: &[&str] =
+    &["@media", "@supports", "@document", "@layer", "@container", "@scope", "@starting-style"];
 
 /// Scope all CSS selectors with the content attribute.
 fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
@@ -1617,7 +1619,7 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
     let mut in_declaration = false;
     let mut declaration_depth: u32 = 0;
     let mut at_rule_header = String::new(); // Collect the at-rule header text
-    let mut in_no_scope_at_rule = false; // Track if we're inside @font-face/@page
+    let mut in_no_scope_at_rule = false; // Track if we're inside an at-rule that isn't scoped
     let mut no_scope_depth: u32 = 0; // Track nesting depth for no-scope at-rules
     let mut no_scope_content = String::new(); // Collect content for no-scope at-rules
 
@@ -1678,7 +1680,7 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
             continue;
         }
 
-        // Handle content inside @font-face/@page (no scoping, but strip selectors)
+        // Handle content inside an at-rule that isn't scoped (no scoping, but strip selectors)
         // This must be checked BEFORE the @ rule handling so nested @-rules
         // (like @top-left inside @page) are collected properly
         if in_no_scope_at_rule {
@@ -1725,9 +1727,9 @@ fn scope_selectors(css: &str, content_attr: &str, host_attr: &str) -> String {
                 at_rule_depth += 1;
                 in_at_rule_header = false;
 
-                // Check if this is a no-scope at-rule (@font-face, @page)
+                // Only the contents of the scoped at-rules are style rules
                 let header_lower = at_rule_header.to_lowercase();
-                if NO_SCOPE_AT_RULES.iter().any(|r| header_lower.starts_with(&r.to_lowercase())) {
+                if !SCOPED_AT_RULES.iter().any(|r| header_lower.starts_with(r)) {
                     in_no_scope_at_rule = true;
                     no_scope_depth = 1;
                 }
@@ -3378,6 +3380,68 @@ mod tests {
         // Test the strip function directly
         let result = strip_scoping_selectors(" ::ng-deep @top-left { content: \"Hamlet\";}", "h");
         assert!(result.starts_with(" "), "Expected leading space, got: {:?}", result);
+    }
+
+    #[test]
+    fn test_property_kept_and_next_rule_scoped() {
+        let result = shim_css_text(
+            "@property --angle { syntax: \"<angle>\"; initial-value: 0deg; inherits: false; } .button { color: red; }",
+            "contenta",
+            "",
+        );
+        assert_eq!(
+            result,
+            "@property --angle { syntax: \"<angle>\"; initial-value: 0deg; inherits: false; } .button[contenta] { color: red; }"
+        );
+    }
+
+    #[test]
+    fn test_property_minified_keeps_following_keyframes() {
+        let result = shim_css_text(
+            "@property --a{syntax:\"<angle>\";inherits:false;initial-value:0deg}@keyframes spin{to{--a:360deg}}.x{animation:spin 1s}",
+            "contenta",
+            "",
+        );
+        assert!(
+            result.starts_with(
+                "@property --a{syntax:\"<angle>\";inherits:false;initial-value:0deg}@keyframes"
+            ),
+            "Got: {}",
+            result
+        );
+        assert!(result.contains(".x[contenta]"), "Got: {}", result);
+    }
+
+    #[test]
+    fn test_declaration_at_rules_are_not_scoped() {
+        for css in [
+            "@counter-style thumbs { system: cyclic; symbols: \"x\"; suffix: \" \"; }",
+            "@font-palette-values --bright { font-family: Bixa; base-palette: 1; }",
+            "@position-try --flip { top: anchor(bottom); }",
+        ] {
+            let result = shim_css_text(css, "contenta", "");
+            assert_eq!(result, css);
+        }
+    }
+
+    #[test]
+    fn test_scoped_at_rules_scope_their_rules() {
+        for at_rule in [
+            "@media (width > 1px)",
+            "@supports (display: grid)",
+            "@document url(x)",
+            "@layer base",
+            "@container (width > 1px)",
+            "@scope (.a)",
+            "@starting-style",
+        ] {
+            let result = shim_css_text(
+                &format!("{at_rule} {{ .button {{ color: red; }} }}"),
+                "contenta",
+                "",
+            );
+            assert!(result.contains(".button[contenta]"), "{at_rule} got: {result}");
+        }
     }
 
     #[test]
