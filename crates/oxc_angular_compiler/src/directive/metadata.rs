@@ -264,7 +264,7 @@ pub fn merge_host_bindings<'a, V>(
 
 /// `key` without the brackets of a `[property]` / `(event)` host key: the key
 /// ngtsc's `parseHostBindings` stores the binding under.
-fn strip_host_key(key: &str, open: char, close: char) -> &str {
+pub fn strip_host_key(key: &str, open: char, close: char) -> &str {
     key.strip_prefix(open).and_then(|k| k.strip_suffix(close)).unwrap_or(key)
 }
 

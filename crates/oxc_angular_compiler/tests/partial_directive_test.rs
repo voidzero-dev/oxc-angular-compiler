@@ -141,11 +141,14 @@ fn signal_query_bumps_minversion_17_2() {
 }
 
 #[test]
-fn host_listeners_and_properties_emitted_raw() {
+fn host_listeners_and_properties_keyed_by_bare_name() {
     let allocator = Allocator::default();
+    // Keyed like the `host:` entries they come from.
     let mut host = R3HostMetadata::new(&allocator);
-    host.listeners.push((Ident::from("click"), Ident::from("onClick($event)")));
-    host.properties.push((Ident::from("disabled"), Ident::from("isDisabled")));
+    host.listeners.push((Ident::from("(click)"), Ident::from("onClick($event)")));
+    host.listeners.push((Ident::from("(window:resize)"), Ident::from("onResize()")));
+    host.properties.push((Ident::from("[disabled]"), Ident::from("isDisabled")));
+    host.properties.push((Ident::from("[style.height.px]"), Ident::from("height")));
 
     let meta = R3DirectiveMetadataBuilder::new(&allocator)
         .name(Ident::from("MyDir"))
@@ -157,16 +160,18 @@ fn host_listeners_and_properties_emitted_raw() {
     let expr =
         compile_declare_directive_from_metadata(&allocator, "i0", PLACEHOLDER_VERSION, &meta);
 
-    let js = emit(&expr);
-    // Listeners and properties carried as raw unparsed strings — the linker
-    // re-parses them.
+    // The emitter wraps long lines.
+    let js: String = emit(&expr).split_whitespace().collect();
+    // Like ngtsc's `parseHostBindings`, the declaration keys each binding by
+    // its name without the `(…)` / `[…]`, and carries the expression as a raw
+    // unparsed string — the linker parses both.
     assert!(
-        js.contains(r#"listeners:{click:"onClick($event)"}"#),
-        "expected raw listener, got: {js}"
+        js.contains(r#"listeners:{click:"onClick($event)","window:resize":"onResize()"}"#),
+        "expected listeners keyed by event name, got: {js}"
     );
     assert!(
-        js.contains(r#"properties:{disabled:"isDisabled"}"#),
-        "expected raw property, got: {js}"
+        js.contains(r#"properties:{disabled:"isDisabled","style.height.px":"height"}"#),
+        "expected properties keyed by property name, got: {js}"
     );
 }
 
