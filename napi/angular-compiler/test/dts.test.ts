@@ -548,6 +548,26 @@ describe('angular() dts plugin (#104)', () => {
     expect(bundle['index.mjs'].code).toBe(js)
   })
 
+  it('augments shared .d.ts chunks that export the class under another name', async () => {
+    const { transform, dts } = getPlugins('partial')
+    await runTransform(transform)
+
+    // The shape rolldown-plugin-dts gives a chunk shared by several entries.
+    const bundle = {
+      'shared-abc.d.mts': {
+        type: 'chunk' as const,
+        fileName: 'shared-abc.d.mts',
+        code: 'declare class LibButtonComponent {\n}\nexport { LibButtonComponent as t };\n',
+      },
+    }
+    await runGenerateBundle(dts, bundle)
+
+    const out = bundle['shared-abc.d.mts'].code
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
+    expect(out).toContain('export { LibButtonComponent as t };')
+  })
+
   it('does not touch declarations in full (app) mode', async () => {
     const { transform, dts } = getPlugins('full')
     await runTransform(transform)

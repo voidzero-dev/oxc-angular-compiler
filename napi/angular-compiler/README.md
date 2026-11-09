@@ -286,7 +286,7 @@ type-checking against your library.
 ```typescript
 // vite.config.ts — Angular library build
 import { angular } from '@oxc-angular/vite'
-import dts from 'rolldown-plugin-dts' // or vite-plugin-dts / tsdown
+import { dts } from 'rolldown-plugin-dts'
 
 export default defineConfig({
   plugins: [angular({ compilationMode: 'partial' }), dts()],
@@ -295,11 +295,16 @@ export default defineConfig({
 ```
 
 The plugin does **not** generate the base `.d.ts` itself — a declaration
-generator (`rolldown-plugin-dts`, `vite-plugin-dts`, `tsdown`, or `tsc`) must
-produce them. The Angular members are then spliced into those files during
-`generateBundle`. The injected members reference `i0` (the `@angular/core`
-namespace), and the plugin adds `import * as i0 from "@angular/core";` to any
-`.d.ts` it augments.
+generator must produce them in the bundle, as `rolldown-plugin-dts` and
+`tsdown` (`dts: true`) do. The Angular members are then spliced into those
+files during `generateBundle`. The injected members reference `i0` (the
+`@angular/core` namespace), and the plugin adds
+`import * as i0 from "@angular/core";` to any `.d.ts` it augments.
+
+Declarations written outside the bundle are not augmented: `vite-plugin-dts`
+and `tsc` write their files themselves, and tsdown builds the `.d.cts` of a
+`cjs` format in a separate pass without user plugins. Use `format: 'esm'` with
+tsdown.
 
 ## Vite Plugin Architecture
 
