@@ -1020,6 +1020,13 @@ fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
         for prop in &attr_obj.properties {
             if let ObjectPropertyKind::ObjectProperty(p) = prop {
                 let key = match &p.key {
+                    // Angular's linker reads the map with `AstObject.toLiteral`
+                    // (linker/src/ast/ast_value.ts), which assigns into a plain
+                    // `{}`: a `__proto__` key is lost there.
+                    PropertyKey::StaticIdentifier(ident) if ident.name == "__proto__" => continue,
+                    PropertyKey::StringLiteral(s) if s.value.as_str() == Some("__proto__") => {
+                        continue;
+                    }
                     PropertyKey::StaticIdentifier(ident) => {
                         crate::output::emitter::escape_string(&ident.name, false)
                     }
@@ -1803,6 +1810,10 @@ fn extract_host_metadata_input(
                 },
                 _ => continue,
             };
+            // Lost in Angular's linker, as in `build_host_attrs`.
+            if key == "__proto__" {
+                continue;
+            }
             let Some(value) = as_static_string(&p.value) else { continue };
             input.properties.push((format!("[{key}]"), value.to_string()));
         }
@@ -1819,6 +1830,9 @@ fn extract_host_metadata_input(
                 },
                 _ => continue,
             };
+            if key == "__proto__" {
+                continue;
+            }
             let Some(value) = as_static_string(&p.value) else { continue };
             input.listeners.push((format!("({key})"), value.to_string()));
         }

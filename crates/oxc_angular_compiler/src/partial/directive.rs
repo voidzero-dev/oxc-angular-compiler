@@ -379,8 +379,8 @@ fn compile_host_metadata<'a>(
     if !host.attributes.is_empty() {
         let mut attr_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         for (key, value) in &host.attributes {
-            let quoted = is_unsafe_object_key(key.as_str());
-            attr_entries.push(LiteralMapEntry::new(key.clone(), value.clone_in(allocator), quoted));
+            // Every key is quoted, like ngtsc's `toOptionalLiteralMap` (partial/util.ts).
+            attr_entries.push(LiteralMapEntry::new(key.clone(), value.clone_in(allocator), true));
         }
         entries.push(LiteralMapEntry::new(
             Ident::from("attributes"),
@@ -431,6 +431,7 @@ fn compile_host_metadata<'a>(
 /// `attr.aria-label`, `style.height.px`, …) without the `(…)` / `[…]` of the
 /// `host:` entry, like ngtsc's `parseHostBindings`. The linker parses that
 /// name the way a full compilation parses the key after removing its brackets.
+/// Every key is quoted, like ngtsc's `toOptionalLiteralMap` (partial/util.ts).
 ///
 /// `pub(crate)`: the component partial emitter reuses this.
 pub(crate) fn host_binding_map<'a>(
@@ -442,11 +443,10 @@ pub(crate) fn host_binding_map<'a>(
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(pairs.len(), &allocator);
     for (key, value) in pairs {
         let name = strip_host_key(key.as_str(), open, close);
-        let quoted = is_unsafe_object_key(name);
         entries.push(LiteralMapEntry::new(
             Ident::from(name),
             string_literal_owned(allocator, value.clone()),
-            quoted,
+            true,
         ));
     }
     OutputExpression::LiteralMap(Box::new_in(

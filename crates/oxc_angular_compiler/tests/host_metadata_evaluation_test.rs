@@ -37,8 +37,13 @@ fn compile(source: &str) -> (String, Vec<OxcDiagnostic>) {
 /// The whitespace-free host part of the compiled definition: `hostAttrs`, `hostVars`
 /// and `hostBindings`, or nothing when the class has no host metadata.
 fn host_definition(decorator: &str, preamble: &str, host: &str) -> String {
-    let (code, diagnostics) = compile(&source(decorator, preamble, host));
-    assert!(diagnostics.is_empty(), "unexpected diagnostics for `{host}`: {diagnostics:?}");
+    host_part(&source(decorator, preamble, host))
+}
+
+/// The whitespace-free host part of the definition compiled from `source`.
+fn host_part(source: &str) -> String {
+    let (code, diagnostics) = compile(source);
+    assert!(diagnostics.is_empty(), "unexpected diagnostics for `{source}`: {diagnostics:?}");
     let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
     let start = compact.find("({type:X,").expect("definition");
     // The definition ends where the class metadata call, which repeats `host`, starts.
@@ -424,7 +429,7 @@ fn dynamic_value_of_a_plain_attribute_partial() {
         let result = transform_angular_file(&allocator, "/x/a.ts", &source, Some(&options), None);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(compact.contains("host:{attributes:{role:make()}}"), "{compact}");
+        assert!(compact.contains("host:{attributes:{\"role\":make()}}"), "{compact}");
     }
 }
 
@@ -504,6 +509,130 @@ fn proto_key_is_dropped() {
         let (code, _) = compile(&source(decorator, "", "{ __proto__: 'x', role: 'r' }"));
         let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(compact.contains(r#""role","r""#), "{compact}");
+    }
+}
+
+/// A class with `@HostBinding` / `@HostListener` members and, optionally, `host`.
+fn member_source(decorator: &str, host: &str, members: &str) -> String {
+    let rest =
+        if decorator == "Component" { "selector: 'x', template: ''," } else { "selector: '[x]'," };
+    let host = if host.is_empty() { String::new() } else { format!("host: {host}") };
+    format!(
+        "import {{ {decorator}, HostBinding, HostListener }} from '@angular/core';\n\
+         @{decorator}({{ {rest} {host} }})\nexport class X {{ {MEMBERS} {members} }}\n"
+    )
+}
+
+/// A listener or property named exactly `__proto__` is dropped too: ngtsc's
+/// `parseHostBindings` writes `listeners['__proto__'] = …` into a plain
+/// object, where the prototype setter ignores a string (#687).
+#[test]
+fn proto_binding_is_dropped() {
+    for decorator in ["Component", "Directive"] {
+        let host = host_definition(
+            decorator,
+            "",
+            "{ '(__proto__)': 'other()', '(click)': 'go()', '[__proto__]': 'w', '[title]': 't' }",
+        );
+        assert!(!host.contains("ctx.other("), "{host}");
+        assert!(!host.contains(r#"ɵɵdomProperty("__proto__""#), "{host}");
+        assert!(host.contains("hostVars:1,"), "{host}");
+        assert!(host.contains(r#"ɵɵlistener("click""#), "{host}");
+        assert!(host.contains(r#"ɵɵdomProperty("title",ctx.t)"#), "{host}");
+    }
+}
+
+/// `@HostBinding('__proto__')`, `@HostBinding()` on a member named `__proto__`
+/// and `@HostListener('__proto__')` are dropped, like a `host:` entry: ngtsc's
+/// `extractHostBindings` assigns them into the same plain object.
+#[test]
+fn proto_member_bindings_are_dropped() {
+    for decorator in ["Component", "Directive"] {
+        let host = host_part(&member_source(
+            decorator,
+            "",
+            "@HostBinding('__proto__') a = 1; \
+             @HostListener('__proto__', ['$event']) onP(e: any) {} \
+             @HostBinding('title') t2 = '';",
+        ));
+        assert!(!host.contains("ctx.onP("), "{host}");
+        assert!(!host.contains(r#"ɵɵdomProperty("__proto__""#), "{host}");
+        assert!(host.contains("hostVars:1,"), "{host}");
+        assert!(host.contains(r#"ɵɵdomProperty("title",ctx.t2)"#), "{host}");
+
+        for (host, members) in [
+            ("", "@HostBinding() __proto__ = 1 as any;"),
+            // A `host:` entry and a member with the same name.
+            ("{ '(__proto__)': 'go()' }", "@HostListener('__proto__') b() {}"),
+            // Only `__proto__` members: no host bindings at all.
+            ("", "@HostListener('__proto__') b() {} @HostBinding('__proto__') c = 1;"),
+        ] {
+            let definition = host_part(&member_source(decorator, host, members));
+            assert_eq!(definition, "", "for `{members}`");
+        }
+    }
+}
+
+/// Only the exact name is dropped: ngtsc keeps every other key that contains
+/// `__proto__`, each one bound once.
+#[test]
+fn proto_lookalikes_are_kept() {
+    for decorator in ["Component", "Directive"] {
+        for (host, members, expected) in [
+            ("{ '(window:__proto__)': 'go()' }", "", r#"ɵɵlistener("__proto__",function"#),
+            ("{ '(__proto__.x)': 'go()' }", "", r#"ɵɵlistener("__proto__.x",function"#),
+            ("{ '[attr.__proto__]': 't' }", "", r#"ɵɵattribute("__proto__",ctx.t)"#),
+            ("{ '[class.__proto__]': 't' }", "", r#"ɵɵclassProp("__proto__",ctx.t)"#),
+            ("{ '[style.__proto__]': 't' }", "", r#"ɵɵstyleProp("__proto__",ctx.t)"#),
+            // `"__proto__ "`, compacted.
+            ("{ '[__proto__ ]': 't' }", "", r#"ɵɵdomProperty("__proto__",ctx.t)"#),
+            ("", "@HostBinding('[__proto__]') k = 1;", r#"ɵɵdomProperty("[__proto__]",ctx.k)"#),
+            ("", "@HostBinding() __proto__x = 2;", r#"ɵɵdomProperty("__proto__x",ctx.__proto__x)"#),
+            (
+                "",
+                "@HostBinding('title') get __proto__() { return ''; }",
+                r#"ɵɵdomProperty("title",ctx.__proto__)"#,
+            ),
+        ] {
+            let definition = host_part(&member_source(decorator, host, members));
+            assert!(definition.contains(expected), "for `{host}` `{members}`: {definition}");
+        }
+        let window = host_definition(decorator, "", "{ '(window:__proto__)': 'go()' }");
+        assert!(window.contains("ɵɵresolveWindow"), "{window}");
+    }
+}
+
+/// A dropped key is still checked first: ngtsc rejects a value that is not a
+/// string before it assigns the binding.
+#[test]
+fn proto_binding_with_a_dynamic_value_is_an_error() {
+    let make = "declare function make(): string;";
+    assert_error(make, "{ '(__proto__)': make() }", "Event binding must be string");
+    assert_error(make, "{ '[__proto__]': make() }", "Property binding must be string");
+}
+
+/// A `@HostBinding` member is read through `this`, like ngtsc's
+/// `getSafePropertyAccessString('this', member.name)`: a name that isn't an
+/// identifier, or is a keyword, still reads the member (#690). The expected
+/// calls are what ngtsc 22.2.2 emits.
+#[test]
+fn host_binding_member_is_read_through_this() {
+    for decorator in ["Component", "Directive"] {
+        let host = host_part(&member_source(
+            decorator,
+            "",
+            "@HostBinding('id') 'my-prop' = 1; @HostBinding('title') m = 2; \
+             @HostBinding('attr.t') true = 4; @HostBinding('attr.u') this = 5; \
+             @HostBinding('attr.v') \"it's\" = 6; @HostBinding('attr.w') 'a.b' = 7; \
+             @HostBinding('attr.x') 'a{{b}}' = 8; @HostBinding('attr.y') $ok = 9;",
+        ));
+        assert!(host.contains(r#"ɵɵdomProperty("id",ctx["my-prop"])("title",ctx.m)"#), "{host}");
+        assert!(
+            host.contains(
+                r#"ɵɵattribute("t",ctx.true)("u",ctx.this)("v",ctx["it's"])("w",ctx["a.b"])("x",ctx["a{{b}}"])("y",ctx.$ok)"#
+            ),
+            "{host}"
+        );
     }
 }
 

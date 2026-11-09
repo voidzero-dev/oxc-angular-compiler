@@ -270,9 +270,68 @@ export class HostComponent {
         "expected listeners keyed by event name, got:\n{code}"
     );
     assert!(
-        code.contains(r#"properties:{"attr.aria-label":"label","style.height.px":"height"}"#),
+        code.contains(r#"properties:{"attr.aria-label":"label","style.height.px":"this.height"}"#),
         "expected properties keyed by property name, got:\n{code}"
     );
+}
+
+#[test]
+fn component_host_quotes_every_key() {
+    // ngtsc's `toOptionalLiteralMap` (partial/util.ts) quotes every key of
+    // `host.attributes` / `listeners` / `properties` (#686). ngtsc 22.2.2
+    // emits the same text.
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+
+@Component({ selector: 'c', template: '', host: { '(click)': 'a()', '[id]': 'b', 'role': 'x' } })
+export class C {
+  a() {}
+  b = '';
+}
+";
+    let code: String =
+        compile_partial(&allocator, "c.component.ts", source).split_whitespace().collect();
+    assert!(
+        code.contains(
+            r#"host:{attributes:{"role":"x"},listeners:{"click":"a()"},properties:{"id":"b"}}"#
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn component_host_drops_proto_bindings() {
+    // A binding named `__proto__` is lost in ngtsc's plain-object host
+    // bindings (#687).
+    let allocator = Allocator::default();
+    let source = "import { Component, HostBinding, HostListener } from '@angular/core';
+
+@Component({ selector: 'c', template: '', host: { '(__proto__)': 'pp()', '(click)': 'a()', '[__proto__]': 'q' } })
+export class C {
+  a() {}
+  pp() {}
+  q = '';
+  @HostBinding('__proto__') m = 1;
+}
+
+@Component({ selector: 'd', template: '' })
+export class D {
+  @HostBinding('__proto__') m = 1;
+  @HostListener('__proto__') n() {}
+}
+";
+    let code: String =
+        compile_partial(&allocator, "c.component.ts", source).split_whitespace().collect();
+    // The class metadata calls repeat the decorators as written.
+    let declarations: std::vec::Vec<&str> = code
+        .split("\u{0275}\u{0275}ngDeclareComponent(")
+        .skip(1)
+        .map(|call| &call[..call.find("ngImport:i0").expect("ngImport")])
+        .collect();
+    let [c, d] = declarations.as_slice() else { panic!("{code}") };
+    assert!(c.contains(r#"host:{listeners:{"click":"a()"}}"#), "{c}");
+    assert!(!c.contains("__proto__"), "{c}");
+    assert!(!d.contains("host:"), "{d}");
 }
 
 #[test]

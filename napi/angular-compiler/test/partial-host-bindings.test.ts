@@ -148,4 +148,95 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(code).toMatch(/\("keyup\.control\.a",\s*function C_keyup_control_a_/)
     expect(code).toMatch(/ɵɵstyleProp\("width",\s*ctx\.width,\s*"%"\)/)
   })
+
+  it('reads @HostBinding members through `this` (#690)', async () => {
+    const code = await link(
+      `
+        import { Directive, HostBinding } from '@angular/core';
+        @Directive({ selector: '[d]' })
+        export class D {
+          @HostBinding('id') 'my-prop' = 1;
+          @HostBinding('title') m = 2;
+          @HostBinding('attr.t') true = 3;
+          @HostBinding('attr.v') "it's" = 4;
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(/ɵɵdomProperty\("id",\s*ctx\["my-prop"\]\)\(\s*"title",\s*ctx\.m\)/)
+    expect(code).toMatch(/ɵɵattribute\("t",\s*ctx\.true\)\(\s*"v",\s*ctx\["it's"\]\)/)
+  })
+
+  it('drops host bindings named `__proto__` (#687)', async () => {
+    const code = await link(
+      `
+        import { Directive, HostListener } from '@angular/core';
+        @Directive({
+          selector: '[d]',
+          host: { '(__proto__)': 'pp()', '(click)': 'a()', '[__proto__]': 'q', '[title]': 't' },
+        })
+        export class D {
+          @HostListener('__proto__') n() {}
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(/ɵɵlistener\("click",/)
+    expect(code).toMatch(/ɵɵdomProperty\("title",\s*ctx\.t\)/)
+    expect(code).toMatch(/hostVars:\s*1,/)
+    // The class metadata repeats the decorators as written, so only the
+    // compiled bindings are checked.
+    expect(code).not.toMatch(/ɵɵ(listener|domProperty)\("__proto__"/)
+    expect(code).not.toContain('ctx.pp(')
+    expect(code).not.toContain('ctx.n(')
+  })
+
+  it('drops `__proto__` keys of a partial declaration (#687)', async () => {
+    const code = await LINKERS[linker](
+      `
+        import * as i0 from "@angular/core";
+        export class D {}
+        D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", host: { attributes: { __proto__: "x", role: "r" }, listeners: { "__proto__": "pp()", click: "a()" }, properties: { __proto__: "q", "title": "t" } }, ngImport: i0 });
+      `,
+      '/lib/dir.mjs',
+    )
+    expect(code).toMatch(/hostAttrs:\s*\["role",\s*"r"\]/)
+    expect(code).toMatch(/hostVars:\s*1,/)
+    expect(code).toMatch(/ɵɵlistener\("click",/)
+    expect(code).toMatch(/ɵɵdomProperty\("title",\s*ctx\.t\)/)
+    expect(code).not.toContain('__proto__')
+  })
+})
+
+describe('partial host declaration', () => {
+  const declare = (source: string) => {
+    const result = transformAngularFileSync(source, '/lib/dir.mts', { compilationMode: 'partial' })
+    expect(result.errors).toEqual([])
+    // The class metadata call that follows repeats the decorators as written.
+    const start = result.code.indexOf('ɵɵngDeclareDirective(')
+    return result.code.slice(start, result.code.indexOf('ngImport', start)).replace(/\s+/g, '')
+  }
+
+  it('quotes every host key, like ngtsc (#686)', () => {
+    const code = declare(`
+      import { Directive } from '@angular/core';
+      @Directive({ selector: '[d]', host: { '(click)': 'a()', '[disabled]': 'b', 'role': 'x' } })
+      export class D {}
+    `)
+    expect(code).toContain(
+      'host:{attributes:{"role":"x"},listeners:{"click":"a()"},properties:{"disabled":"b"}}',
+    )
+  })
+
+  it('writes @HostBinding values as ngtsc does (#690)', () => {
+    const code = declare(`
+      import { Directive, HostBinding } from '@angular/core';
+      @Directive({ selector: '[d]' })
+      export class D {
+        @HostBinding('id') 'my-prop' = 1;
+        @HostBinding('title') m = 2;
+      }
+    `)
+    expect(code).toContain(`properties:{"id":"this['my-prop']","title":"this.m"}`)
+  })
 })

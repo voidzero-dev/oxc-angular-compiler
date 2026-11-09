@@ -1272,3 +1272,48 @@ fn test_link_safe_navigation_version_read_like_npm_semver() {
     let linked = link_for_version(&quoted, None);
     assert_eq!(linked.matches("== null)? null:").count(), 3, "{linked}");
 }
+
+/// Angular's linker reads `host.attributes` / `listeners` / `properties` with
+/// `AstObject.toLiteral`, which assigns into a plain `{}`: a `__proto__` key is
+/// lost, quoted or not (#687).
+#[test]
+fn test_link_host_proto_keys_are_dropped() {
+    let hosts = [
+        r#"{ attributes: { __proto__: "x", role: "r" }, listeners: { __proto__: "pp()", click: "a()" }, properties: { __proto__: "q", title: "t" } }"#,
+        r#"{ attributes: { "__proto__": "x", "role": "r" }, listeners: { "__proto__": "pp()", "click": "a()" }, properties: { "__proto__": "q", "title": "t" } }"#,
+    ];
+    for host in hosts {
+        let directive = format!(
+            r#"import * as i0 from "@angular/core";
+class D {{}}
+D.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", host: {host}, ngImport: i0 }});"#
+        );
+        let component = format!(
+            r#"import * as i0 from "@angular/core";
+class C {{}}
+C.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "22.2.2", type: C, isStandalone: true, selector: "c", host: {host}, ngImport: i0, template: "" }});"#
+        );
+        for code in [directive, component] {
+            let linked = link_for_version(&code, None);
+            assert!(linked.contains(r#"hostAttrs: ["role", "r"]"#), "{linked}");
+            assert!(linked.contains("hostVars: 1,"), "{linked}");
+            assert!(linked.contains(r#"ɵɵlistener("click""#), "{linked}");
+            assert!(linked.contains(r#"ɵɵdomProperty("title",ctx.t)"#), "{linked}");
+            assert!(!linked.contains("ctx.pp("), "{linked}");
+            assert!(!linked.contains(r#""__proto__""#), "{linked}");
+        }
+    }
+}
+
+/// ngtsc keys a `@HostBinding` member by `this.member` / `this['member']`
+/// (`getSafePropertyAccessString`), which links to `ctx.member` /
+/// `ctx["member"]` (#690).
+#[test]
+fn test_link_host_binding_member_access() {
+    let code = r#"import * as i0 from "@angular/core";
+class M {}
+M.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", type: M, isStandalone: true, selector: "[m]", host: { properties: { "id": "this['my-prop']", "title": "this.m", "attr.v": "this['it\\'s']" } }, ngImport: i0 });"#;
+    let linked = link_for_version(code, None);
+    assert!(linked.contains(r#"ɵɵdomProperty("id",ctx["my-prop"])("title",ctx.m)"#), "{linked}");
+    assert!(linked.contains(r#"ɵɵattribute("v",ctx["it's"])"#), "{linked}");
+}
