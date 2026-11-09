@@ -3864,6 +3864,62 @@ export class D { @HostBinding('animate.leave') y = 'o'; }
     }
 }
 
+/// #689: Angular 20.2.0 to 20.3.0 needs `ɵɵAnimationsFeature()` for a host
+/// `animate.leave` (attribute, property or listener), as ngtsc adds it; and
+/// before 20.2 a static `animate.*` host attribute stays in `hostAttrs`.
+#[test]
+fn test_host_animate_leave_feature_and_static_attribute() {
+    let hosts = [
+        "{ 'animate.leave': 'out' }",
+        "{ '[animate.leave]': 'x' }",
+        "{ '(animate.leave)': 'g($event)' }",
+    ];
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(22, 2, 3)), false),
+        (None, false),
+    ];
+    for host in hosts {
+        for decorator in ["Component({ selector: 'd', template: '',", "Directive({ selector: 'd',"]
+        {
+            let kind = decorator.split('(').next().unwrap();
+            let source = format!(
+                "import {{ {kind} }} from '@angular/core';\n@{decorator} host: {host} }})\nexport class D {{ x = 1; g(e: unknown) {{}} }}\n"
+            );
+            for (version, feature) in cases {
+                let options = ComponentTransformOptions {
+                    angular_version: version,
+                    ..ComponentTransformOptions::default()
+                };
+                let code = compile_compact(&source, Some(&options));
+                assert_eq!(
+                    code.contains("features:[i0.ɵɵAnimationsFeature()]"),
+                    feature,
+                    "{version:?} {code}"
+                );
+            }
+        }
+    }
+
+    for decorator in ["Component({ selector: 'd', template: '',", "Directive({ selector: 'd',"] {
+        let kind = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {kind} }} from '@angular/core';\n@{decorator} host: {{ 'animate.leave': 'out' }} }})\nexport class D {{}}\n"
+        );
+        for version in [AngularVersion::new(20, 1, 8), AngularVersion::new(19, 2, 15)] {
+            let options = ComponentTransformOptions {
+                angular_version: Some(version),
+                ..ComponentTransformOptions::default()
+            };
+            let code = compile_compact(&source, Some(&options));
+            assert!(code.contains(r#"hostAttrs:["animate.leave","out"]"#), "{code}");
+            assert!(!code.contains("ɵɵanimate"), "{code}");
+        }
+    }
+}
+
 /// #689: a callback body is not a binding slot, so literals and arrow functions
 /// stay inline (no pure function, no host vars).
 #[test]

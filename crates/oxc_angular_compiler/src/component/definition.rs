@@ -270,9 +270,13 @@ fn generate_cmp_definition<'a>(
 
     // 13. features: [...] - component features like providers, lifecycle hooks, inheritance
     // See: packages/compiler/src/render3/view/compiler.ts:119-161
-    if let Some(features) =
-        generate_features_array(allocator, core_namespace, metadata, namespace_registry)
-    {
+    if let Some(features) = generate_features_array(
+        allocator,
+        core_namespace,
+        metadata,
+        namespace_registry,
+        options.angular_version,
+    ) {
         entries.push(LiteralMapEntry::new(Ident::from("features"), features, false));
     }
 
@@ -1000,6 +1004,7 @@ fn generate_features_array<'a>(
     core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    angular_version: Option<crate::AngularVersion>,
 ) -> Option<OutputExpression<'a>> {
     let mut features: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
 
@@ -1049,6 +1054,31 @@ fn generate_features_array<'a>(
         let external_styles_feature =
             generate_external_styles_feature(allocator, core_namespace, metadata);
         features.push(external_styles_feature);
+    }
+
+    // 6. AnimationsFeature - v20.2.0 to v20.3.0, for a host `animate.leave`
+    // Format: ɵɵAnimationsFeature()
+    if angular_version.is_some_and(|v| v.needs_animations_feature())
+        && metadata.host.as_ref().is_some_and(|host| {
+            crate::directive::has_animate_leave_host_binding(
+                host.attributes.iter().map(|(key, _)| key.as_str()),
+                host.properties.iter().map(|(key, _)| key.as_str()),
+                host.listeners.iter().map(|(key, _)| key.as_str()),
+            )
+        })
+    {
+        let feature =
+            create_angular_fn_ref(allocator, core_namespace, Identifiers::ANIMATIONS_FEATURE);
+        features.push(OutputExpression::InvokeFunction(Box::new_in(
+            InvokeFunctionExpr {
+                fn_expr: Box::new_in(feature, &allocator),
+                args: OxcVec::new_in(&allocator),
+                pure: false,
+                optional: false,
+                source_span: None,
+            },
+            &allocator,
+        )));
     }
 
     // Only return the array if there are features
@@ -1661,7 +1691,8 @@ mod tests {
         let metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
-        let result = generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry);
+        let result =
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None);
         assert!(result.is_none(), "Should return None when no features are needed");
     }
 
@@ -1693,7 +1724,8 @@ mod tests {
             Some(create_test_providers_array(&allocator, &["ServiceA", "ServiceB"]));
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1712,7 +1744,8 @@ mod tests {
         metadata.view_providers = Some(create_test_providers_array(&allocator, &["ViewService"]));
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1731,7 +1764,8 @@ mod tests {
         metadata.view_providers = Some(create_test_providers_array(&allocator, &["ViewService"]));
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1749,7 +1783,8 @@ mod tests {
         metadata.uses_inheritance = true;
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1767,7 +1802,8 @@ mod tests {
         metadata.lifecycle = LifecycleMetadata { uses_on_changes: true };
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1786,7 +1822,8 @@ mod tests {
         metadata.external_styles.push(Ident::from("./theme.css"));
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1806,7 +1843,8 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1827,7 +1865,8 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1851,7 +1890,8 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1874,7 +1914,8 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1907,7 +1948,8 @@ mod tests {
         metadata.host_directives.push(imported_directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1937,7 +1979,8 @@ mod tests {
         metadata.lifecycle = LifecycleMetadata { uses_on_changes: true };
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -2231,7 +2274,8 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry, None)
+                .unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);

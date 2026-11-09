@@ -1407,6 +1407,42 @@ fn test_link_host_animate_attribute() {
     }
 }
 
+/// #689: Angular 20.2.0 to 20.3.0 needs `ɵɵAnimationsFeature()` for a host
+/// `animate.leave` (attribute, property or listener), as its linker adds it.
+#[test]
+fn test_link_host_animate_leave_feature() {
+    let hosts = [
+        r#"{ attributes: { "animate.leave": "out" } }"#,
+        r#"{ properties: { "animate.leave": "x" } }"#,
+        r#"{ listeners: { "animate.leave": "g($event)" } }"#,
+    ];
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(20, 1, 8)), false),
+        (Some(AngularVersion::new(22, 2, 3)), false),
+        (None, false),
+    ];
+    for host in hosts {
+        for code in host_declarations(host) {
+            for (version, feature) in cases {
+                let linked: String = link_for_version(&code, version).split_whitespace().collect();
+                assert_eq!(
+                    linked.contains("features:[i0.ɵɵAnimationsFeature()]"),
+                    feature,
+                    "{version:?} {linked}"
+                );
+            }
+        }
+    }
+    // `animate.enter` alone needs no feature.
+    for code in host_declarations(r#"{ properties: { "animate.enter": "x" } }"#) {
+        let linked = link_for_version(&code, Some(AngularVersion::new(20, 2, 0)));
+        assert!(!linked.contains("AnimationsFeature"), "{linked}");
+    }
+}
+
 /// #689: Angular before 20.2 has no `ɵɵanimateEnter` / `ɵɵanimateLeave`: its
 /// linker keeps `animate.*` attributes in `hostAttrs` and binds `animate.*`
 /// properties as DOM properties.

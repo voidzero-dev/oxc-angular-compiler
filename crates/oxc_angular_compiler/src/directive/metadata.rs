@@ -304,6 +304,21 @@ pub fn merge_host_bindings<'a, V>(
     sort_like_object_keys(attributes, |key| key);
 }
 
+/// Whether a host attribute, property or listener is `animate.leave`, as
+/// ngtsc's `hasAnimationHostBinding` checks for `ɵɵAnimationsFeature()` (see
+/// [`crate::AngularVersion::needs_animations_feature`]). The keys may keep
+/// their `[…]` / `(…)` brackets.
+pub fn has_animate_leave_host_binding<'k>(
+    attributes: impl IntoIterator<Item = &'k str>,
+    properties: impl IntoIterator<Item = &'k str>,
+    listeners: impl IntoIterator<Item = &'k str>,
+) -> bool {
+    const ANIMATE_LEAVE: &str = "animate.leave";
+    attributes.into_iter().any(|key| key == ANIMATE_LEAVE)
+        || properties.into_iter().any(|key| strip_host_key(key, '[', ']') == ANIMATE_LEAVE)
+        || listeners.into_iter().any(|key| strip_host_key(key, '(', ')') == ANIMATE_LEAVE)
+}
+
 /// `key` without the brackets of a `[property]` / `(event)` host key: the key
 /// ngtsc's `parseHostBindings` stores the binding under.
 pub fn strip_host_key(key: &str, open: char, close: char) -> &str {

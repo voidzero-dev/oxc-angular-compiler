@@ -46,7 +46,9 @@ pub(crate) use dts_type::{quote as ts_string_literal, quote_literal as quote_str
 pub use evaluator::input_transform_types;
 #[cfg(feature = "cross_file_elision")]
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
-pub(crate) use metadata::{MemberHostBindings, merge_host_bindings, strip_host_key};
+pub(crate) use metadata::{
+    MemberHostBindings, has_animate_leave_host_binding, merge_host_bindings, strip_host_key,
+};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,

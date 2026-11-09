@@ -101,7 +101,7 @@ pub fn compile_directive_from_metadata<'a>(
 
     // Add features
     let mut definition_map = definition_map;
-    add_features(allocator, core_namespace, metadata, &mut definition_map);
+    add_features(allocator, core_namespace, metadata, &mut definition_map, angular_version);
 
     // Create the expression: ɵɵdefineDirective(definitionMap)
     let expression = create_define_directive_call(allocator, core_namespace, definition_map);
@@ -321,6 +321,7 @@ fn add_features<'a>(
     core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     definition_map: &mut Vec<'a, LiteralMapEntry<'a>>,
+    angular_version: Option<crate::AngularVersion>,
 ) {
     let mut features = Vec::new_in(&allocator);
 
@@ -365,6 +366,23 @@ fn add_features<'a>(
             allocator,
             core_namespace,
             Identifiers::NG_ON_CHANGES_FEATURE,
+        ));
+    }
+
+    // AnimationsFeature (v20.2.0 to v20.3.0, for a host `animate.leave`)
+    let host = &metadata.host;
+    if angular_version.is_some_and(|v| v.needs_animations_feature())
+        && super::has_animate_leave_host_binding(
+            host.attributes.iter().map(|(key, _)| key.as_str()),
+            host.properties.iter().map(|(key, _)| key.as_str()),
+            host.listeners.iter().map(|(key, _)| key.as_str()),
+        )
+    {
+        features.push(create_feature_call(
+            allocator,
+            core_namespace,
+            Identifiers::ANIMATIONS_FEATURE,
+            Vec::new_in(&allocator),
         ));
     }
 

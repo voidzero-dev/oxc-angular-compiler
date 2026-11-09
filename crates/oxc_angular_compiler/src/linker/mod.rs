@@ -1721,7 +1721,7 @@ fn link_directive<'a>(
         parts.push("signals: true".to_string());
     }
 
-    if let Some(features) = build_features(meta, source, ns) {
+    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
         parts.push(format!("features: {features}"));
     }
 
@@ -2153,7 +2153,12 @@ fn declare_pooled_constants_js(pool: &mut ConstantPool<'_>, ns: &str) -> String 
 /// - `controlCreate: { passThroughInput }` → `ns.ɵɵControlFeature(passThroughInput)`
 /// Order is important: ProvidersFeature → HostDirectivesFeature → InheritDefinitionFeature → NgOnChangesFeature → ControlFeature
 /// (see packages/compiler/src/render3/view/compiler.ts:119-161)
-fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
+fn build_features(
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    ns: &str,
+    angular_version: Option<AngularVersion>,
+) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
     // 1. ProvidersFeature — must come before InheritDefinitionFeature
@@ -2198,7 +2203,41 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
         features.push(format!("{ns}.\u{0275}\u{0275}ControlFeature({pass_through})"));
     }
 
+    // 6. AnimationsFeature — v20.2.0 to v20.3.0, for a host `animate.leave`
+    if angular_version.is_some_and(|v| v.needs_animations_feature())
+        && get_object_property(meta, "host").is_some_and(has_animate_leave_host)
+    {
+        features.push(format!("{ns}.\u{0275}\u{0275}AnimationsFeature()"));
+    }
+
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
+}
+
+/// Whether the partial `host: { attributes, properties, listeners }` has an
+/// `animate.leave` key, as ngtsc's `hasAnimationHostBinding` checks.
+fn has_animate_leave_host(host: &ObjectExpression<'_>) -> bool {
+    let keys = |name: &str| -> std::vec::Vec<&str> {
+        get_object_property(host, name)
+            .map(|obj| {
+                obj.properties
+                    .iter()
+                    .filter_map(|prop| match prop {
+                        ObjectPropertyKind::ObjectProperty(p) => match &p.key {
+                            PropertyKey::StaticIdentifier(ident) => Some(ident.name.as_str()),
+                            PropertyKey::StringLiteral(s) => s.value.as_str(),
+                            _ => None,
+                        },
+                        ObjectPropertyKind::SpreadProperty(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    crate::directive::has_animate_leave_host_binding(
+        keys("attributes"),
+        keys("properties"),
+        keys("listeners"),
+    )
 }
 
 /// Whether a component is not standalone or has a directive, component or NgModule
@@ -2400,7 +2439,7 @@ fn link_component<'a>(
     }
 
     // 12. features
-    if let Some(features) = build_features(meta, source, ns) {
+    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
         parts.push(format!("features: {features}"));
     }
 

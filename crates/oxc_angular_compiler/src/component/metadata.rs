@@ -113,6 +113,14 @@ impl AngularVersion {
         self.major > 20 || (self.major == 20 && self.minor >= 2)
     }
 
+    /// Check if `animate.leave` needs `ɵɵAnimationsFeature()` (v20.2.0 to v20.3.0).
+    ///
+    /// In those versions only that feature sets up the registry `ɵɵanimateLeave`
+    /// writes to, so the compiler adds it (`addFeatures`). v20.3.1 dropped both.
+    pub fn needs_animations_feature(&self) -> bool {
+        self.major == 20 && (self.minor == 2 || (self.minor == 3 && self.patch == 0))
+    }
+
     /// Check if this version supports the `@Service` decorator (v22.0.0+).
     ///
     /// Angular v22 introduced the `@Service` decorator as a lighter alternative to
