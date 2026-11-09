@@ -111,6 +111,60 @@ export default defineConfig({
 });
 `.trim(),
     )
+
+    // Builds the client, then the server, in one run (`vite build --app`)
+    writeTempFile(
+      'vite.config.app.ts',
+      `
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { angular } from '@oxc-angular/vite';
+import { defineConfig } from 'vite';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const tsconfig = path.resolve(__dirname, './tsconfig.json');
+
+export default defineConfig({
+  plugins: [
+    angular({
+      tsconfig,
+      liveReload: false,
+    }),
+  ],
+  builder: {},
+  environments: {
+    client: {
+      build: { outDir: 'dist-ssr/client' },
+    },
+    ssr: {
+      build: {
+        outDir: 'dist-ssr/server',
+        rollupOptions: {
+          input: 'src/server.ts',
+          external: [/^@angular/],
+        },
+      },
+    },
+  },
+});
+`.trim(),
+    )
+  })
+
+  test('vite build --app embeds the built client index.html (#696)', () => {
+    execSync('npx vite build --config vite.config.app.ts', {
+      cwd: APP_DIR,
+      stdio: 'pipe',
+      timeout: 60000,
+    })
+
+    const content = readFileSync(join(SSR_OUT_DIR, 'server/server.js'), 'utf-8')
+    expect(content).toContain('index.server.html')
+    expect(content).toContain('/assets/index-')
+    expect(content).not.toContain('/src/main.ts')
+
+    rmSync(SSR_OUT_DIR, { recursive: true, force: true })
   })
 
   test('vite build --ssr injects ɵsetAngularAppManifest into server entry', () => {
