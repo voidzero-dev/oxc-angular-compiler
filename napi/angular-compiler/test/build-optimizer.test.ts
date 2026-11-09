@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { normalizePath } from 'vite'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { normalizePath, resolveConfig, type InlineConfig } from 'vite'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { buildOptimizerPlugin } from '../vite-plugin/angular-build-optimizer-plugin.js'
 
@@ -179,5 +179,59 @@ describe('build optimizer: package sideEffects', () => {
     )
     expect(await optimize('@angular/compiler/fesm2022/other.mjs', plugin)).toContain('__PURE__')
     expect(await optimize('@angular/build/fesm2022/build.mjs', plugin)).not.toContain('__PURE__')
+  })
+})
+
+describe('build optimizer: ngServerMode', () => {
+  function resolveBuildConfig(config: InlineConfig, mode = 'production') {
+    return resolveConfig(
+      {
+        configFile: false,
+        logLevel: 'silent',
+        mode,
+        plugins: [
+          buildOptimizerPlugin({ jit: false, sourcemap: false, thirdPartySourcemaps: false }),
+        ],
+        ...config,
+      },
+      'build',
+    )
+  }
+
+  // The `ngServerMode` each environment of the resolved build config defines.
+  async function ngServerModes(config: InlineConfig, mode?: string) {
+    const resolved = await resolveBuildConfig(config, mode)
+    return Object.fromEntries(
+      Object.entries(resolved.environments).map(([name, env]) => [name, env.define?.ngServerMode]),
+    )
+  }
+
+  it('defines it per environment when one config builds the client and the server', async () => {
+    expect(
+      await ngServerModes({ environments: { client: {}, ssr: {}, edge: { consumer: 'server' } } }),
+    ).toEqual({ client: 'false', ssr: 'true', edge: 'true' })
+  })
+
+  it('defines it as true for a separate `vite build --ssr`', async () => {
+    expect(await ngServerModes({ build: { ssr: 'src/server.ts' } })).toMatchObject({ ssr: 'true' })
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('only defines it in server environments outside production', async () => {
+    // The plugin also treats `NODE_ENV=production` as production.
+    vi.stubEnv('NODE_ENV', 'development')
+    expect(await ngServerModes({ environments: { client: {}, ssr: {} } }, 'development')).toEqual({
+      client: undefined,
+      ssr: 'true',
+    })
+  })
+
+  it('leaves it out of the defines all environments share', async () => {
+    const resolved = await resolveBuildConfig({})
+    expect(resolved.define).not.toHaveProperty('ngServerMode')
+    expect(resolved.oxc && resolved.oxc.define).not.toHaveProperty('ngServerMode')
   })
 })

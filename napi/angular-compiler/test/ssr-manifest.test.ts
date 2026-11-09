@@ -109,5 +109,49 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       const plugin = ssrManifestPlugin({})
       expect(plugin.apply).toBe('build')
     })
+
+    it('should inject the manifests only in server environments', () => {
+      // One config can build the client and the server environments
+      // (`vite build --app`); `vite build --ssr` builds the `ssr` one.
+      const plugin = ssrManifestPlugin({})
+      ;(plugin.configResolved as Function)({ root: '/app', base: '/' })
+      const transform = (consumer: 'client' | 'server') =>
+        (plugin.transform as Function).call(
+          { environment: { config: { consumer } } },
+          'const engine = new AngularNodeAppEngine();',
+          '/app/src/server.ts',
+        )
+
+      expect(transform('client')).toBeUndefined()
+      expect(transform('server')?.code).toContain('ɵsetAngularAppManifest')
+    })
+
+    it('should not inject the manifests twice', () => {
+      // A server environment can bundle another one's output (Nitro).
+      const plugin = ssrManifestPlugin({})
+      ;(plugin.configResolved as Function)({ root: '/app', base: '/' })
+      const transform = (code: string) =>
+        (plugin.transform as Function).call(
+          { environment: { config: { consumer: 'server' } } },
+          code,
+          '/app/.nitro/vite/services/ssr/index.mjs',
+        )
+
+      const once = transform('const engine = new AngularNodeAppEngine();').code
+      expect(transform(once)).toBeUndefined()
+    })
+
+    it('should do nothing outside Vite (plain rolldown has no environment)', async () => {
+      const plugin = ssrManifestPlugin({})
+      ;(plugin.configResolved as Function)({ root: '/app', base: '/' })
+      await (plugin.buildStart as Function).call({})
+      expect(
+        (plugin.transform as Function).call(
+          {},
+          'const engine = new AngularNodeAppEngine();',
+          '/app/src/server.ts',
+        ),
+      ).toBeUndefined()
+    })
   })
 })
