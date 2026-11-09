@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { normalizePath, resolveConfig, type InlineConfig } from 'vite'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { buildOptimizerPlugin } from '../vite-plugin/angular-build-optimizer-plugin.js'
 
@@ -216,7 +216,13 @@ describe('build optimizer: ngServerMode', () => {
     expect(await ngServerModes({ build: { ssr: 'src/server.ts' } })).toMatchObject({ ssr: 'true' })
   })
 
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('only defines it in server environments outside production', async () => {
+    // The plugin also treats `NODE_ENV=production` as production.
+    vi.stubEnv('NODE_ENV', 'development')
     expect(await ngServerModes({ environments: { client: {}, ssr: {} } }, 'development')).toEqual({
       client: undefined,
       ssr: 'true',

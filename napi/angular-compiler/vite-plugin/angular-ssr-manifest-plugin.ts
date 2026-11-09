@@ -133,7 +133,8 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     },
 
     async buildStart() {
-      if (this.environment.config.consumer !== 'server') return
+      // `environment` is only set by Vite, not by plain rolldown / tsdown.
+      if (this.environment?.config.consumer !== 'server') return
 
       // Read index.html for the server asset
       const indexHtmlPath = resolve(resolvedConfig.root, 'index.html')
@@ -147,14 +148,17 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     },
 
     transform(code, id) {
-      if (this.environment.config.consumer !== 'server') return
+      if (this.environment?.config.consumer !== 'server') return
 
       // Inject manifest setup into files that use AngularNodeAppEngine or AngularAppEngine
-      // These are the SSR entry points that need the manifest before constructing the engine
+      // These are the SSR entry points that need the manifest before constructing the engine.
+      // Code that already sets the manifest is skipped: a server environment can bundle
+      // the output of another one (Nitro builds the `ssr` service, then bundles it).
       if (
         !id.includes('node_modules') &&
         !id.startsWith('\0') &&
-        (code.includes('AngularNodeAppEngine') || code.includes('AngularAppEngine'))
+        (code.includes('AngularNodeAppEngine') || code.includes('AngularAppEngine')) &&
+        !code.includes('ɵsetAngularAppManifest')
       ) {
         const baseHref = resolvedConfig.base || '/'
 
