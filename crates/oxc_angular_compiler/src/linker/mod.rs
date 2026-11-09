@@ -1779,6 +1779,12 @@ fn get_array_property<'a>(
 /// }
 /// ```
 ///
+/// The keys are the bare names ngtsc's `parseHostBindings` stores, without the
+/// `[…]` / `(…)` of the `host:` key. `HostMetadataInput` takes `host:` keys, and
+/// the host binding compiler strips one pair of brackets from them, so each key
+/// is wrapped back: a name that itself starts and ends with brackets
+/// (`"[y]"` from `'[[y]]'`) then keeps them, as with Angular's linker.
+///
 /// The values are Angular template expression strings that must be compiled through
 /// the Angular expression parser (not simple string interpolation).
 fn extract_host_metadata_input(
@@ -1798,7 +1804,7 @@ fn extract_host_metadata_input(
                 _ => continue,
             };
             let Some(value) = as_static_string(&p.value) else { continue };
-            input.properties.push((key, value.to_string()));
+            input.properties.push((format!("[{key}]"), value.to_string()));
         }
     }
 
@@ -1814,7 +1820,7 @@ fn extract_host_metadata_input(
                 _ => continue,
             };
             let Some(value) = as_static_string(&p.value) else { continue };
-            input.listeners.push((key, value.to_string()));
+            input.listeners.push((format!("({key})"), value.to_string()));
         }
     }
 
