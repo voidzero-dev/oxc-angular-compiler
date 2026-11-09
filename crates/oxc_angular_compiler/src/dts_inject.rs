@@ -496,11 +496,10 @@ fn import_insert_position(
 /// after them. So the statement's JSDoc stays on it: `import * as i0 …;`,
 /// `/** doc */`, `export declare class X`.
 ///
-/// Two kinds of comments stay above the imports: `/// <reference …/>`
-/// directives, which only work at the top of the file, and the file's
-/// header, which is TS's detached comments (`emitDetachedComments`): the
-/// first group of comments with no blank line between them, when a blank
-/// line follows it.
+/// Only `/// <reference …/>` and `/// <amd-…/>` directives stay above the
+/// imports, as they work only at the top of the file. Every other comment,
+/// a license header too, goes below them: ngc edits the declaration AST, so
+/// its namespace import is always first.
 fn first_import_position(source: &str, statement_start: usize, program: &Program<'_>) -> usize {
     let leading: Vec<Span> = program
         .comments
@@ -509,27 +508,13 @@ fn first_import_position(source: &str, statement_start: usize, program: &Program
         .take_while(|span| span.end as usize <= statement_start)
         .collect();
     let text = |span: &Span| &source[span.start as usize..span.end as usize];
-    let blank_line_between = |end: u32, start: usize| {
-        source[end as usize..start].bytes().filter(|&b| b == b'\n').count() >= 2
-    };
-    // Comments up to the last `/// <reference …/>` directive.
-    let mut kept = leading
+    // Comments up to the last `/// <…/>` directive.
+    let kept = leading
         .iter()
         .rposition(|span| {
             text(span).strip_prefix("///").is_some_and(|rest| rest.trim_start().starts_with('<'))
         })
         .map_or(0, |index| index + 1);
-    if kept < leading.len() {
-        let rest = &leading[kept..];
-        let group = 1 + rest
-            .windows(2)
-            .take_while(|pair| !blank_line_between(pair[0].end, pair[1].start as usize))
-            .count();
-        let next = rest.get(group).map_or(statement_start, |span| span.start as usize);
-        if blank_line_between(rest[group - 1].end, next) {
-            kept += group;
-        }
-    }
     leading.get(kept).map_or(statement_start, |span| span.start as usize)
 }
 

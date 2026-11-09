@@ -202,8 +202,8 @@ fn maps_the_jsdoc_below_the_new_import() {
 
 /// The import ngtsc adds to a file with no imports goes above the comments
 /// of the first statement, so its JSDoc stays on the class (and a bundler
-/// that drops the import keeps it). `/// <reference>` directives and a
-/// header followed by a blank line (TS's detached comments) stay on top.
+/// that drops the import keeps it). Only `/// <reference>` directives stay
+/// on top; ngc puts the import above a license header too.
 #[test]
 fn puts_the_import_above_the_jsdoc_of_the_first_class() {
     let import = "import * as i0 from \"@angular/core\";\n";
@@ -213,18 +213,17 @@ fn puts_the_import_above_the_jsdoc_of_the_first_class() {
         ("// header\n/** Doc for H. */\nexport declare class H {\n}\n", 0),
         ("/*! pinned */\n/** Doc for H. */ export declare class H {\n}\n", 0),
         ("/// <reference types=\"node\" />\n/** Doc for H. */\nexport declare class H {\n}\n", 31),
-        ("/* license */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 15),
-        // A JSDoc a blank line away is still the class's in TS.
-        ("/* a */\n\n/** Doc for H. */\n\nexport declare class H {\n}\n", 9),
-        // Only the first group of comments is detached.
-        ("/* a */\n\n/* b */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 9),
+        // ngc: `import`, `/* license */`, `/** Doc for H. */`, `export declare class H`.
+        ("/* license */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 0),
+        ("/** Doc for H. */\n\nexport declare class H {\n}\n", 0),
+        ("/* a */\n\n/* b */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 0),
         (
             "/// <reference types=\"node\" />\n/// <reference lib=\"dom\" />\n\
              // header\n\n// more\n/** Doc for H. */\nexport declare class H {\n}\n",
-            70,
+            59,
         ),
         ("/// <reference types=\"node\" />\nexport declare class H {\n}\n", 31),
-        ("/* license */\n\nexport declare class H {\n}\n", 15),
+        ("/* license */\n\nexport declare class H {\n}\n", 0),
     ];
     for (source, at) in cases {
         let result = inject_dts_declarations_with_identity_map(source, &[decl("H")]);
