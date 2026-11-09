@@ -37,7 +37,7 @@ use super::metadata::{
 };
 use super::namespace_registry::NamespaceRegistry;
 use super::signal_debug_name;
-use crate::ast::expression::{BindingType, ParsedEventType};
+use crate::ast::expression::ParsedEventType;
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata_in,
@@ -48,7 +48,8 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     decorator_io_errors, extract_class_queries, extract_directive_metadata,
-    find_directive_decorator, generate_directive_definitions, param_decorator_errors, styles_error,
+    find_directive_decorator, generate_directive_definitions, param_decorator_errors,
+    parse_host_property_name, styles_error,
 };
 use crate::dts;
 use crate::injectable::{
@@ -8424,36 +8425,6 @@ fn convert_host_metadata_to_input<'a>(
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }
-}
-
-/// Parse a host property name to determine binding type and extract the final name.
-///
-/// Examples:
-/// - "class.active" -> (BindingType::Class, "active", None)
-/// - "style.color" -> (BindingType::Style, "color", None)
-/// - "style.width.px" -> (BindingType::Style, "width", Some("px"))
-/// - "attr.role" -> (BindingType::Attribute, "role", None)
-/// - "disabled" -> (BindingType::Property, "disabled", None)
-fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
-    if let Some(rest) = name.strip_prefix("class.") {
-        (BindingType::Class, rest, None)
-    } else if let Some(rest) = name.strip_prefix("style.") {
-        // Check for unit suffix: style.width.px
-        if let Some(dot_pos) = rest.find('.') {
-            let prop = &rest[..dot_pos];
-            let unit = &rest[dot_pos + 1..];
-            (BindingType::Style, prop, Some(unit))
-        } else {
-            (BindingType::Style, rest, None)
-        }
-    } else if let Some(rest) = name.strip_prefix("attr.") {
-        (BindingType::Attribute, rest, None)
-    } else if name.starts_with('@') {
-        // Animation binding like @triggerName
-        (BindingType::Animation, name, None)
-    } else {
-        (BindingType::Property, name, None)
-    }
 }
 
 /// Classify a host event name as a legacy animation event.

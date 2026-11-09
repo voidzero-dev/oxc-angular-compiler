@@ -1272,3 +1272,47 @@ fn test_link_safe_navigation_version_read_like_npm_semver() {
     let linked = link_for_version(&quoted, None);
     assert_eq!(linked.matches("== null)? null:").count(), 3, "{linked}");
 }
+
+/// #688: a linked `@trigger` host property sorts with the DOM properties, as
+/// Angular's linker does.
+#[test]
+fn test_link_host_legacy_trigger_order() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: { properties: { "id": "x", "attr.aria-label": "y", "style.height.px": "h", "@fade": "s", "class.active": "a" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    let parts = [
+        r#"ɵɵdomProperty("id",ctx.x)"#,
+        r#"ɵɵsyntheticHostProperty("@fade",ctx.s)"#,
+        r#"ɵɵattribute("aria-label",ctx.y)"#,
+        r#"ɵɵstyleProp("height",ctx.h,"px")"#,
+        r#"ɵɵclassProp("active",ctx.a)"#,
+    ];
+    let positions: Vec<_> = parts.iter().map(|p| linked.find(p)).collect();
+    assert!(positions.iter().all(Option::is_some), "{linked}");
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{linked}");
+    assert!(linked.contains("hostVars:7"), "{linked}");
+}
+
+/// #689: a linked `animate.enter` host property is a create-mode callback.
+#[test]
+fn test_link_host_animate_property() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: { properties: { "animate.enter": "x" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    assert!(
+        linked.contains(
+            "if((rf&1)){i0.ɵɵanimateEnter(functionD_HostBindings_animateenter_cb(){returnctx.x;});}"
+        ),
+        "{linked}"
+    );
+    assert!(!linked.contains("domProperty"), "{linked}");
+    assert!(!linked.contains("hostVars"), "{linked}");
+}

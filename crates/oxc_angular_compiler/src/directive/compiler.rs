@@ -797,14 +797,26 @@ fn convert_r3_host_metadata_to_input<'a>(
 
 /// Parse a host property name to determine binding type and extract the final name.
 ///
+/// Shared by the directive, component and linker host paths.
+///
 /// Examples:
+/// - "@fade" -> (BindingType::LegacyAnimation, "fade", None)
+/// - "animate.enter" -> (BindingType::Animation, "animate.enter", None)
 /// - "class.active" -> (BindingType::Class, "active", None)
 /// - "style.color" -> (BindingType::Style, "color", None)
 /// - "style.width.px" -> (BindingType::Style, "width", Some("px"))
 /// - "attr.role" -> (BindingType::Attribute, "role", None)
 /// - "disabled" -> (BindingType::Property, "disabled", None)
-fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
-    if let Some(rest) = name.strip_prefix("class.") {
+///
+/// The `@` and `animate.` checks follow `parsePropertyBinding` in Angular's
+/// `template_parser/binding_parser.ts`: `@` is stripped (reify adds it back),
+/// and `animate.` keeps the full name.
+pub(crate) fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
+    if let Some(rest) = name.strip_prefix('@') {
+        (BindingType::LegacyAnimation, rest, None)
+    } else if name.starts_with("animate.") {
+        (BindingType::Animation, name, None)
+    } else if let Some(rest) = name.strip_prefix("class.") {
         (BindingType::Class, rest, None)
     } else if let Some(rest) = name.strip_prefix("style.") {
         // Check for unit suffix: style.width.px
@@ -817,9 +829,6 @@ fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
         }
     } else if let Some(rest) = name.strip_prefix("attr.") {
         (BindingType::Attribute, rest, None)
-    } else if name.starts_with('@') {
-        // Animation binding like @triggerName
-        (BindingType::Animation, name, None)
     } else {
         (BindingType::Property, name, None)
     }
