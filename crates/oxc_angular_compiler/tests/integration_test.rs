@@ -11363,10 +11363,18 @@ export class MyModule {}
         "Should reference MyComponent with typeof. Got:\n{}",
         decl.members
     );
+    // An imported class goes through a namespace import of the `.d.ts`,
+    // like ngtsc's `toR3Reference` (#692).
     assert!(
-        decl.members.contains("typeof CommonModule"),
-        "Should reference CommonModule with typeof. Got:\n{}",
+        decl.members.contains("[typeof i1.CommonModule]"),
+        "Should reference CommonModule through its namespace. Got:\n{}",
         decl.members
+    );
+    assert_eq!(
+        decl.namespace_imports.get("i1").map(String::as_str),
+        Some("@angular/common"),
+        "{:?}",
+        decl.namespace_imports
     );
 
     // Should have ɵinj
