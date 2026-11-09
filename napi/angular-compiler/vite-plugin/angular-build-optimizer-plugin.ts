@@ -87,8 +87,6 @@ export function buildOptimizerPlugin({
     apply: 'build',
     config(userConfig) {
       isProd = userConfig.mode === 'production' || process.env['NODE_ENV'] === 'production'
-      const isSSR = !!userConfig.build?.ssr
-      const ngServerMode = `${isSSR}`
 
       if (isProd) {
         return {
@@ -96,30 +94,32 @@ export function buildOptimizerPlugin({
             ngJitMode: jit ? 'true' : 'false',
             ngI18nClosureMode: 'false',
             ngDevMode: 'false',
-            ngServerMode,
           },
           oxc: {
             define: {
               ngDevMode: 'false',
               ngJitMode: jit ? 'true' : 'false',
               ngI18nClosureMode: 'false',
-              ngServerMode,
             },
           },
         }
       }
 
-      // In dev SSR mode, set ngServerMode even without the full production defines
-      if (isSSR) {
-        const defines: Record<string, string> = { ngServerMode }
-        return {
-          define: defines,
-          oxc: {
-            define: defines,
-          },
-        }
+      return undefined
+    },
+    // `ngServerMode` is set per environment: one config can build the browser
+    // and the server bundles (`vite build --app`, `builder.buildApp`), and
+    // `vite build --ssr` builds the `ssr` environment. Like the Angular CLI, a
+    // server bundle gets `true` and a production browser bundle `false`.
+    configEnvironment(name, config) {
+      // Vite's default when `consumer` is not set.
+      const consumer = config.consumer ?? (name === 'client' ? 'client' : 'server')
+      if (consumer === 'server') {
+        return { define: { ngServerMode: 'true' } }
       }
-
+      if (isProd) {
+        return { define: { ngServerMode: 'false' } }
+      }
       return undefined
     },
     transform: {

@@ -109,5 +109,21 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       const plugin = ssrManifestPlugin({})
       expect(plugin.apply).toBe('build')
     })
+
+    it('should inject the manifests only in server environments', () => {
+      // One config can build the client and the server environments
+      // (`vite build --app`); `vite build --ssr` builds the `ssr` one.
+      const plugin = ssrManifestPlugin({})
+      ;(plugin.configResolved as Function)({ root: '/app', base: '/' })
+      const transform = (consumer: 'client' | 'server') =>
+        (plugin.transform as Function).call(
+          { environment: { config: { consumer } } },
+          'const engine = new AngularNodeAppEngine();',
+          '/app/src/server.ts',
+        )
+
+      expect(transform('client')).toBeUndefined()
+      expect(transform('server')?.code).toContain('ɵsetAngularAppManifest')
+    })
   })
 })

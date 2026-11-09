@@ -6,7 +6,8 @@
  *   "Angular app engine manifest is not set."
  *
  * This plugin:
- * 1. Detects SSR builds (when Vite's build.ssr is true)
+ * 1. Detects server builds (environments whose `consumer` is `server`, which
+ *    includes the `ssr` environment `vite build --ssr` builds)
  * 2. Auto-injects manifest setup into files that use AngularNodeAppEngine/AngularAppEngine
  * 3. Provides the index.html as a server asset for SSR rendering
  *
@@ -112,7 +113,6 @@ export interface SsrManifestPluginOptions {
  * Vite plugin that generates Angular SSR manifests for AngularNodeAppEngine.
  */
 export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
-  let isSSR = false
   let resolvedConfig: ResolvedConfig
   let ssrEntryPath: string
   let indexHtmlContent: string | undefined
@@ -121,14 +121,8 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     name: '@oxc-angular/vite-ssr-manifest',
     apply: 'build',
 
-    config(userConfig) {
-      isSSR = !!userConfig.build?.ssr
-    },
-
     configResolved(config) {
       resolvedConfig = config
-
-      if (!isSSR) return
 
       const workspaceRoot = config.root
 
@@ -139,7 +133,7 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     },
 
     async buildStart() {
-      if (!isSSR) return
+      if (this.environment.config.consumer !== 'server') return
 
       // Read index.html for the server asset
       const indexHtmlPath = resolve(resolvedConfig.root, 'index.html')
@@ -153,7 +147,7 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     },
 
     transform(code, id) {
-      if (!isSSR) return
+      if (this.environment.config.consumer !== 'server') return
 
       // Inject manifest setup into files that use AngularNodeAppEngine or AngularAppEngine
       // These are the SSR entry points that need the manifest before constructing the engine
