@@ -804,7 +804,7 @@ export declare function injectDtsDeclarations(
 /**
  * [`inject_dts_declarations`], plus `mappings` from the new code back to
  * `source` (source index 0), e.g. for a bundler `transform` hook. Injected
- * text is unmapped. Nothing injected gives `mappings: null`.
+ * text is unmapped. Nothing injected gives no `mappings`.
  */
 export declare function injectDtsDeclarationsWithIdentityMap(
   source: string,
@@ -815,7 +815,7 @@ export declare function injectDtsDeclarationsWithIdentityMap(
  * [`inject_dts_declarations`], and also shift the `mappings` of the file's
  * existing declaration map to fit the new code. Original tokens keep their
  * mapping, injected text is unmapped. Nothing injected gives `mappings`
- * back as is; bad VLQ gives `null`.
+ * back as is; bad VLQ gives no `mappings`.
  */
 export declare function injectDtsDeclarationsWithMap(
   source: string,

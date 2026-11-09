@@ -29,6 +29,10 @@
  * `./other` in another), so the pass canonicalizes: one alias per module
  * identity, collision-free against every identifier in the emitted file.
  */
+import type { Dirent } from 'node:fs'
+import { readdir } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
+
 import {
   injectDtsDeclarations as injectDtsDeclarationsNative,
   injectDtsDeclarationsWithIdentityMap as injectDtsDeclarationsWithIdentityMapNative,
@@ -164,4 +168,173 @@ export function injectDtsDeclarationsWithIdentityMap(
       mappings: result.mappings,
     }),
   }
+}
+
+const DTS_EXT_REGEX = /\.d\.([cm]?)ts$/
+const TS_EXT_REGEX = /\.([cm]?)ts(x?)$/
+
+/** Whether `fileName` is a declaration file (`.d.ts`, `.d.mts`, `.d.cts`). */
+export function isDtsFile(fileName: string): boolean {
+  return DTS_EXT_REGEX.test(fileName)
+}
+
+/**
+ * The source ids a `.d.ts` module id can come from, the reverse of
+ * rolldown-plugin-dts's `filename_to_dts`: `.d.ts` → `.ts`/`.tsx`,
+ * `.d.mts` → `.mts`, `.d.cts` → `.cts`.
+ */
+export function dtsSourceCandidates(id: string): string[] {
+  const m = DTS_EXT_REGEX.exec(id)
+  if (!m) return []
+  const base = id.slice(0, m.index)
+  return m[1] ? [`${base}.${m[1]}ts`] : [`${base}.ts`, `${base}.tsx`]
+}
+
+/** A TS source file of the project: absolute, not a declaration, virtual or node_modules id. */
+export function isProjectTsSource(id: string): boolean {
+  return (
+    isAbsolute(id) &&
+    !id.includes('?') &&
+    !/[\\/]node_modules[\\/]/.test(id) &&
+    TS_EXT_REGEX.test(id) &&
+    !DTS_EXT_REGEX.test(id)
+  )
+}
+
+function pathParts(path: string): string[] {
+  return path.split(/[\\/]+/).filter(Boolean)
+}
+
+/**
+ * The source a declaration file `fileName` (its path in the output dir) was
+ * emitted from, or `undefined`.
+ *
+ * tsc writes `<declarationDir>/<path relative to rootDir>.d.ts`, and the
+ * default rootDir is the common directory of the sources (TypeScript
+ * `getCommonSourceDirectory`). So a source matches when its whole path from
+ * the common directory of `sourceIds`, without the extension, ends
+ * `fileName`; the longest one wins. Two different paths of the same length
+ * can't both end one path, so there is no tie. `sourceIds` should hold every
+ * TS module of the graph, not only the Angular ones, so that a plain
+ * `utils.ts` claims its own `utils.d.ts`. Never matches by class name.
+ */
+export function matchDtsSource(
+  fileName: string,
+  sourceIds: Iterable<string>,
+  caseSensitive = true,
+): string | undefined {
+  const m = DTS_EXT_REGEX.exec(fileName)
+  if (!m) return undefined
+  const flavor = m[1]
+  const fold = (s: string) => (caseSensitive ? s : s.toLowerCase())
+  const target = pathParts(fold(fileName.slice(0, m.index)))
+
+  const sources: Array<{ id: string; parts: string[] }> = []
+  for (const id of sourceIds) {
+    if (isProjectTsSource(id)) sources.push({ id, parts: pathParts(fold(id)) })
+  }
+  if (sources.length === 0) return undefined
+
+  // Number of parts in the common source directory.
+  const first = sources[0].parts
+  let common = first.length - 1
+  for (const { parts } of sources) {
+    let i = 0
+    while (i < common && i < parts.length - 1 && parts[i] === first[i]) i++
+    common = i
+  }
+
+  let best: { id: string; length: number } | undefined
+  for (const { id, parts } of sources) {
+    const ext = TS_EXT_REGEX.exec(id)!
+    if (ext[1] !== flavor || (flavor && ext[2])) continue
+    const rel = parts.slice(common)
+    rel[rel.length - 1] = rel[rel.length - 1].replace(TS_EXT_REGEX, '')
+    if (rel.length > target.length || (best && rel.length <= best.length)) continue
+    const offset = target.length - rel.length
+    if (rel.every((part, i) => part === target[offset + i])) {
+      best = { id, length: rel.length }
+    }
+  }
+  return best?.id
+}
+
+const SOURCE_MAPPING_URL_REGEX = /\/\/# sourceMappingURL=(\S+)/g
+const INLINE_MAP_REGEX = /^data:application\/json(?:;[^,;]*)*;base64,/
+
+/** The new code of a `.d.ts` file, and its map file to write back, if any. */
+export interface DtsFileResult {
+  code: string
+  /** `ref` is the map file's path, relative to the `.d.ts`'s directory. */
+  map?: { ref: string; json: string }
+}
+
+/**
+ * {@link injectDtsDeclarations} for a whole declaration file, keeping its
+ * declaration map in step (see {@link injectDtsDeclarationsWithMap}).
+ *
+ * The map is found the way bundlers and tsc point at it: the last
+ * `//# sourceMappingURL=` comment, either a base64 `data:application/json`
+ * URL (rewritten in place in the new code) or a path; with no comment,
+ * `<file>.map`. `readMap(ref)` reads a map file by its path relative to the
+ * `.d.ts`'s directory, or gives `undefined`. Returns `undefined` when
+ * nothing was injected.
+ */
+export function injectDtsFile(
+  code: string,
+  declarations: readonly DtsClassDeclaration[],
+  fileName: string,
+  readMap: (ref: string) => string | undefined,
+): DtsFileResult | undefined {
+  let url: string | undefined
+  for (const match of code.matchAll(SOURCE_MAPPING_URL_REGEX)) url = match[1]
+
+  if (url?.startsWith('data:')) {
+    const inline = INLINE_MAP_REGEX.exec(url)
+    // Maps can hold non-ASCII names, so decode with Buffer, not `atob`.
+    const json = inline
+      ? Buffer.from(url.slice(inline[0].length), 'base64').toString('utf8')
+      : undefined
+    const result = injectDtsDeclarationsWithMap(code, declarations, json)
+    if (result.code === code) return undefined
+    const at = result.code.lastIndexOf(url)
+    if (!inline || !result.map || at === -1) return { code: result.code }
+    const newUrl = inline[0] + Buffer.from(result.map, 'utf8').toString('base64')
+    return { code: result.code.slice(0, at) + newUrl + result.code.slice(at + url.length) }
+  }
+
+  let ref = `${pathParts(fileName).pop()}.map`
+  if (url) {
+    try {
+      ref = decodeURI(url)
+    } catch {
+      ref = url
+    }
+  }
+  const result = injectDtsDeclarationsWithMap(code, declarations, readMap(ref))
+  if (result.code === code) return undefined
+  return result.map ? { code: result.code, map: { ref, json: result.map } } : { code: result.code }
+}
+
+/** Every declaration file under `dir`, skipping `node_modules` and dot-dirs. */
+export async function findDtsFiles(dir: string): Promise<string[]> {
+  const files: string[] = []
+  async function walk(current: string): Promise<void> {
+    let entries: Dirent[]
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = join(current, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) await walk(full)
+      } else if (entry.isFile() && DTS_EXT_REGEX.test(entry.name)) {
+        files.push(full)
+      }
+    }
+  }
+  await walk(dir)
+  return files
 }
