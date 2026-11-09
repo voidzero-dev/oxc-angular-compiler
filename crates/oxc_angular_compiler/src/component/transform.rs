@@ -901,6 +901,41 @@ fn member_chain_root<'b, 'a>(expr: &'b mut OutputExpression<'a>) -> &'b mut Outp
     }
 }
 
+/// The `.d.ts` type reference of the class named `local` in this file,
+/// like ngtsc's `toR3Reference` (annotations/common/src/util.ts), which
+/// emits it with `ImportFlags.ForceNewImport | AllowTypeImports`:
+/// `LocalIdentifierStrategy` (imports/src/emitter.ts) keeps the name of a
+/// class this file declares, and any other is its export through a
+/// namespace import of the `.d.ts` (`i1.Dep`, `i1.default`). A name that
+/// isn't imported stays as written.
+fn dts_type_ref<'a>(
+    local: &str,
+    import_map: &ImportMap<'a>,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    match import_map.get(&Ident::from(local)) {
+        Some(info) if info.is_named_import => {
+            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
+            if !oxc_syntax::identifier::is_identifier_name(export) {
+                return local.to_string();
+            }
+            format!("{}.{export}", registry.get_or_assign(&info.source_module))
+        }
+        _ => local.to_string(),
+    }
+}
+
+/// `i1.name` for the export `name` of `specifier` in the `.d.ts`.
+fn dts_module_ref<'a>(
+    allocator: &'a Allocator,
+    specifier: &str,
+    name: &str,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    let namespace = registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
+    format!("{namespace}.{name}")
+}
+
 /// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
 ///
 /// Replaces bare `ReadVar("X")` references with namespace-prefixed `ReadProp(ReadVar("i1"), "X")`
@@ -3445,14 +3480,18 @@ pub fn transform_angular_file(
     // `import * as i0` would redeclare a user binding of the same name.
     let file_used_names = file_identifiers(&parser_ret.program);
     let mut file_namespace_registry =
-        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names));
+        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names.clone()));
     jit_core_namespace = Some((file_namespace_registry.angular_core_ns(), false));
-    // `.d.ts` members use the same alias: upstream's second ImportManager
-    // (`IvyDeclarationDtsTransform`) dedupes `i0` against the ORIGINAL
-    // file's `SourceFile.identifiers` too (declaration.ts:96-98,160; the
-    // dts transform receives `original.getSourceFile()`, not the emitted
-    // file), so the alias it picks is identical to the registry's.
-    let dts_core_namespace = file_namespace_registry.angular_core_ns();
+    // The `.d.ts` has its own registry, like upstream's second ImportManager
+    // (`IvyDeclarationDtsTransform`, declaration.ts:96-98): its `iN` are
+    // numbered by first use in the `.d.ts`, and a class reference there
+    // never adds an import to the JS. It dedupes against the ORIGINAL
+    // file's `SourceFile.identifiers` too (declaration.ts:160; the dts
+    // transform receives `original.getSourceFile()`), so its `i0` is the
+    // same as the JS one.
+    let mut dts_namespace_registry =
+        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names));
+    let dts_core_namespace = dts_namespace_registry.angular_core_ns();
 
     // Shared constant pool index across all components in this file.
     // This ensures constant names (_c0, _c1, etc.) don't conflict when
@@ -4426,6 +4465,17 @@ pub fn transform_angular_file(
                                 dts_core_namespace.as_str(),
                             );
                             if in_dts {
+                                let host_directive_types: Vec<String> = metadata
+                                    .host_directives
+                                    .iter()
+                                    .map(|hd| {
+                                        dts_type_ref(
+                                            hd.directive.as_str(),
+                                            &import_map,
+                                            &mut dts_namespace_registry,
+                                        )
+                                    })
+                                    .collect();
                                 result.dts_declarations.push(dts_entry(
                                     dts::generate_component_dts(
                                         dts_core_namespace.as_str(),
@@ -4435,6 +4485,7 @@ pub fn transform_angular_file(
                                         has_injectable,
                                         &compilation_result.ng_content_selectors,
                                         &accept_types,
+                                        &host_directive_types,
                                     ),
                                 ));
                             }
@@ -4511,6 +4562,26 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
                     }
+
+                    // The `.d.ts` type of each host directive, read while each
+                    // is still the name written in the file: the JS rewrite
+                    // below uses the JS registry's aliases.
+                    let host_directive_types: Vec<String> = if in_dts {
+                        directive_metadata
+                            .host_directives
+                            .iter()
+                            .map(|hd| match &hd.directive {
+                                OutputExpression::ReadVar(var) => dts_type_ref(
+                                    var.name.as_str(),
+                                    &import_map,
+                                    &mut dts_namespace_registry,
+                                ),
+                                _ => dts::extract_directive_name_from_expr(&hd.directive),
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
 
                     // Resolve namespace imports for hostDirectives references.
                     // Host directive references (e.g., BrnTooltipTrigger from '@spartan-ng/brain/tooltip')
@@ -4596,6 +4667,7 @@ pub fn transform_angular_file(
                             &directive_metadata,
                             has_injectable,
                             &accept_types,
+                            &host_directive_types,
                         )));
                     }
 
@@ -4785,7 +4857,9 @@ pub fn transform_angular_file(
                     // they are wrapped when one names a class declared
                     // later. A class in a function may see local bindings:
                     // it stays as before.
-                    if !site.nested {
+                    let module_lists = if site.nested {
+                        None
+                    } else {
                         resolve_ng_module_lists(
                             allocator,
                             &parser_ret.program,
@@ -4801,8 +4875,8 @@ pub fn transform_angular_file(
                                 .map(|analyzer| (analyzer, path, source)),
                             matches!(options.compilation_mode, crate::CompilationMode::Partial)
                                 .then_some(&mut file_namespace_registry),
-                        );
-                    }
+                        )
+                    };
 
                     // Like ngtsc in full and partial compilation, ɵinj leaves
                     // out the directives, pipes and provider-less standalone
@@ -4904,11 +4978,39 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         if in_dts {
+                            // Like ngtsc, the `.d.ts` lists the classes the
+                            // lists give (ng_module/src/handler.ts:522-552),
+                            // each as a type reference (`toR3Reference`).
+                            let mut type_ref = |specifier: Option<&str>, name: &str| {
+                                let registry = &mut dts_namespace_registry;
+                                match specifier {
+                                    Some(specifier) => {
+                                        dts_module_ref(allocator, specifier, name, registry)
+                                    }
+                                    None => dts_type_ref(name, &import_map, registry),
+                                }
+                            };
+                            let [declarations, imports, exports] = match &module_lists {
+                                Some(lists) => {
+                                    use crate::ng_module::module_with_providers::ListKey;
+                                    [ListKey::Declarations, ListKey::Imports, ListKey::Exports]
+                                        .map(|key| lists.type_refs(key, &mut type_ref))
+                                }
+                                None => [
+                                    &ng_module_metadata.declarations,
+                                    &ng_module_metadata.imports,
+                                    &ng_module_metadata.exports,
+                                ]
+                                .map(|list| {
+                                    list.iter().map(|name| type_ref(None, name.as_str())).collect()
+                                }),
+                            };
                             result.dts_declarations.push(dts_entry(dts::generate_ng_module_dts(
                                 dts_core_namespace.as_str(),
                                 &ng_module_metadata,
                                 type_argument_count,
                                 has_injectable,
+                                [&declarations, &imports, &exports],
                             )));
                         }
 
@@ -5416,14 +5518,14 @@ pub fn transform_angular_file(
     let debug_name_edits = debug_names_scope.finish().into_file_edits(&edits);
     edits.extend(debug_name_edits);
 
-    // Members can reference namespace aliases the registry assigned to
-    // other modules (e.g. `typeof i1.SomeDirective` for host directives).
-    // Record each referenced alias's module so the consumer emits the
-    // matching `import * as <alias> from "<module>"` in the `.d.ts` —
-    // what upstream's `IvyDeclarationDtsTransform` `ImportManager` adds
-    // when a declaration references an external type.
+    // Members can reference namespace aliases the `.d.ts` registry assigned
+    // to other modules (`typeof i1.SomeDirective` for host directives and
+    // NgModule lists). Record each referenced alias's module so the
+    // consumer emits the matching `import * as <alias> from "<module>"` in
+    // the `.d.ts` — what upstream's `IvyDeclarationDtsTransform`
+    // `ImportManager` adds when a declaration references an external type.
     if !result.dts_declarations.is_empty() {
-        let module_by_alias: HashMap<String, String> = file_namespace_registry
+        let module_by_alias: HashMap<String, String> = dts_namespace_registry
             .get_all_modules()
             .into_iter()
             .map(|(module, alias)| (alias.as_str().to_string(), module.as_str().to_string()))
@@ -5613,7 +5715,8 @@ fn scope_dependencies<'a>(
 /// (partial mode), the declaration lists what they give. With cross-file
 /// analysis, a name of another file is read too, and a class found there
 /// is named through a namespace import, like `ɵɵsetComponentScope` names
-/// classes. Anything unread keeps its old output.
+/// classes. Anything unread keeps its old output. Gives the lists read,
+/// for the `.d.ts`.
 #[expect(clippy::too_many_arguments)]
 fn resolve_ng_module_lists<'a>(
     allocator: &'a Allocator,
@@ -5625,7 +5728,7 @@ fn resolve_ng_module_lists<'a>(
     import_elision: &ImportElisionAnalyzer<'_>,
     #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
     registry: Option<&mut NamespaceRegistry<'a>>,
-) {
+) -> Option<crate::ng_module::module_with_providers::ModuleLists> {
     #[cfg(feature = "cross_file_elision")]
     use crate::ng_module::module_with_providers::{Answer, Question, ResolveImported};
     use crate::ng_module::module_with_providers::{Binding, ListKey, read_module_lists};
@@ -5659,7 +5762,7 @@ fn resolve_ng_module_lists<'a>(
         &metadata.imports[..],
         &metadata.exports[..],
     ];
-    let Some(lists) = read_module_lists(
+    let lists = read_module_lists(
         program,
         class,
         string_consts,
@@ -5667,11 +5770,9 @@ fn resolve_ng_module_lists<'a>(
         metadata.contains_forward_decls,
         binding,
         resolve_imported,
-    ) else {
-        return;
-    };
+    )?;
     metadata.contains_forward_decls = lists.wrap;
-    let Some(registry) = registry else { return };
+    let Some(registry) = registry else { return Some(lists) };
     // In the order the declaration lists them, so namespaces are numbered
     // like ngtsc's.
     let mut namespace_of =
@@ -5679,6 +5780,7 @@ fn resolve_ng_module_lists<'a>(
     metadata.partial_declarations = lists.emit(allocator, ListKey::Declarations, &mut namespace_of);
     metadata.partial_imports = lists.emit(allocator, ListKey::Imports, &mut namespace_of);
     metadata.partial_exports = lists.emit(allocator, ListKey::Exports, &mut namespace_of);
+    Some(lists)
 }
 
 /// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for

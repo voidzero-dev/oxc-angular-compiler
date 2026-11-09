@@ -542,6 +542,30 @@ impl ModuleLists {
         }
         Some(list)
     }
+
+    /// The `.d.ts` type reference of each class of the `key` list, read
+    /// like `emit`. `type_ref(None, name)` maps a name of this file, and
+    /// `type_ref(Some(specifier), name)` an export of a module. An unread
+    /// entry maps its parser name. Called in the order the classes are
+    /// listed.
+    pub fn type_refs(
+        &self,
+        key: ListKey,
+        mut type_ref: impl FnMut(Option<&str>, &str) -> String,
+    ) -> std::vec::Vec<String> {
+        let mut list = std::vec::Vec::new();
+        for entry in &self.lists[key as usize] {
+            let Some(refs) = &entry.refs else {
+                list.extend(entry.fallback.as_deref().map(|name| type_ref(None, name)));
+                continue;
+            };
+            list.extend(refs.iter().map(|class| match class {
+                Ref::Local(name) => type_ref(None, name),
+                Ref::Module { specifier, name } => type_ref(Some(specifier), name),
+            }));
+        }
+        list
+    }
 }
 
 /// The name the decorator parser lists for a top-level entry (see
