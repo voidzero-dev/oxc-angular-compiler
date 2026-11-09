@@ -2,7 +2,11 @@ import type { Plugin } from 'vite'
 import { describe, expect, it } from 'vitest'
 
 import { angular } from '../vite-plugin/index.js'
-import { injectDtsDeclarations } from '../vite-plugin/utils/dts.js'
+import {
+  injectDtsDeclarations,
+  injectDtsDeclarationsWithIdentityMap,
+  injectDtsDeclarationsWithMap,
+} from '../vite-plugin/utils/dts.js'
 
 const COMPONENT_SOURCE = `
   import { Component } from '@angular/core';
@@ -468,6 +472,73 @@ describe('injectDtsDeclarations', () => {
     const closeIdx = out.lastIndexOf('}')
     expect(classIdx).toBeLessThan(facIdx)
     expect(facIdx).toBeLessThan(closeIdx)
+  })
+})
+
+describe('injectDtsDeclarationsWithMap (#693)', () => {
+  // From a real rolldown + rolldown-plugin-dts build.
+  const source =
+    'export declare class HelloComponent {\n  name: string;\n}\n' +
+    'export declare class OtherComponent {\n  value: number;\n  greet(): string;\n}\n' +
+    'export declare class EmptyOne {}\n//# sourceMappingURL=index.d.mts.map'
+  const declarations = ['HelloComponent', 'OtherComponent', 'EmptyOne'].map((className) => ({
+    className,
+    members: `static ɵfac: i0.ɵɵFactoryDeclaration<${className}, never>;`,
+  }))
+  const map = {
+    version: 3,
+    file: 'index.d.mts',
+    names: [],
+    sourceRoot: '',
+    sources: ['../src/index.ts'],
+    x_google_ignoreList: [],
+    mappings: 'A,qBAAa;EACX;;qBAGW;EACX;EACA;;qBAEW',
+  }
+
+  it('shifts the mappings and keeps the other map fields', () => {
+    const out = injectDtsDeclarationsWithMap(source, declarations, JSON.stringify(map))
+    expect(out.code).toBe(injectDtsDeclarations(source, declarations))
+    expect(JSON.parse(out.map!)).toEqual({
+      ...map,
+      mappings: ';A,qBAAa;EACX;;;qBAGW;EACX;EACA;;;qBAEW',
+    })
+  })
+
+  it('gives no map for bad map JSON or bad VLQ, but still injects', () => {
+    for (const bad of ['{', '{"mappings":1}', JSON.stringify({ ...map, mappings: '!!' })]) {
+      const out = injectDtsDeclarationsWithMap(source, declarations, bad)
+      expect(out.code).toContain('static ɵfac')
+      expect(out.map).toBeUndefined()
+    }
+    expect(injectDtsDeclarationsWithMap(source, declarations).map).toBeUndefined()
+  })
+
+  it('gives the map back as is when nothing is injected', () => {
+    const json = JSON.stringify(map)
+    const out = injectDtsDeclarationsWithMap(source, [], json)
+    expect(out).toEqual({ code: source, map: json })
+  })
+
+  it('maps the new code back to the source for a transform hook', () => {
+    const src = 'export declare class X {}\n'
+    const out = injectDtsDeclarationsWithIdentityMap(
+      src,
+      [{ className: 'X', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;' }],
+      'x.d.ts',
+    )
+    expect(out.code).toBe(
+      'import * as i0 from "@angular/core";\nexport declare class X {\n' +
+        '    static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;\n}\n',
+    )
+    // Import and member lines unmapped; `export declare class X {` and `}`
+    // keep their original places.
+    expect(JSON.parse(out.map!)).toEqual({
+      version: 3,
+      sources: ['x.d.ts'],
+      names: [],
+      mappings: ';AAAA,OAAO,QAAQ,MAAM,EAAE;;AAAC;',
+    })
+    expect(injectDtsDeclarationsWithIdentityMap(src, []).map).toBeUndefined()
   })
 })
 

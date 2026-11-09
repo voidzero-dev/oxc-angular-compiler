@@ -29,7 +29,11 @@
  * `./other` in another), so the pass canonicalizes: one alias per module
  * identity, collision-free against every identifier in the emitted file.
  */
-import { injectDtsDeclarations as injectDtsDeclarationsNative } from '#binding'
+import {
+  injectDtsDeclarations as injectDtsDeclarationsNative,
+  injectDtsDeclarationsWithIdentityMap as injectDtsDeclarationsWithIdentityMapNative,
+  injectDtsDeclarationsWithMap as injectDtsDeclarationsWithMapNative,
+} from '#binding'
 
 /** A single class's `.d.ts` static member declarations. */
 export interface DtsClassDeclaration {
@@ -82,4 +86,82 @@ export function injectDtsDeclarations(
     source,
     declarations.map((d) => ({ ...d })),
   )
+}
+
+/** Injected code plus its source map JSON, when there is one. */
+export interface DtsInjectWithMapResult {
+  code: string
+  map?: string
+}
+
+/**
+ * {@link injectDtsDeclarations}, and also shift the `.d.ts`'s existing
+ * declaration map (JSON) so it fits the new code, as ngtsc's
+ * `afterDeclarations` emit would: original tokens keep their mapping,
+ * injected text has none. Every other map field (`sources`, `sourceRoot`,
+ * `x_google_ignoreList`, …) is kept. No `map` comes back when the input map
+ * is missing or can't be read; the caller then leaves it as is.
+ */
+export function injectDtsDeclarationsWithMap(
+  source: string,
+  declarations: readonly DtsClassDeclaration[],
+  map?: string | null,
+): DtsInjectWithMapResult {
+  const parsed = map ? parseMap(map) : undefined
+  const result = injectDtsDeclarationsWithMapNative(
+    source,
+    declarations.map((d) => ({ ...d })),
+    parsed?.mappings,
+  )
+  if (!parsed || result.mappings == null) {
+    return { code: result.code }
+  }
+  return { code: result.code, map: JSON.stringify({ ...parsed, mappings: result.mappings }) }
+}
+
+/** A source map JSON object with a string `mappings`, or `undefined`. */
+function parseMap(map: string): { mappings: string; [key: string]: unknown } | undefined {
+  let value: unknown
+  try {
+    value = JSON.parse(map)
+  } catch {
+    return undefined
+  }
+  if (
+    value &&
+    typeof value === 'object' &&
+    typeof (value as { mappings?: unknown }).mappings === 'string'
+  ) {
+    return value as { mappings: string }
+  }
+  return undefined
+}
+
+/**
+ * {@link injectDtsDeclarations}, plus a source map JSON from the new code
+ * back to `source` (one source, `sourceName`), e.g. for a Rollup/Rolldown
+ * `transform` hook. Injected text is unmapped. No `map` comes back when
+ * nothing was injected (the code is unchanged).
+ */
+export function injectDtsDeclarationsWithIdentityMap(
+  source: string,
+  declarations: readonly DtsClassDeclaration[],
+  sourceName = '',
+): DtsInjectWithMapResult {
+  const result = injectDtsDeclarationsWithIdentityMapNative(
+    source,
+    declarations.map((d) => ({ ...d })),
+  )
+  if (result.mappings == null) {
+    return { code: result.code }
+  }
+  return {
+    code: result.code,
+    map: JSON.stringify({
+      version: 3,
+      sources: [sourceName],
+      names: [],
+      mappings: result.mappings,
+    }),
+  }
 }

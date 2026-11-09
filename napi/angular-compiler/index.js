@@ -923,6 +923,8 @@ const {
   generateHmrModule,
   generateStyleModule,
   injectDtsDeclarations,
+  injectDtsDeclarationsWithIdentityMap,
+  injectDtsDeclarationsWithMap,
   linkAngularPackage,
   linkAngularPackageSync,
   optimizeAngularPackage,
@@ -950,6 +952,8 @@ export { extractComponentUrls }
 export { generateHmrModule }
 export { generateStyleModule }
 export { injectDtsDeclarations }
+export { injectDtsDeclarationsWithIdentityMap }
+export { injectDtsDeclarationsWithMap }
 export { linkAngularPackage }
 export { linkAngularPackageSync }
 export { optimizeAngularPackage }

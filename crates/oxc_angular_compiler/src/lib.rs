@@ -174,7 +174,10 @@ pub use dts::{
 };
 
 // Re-export the .d.ts injection pass used by bundler plugins
-pub use dts_inject::{DtsInjectDeclaration, inject_dts_declarations};
+pub use dts_inject::{
+    DtsInjectDeclaration, DtsInjectResult, inject_dts_declarations,
+    inject_dts_declarations_with_identity_map, inject_dts_declarations_with_map,
+};
 
 // Re-export linker types
 pub use linker::{LinkOptions, LinkResult, link, link_with_options};
