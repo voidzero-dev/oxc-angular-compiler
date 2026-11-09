@@ -29,7 +29,7 @@
  * `./other` in another), so the pass canonicalizes: one alias per module
  * identity, collision-free against every identifier in the emitted file.
  */
-import type { Dirent } from 'node:fs'
+import { realpathSync, type Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
@@ -201,6 +201,14 @@ export function isProjectTsSource(id: string): boolean {
   )
 }
 
+function realPathOrSelf(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
+
 function pathParts(path: string): string[] {
   return path.split(/[\\/]+/).filter(Boolean)
 }
@@ -224,10 +232,10 @@ export interface DtsFileToMatch {
  *    Each file and each graph source with the same base name and flavor
  *    (`.ts`/`.tsx` → `.d.ts`, `.mts` → `.d.mts`, `.cts` → `.d.cts`) vote
  *    for the layout that lines up the longest common end of their paths.
- *    Most votes wins; on a tie the shorter prefix, then the root holding
- *    more graph sources (tsc's default rootDir is their common dir); a full
- *    tie matches nothing. A file then matches only when it is exactly the
- *    prefix plus its source's path from the root.
+ *    Most votes wins; on a tie the shorter prefix. A file then matches
+ *    only when it is exactly the prefix plus its source's path from the
+ *    root. When layouts are still tied, a file matches only when every
+ *    tied layout gives it the same source.
  *
  * So a file whose source is not in the graph (a test double the library
  * doesn't import, another package in the same dir) never gets another
@@ -239,6 +247,7 @@ export function matchDtsSources(
   files: readonly DtsFileToMatch[],
   sourceIds: Iterable<string>,
   caseSensitive = true,
+  realPath: (path: string) => string = realPathOrSelf,
 ): Array<string | undefined> {
   const fold = (s: string) => (caseSensitive ? s : s.toLowerCase())
   const key = (flavor: string, parts: readonly string[]) => `${flavor}|${parts.join('/')}`
@@ -248,7 +257,6 @@ export function matchDtsSources(
   const byId = new Map<string, string>()
   const byPath = new Map<string, string>()
   const byBase = new Map<string, string[][]>()
-  const sources: string[][] = []
   for (const id of sourceIds) {
     if (!isProjectTsSource(id)) continue
     const parts = pathParts(fold(id))
@@ -262,14 +270,27 @@ export function matchDtsSources(
     const group = byBase.get(baseKey)
     if (group) group.push(parts)
     else byBase.set(baseKey, [parts])
-    sources.push(parts)
+  }
+
+  // A map names the source by the path the generator saw, graph ids are
+  // real paths (or not, with `preserveSymlinks`): compare real paths when
+  // the plain ones differ, e.g. an outDir reached through a symlink.
+  let byRealId: Map<string, string> | undefined
+  const byMapSource = (mapSource: string): string | undefined => {
+    const hit = byId.get(pathParts(fold(mapSource)).join('/'))
+    if (hit !== undefined) return hit
+    if (!byRealId) {
+      byRealId = new Map()
+      for (const id of byId.values()) byRealId.set(pathParts(fold(realPath(id))).join('/'), id)
+    }
+    return byRealId.get(pathParts(fold(realPath(mapSource))).join('/'))
   }
 
   const result: Array<string | undefined> = Array.from({ length: files.length })
   const targets: Array<{ index: number; flavor: string; parts: string[] }> = []
   for (const [index, file] of files.entries()) {
     if (file.mapSource !== undefined) {
-      result[index] = byId.get(pathParts(fold(file.mapSource)).join('/'))
+      result[index] = byMapSource(file.mapSource)
       continue
     }
     const m = DTS_EXT_REGEX.exec(file.fileName)
@@ -312,26 +333,24 @@ export function matchDtsSources(
       best.push(vote)
     }
   }
-  if (best.length > 1) {
-    // How many graph sources each dir holds.
-    const held = new Map<string, number>()
-    for (const parts of sources) {
-      let dir = ''
-      for (const part of parts) {
-        held.set(dir, (held.get(dir) ?? 0) + 1)
-        dir = dir ? `${dir}/${part}` : part
-      }
-    }
-    const count = best.map(({ root }) => held.get(root.join('/')) ?? 0)
-    const most = Math.max(...count)
-    best = best.filter((_, i) => count[i] === most)
-  }
-  if (best.length !== 1) return result
+  if (best.length === 0) return result
 
-  const { prefix, root } = best[0]
+  // Every tied layout must give a file the same source: twins in two dirs
+  // (a `testing/` stub next to `src/lib/`) are never guessed.
   for (const { index, flavor, parts } of targets) {
-    if (parts.length <= prefix.length || !prefix.every((part, i) => part === parts[i])) continue
-    result[index] = byPath.get(key(flavor, [...root, ...parts.slice(prefix.length)]))
+    let source: string | undefined
+    for (const [i, { prefix, root }] of best.entries()) {
+      const inLayout = parts.length > prefix.length && prefix.every((part, j) => part === parts[j])
+      const found = inLayout
+        ? byPath.get(key(flavor, [...root, ...parts.slice(prefix.length)]))
+        : undefined
+      if (i > 0 && found !== source) {
+        source = undefined
+        break
+      }
+      source = found
+    }
+    result[index] = source
   }
   return result
 }

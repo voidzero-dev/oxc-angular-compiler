@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -957,21 +965,50 @@ describe('angular() dts plugin (#104)', () => {
       ])
     })
 
-    it('breaks a tie by the root that holds more sources, as tsc’s common dir', () => {
+    it('matches a file on a tie only when every tied layout agrees', () => {
+      // One file, two roots that could hold it: no guess.
       expect(match(['types/index.d.ts'], ['/p/src/index.ts', '/p/src/b/index.ts'])).toEqual([
-        '/p/src/index.ts',
+        undefined,
       ])
-      // A plain src/utils.ts claims utils.d.ts from an Angular src/lib/utils.ts.
-      expect(match(['types/utils.d.ts'], ['/p/src/utils.ts', '/p/src/lib/utils.ts'])).toEqual([
-        '/p/src/utils.ts',
-      ])
-      // Two equal roots: nothing.
       expect(
         match(
           ['card.component.d.ts'],
           ['/p/src/b/card.component.ts', '/p/src/c/card.component.ts'],
         ),
       ).toEqual([undefined])
+      // vite-plugin-dts entryRoot 'testing': testing/ imports src/lib/, and
+      // both hold a button.component.ts. The testing stub never gets the
+      // library's members, and src/lib/util.ts holding one more source
+      // doesn't break the tie.
+      const ids = [
+        '/p/testing/index.ts',
+        '/p/testing/button.component.ts',
+        '/p/src/lib/index.ts',
+        '/p/src/lib/button.component.ts',
+        '/p/src/lib/util.ts',
+      ]
+      expect(match(['index.d.ts', 'button.component.d.ts'], ids)).toEqual([undefined, undefined])
+      // A util.d.ts next to them shows the root is src/lib/: no tie.
+      expect(match(['index.d.ts', 'button.component.d.ts', 'util.d.ts'], ids)).toEqual(ids.slice(2))
+    })
+
+    it('compares real paths when a map source goes through a symlink', () => {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), 'dts-link-')))
+      try {
+        mkdirSync(join(dir, 'real/src'), { recursive: true })
+        writeFileSync(join(dir, 'real/src/a.ts'), '')
+        symlinkSync(join(dir, 'real'), join(dir, 'link'))
+        const files = [{ fileName: 'a.d.ts', mapSource: join(dir, 'link/src/a.ts') }]
+        expect(matchDtsSources(files, [join(dir, 'real/src/a.ts')])).toEqual([
+          join(dir, 'real/src/a.ts'),
+        ])
+        // A real path outside the graph still matches nothing.
+        writeFileSync(join(dir, 'real/src/b.ts'), '')
+        const other = [{ fileName: 'b.d.ts', mapSource: join(dir, 'link/src/b.ts') }]
+        expect(matchDtsSources(other, [join(dir, 'real/src/a.ts')])).toEqual([undefined])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
     })
 
     it('needs the same flavor and ignores non-sources', () => {

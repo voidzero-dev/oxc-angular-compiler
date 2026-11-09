@@ -1833,7 +1833,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           warnedDirs.add(dir)
           warn(
             `No declaration file under ${dir} could be matched to its source file, so none ` +
-              `got Angular's type members. Turn on \`declarationMap\` for an exact match.`,
+              `got Angular's type members. ` +
+              (files.some((f) => f.mapSource !== undefined)
+                ? `Their declaration maps name no source file of this build.`
+                : `Turn on \`declarationMap\` for an exact match.`),
           )
         }
         for (const [i, { file, code }] of files.entries()) {
