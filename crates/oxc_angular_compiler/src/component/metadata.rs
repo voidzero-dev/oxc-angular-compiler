@@ -105,6 +105,14 @@ impl AngularVersion {
         self.major >= 20
     }
 
+    /// Check if this version supports `ɵɵanimateEnter`/`ɵɵanimateLeave` (v20.2.0+).
+    ///
+    /// Angular v20.2 added the `animate.enter` / `animate.leave` bindings. Before
+    /// that, a host `[animate.*]` binding is a plain DOM property.
+    pub fn supports_animate_instructions(&self) -> bool {
+        self.major > 20 || (self.major == 20 && self.minor >= 2)
+    }
+
     /// Check if this version supports the `@Service` decorator (v22.0.0+).
     ///
     /// Angular v22 introduced the `@Service` decorator as a lighter alternative to

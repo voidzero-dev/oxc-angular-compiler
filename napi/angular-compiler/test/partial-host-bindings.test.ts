@@ -257,6 +257,45 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
   })
 })
 
+describe('static animate host attributes (#689)', () => {
+  /** The `ɵɵdefine*` call, printed by Babel so that both linkers' output compares as text. */
+  const definition = (code: string) => {
+    const require = createRequire(import.meta.url)
+    const babel = createRequire(require.resolve('@angular/compiler-cli/package.json'))(
+      '@babel/core',
+    )
+    const printed: string = babel.transformSync(code, { babelrc: false, configFile: false }).code
+    return printed.slice(printed.indexOf('i0.ɵɵdefine'))
+  }
+  const declaration = (kind: string, host: string) => `
+    import * as i0 from "@angular/core";
+    export class D {}
+    D.ɵ${kind === 'Directive' ? 'dir' : 'cmp'} = i0.ɵɵngDeclare${kind}({ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "d", ${kind === 'Component' ? 'template: "", isInline: true, ' : ''}host: ${host}, ngImport: i0 });
+  `
+
+  it.each([
+    ['Directive', '{ attributes: { "animate.leave": "out" } }', 'i0.ɵɵanimateLeave("out");'],
+    ['Component', '{ attributes: { "animate.leave": "out" } }', 'i0.ɵɵanimateLeave("out");'],
+    [
+      'Directive',
+      '{ attributes: { "animate.enter": "a" }, properties: { "animate.leave": "x", "@t": "y" } }',
+      'i0.ɵɵanimateLeave(function D_HostBindings_animateleave_cb() {',
+    ],
+    [
+      'Component',
+      '{ attributes: { "role": "r", "animate.enter": "a" }, listeners: { "click": "c()" }, properties: { "animate.leave": "x", "id": "i" }, classAttribute: "k" }',
+      'i0.ɵɵanimateEnter("a");',
+    ],
+  ])('links a %s with host %s like Angular', async (kind, host, expected) => {
+    const code = declaration(kind, host)
+    const angular = definition(await LINKERS.angular(code, '/lib/dir.mjs'))
+    const oxc = definition(await LINKERS.oxc(code, '/lib/dir.mjs'))
+    expect(oxc).toContain(expected)
+    expect(oxc).not.toContain('"animate.')
+    expect(oxc).toBe(angular)
+  })
+})
+
 describe('partial host declaration', () => {
   const declare = (source: string) => {
     const result = transformAngularFileSync(source, '/lib/dir.mts', { compilationMode: 'partial' })

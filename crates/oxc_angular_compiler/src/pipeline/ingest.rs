@@ -4405,6 +4405,13 @@ fn ingest_host_dom_property<'a>(
             BindingType::Class => BindingKind::ClassName,
             BindingType::Style => BindingKind::StyleProperty,
             BindingType::TwoWay => BindingKind::TwoWayProperty,
+            // Before v20.2 Angular has no `animate.*` bindings: ngtsc binds
+            // the name as a DOM property.
+            BindingType::Animation
+                if job.angular_version.is_some_and(|v| !v.supports_animate_instructions()) =>
+            {
+                BindingKind::Property
+            }
             BindingType::Animation => BindingKind::Animation,
             BindingType::LegacyAnimation => BindingKind::LegacyAnimation,
         };

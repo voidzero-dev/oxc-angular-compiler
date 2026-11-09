@@ -3817,6 +3817,53 @@ export class D { @HostBinding('animate.leave') get y(): any { return 1; } }
     );
 }
 
+/// #689: Angular before 20.2 has no `ɵɵanimateEnter` / `ɵɵanimateLeave`, so a
+/// host `[animate.*]` stays a DOM property, as ngtsc 20.1.8 / 19.2.15 emit it.
+#[test]
+fn test_host_animate_property_binding_before_20_2() {
+    let sources = [
+        r"
+import { Component, HostBinding } from '@angular/core';
+@Component({ selector: 'd', template: '', host: { '[animate.enter]': 'x' } })
+export class D { @HostBinding('animate.leave') y = 'o'; }
+",
+        r"
+import { Directive, HostBinding } from '@angular/core';
+@Directive({ selector: 'd', host: { '[animate.enter]': 'x' } })
+export class D { @HostBinding('animate.leave') y = 'o'; }
+",
+    ];
+    let cases = [
+        (AngularVersion::new(20, 1, 8), "ɵɵdomProperty"),
+        (AngularVersion::new(19, 2, 15), "ɵɵhostProperty"),
+    ];
+    for source in sources {
+        for (version, instruction) in cases {
+            let options = ComponentTransformOptions {
+                angular_version: Some(version),
+                ..ComponentTransformOptions::default()
+            };
+            let code = compile_compact(source, Some(&options));
+            assert!(code.contains("hostVars:2,"), "{code}");
+            assert!(
+                code.contains(&format!(
+                    r#"if((rf&2)){{i0.{instruction}("animate.enter",ctx.x)("animate.leave",ctx.y);}}"#
+                )),
+                "{code}"
+            );
+            assert!(!code.contains("ɵɵanimate"), "{code}");
+        }
+
+        let options = ComponentTransformOptions {
+            angular_version: Some(AngularVersion::new(20, 2, 0)),
+            ..ComponentTransformOptions::default()
+        };
+        let code = compile_compact(source, Some(&options));
+        assert!(code.contains("ɵɵanimateEnter(functionD_HostBindings_animateenter_cb()"), "{code}");
+        assert!(!code.contains("hostVars"), "{code}");
+    }
+}
+
 /// #689: a callback body is not a binding slot, so literals and arrow functions
 /// stay inline (no pure function, no host vars).
 #[test]
