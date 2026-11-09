@@ -222,7 +222,23 @@ export class M {}
             "{mode:?}:\n{members}"
         );
     }
+
+    // A module named only through a string export still gets its import.
+    let source = r#"
+import { Directive } from '@angular/core';
+import { "s-dir" as SDir } from './dep/str';
+
+@Directive({ selector: '[x]', hostDirectives: [SDir] })
+export class X {}
+"#;
+    for mode in MODES {
+        let result = transform(source, mode);
+        let (members, imports) = dts(&result, "X");
+        assert!(members.contains("directive: typeof i1[\"s-dir\"];"), "{mode:?}:\n{members}");
+        assert_eq!(imports, &map(&[("i0", "@angular/core"), ("i1", "./dep/str")]), "{mode:?}");
+    }
 }
+
 #[test]
 fn nested_class_takes_no_dts_alias() {
     let source = r"

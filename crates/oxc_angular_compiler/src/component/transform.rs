@@ -5555,7 +5555,10 @@ pub fn transform_angular_file(
             .collect();
         for declaration in &mut result.dts_declarations {
             for (alias, module) in &module_by_alias {
-                if declaration.members.contains(&format!("{alias}.")) {
+                // `i1.Dep`, or `i1["s-dir"]` for an export named by a string.
+                if declaration.members.contains(&format!("{alias}."))
+                    || declaration.members.contains(&format!("{alias}["))
+                {
                     declaration.namespace_imports.insert(alias.clone(), module.clone());
                 }
             }
