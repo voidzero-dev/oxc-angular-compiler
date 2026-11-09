@@ -118,6 +118,55 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(code).toMatch(/ɵɵsyntheticHostListener\("@fade\.done",/)
   })
 
+  it('orders a legacy trigger with the DOM properties', async () => {
+    const code = await link(
+      `
+        import { Directive } from '@angular/core';
+        @Directive({
+          selector: '[d]',
+          host: {
+            '[id]': 'x',
+            '[attr.aria-label]': 'y',
+            '[style.height.px]': 'h',
+            '[@fade]': 's',
+            '[class.active]': 'a',
+          },
+        })
+        export class D {}
+      `,
+      linker,
+    )
+    const at = (re: RegExp) => code.search(re)
+    const order = [
+      at(/ɵɵdomProperty\("id",\s*ctx\.x\)/),
+      at(/ɵɵsyntheticHostProperty\("@fade",\s*ctx\.s\)/),
+      at(/ɵɵattribute\("aria-label",\s*ctx\.y\)/),
+      at(/ɵɵstyleProp\("height",\s*ctx\.h,\s*"px"\)/),
+      at(/ɵɵclassProp\("active",\s*ctx\.a\)/),
+    ]
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
+
+  it('binds animate.enter / animate.leave properties as callbacks', async () => {
+    const code = await link(
+      `
+        import { Directive, HostBinding } from '@angular/core';
+        @Directive({ selector: '[d]', host: { '[animate.enter]': 'x' } })
+        export class D {
+          @HostBinding('animate.leave') y = 'out';
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(
+      /ɵɵanimateEnter\(function D_HostBindings_animateenter_cb\(\) \{\s*return ctx\.x;\s*\}\)/,
+    )
+    expect(code).toMatch(/\(function D_HostBindings_animateleave_cb\(\) \{\s*return ctx\.y;\s*\}\)/)
+    expect(code).not.toMatch(/domProperty\("animate\./)
+    expect(code).not.toMatch(/hostVars/)
+  })
+
   it('strips only the outer brackets of a host key', async () => {
     // ngtsc keeps `[y]` / `(z)` as the name, and the linker binds it as is.
     const code = await link(

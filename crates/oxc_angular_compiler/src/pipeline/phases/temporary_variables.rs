@@ -140,7 +140,7 @@ fn generate_temporaries_for_create<'a>(
 
         op_count += 1;
 
-        // Recursively process handler_ops for Listener, AnimationListener, and TwoWayListener.
+        // Recursively process handler_ops for Listener, AnimationListener, Animation and TwoWayListener.
         // This matches TypeScript's behavior where generateTemporaries is called recursively
         // for nested ops lists and the results are prepended to those lists.
         match op {
@@ -161,6 +161,12 @@ fn generate_temporaries_for_create<'a>(
                 let mut handler_stmts =
                     generate_temporaries_for_handler_ops(&mut listener.handler_ops, &allocator);
                 prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, &allocator);
+            }
+            // Angular temporary_variables.ts also recurses into `Animation` handler ops.
+            CreateOp::Animation(animation) => {
+                let mut handler_stmts =
+                    generate_temporaries_for_handler_ops(&mut animation.handler_ops, &allocator);
+                prepend_update_ops(&mut animation.handler_ops, &mut handler_stmts, &allocator);
             }
             CreateOp::TwoWayListener(listener) => {
                 let mut handler_stmts =

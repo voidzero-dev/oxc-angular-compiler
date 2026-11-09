@@ -1891,6 +1891,34 @@ fn reify_host_create_op<'a>(
             );
             Some(create_animation_string_stmt(allocator, core_namespace, anim.animation_kind, expr))
         }
+        CreateOp::Animation(anim) => {
+            // Emit ɵɵanimateEnter / ɵɵanimateLeave with a callback for `[animate.*]`
+            // host bindings (Angular reify.ts: `ng.animation(op.animationKind, ...)`).
+            let mut handler_stmts = OxcVec::new_in(&allocator);
+            for handler_op in anim.handler_ops.iter() {
+                // Host bindings use Full mode (not DomOnly)
+                if let Some(stmt) = reify_update_op(
+                    &allocator,
+                    core_namespace,
+                    handler_op,
+                    expressions,
+                    root_xref,
+                    TemplateCompilationMode::Full,
+                    diagnostics,
+                    supports_value_interpolation,
+                    supports_dom_property,
+                ) {
+                    handler_stmts.push(stmt);
+                }
+            }
+            Some(create_animation_op_stmt(
+                &allocator,
+                core_namespace,
+                anim.animation_kind,
+                handler_stmts,
+                anim.handler_fn_name.as_ref(),
+            ))
+        }
         // ExtractedAttribute ops are handled separately for hostAttrs
         CreateOp::ExtractedAttribute(_) => None,
         // Other create ops are not relevant for host bindings

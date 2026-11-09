@@ -21,11 +21,11 @@ mod metadata;
 mod property_decorators;
 mod query;
 
-pub(crate) use compiler::create_host_directives_feature_arg;
 pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
+pub(crate) use compiler::{create_host_directives_feature_arg, parse_host_property_name};
 pub(crate) use decorator::evaluate_host_directives;
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{

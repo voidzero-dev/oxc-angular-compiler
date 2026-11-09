@@ -161,4 +161,79 @@ export class SlideDirective {
     `.trim(),
     expectedFeatures: ['ɵɵsyntheticHostProperty'],
   },
+  {
+    name: 'animation-host-trigger-ordering',
+    category: 'animations',
+    description: 'Host trigger binding sorted with the DOM properties',
+    className: 'HostTriggerOrderComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-host-trigger-order',
+  standalone: true,
+  template: '',
+  host: {
+    '[id]': 'id',
+    '[attr.aria-label]': 'label',
+    '[style.height.px]': 'height',
+    '[@fade]': 'state',
+    '[class.active]': 'active',
+  },
+})
+export class HostTriggerOrderComponent {
+  id = 'x';
+  label = 'y';
+  height = 1;
+  state = 'on';
+  active = true;
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵsyntheticHostProperty', 'ɵɵdomProperty'],
+  },
+  {
+    name: 'animation-host-property-animate-enter',
+    category: 'animations',
+    description: 'animate.enter property binding in host metadata',
+    className: 'HostAnimateEnterDirective',
+    type: 'full-transform',
+    sourceCode: `
+import { Directive } from '@angular/core';
+
+@Directive({
+  selector: '[appAnimateEnter]',
+  host: {
+    '[animate.enter]': 'enterClass',
+    '[attr.animate.leave]': 'leaveClass',
+  },
+})
+export class HostAnimateEnterDirective {
+  enterClass = 'fade-in';
+  leaveClass = 'fade-out';
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵanimateEnter', 'ɵɵanimateLeave'],
+  },
+  {
+    name: 'animation-host-property-animate-leave-decorator',
+    category: 'animations',
+    description: '@HostBinding animate.leave chained with a static animate.leave attribute',
+    className: 'HostAnimateLeaveDirective',
+    type: 'full-transform',
+    sourceCode: `
+import { Directive, HostBinding } from '@angular/core';
+
+@Directive({
+  selector: '[appAnimateLeave]',
+  host: { 'animate.leave': 'out' },
+})
+export class HostAnimateLeaveDirective {
+  @HostBinding('animate.leave') get leave() {
+    return 'fade-out';
+  }
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵanimateLeave'],
+  },
 ]
