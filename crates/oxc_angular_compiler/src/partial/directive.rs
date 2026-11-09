@@ -431,7 +431,9 @@ fn compile_host_metadata<'a>(
 /// `attr.aria-label`, `style.height.px`, …) without the `(…)` / `[…]` of the
 /// `host:` entry, like ngtsc's `parseHostBindings`. The linker parses that
 /// name the way a full compilation parses the key after removing its brackets.
-fn host_binding_map<'a>(
+///
+/// `pub(crate)`: the component partial emitter reuses this.
+pub(crate) fn host_binding_map<'a>(
     allocator: &'a Allocator,
     pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
     open: char,

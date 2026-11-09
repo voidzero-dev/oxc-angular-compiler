@@ -72,9 +72,10 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     )
     expect(code).toMatch(/ɵɵlistener\("click",\s*function D_click_HostBindingHandler/)
     expect(code).toMatch(/\("keydown\.shift\.tab",\s*function D_keydown_shift_tab_/)
-    expect(code).toMatch(/\("resize",\s*function D_resize_[^]*?\},\s*i0\.ɵɵresolveWindow\)/)
+    // A handler body has no `}`, so `[^}]*` stays within one listener.
+    expect(code).toMatch(/\("resize",\s*function D_resize_[^}]*\},\s*i0\.ɵɵresolveWindow\)/)
     expect(code).toMatch(
-      /\("keydown\.escape",\s*function D_keydown_escape_[^]*?\},\s*i0\.ɵɵresolveDocument\)/,
+      /\("keydown\.escape",\s*function D_keydown_escape_[^}]*\},\s*i0\.ɵɵresolveDocument\)/,
     )
   })
 
@@ -115,6 +116,20 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     )
     expect(code).toMatch(/ɵɵsyntheticHostProperty\("@fade",\s*ctx\.state\)/)
     expect(code).toMatch(/ɵɵsyntheticHostListener\("@fade\.done",/)
+  })
+
+  it('strips only the outer brackets of a host key', async () => {
+    // ngtsc keeps `[y]` / `(z)` as the name, and the linker binds it as is.
+    const code = await link(
+      `
+        import { Directive } from '@angular/core';
+        @Directive({ selector: '[d]', host: { '[[y]]': 'y', '((z))': 'z()' } })
+        export class D {}
+      `,
+      linker,
+    )
+    expect(code).toMatch(/ɵɵdomProperty\("\[y\]",\s*ctx\.y\)/)
+    expect(code).toMatch(/ɵɵlistener\("\(z\)",\s*function D__z__HostBindingHandler/)
   })
 
   it('binds @HostBinding and @HostListener members of a component', async () => {

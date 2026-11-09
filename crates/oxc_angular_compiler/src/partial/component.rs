@@ -42,7 +42,7 @@ use crate::component::{
     HostMetadata, ImportRef, NamespaceRegistry, TemplateDependency, TemplateDependencyKind,
     ViewEncapsulation,
 };
-use crate::directive::{R3InputMetadata, R3QueryMetadata, strip_host_key};
+use crate::directive::{R3InputMetadata, R3QueryMetadata};
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata,
@@ -575,8 +575,8 @@ fn create_outputs_map<'a>(
 /// Component carries host bindings as raw `(key, value)` string pairs
 /// where the key still includes any binding syntax (`[class.x]`,
 /// `(click)`, …). The declaration keys `listeners` / `properties` by the
-/// bare name (see `host_binding_map`), which the linker parses into Ivy host
-/// instructions.
+/// bare name (see `super::directive::host_binding_map`), which the linker
+/// parses into Ivy host instructions.
 fn compile_host_metadata<'a>(
     allocator: &'a Allocator,
     host: &HostMetadata<'a>,
@@ -610,14 +610,14 @@ fn compile_host_metadata<'a>(
     if !host.listeners.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("listeners"),
-            host_binding_map(allocator, &host.listeners, '(', ')'),
+            super::directive::host_binding_map(allocator, &host.listeners, '(', ')'),
             false,
         ));
     }
     if !host.properties.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("properties"),
-            host_binding_map(allocator, &host.properties, '[', ']'),
+            super::directive::host_binding_map(allocator, &host.properties, '[', ']'),
             false,
         ));
     }
@@ -640,33 +640,6 @@ fn compile_host_metadata<'a>(
         LiteralMapExpr { entries, source_span: None },
         &allocator,
     )))
-}
-
-/// The `listeners` / `properties` map of the partial `host`, keyed by the bare
-/// event / property name (`click`, `keydown.enter`, `window:resize`,
-/// `attr.aria-label`, `style.height.px`, …) without the `(…)` / `[…]` of the
-/// `host:` entry, like ngtsc's `parseHostBindings`. The linker parses that
-/// name the way a full compilation parses the key after removing its brackets.
-fn host_binding_map<'a>(
-    allocator: &'a Allocator,
-    pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
-    open: char,
-    close: char,
-) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(pairs.len(), &allocator);
-    for (key, value) in pairs {
-        let name = strip_host_key(key.as_str(), open, close);
-        let quoted = is_unsafe_object_key(name);
-        entries.push(LiteralMapEntry::new(
-            Ident::from(name),
-            string_literal_owned(allocator, value.clone()),
-            quoted,
-        ));
-    }
-    OutputExpression::LiteralMap(Box::new_in(
-        LiteralMapExpr { entries, source_span: None },
-        &allocator,
-    ))
 }
 
 // ---- host directives ------------------------------------------------------

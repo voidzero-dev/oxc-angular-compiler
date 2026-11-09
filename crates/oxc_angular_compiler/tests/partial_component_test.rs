@@ -243,6 +243,39 @@ export class RtComponent {
 }
 
 #[test]
+fn component_host_bindings_keyed_by_bare_name() {
+    // Like ngtsc's `parseHostBindings`, the declaration keys `listeners` /
+    // `properties` by the `host:` key without its `(…)` / `[…]` (#680), for
+    // both `host:` entries and `@HostBinding` / `@HostListener` members.
+    let allocator = Allocator::default();
+    let source = "import { Component, HostBinding, HostListener } from '@angular/core';
+
+@Component({
+  selector: 'app-host',
+  template: '',
+  host: { '(window:resize)': 'onResize()', '[attr.aria-label]': 'label' },
+})
+export class HostComponent {
+  label = '';
+  @HostBinding('style.height.px') height = 1;
+  @HostListener('keydown.enter') onEnter() {}
+  onResize() {}
+}
+";
+    // The emitter wraps long lines.
+    let code: String =
+        compile_partial(&allocator, "host.component.ts", source).split_whitespace().collect();
+    assert!(
+        code.contains(r#"listeners:{"window:resize":"onResize()","keydown.enter":"onEnter()"}"#),
+        "expected listeners keyed by event name, got:\n{code}"
+    );
+    assert!(
+        code.contains(r#"properties:{"attr.aria-label":"label","style.height.px":"height"}"#),
+        "expected properties keyed by property name, got:\n{code}"
+    );
+}
+
+#[test]
 fn full_mode_component_unchanged() {
     let allocator = Allocator::default();
     let source = "import { Component } from '@angular/core';
