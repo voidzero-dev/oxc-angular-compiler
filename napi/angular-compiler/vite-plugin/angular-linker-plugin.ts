@@ -20,7 +20,8 @@ import type { Plugin, ResolvedConfig } from 'vite'
  * 1. During dependency optimization (Rolldown pre-bundling) via a Rolldown load plugin
  * 2. During Vite's transform pipeline for non-optimized node_modules files
  *
- * The linker automatically skips any package listed in `optimizeDeps.exclude`
+ * In dev, the linker skips packages in that environment's `optimizeDeps.exclude`;
+ * builds link every package.
  */
 
 // No `ɵɵ` prefix: minifiers may write it as `\u0275` escapes.
@@ -143,7 +144,7 @@ export function angularLinkerPlugin({
     name: '@oxc-angular/vite-linker',
 
     configResolved(config: ResolvedConfig) {
-      // Capture optimizeDeps.exclude so we can skip the linker for those packages.
+      // The client's list, for the optimizer load hook (it only prebundles the client).
       optimizeDepsExclude = config.optimizeDeps?.exclude ?? []
     },
 
@@ -210,8 +211,18 @@ export function angularLinkerPlugin({
         id: NODE_MODULES_JS_REGEX,
       },
       async handler(code, id) {
-        // early skip for packages in optimizeDeps.exclude
-        if (createExcludeFilter(optimizeDepsExclude)(id)) return
+        // Only the dev server honours `optimizeDeps.exclude` (#210), with each
+        // environment's own list: the top-level one is the client's. Builds link
+        // every package, like the Angular CLI (@angular/build
+        // src/tools/javascript-transformer/javascript-transformer.ts `requiresLinking`
+        // checks no exclude list).
+        const env = this.environment
+        if (
+          env?.mode === 'dev' &&
+          createExcludeFilter(env.config.optimizeDeps?.exclude ?? [])(id)
+        ) {
+          return
+        }
 
         // Precise extension check (covers .js, .mjs, .cjs with optional ?v=… query)
         if (!JS_EXT_REGEX.test(id)) {

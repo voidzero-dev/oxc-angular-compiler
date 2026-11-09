@@ -9,7 +9,7 @@
  * 1. Detects server builds (environments whose `consumer` is `server`, which
  *    includes the `ssr` environment `vite build --ssr` builds)
  * 2. Auto-injects manifest setup into files that use AngularNodeAppEngine/AngularAppEngine
- * 3. Provides the index.html as a server asset for SSR rendering
+ * 3. Provides the client's built index.html as a server asset for SSR rendering
  *
  * @see https://github.com/voidzero-dev/oxc-angular-compiler/issues/60
  */
@@ -17,7 +17,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 
-import type { Plugin, ResolvedConfig } from 'vite'
+import type { Plugin, ResolvedConfig, Rolldown } from 'vite'
 import { normalizePath } from 'vite'
 
 /**
@@ -116,10 +116,15 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
   let resolvedConfig: ResolvedConfig
   let ssrEntryPath: string
   let indexHtmlContent: string | undefined
+  // The client environment's built index.html, when it was built first in this run.
+  let clientIndexHtml: Rolldown.OutputAsset | undefined
 
   return {
     name: '@oxc-angular/vite-ssr-manifest',
     apply: 'build',
+    // One instance for all environments (`vite build --app`), so the server
+    // build sees the client's index.html.
+    sharedDuringBuild: true,
 
     configResolved(config) {
       resolvedConfig = config
@@ -132,14 +137,62 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         : resolve(workspaceRoot, 'src/main.server.ts')
     },
 
+    generateBundle: {
+      // 'post': vite:build-html adds index.html to the bundle in its own generateBundle.
+      order: 'post',
+      handler(_, bundle) {
+        if (this.environment?.config.consumer !== 'client') return
+        const asset = bundle['index.html']
+        if (asset?.type === 'asset') clientIndexHtml = asset
+      },
+    },
+
     async buildStart() {
       // `environment` is only set by Vite, not by plain rolldown / tsdown.
       if (this.environment?.config.consumer !== 'server') return
 
-      // Read index.html for the server asset
-      const indexHtmlPath = resolve(resolvedConfig.root, 'index.html')
+      // Like the Angular CLI, serve the built browser page, which loads the
+      // hashed bundles, not the source one (@angular/build
+      // src/utils/index-file/index-html-generator.ts builds index.server.html
+      // from the augmented page).
+      const config = this.environment.config
+      if (clientIndexHtml) {
+        const { source } = clientIndexHtml
+        indexHtmlContent = typeof source === 'string' ? source : Buffer.from(source).toString()
+        return
+      }
+
+      // A client built by an earlier run. buildStart runs before Vite empties outDir.
+      const builder = !!this.environment.getTopLevelConfig?.().builder
+      const clientOutDir = config.environments?.client?.build?.outDir
+      const builtPath = clientOutDir && resolve(config.root, clientOutDir, 'index.html')
+      if (builtPath) {
+        try {
+          indexHtmlContent = await readFile(builtPath, 'utf-8')
+          if (builder) {
+            this.warn(
+              `the client is built after this server environment, so ${builtPath} ` +
+                'comes from an earlier build and may be stale. List `client` first in ' +
+                '`environments`.',
+            )
+          }
+          return
+        } catch {
+          // Not built yet.
+        }
+      }
+
+      const sourcePath = resolve(config.root, 'index.html')
       try {
-        indexHtmlContent = await readFile(indexHtmlPath, 'utf-8')
+        indexHtmlContent = await readFile(sourcePath, 'utf-8')
+        this.warn(
+          `built client index.html not found${builtPath ? ` at ${builtPath}` : ''}; ` +
+            `embedding the source ${sourcePath}, so SSR pages will load the source entry. ` +
+            (builder
+              ? 'List `client` first in `environments`.'
+              : 'Build the client first (`vite build --app`) or set ' +
+                '`environments.client.build.outDir`.'),
+        )
       } catch {
         // index.html not found, provide a minimal fallback
         indexHtmlContent =
