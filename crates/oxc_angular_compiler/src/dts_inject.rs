@@ -511,14 +511,80 @@ fn resolve_path(path: &str) -> String {
 /// same member twice. A declaration whose class isn't found, whose members
 /// don't parse, or a file the parser rejects is silently skipped.
 pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaration]) -> String {
+    apply_splices(source, &merge_splices(plan_splices(source, declarations)))
+}
+
+/// The output of [`inject_dts_declarations_with_map`] and
+/// [`inject_dts_declarations_with_identity_map`].
+pub struct DtsInjectResult {
+    /// The `.d.ts` with the members and imports injected.
+    pub code: String,
+    /// The source map `mappings` for `code`, or `None` when there is none
+    /// to give (see each function).
+    pub mappings: Option<String>,
+}
+
+/// [`inject_dts_declarations`], and also shift the `mappings` of the
+/// `.d.ts`'s existing declaration map so it fits the new code.
+///
+/// Like ngtsc, which adds the members in an `afterDeclarations` transform
+/// (ngtsc/transform/src/declaration.ts) so TS writes the `.d.ts` and its map
+/// together: original tokens keep their mapping, injected text has none.
+/// One gap: ngtsc maps the class name inside injected members
+/// (`ɵɵFactoryDeclaration<App, …>`); here it stays unmapped.
+///
+/// Nothing to inject gives `mappings` back as is. Bad VLQ gives `None`.
+pub fn inject_dts_declarations_with_map(
+    source: &str,
+    declarations: &[DtsInjectDeclaration],
+    mappings: Option<&str>,
+) -> DtsInjectResult {
+    let splices = plan_splices(source, declarations);
+    if splices.is_empty() {
+        return DtsInjectResult {
+            code: source.to_string(),
+            mappings: mappings.map(str::to_string),
+        };
+    }
+    let splices = merge_splices(splices);
+    DtsInjectResult {
+        code: apply_splices(source, &splices),
+        mappings: mappings.and_then(|m| shift_mappings(source, &splices, m)),
+    }
+}
+
+/// [`inject_dts_declarations`], plus `mappings` from the new code back to
+/// `source` (source index 0), e.g. for a bundler `transform` hook.
+///
+/// Every identifier run and punctuation char of `source` gets a segment;
+/// injected text is unmapped. Nothing to inject gives `mappings: None`
+/// (the code is unchanged).
+pub fn inject_dts_declarations_with_identity_map(
+    source: &str,
+    declarations: &[DtsInjectDeclaration],
+) -> DtsInjectResult {
+    let splices = plan_splices(source, declarations);
+    if splices.is_empty() {
+        return DtsInjectResult { code: source.to_string(), mappings: None };
+    }
+    let splices = merge_splices(splices);
+    DtsInjectResult {
+        code: apply_splices(source, &splices),
+        mappings: shift_mappings(source, &splices, &identity_mappings(source)),
+    }
+}
+
+/// The insertions [`inject_dts_declarations`] makes, as `(byte position,
+/// text)` in the order they were planned. Empty when nothing is injected.
+fn plan_splices(source: &str, declarations: &[DtsInjectDeclaration]) -> Vec<(usize, String)> {
     if declarations.is_empty() {
-        return source.to_string();
+        return vec![];
     }
 
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, source, SourceType::d_ts()).parse();
     if !ret.diagnostics.is_empty() {
-        return source.to_string();
+        return vec![];
     }
     let program = &ret.program;
 
@@ -569,7 +635,7 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
         alias
     };
 
-    let mut splices: Vec<(usize, usize, String)> = Vec::new();
+    let mut splices: Vec<(usize, String)> = Vec::new();
 
     for declaration in declarations {
         let resolve = resolve_for(declaration.source_file.as_deref());
@@ -627,11 +693,11 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
             if needs_leading_nl { "\n" } else { "" },
             lines.iter().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n")
         );
-        splices.push((insert_at, insert_at, text));
+        splices.push((insert_at, text));
     }
 
     if splices.is_empty() {
-        return source.to_string();
+        return splices;
     }
 
     // Emit an import for every canonical module the file doesn't already
@@ -670,7 +736,6 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
             let at_newline = source.as_bytes().get(position) == Some(&b'\n');
             splices.push((
                 position,
-                position,
                 format!(
                     "\n{text}{}",
                     if at_newline || position == source.len() { "" } else { "\n" }
@@ -680,10 +745,9 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
             // Before the first statement keeps leading comments and
             // triple-slash reference directives at the top of the file.
             let start = first.span().start as usize;
-            splices.push((start, start, format!("{text}\n")));
+            splices.push((start, format!("{text}\n")));
         } else {
             splices.push((
-                source.len(),
                 source.len(),
                 format!(
                     "{}{text}\n",
@@ -693,10 +757,300 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
         }
     }
 
-    let mut output = source.to_string();
-    splices.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
-    for (start, end, text) in splices {
-        output.replace_range(start..end, &text);
+    splices
+}
+
+/// Sort splices by position and join the texts at one position into one.
+/// There the later-planned text goes first, as the old stable
+/// reverse-order apply did.
+fn merge_splices(splices: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut indexed: Vec<_> = splices.into_iter().enumerate().collect();
+    indexed.sort_by_key(|(index, (pos, _))| (*pos, std::cmp::Reverse(*index)));
+    let mut merged: Vec<(usize, String)> = Vec::new();
+    for (_, (pos, text)) in indexed {
+        match merged.last_mut() {
+            Some((last, joined)) if *last == pos => joined.push_str(&text),
+            _ => merged.push((pos, text)),
+        }
+    }
+    merged
+}
+
+/// Insert merged splices (see [`merge_splices`]) into `source`.
+fn apply_splices(source: &str, splices: &[(usize, String)]) -> String {
+    let added: usize = splices.iter().map(|(_, text)| text.len()).sum();
+    let mut output = String::with_capacity(source.len() + added);
+    let mut last = 0;
+    for (pos, text) in splices {
+        output.push_str(&source[last..*pos]);
+        output.push_str(text);
+        last = *pos;
+    }
+    output.push_str(&source[last..]);
+    output
+}
+
+/// One splice in source-map terms of the original source: lines split on
+/// `\n` only (`\r` is a column char), columns in UTF-16 units.
+struct SpliceShift {
+    line: usize,
+    col: i64,
+    /// `\n`s in the inserted text.
+    newlines: usize,
+    /// UTF-16 length of the inserted text's last line.
+    last_len: i64,
+    /// The text's first line is not empty, so it sits after any code before
+    /// it on that line.
+    first_nonempty: bool,
+}
+
+fn utf16_len(text: &str) -> i64 {
+    text.encode_utf16().count() as i64
+}
+
+/// Move the generated positions of `mappings`, written for `source`, so
+/// they fit `source` with `splices` (merged, see [`merge_splices`])
+/// inserted. Fields 2-5 of a segment are deltas over the whole map and the
+/// segment order stays, so they are copied as they are. Injected text is
+/// unmapped: where it starts after mapped code on a line, a 1-field segment
+/// ends that code's mapping. `None` on bad VLQ.
+fn shift_mappings(source: &str, splices: &[(usize, String)], mappings: &str) -> Option<String> {
+    let shifts: Vec<SpliceShift> = splices
+        .iter()
+        .map(|(pos, text)| {
+            let before = &source[..*pos];
+            let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+            let last_line_start = text.rfind('\n').map_or(0, |i| i + 1);
+            SpliceShift {
+                line: before.bytes().filter(|&b| b == b'\n').count(),
+                col: utf16_len(&before[line_start..]),
+                newlines: text.bytes().filter(|&b| b == b'\n').count(),
+                last_len: utf16_len(&text[last_line_start..]),
+                first_nonempty: !text.starts_with('\n'),
+            }
+        })
+        .collect();
+    // `newlines_before[k]`: lines added by `shifts[..k]`.
+    let mut newlines_before = vec![0];
+    for shift in &shifts {
+        newlines_before.push(newlines_before[newlines_before.len() - 1] + shift.newlines);
+    }
+    // Where an original `(line, col)` lands. A splice right at `col` moves
+    // it when `at_col_moves` (the text goes in before that char).
+    let shift = |line: usize, col: i64, at_col_moves: bool| -> (usize, i64) {
+        let first = shifts.partition_point(|s| s.line < line);
+        let (mut new_line, mut new_col) = (line + newlines_before[first], col);
+        for s in shifts[first..].iter().take_while(|s| s.line == line) {
+            if s.col > col || (s.col == col && !at_col_moves) {
+                break;
+            }
+            new_line += s.newlines;
+            new_col =
+                if s.newlines > 0 { s.last_len + (col - s.col) } else { new_col + s.last_len };
+        }
+        (new_line, new_col)
+    };
+
+    // Per new line: (generated column, raw fields 2-5, `None` for 1-field).
+    let mut lines: Vec<Vec<(i64, Option<&str>)>> = Vec::new();
+    let mut line_count = 0;
+    for (line, text) in mappings.split(';').enumerate() {
+        line_count = line + 1;
+        let mut col = 0;
+        for segment in text.split(',').filter(|segment| !segment.is_empty()) {
+            let bytes = segment.as_bytes();
+            let mut i = 0;
+            col += vlq_decode(bytes, &mut i)?;
+            if col < 0 {
+                return None;
+            }
+            let rest = &segment[i..];
+            while i < bytes.len() {
+                vlq_decode(bytes, &mut i)?;
+            }
+            let (new_line, new_col) = shift(line, col, true);
+            if lines.len() <= new_line {
+                lines.resize_with(new_line + 1, Vec::new);
+            }
+            lines[new_line].push((new_col, (!rest.is_empty()).then_some(rest)));
+        }
+    }
+    let line_count = shift(line_count - 1, 0, false).0 + 1;
+    if lines.len() < line_count {
+        lines.resize_with(line_count, Vec::new);
+    }
+
+    for s in shifts.iter().filter(|s| s.first_nonempty) {
+        let (line, col) = shift(s.line, s.col, false);
+        let Some(segments) = lines.get_mut(line) else { continue };
+        let at = segments.partition_point(|(segment_col, _)| *segment_col < col);
+        if at > 0 && segments[at - 1].1.is_some() {
+            segments.insert(at, (col, None));
+        }
+    }
+
+    let mut output = String::with_capacity(mappings.len() + lines.len());
+    for (index, segments) in lines.iter().enumerate() {
+        if index > 0 {
+            output.push(';');
+        }
+        let mut prev = 0;
+        for (segment_index, (col, rest)) in segments.iter().enumerate() {
+            if segment_index > 0 {
+                output.push(',');
+            }
+            vlq_encode(&mut output, col - prev);
+            prev = *col;
+            if let Some(rest) = rest {
+                output.push_str(rest);
+            }
+        }
+    }
+    Some(output)
+}
+
+/// A map of `source` onto itself (source index 0): a segment at the start
+/// of every identifier run and at every other non-space char.
+fn identity_mappings(source: &str) -> String {
+    let mut output = String::new();
+    let (mut prev_line, mut prev_col) = (0, 0);
+    for (line, text) in source.split('\n').enumerate() {
+        if line > 0 {
+            output.push(';');
+        }
+        let line = line as i64;
+        let (mut col, mut generated_prev, mut in_word, mut first) = (0, 0, false, true);
+        for ch in text.chars() {
+            let word = ch.is_alphanumeric() || ch == '_' || ch == '$';
+            if !(ch.is_whitespace() || (word && in_word)) {
+                if !first {
+                    output.push(',');
+                }
+                first = false;
+                vlq_encode(&mut output, col - generated_prev);
+                vlq_encode(&mut output, 0);
+                vlq_encode(&mut output, line - prev_line);
+                vlq_encode(&mut output, col - prev_col);
+                (generated_prev, prev_line, prev_col) = (col, line, col);
+            }
+            in_word = word;
+            col += ch.len_utf16() as i64;
+        }
     }
     output
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Read one base64 VLQ value at `bytes[*i..]`.
+fn vlq_decode(bytes: &[u8], i: &mut usize) -> Option<i64> {
+    let mut value: i64 = 0;
+    let mut shift = 0;
+    loop {
+        let byte = *bytes.get(*i)?;
+        *i += 1;
+        let digit = BASE64.iter().position(|&b| b == byte)? as i64;
+        if shift > 55 {
+            return None;
+        }
+        value |= (digit & 31) << shift;
+        if digit & 32 == 0 {
+            break;
+        }
+        shift += 5;
+    }
+    Some(if value & 1 == 1 { -(value >> 1) } else { value >> 1 })
+}
+
+fn vlq_encode(output: &mut String, value: i64) {
+    let mut rest = if value < 0 { (value.unsigned_abs() << 1) | 1 } else { (value as u64) << 1 };
+    loop {
+        let mut digit = (rest & 31) as usize;
+        rest >>= 5;
+        if rest > 0 {
+            digit |= 32;
+        }
+        output.push(BASE64[digit] as char);
+        if rest == 0 {
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The apply used before splices were merged: stable sort by reverse
+    /// position, then insert one by one.
+    fn old_apply(source: &str, splices: &[(usize, String)]) -> String {
+        let mut splices = splices.to_vec();
+        splices.sort_by_key(|(pos, _)| std::cmp::Reverse(*pos));
+        let mut output = source.to_string();
+        for (pos, text) in splices {
+            output.insert_str(pos, &text);
+        }
+        output
+    }
+
+    #[test]
+    fn merge_keeps_the_old_order_at_one_position() {
+        let source = "abc";
+        let splices: Vec<(usize, String)> = vec![
+            (1, "1".into()),
+            (3, "2".into()),
+            (1, "3".into()),
+            (0, "4".into()),
+            (1, "5".into()),
+        ];
+        assert_eq!(
+            apply_splices(source, &merge_splices(splices.clone())),
+            old_apply(source, &splices)
+        );
+
+        // The same class twice gives two splices at one position.
+        let declaration = || DtsInjectDeclaration {
+            class_name: "X".into(),
+            members: "static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;".into(),
+            namespace_imports: [("i0".to_string(), CORE.to_string())].into_iter().collect(),
+            source_file: None,
+        };
+        let source = "export declare class X {}\n";
+        let splices = plan_splices(source, &[declaration(), declaration()]);
+        assert_eq!(splices.len(), 3);
+        assert_eq!(
+            apply_splices(source, &merge_splices(splices.clone())),
+            old_apply(source, &splices)
+        );
+    }
+
+    #[test]
+    fn shifts_by_the_utf16_length_of_injected_text() {
+        // `ɵ` is 1 UTF-16 unit (2 bytes), `𝒳` is 2 (4 bytes); `a` at 0,
+        // `;` at 1, `b` at 2.
+        let source = "a;b";
+        let splices = vec![(1, "ɵ𝒳".to_string())];
+        assert_eq!(
+            shift_mappings(source, &splices, "AAAA,CAAC,CAAC").as_deref(),
+            Some("AAAA,C,GAAC,CAAC")
+        );
+        // Text that ends a line: `;` goes to col 3 of the next line.
+        let splices = vec![(1, "\nɵ𝒳".to_string())];
+        assert_eq!(
+            shift_mappings(source, &splices, "AAAA,CAAC,CAAC").as_deref(),
+            Some("AAAA;GAAC,CAAC")
+        );
+    }
+
+    #[test]
+    fn shifts_through_several_splices_on_one_line() {
+        // `x` before `b`, a line break before `c`: `a` stays, `b` goes from
+        // 2 to 3 (a 1-field segment at 2), `c` to the next line at col 0.
+        let source = "a b c";
+        let splices = vec![(2, "x".to_string()), (4, "\n".to_string())];
+        assert_eq!(
+            shift_mappings(source, &splices, "AAAA,EAAE,EAAE").as_deref(),
+            Some("AAAA,E,CAAE;AAAE")
+        );
+    }
 }

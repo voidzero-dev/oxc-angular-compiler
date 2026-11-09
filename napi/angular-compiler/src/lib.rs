@@ -513,7 +513,13 @@ pub struct DtsInjectDeclaration {
 /// full contract.
 #[napi]
 pub fn inject_dts_declarations(source: String, declarations: Vec<DtsInjectDeclaration>) -> String {
-    let declarations: Vec<oxc_angular_compiler::DtsInjectDeclaration> = declarations
+    oxc_angular_compiler::inject_dts_declarations(&source, &to_core_dts_declarations(declarations))
+}
+
+fn to_core_dts_declarations(
+    declarations: Vec<DtsInjectDeclaration>,
+) -> Vec<oxc_angular_compiler::DtsInjectDeclaration> {
+    declarations
         .into_iter()
         .map(|d| oxc_angular_compiler::DtsInjectDeclaration {
             class_name: d.class_name,
@@ -521,8 +527,50 @@ pub fn inject_dts_declarations(source: String, declarations: Vec<DtsInjectDeclar
             namespace_imports: d.namespace_imports.unwrap_or_default().into_iter().collect(),
             source_file: d.source_file,
         })
-        .collect();
-    oxc_angular_compiler::inject_dts_declarations(&source, &declarations)
+        .collect()
+}
+
+/// The result of [`inject_dts_declarations_with_map`] and
+/// [`inject_dts_declarations_with_identity_map`].
+#[napi(object)]
+pub struct DtsInjectResult {
+    /// The `.d.ts` with the members and imports injected.
+    pub code: String,
+    /// The source map `mappings` for `code`, if any.
+    pub mappings: Option<String>,
+}
+
+/// [`inject_dts_declarations`], and also shift the `mappings` of the file's
+/// existing declaration map to fit the new code. Original tokens keep their
+/// mapping, injected text is unmapped. Nothing injected gives `mappings`
+/// back as is; bad VLQ gives no `mappings`.
+#[napi]
+pub fn inject_dts_declarations_with_map(
+    source: String,
+    declarations: Vec<DtsInjectDeclaration>,
+    mappings: Option<String>,
+) -> DtsInjectResult {
+    let result = oxc_angular_compiler::inject_dts_declarations_with_map(
+        &source,
+        &to_core_dts_declarations(declarations),
+        mappings.as_deref(),
+    );
+    DtsInjectResult { code: result.code, mappings: result.mappings }
+}
+
+/// [`inject_dts_declarations`], plus `mappings` from the new code back to
+/// `source` (source index 0), e.g. for a bundler `transform` hook. Injected
+/// text is unmapped. Nothing injected gives no `mappings`.
+#[napi]
+pub fn inject_dts_declarations_with_identity_map(
+    source: String,
+    declarations: Vec<DtsInjectDeclaration>,
+) -> DtsInjectResult {
+    let result = oxc_angular_compiler::inject_dts_declarations_with_identity_map(
+        &source,
+        &to_core_dts_declarations(declarations),
+    );
+    DtsInjectResult { code: result.code, mappings: result.mappings }
 }
 
 /// Compile an Angular template to JavaScript.

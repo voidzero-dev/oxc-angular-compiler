@@ -295,16 +295,30 @@ export default defineConfig({
 ```
 
 The plugin does **not** generate the base `.d.ts` itself — a declaration
-generator must produce them in the bundle, as `rolldown-plugin-dts` and
-`tsdown` (`dts: true`) do. The Angular members are then spliced into those
-files during `generateBundle`. The injected members reference `i0` (the
-`@angular/core` namespace), and the plugin adds
-`import * as i0 from "@angular/core";` to any `.d.ts` it augments.
+generator must write them. Like ngtsc, the plugin then adds to each
+declaration file only the members of its own source file (two classes with
+the same name in different files each get their own), adds the namespace
+imports the members use (`import * as i0 from "@angular/core";`, …), and
+keeps the file's declaration map in step. What is covered:
 
-Declarations written outside the bundle are not augmented: `vite-plugin-dts`
-and `tsc` write their files themselves, and tsdown builds the `.d.cts` of a
-`cjs` format in a separate pass without user plugins. Use `format: 'esm'` with
-tsdown.
+| Generator                                                | How                                                                          |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `rolldown-plugin-dts`, tsdown `dts` (`esm` and `cjs`)    | each `.d.ts` module as it loads, before bundling                             |
+| `.d.ts` assets (`@rollup/plugin-typescript`, `emitFile`) | in `generateBundle`, matched to their source by path, as `tsc` lays them out |
+| `vite-plugin-dts` with its default `outDir`              | the files it wrote under the build's output dir, matched by path             |
+
+Not covered:
+
+- declarations written outside the build, such as a `tsc` run of its own, or
+  `vite-plugin-dts` `outDirs` outside `build.outDir`;
+- `vite-plugin-dts` `rollupTypes` bundles, which only get members when their
+  path matches one source file;
+- the `.d.cts` of tsdown when the plugin comes through `fromVite` (such
+  plugins don't get tsdown's `tsdownConfig` hook, which that pass needs).
+
+Files written by another generator (`vite-plugin-dts`) are patched after they
+are written, so a tool that reads them earlier in the same build sees them
+without the members.
 
 ## Vite Plugin Architecture
 

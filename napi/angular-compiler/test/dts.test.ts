@@ -1,8 +1,18 @@
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+
 import type { Plugin } from 'vite'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { angular } from '../vite-plugin/index.js'
-import { injectDtsDeclarations } from '../vite-plugin/utils/dts.js'
+import {
+  dtsSourceCandidates,
+  injectDtsDeclarations,
+  injectDtsDeclarationsWithIdentityMap,
+  injectDtsDeclarationsWithMap,
+  matchDtsSource,
+} from '../vite-plugin/utils/dts.js'
 
 const COMPONENT_SOURCE = `
   import { Component } from '@angular/core';
@@ -471,111 +481,684 @@ describe('injectDtsDeclarations', () => {
   })
 })
 
+describe('injectDtsDeclarationsWithMap (#693)', () => {
+  // From a real rolldown + rolldown-plugin-dts build.
+  const source =
+    'export declare class HelloComponent {\n  name: string;\n}\n' +
+    'export declare class OtherComponent {\n  value: number;\n  greet(): string;\n}\n' +
+    'export declare class EmptyOne {}\n//# sourceMappingURL=index.d.mts.map'
+  const declarations = ['HelloComponent', 'OtherComponent', 'EmptyOne'].map((className) => ({
+    className,
+    members: `static ɵfac: i0.ɵɵFactoryDeclaration<${className}, never>;`,
+  }))
+  const map = {
+    version: 3,
+    file: 'index.d.mts',
+    names: [],
+    sourceRoot: '',
+    sources: ['../src/index.ts'],
+    x_google_ignoreList: [],
+    mappings: 'A,qBAAa;EACX;;qBAGW;EACX;EACA;;qBAEW',
+  }
+
+  it('shifts the mappings and keeps the other map fields', () => {
+    const out = injectDtsDeclarationsWithMap(source, declarations, JSON.stringify(map))
+    expect(out.code).toBe(injectDtsDeclarations(source, declarations))
+    expect(JSON.parse(out.map!)).toEqual({
+      ...map,
+      mappings: ';A,qBAAa;EACX;;;qBAGW;EACX;EACA;;;qBAEW',
+    })
+  })
+
+  it('gives no map for bad map JSON or bad VLQ, but still injects', () => {
+    for (const bad of ['{', '{"mappings":1}', JSON.stringify({ ...map, mappings: '!!' })]) {
+      const out = injectDtsDeclarationsWithMap(source, declarations, bad)
+      expect(out.code).toContain('static ɵfac')
+      expect(out.map).toBeUndefined()
+    }
+    expect(injectDtsDeclarationsWithMap(source, declarations).map).toBeUndefined()
+  })
+
+  it('gives the map back as is when nothing is injected', () => {
+    const json = JSON.stringify(map)
+    const out = injectDtsDeclarationsWithMap(source, [], json)
+    expect(out).toEqual({ code: source, map: json })
+  })
+
+  it('maps the new code back to the source for a transform hook', () => {
+    const src = 'export declare class X {}\n'
+    const out = injectDtsDeclarationsWithIdentityMap(
+      src,
+      [{ className: 'X', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;' }],
+      'x.d.ts',
+    )
+    expect(out.code).toBe(
+      'import * as i0 from "@angular/core";\nexport declare class X {\n' +
+        '    static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;\n}\n',
+    )
+    // Import and member lines unmapped; `export declare class X {` and `}`
+    // keep their original places.
+    expect(JSON.parse(out.map!)).toEqual({
+      version: 3,
+      sources: ['x.d.ts'],
+      names: [],
+      mappings: ';AAAA,OAAO,QAAQ,MAAM,EAAE;;AAAC;',
+    })
+    expect(injectDtsDeclarationsWithIdentityMap(src, []).map).toBeUndefined()
+  })
+})
+
 describe('angular() dts plugin (#104)', () => {
-  function getPlugins(compilationMode: 'full' | 'partial') {
-    const plugins = angular({ compilationMode })
+  function getPlugins(compilationMode: 'full' | 'partial', options: Record<string, unknown> = {}) {
+    const plugins = angular({ compilationMode, ...options })
     const transform = plugins.find((p) => p.name === '@oxc-angular/vite')
     const dts = plugins.find((p) => p.name === '@oxc-angular/vite-dts')
     if (!transform || !dts) throw new Error('missing plugins')
     return { transform, dts }
   }
 
-  async function runTransform(transform: Plugin) {
-    if (!transform.transform || typeof transform.transform === 'function') {
-      throw new Error('expected transform handler')
-    }
-    await transform.transform.handler.call(
-      {
-        error(message: string) {
-          throw new Error(message)
-        },
-        warn() {},
-      } as any,
-      COMPONENT_SOURCE,
-      'lib-button.component.ts',
-    )
+  function hookOf(plugin: Plugin, name: string): (...args: any[]) => any {
+    const hook = (plugin as any)[name]
+    if (!hook) throw new Error(`expected ${name}`)
+    return typeof hook === 'function' ? hook : hook.handler
   }
 
-  function makeBundle(dtsSource: string) {
+  const compileContext = {
+    error(message: string) {
+      throw new Error(message)
+    },
+    warn() {},
+  }
+
+  async function runTransform(
+    transform: Plugin,
+    code = COMPONENT_SOURCE,
+    id = 'lib-button.component.ts',
+  ) {
+    return hookOf(transform, 'transform').call(compileContext as any, code, id)
+  }
+
+  function cardSource(selector: string) {
+    return `
+      import { Component } from '@angular/core';
+      @Component({ selector: '${selector}', template: '' })
+      export class Card {}
+    `
+  }
+
+  // A transform context for the dts hook. `modules` are the ids in the graph;
+  // `load` compiles the ones in `lazy` on demand.
+  function dtsContext(modules: string[], lazy: Record<string, () => Promise<unknown>> = {}) {
+    const loaded: string[] = []
     return {
-      'index.d.ts': {
-        type: 'asset' as const,
-        fileName: 'index.d.ts',
-        source: dtsSource,
+      loaded,
+      getModuleInfo: (id: string) => (modules.includes(id) ? { id } : null),
+      async load({ id }: { id: string }) {
+        loaded.push(id)
+        await lazy[id]?.()
+        return { id }
       },
     }
   }
 
-  async function runGenerateBundle(dts: Plugin, bundle: unknown) {
-    const hook = dts.generateBundle
-    if (!hook) throw new Error('expected generateBundle')
-    const fn = typeof hook === 'function' ? hook : hook.handler
-    await fn.call({} as any, {} as any, bundle as any, false)
+  async function runDtsTransform(dts: Plugin, ctx: object, code: string, id: string) {
+    return hookOf(dts, 'transform').call(ctx as any, code, id)
   }
 
-  it('augments .d.ts assets in partial mode', async () => {
-    const { transform, dts } = getPlugins('partial')
-    await runTransform(transform)
+  async function runGenerateBundle(dts: Plugin, bundle: unknown, moduleIds?: string[]) {
+    const ctx = moduleIds ? { getModuleIds: () => moduleIds[Symbol.iterator]() } : {}
+    await hookOf(dts, 'generateBundle').call(ctx as any, {} as any, bundle as any, false)
+  }
 
-    const bundle = makeBundle('export declare class LibButtonComponent {\n}\n')
-    await runGenerateBundle(dts, bundle)
+  function asset(fileName: string, source: string | Uint8Array) {
+    return { type: 'asset' as const, fileName, source }
+  }
 
-    const out = bundle['index.d.ts'].source as string
-    expect(out).toContain('import * as i0 from "@angular/core";')
-    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<LibButtonComponent')
-    expect(out).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
+  describe('per-module transform (bundled declarations)', () => {
+    it('adds each .d.ts module only its own source members', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const b = '/p/src/b/card.component.ts'
+      const c = '/p/src/c/card.component.ts'
+      await runTransform(transform, cardSource('b-card'), b)
+      await runTransform(transform, cardSource('c-card'), c)
+      const ctx = dtsContext([b, c])
+
+      const dtsCode = 'export declare class Card {\n}\n'
+      const outB = await runDtsTransform(dts, ctx, dtsCode, '/p/src/b/card.component.d.ts')
+      const outC = await runDtsTransform(dts, ctx, dtsCode, '/p/src/c/card.component.d.ts')
+      expect(outB.code).toContain('import * as i0 from "@angular/core";')
+      expect(outB.code).toContain('"b-card"')
+      expect(outB.code).not.toContain('"c-card"')
+      expect(outC.code).toContain('"c-card"')
+      expect(outC.code).not.toContain('"b-card"')
+      // A map back to the module's code, so the bundler chains the dts map.
+      expect(JSON.parse(outB.map)).toMatchObject({
+        version: 3,
+        sources: ['/p/src/b/card.component.d.ts'],
+      })
+      expect(ctx.loaded).toEqual([])
+    })
+
+    it('leaves a .d.ts whose source has no Angular class alone', async () => {
+      const { transform, dts } = getPlugins('partial')
+      await runTransform(transform, COMPONENT_SOURCE, '/p/src/angular.ts')
+      await runTransform(transform, 'export class Button {}', '/p/src/utils.ts')
+      const ctx = dtsContext(['/p/src/angular.ts', '/p/src/utils.ts'])
+
+      const code = 'export declare class LibButtonComponent {\n}\n'
+      expect(await runDtsTransform(dts, ctx, code, '/p/src/utils.d.ts')).toBeUndefined()
+    })
+
+    it('skips a .d.ts with no source module (hand-written)', async () => {
+      const { transform, dts } = getPlugins('partial')
+      await runTransform(transform, COMPONENT_SOURCE, '/p/src/lib-button.component.ts')
+      const ctx = dtsContext([])
+      const code = 'export declare class LibButtonComponent {\n}\n'
+      expect(
+        await runDtsTransform(dts, ctx, code, '/p/src/lib-button.component.d.ts'),
+      ).toBeUndefined()
+      expect(ctx.loaded).toEqual([])
+    })
+
+    it('waits for the source transform when the .d.ts comes first', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const source = '/p/src/lib-button.component.ts'
+      const ctx = dtsContext([source], {
+        [source]: () => runTransform(transform, COMPONENT_SOURCE, source),
+      })
+      const out = await runDtsTransform(
+        dts,
+        ctx,
+        'export declare class LibButtonComponent {\n}\n',
+        '/p/src/lib-button.component.d.ts',
+      )
+      expect(ctx.loaded).toEqual([source])
+      expect(out.code).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
+    })
+
+    it('finds a .tsx source', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const source = '/p/src/lib-button.component.tsx'
+      await runTransform(transform, COMPONENT_SOURCE, source)
+      const out = await runDtsTransform(
+        dts,
+        dtsContext([source]),
+        'export declare class LibButtonComponent {\n}\n',
+        '/p/src/lib-button.component.d.ts',
+      )
+      expect(out.code).toContain('static ɵfac')
+    })
+
+    it('does nothing in full (app) mode', async () => {
+      const { transform, dts } = getPlugins('full')
+      const source = '/p/src/lib-button.component.ts'
+      await runTransform(transform, COMPONENT_SOURCE, source)
+      const out = await runDtsTransform(
+        dts,
+        dtsContext([source]),
+        'export declare class LibButtonComponent {\n}\n',
+        '/p/src/lib-button.component.d.ts',
+      )
+      expect(out).toBeUndefined()
+    })
+
+    it('runs before other transforms, and not on node_modules or virtual ids', () => {
+      const { dts } = getPlugins('partial')
+      const hook = (dts as any).transform
+      expect(hook.order).toBe('pre')
+      const { include, exclude } = hook.filter.id
+      expect(
+        include.test('/p/a.d.ts') && include.test('/p/a.d.mts') && include.test('/p/a.d.cts'),
+      ).toBe(true)
+      expect(include.test('/p/a.ts')).toBe(false)
+      expect(exclude.test('/p/node_modules/x/a.d.ts')).toBe(true)
+      expect(exclude.test('\0virtual.d.ts')).toBe(true)
+    })
+
+    it('maps .d.ts ids back to their source ids', () => {
+      expect(dtsSourceCandidates('/p/a.d.ts')).toEqual(['/p/a.ts', '/p/a.tsx'])
+      expect(dtsSourceCandidates('/p/a.d.mts')).toEqual(['/p/a.mts'])
+      expect(dtsSourceCandidates('/p/a.d.cts')).toEqual(['/p/a.cts'])
+      expect(dtsSourceCandidates('/p/a.ts')).toEqual([])
+    })
   })
 
-  it('augments .d.ts chunks in partial mode (rolldown-plugin-dts)', async () => {
-    const { transform, dts } = getPlugins('partial')
-    await runTransform(transform)
+  describe('generateBundle (assets)', () => {
+    it('leaves chunks alone, even when a class name matches', async () => {
+      const { transform, dts } = getPlugins('partial')
+      await runTransform(transform, COMPONENT_SOURCE, '/p/src/index.ts')
+      const code = 'export declare class LibButtonComponent {\n}\n'
+      const bundle = {
+        'index.d.ts': { type: 'chunk' as const, fileName: 'index.d.ts', code },
+      }
+      await runGenerateBundle(dts, bundle, ['/p/src/index.ts'])
+      expect(bundle['index.d.ts'].code).toBe(code)
+    })
 
-    const js = 'export class LibButtonComponent {}\n'
-    const bundle = {
-      'index.d.mts': {
-        type: 'chunk' as const,
-        fileName: 'index.d.mts',
-        code: 'export declare class LibButtonComponent {\n}\n',
-      },
-      'index.mjs': { type: 'chunk' as const, fileName: 'index.mjs', code: js },
+    it('adds members to the asset of the same source path', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const b = '/p/src/b/card.component.ts'
+      const c = '/p/src/c/card.component.ts'
+      await runTransform(transform, cardSource('b-card'), b)
+      await runTransform(transform, cardSource('c-card'), c)
+      const code = 'export declare class Card {\n}\n'
+      const bundle = {
+        'types/b/card.component.d.ts': asset('types/b/card.component.d.ts', code),
+        'types/c/card.component.d.ts': asset('types/c/card.component.d.ts', code),
+        'types/index.d.ts': asset('types/index.d.ts', code),
+      }
+      await runGenerateBundle(dts, bundle, ['/p/src/index.ts', b, c])
+
+      const outB = bundle['types/b/card.component.d.ts'].source as string
+      const outC = bundle['types/c/card.component.d.ts'].source as string
+      expect(outB).toContain('"b-card"')
+      expect(outB).not.toContain('"c-card"')
+      expect(outC).toContain('"c-card"')
+      expect(outC).not.toContain('"b-card"')
+      // Same class name, other source file: untouched.
+      expect(bundle['types/index.d.ts'].source).toBe(code)
+    })
+
+    it('reads Uint8Array asset sources', async () => {
+      const { transform, dts } = getPlugins('partial')
+      await runTransform(transform, COMPONENT_SOURCE, '/p/src/lib-button.component.ts')
+      const code = 'export declare class LibButtonComponent {\n}\n'
+      const bundle = {
+        'lib-button.component.d.ts': asset(
+          'lib-button.component.d.ts',
+          new TextEncoder().encode(code),
+        ),
+      }
+      await runGenerateBundle(dts, bundle, ['/p/src/lib-button.component.ts'])
+      expect(bundle['lib-button.component.d.ts'].source).toContain('static ɵcmp')
+    })
+
+    it('leaves the .d.ts of a plain module alone', async () => {
+      const { transform, dts } = getPlugins('partial')
+      // An Angular `Button` in lib/utils.ts, a plain one in utils.ts.
+      const angularButton = COMPONENT_SOURCE.replace('LibButtonComponent', 'Button')
+      await runTransform(transform, angularButton, '/p/src/lib/utils.ts')
+      const code = 'export declare class Button {\n}\n'
+      const bundle = { 'types/utils.d.ts': asset('types/utils.d.ts', code) }
+      await runGenerateBundle(dts, bundle, ['/p/src/utils.ts', '/p/src/lib/utils.ts'])
+      expect(bundle['types/utils.d.ts'].source).toBe(code)
+    })
+
+    it('skips an asset two sources could have written', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const b = '/p/src/b/card.component.ts'
+      const c = '/p/src/c/card.component.ts'
+      await runTransform(transform, cardSource('b-card'), b)
+      await runTransform(transform, cardSource('c-card'), c)
+      const code = 'export declare class Card {\n}\n'
+      const bundle = { 'card.component.d.ts': asset('card.component.d.ts', code) }
+      await runGenerateBundle(dts, bundle, [b, c])
+      expect(bundle['card.component.d.ts'].source).toBe(code)
+    })
+
+    describe('declaration maps', () => {
+      const code = 'export declare class LibButtonComponent {\n}\n'
+      const map = {
+        version: 3,
+        file: 'lib-button.component.d.ts',
+        sourceRoot: '',
+        sources: ['../src/lib-button.component.ts'],
+        names: [],
+        mappings: 'AAAA,qBAAa;AAAb',
+      }
+      const shifted = ';AAAA,qBAAa;;;AAAb'
+
+      async function augment(bundle: Record<string, unknown>) {
+        const { transform, dts } = getPlugins('partial')
+        await runTransform(transform, COMPONENT_SOURCE, '/p/src/lib-button.component.ts')
+        await runGenerateBundle(dts, bundle, ['/p/src/lib-button.component.ts'])
+      }
+
+      it('shifts a <file>.map asset', async () => {
+        for (const mapSource of [
+          JSON.stringify(map),
+          new TextEncoder().encode(JSON.stringify(map)),
+        ]) {
+          const bundle = {
+            'types/lib-button.component.d.ts': asset('types/lib-button.component.d.ts', code),
+            'types/lib-button.component.d.ts.map': asset(
+              'types/lib-button.component.d.ts.map',
+              mapSource,
+            ),
+          }
+          await augment(bundle)
+          expect(bundle['types/lib-button.component.d.ts'].source).toContain('static ɵcmp')
+          expect(
+            JSON.parse(bundle['types/lib-button.component.d.ts.map'].source as string),
+          ).toEqual({
+            ...map,
+            mappings: shifted,
+          })
+        }
+      })
+
+      it('follows a URL-escaped sourceMappingURL', async () => {
+        const withUrl = `${code}//# sourceMappingURL=maps/lib%20button.d.ts.map`
+        const bundle = {
+          'types/lib-button.component.d.ts': asset('types/lib-button.component.d.ts', withUrl),
+          'types/maps/lib button.d.ts.map': asset(
+            'types/maps/lib button.d.ts.map',
+            JSON.stringify(map),
+          ),
+        }
+        await augment(bundle)
+        expect(bundle['types/lib-button.component.d.ts'].source).toContain(
+          '//# sourceMappingURL=maps/lib%20button.d.ts.map',
+        )
+        expect(JSON.parse(bundle['types/maps/lib button.d.ts.map'].source as string).mappings).toBe(
+          shifted,
+        )
+      })
+
+      it('rewrites an inline map and keeps its prefix', async () => {
+        const prefix = 'data:application/json;charset=utf-8;base64,'
+        const inline = (json: object) =>
+          prefix + Buffer.from(JSON.stringify(json)).toString('base64')
+        const bundle = {
+          'lib-button.component.d.ts': asset(
+            'lib-button.component.d.ts',
+            `${code}//# sourceMappingURL=${inline(map)}`,
+          ),
+        }
+        await augment(bundle)
+        const out = bundle['lib-button.component.d.ts'].source as string
+        expect(out).toContain('static ɵcmp')
+        expect(out.endsWith(`//# sourceMappingURL=${inline({ ...map, mappings: shifted })}`)).toBe(
+          true,
+        )
+      })
+
+      it('leaves a bad map alone and still injects', async () => {
+        const bundle = {
+          'lib-button.component.d.ts': asset('lib-button.component.d.ts', code),
+          'lib-button.component.d.ts.map': asset('lib-button.component.d.ts.map', '{'),
+        }
+        await augment(bundle)
+        expect(bundle['lib-button.component.d.ts'].source).toContain('static ɵcmp')
+        expect(bundle['lib-button.component.d.ts.map'].source).toBe('{')
+      })
+
+      it('injects without a map', async () => {
+        const bundle = { 'lib-button.component.d.ts': asset('lib-button.component.d.ts', code) }
+        await augment(bundle)
+        expect(bundle['lib-button.component.d.ts'].source).toContain('static ɵcmp')
+      })
+    })
+
+    it('does not touch declarations in full (app) mode', async () => {
+      const { transform, dts } = getPlugins('full')
+      await runTransform(transform, COMPONENT_SOURCE, '/p/src/lib-button.component.ts')
+      const original = 'export declare class LibButtonComponent {\n}\n'
+      const bundle = { 'lib-button.component.d.ts': asset('lib-button.component.d.ts', original) }
+      await runGenerateBundle(dts, bundle, ['/p/src/lib-button.component.ts'])
+      expect(bundle['lib-button.component.d.ts'].source).toBe(original)
+    })
+  })
+
+  describe('matchDtsSource', () => {
+    it('takes the source whose path from the common dir ends the file name', () => {
+      const ids = ['/p/src/index.ts', '/p/src/b/index.ts']
+      expect(matchDtsSource('types/index.d.ts', ids)).toBe('/p/src/index.ts')
+      expect(matchDtsSource('types/b/index.d.ts', ids)).toBe('/p/src/b/index.ts')
+      expect(matchDtsSource('types/c/index.d.ts', ids)).toBe('/p/src/index.ts')
+    })
+
+    it('needs the same flavor and ignores non-sources', () => {
+      const ids = [
+        '/p/src/a.mts',
+        '/p/src/b.ts',
+        '/p/src/c.d.ts',
+        '/p/node_modules/x/d.ts',
+        '\0e.ts',
+      ]
+      expect(matchDtsSource('a.d.mts', ids)).toBe('/p/src/a.mts')
+      expect(matchDtsSource('a.d.ts', ids)).toBeUndefined()
+      expect(matchDtsSource('b.d.cts', ids)).toBeUndefined()
+      expect(matchDtsSource('c.d.ts', ids)).toBeUndefined()
+      expect(matchDtsSource('d.d.ts', ids)).toBeUndefined()
+      expect(matchDtsSource('e.d.ts', ids)).toBeUndefined()
+    })
+
+    it('splits on both separators and folds case when asked', () => {
+      const ids = ['/p/src/b/Card.ts', '/p/src/c/card.ts']
+      expect(matchDtsSource('types\\b\\Card.d.ts', ids)).toBe('/p/src/b/Card.ts')
+      expect(matchDtsSource('types/b/card.d.ts', ids)).toBeUndefined()
+      expect(matchDtsSource('types/b/card.d.ts', ids, false)).toBe('/p/src/b/Card.ts')
+    })
+  })
+
+  describe('writeBundle (files written by the generator)', () => {
+    const dtsCode = 'export declare class Card {\n}\n'
+    let root: string
+
+    beforeEach(() => {
+      root = realpathSync(mkdtempSync(join(tmpdir(), 'oxc-angular-dts-')))
+    })
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    function write(file: string, content: string) {
+      mkdirSync(dirname(join(root, file)), { recursive: true })
+      writeFileSync(join(root, file), content)
     }
-    await runGenerateBundle(dts, bundle)
-
-    const out = bundle['index.d.mts'].code
-    expect(out).toContain('import * as i0 from "@angular/core";')
-    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<LibButtonComponent')
-    expect(out).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
-    expect(bundle['index.mjs'].code).toBe(js)
-  })
-
-  it('augments shared .d.ts chunks that export the class under another name', async () => {
-    const { transform, dts } = getPlugins('partial')
-    await runTransform(transform)
-
-    // The shape rolldown-plugin-dts gives a chunk shared by several entries.
-    const bundle = {
-      'shared-abc.d.mts': {
-        type: 'chunk' as const,
-        fileName: 'shared-abc.d.mts',
-        code: 'declare class LibButtonComponent {\n}\nexport { LibButtonComponent as t };\n',
-      },
+    function read(file: string) {
+      return readFileSync(join(root, file), 'utf8')
     }
-    await runGenerateBundle(dts, bundle)
 
-    const out = bundle['shared-abc.d.mts'].code
-    expect(out).toContain('import * as i0 from "@angular/core";')
-    expect(out).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
-    expect(out).toContain('export { LibButtonComponent as t };')
+    async function setup(options: Record<string, unknown> = {}) {
+      const plugins = getPlugins('partial', { workspaceRoot: root, ...options })
+      const b = join(root, 'src/b/card.component.ts')
+      const c = join(root, 'src/c/card.component.ts')
+      await runTransform(plugins.transform, cardSource('b-card'), b)
+      await runTransform(plugins.transform, cardSource('c-card'), c)
+      const ids = [b, c, join(root, 'src/index.ts')]
+      return {
+        ...plugins,
+        writeBundle: (output: object, bundle: object = {}, outDir?: string) => {
+          const ctx = {
+            getModuleIds: () => ids[Symbol.iterator](),
+            environment: outDir ? { config: { build: { outDir } } } : undefined,
+          }
+          return hookOf(plugins.dts, 'writeBundle').call(ctx as any, output, bundle)
+        },
+      }
+    }
+
+    it('runs after other writeBundle hooks', () => {
+      const { dts } = getPlugins('partial')
+      expect((dts as any).writeBundle.order).toBe('post')
+    })
+
+    it('adds members to the files in the output dir by path', async () => {
+      const { writeBundle } = await setup()
+      write('dist/b/card.component.d.ts', dtsCode)
+      write('dist/c/card.component.d.ts', dtsCode)
+      write('dist/index.d.ts', dtsCode)
+      write('dist/node_modules/pkg/b/card.component.d.ts', dtsCode)
+      write('dist/.cache/b/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+      expect(read('dist/b/card.component.d.ts')).not.toContain('"c-card"')
+      expect(read('dist/c/card.component.d.ts')).toContain('"c-card"')
+      expect(read('dist/index.d.ts')).toBe(dtsCode)
+      expect(read('dist/node_modules/pkg/b/card.component.d.ts')).toBe(dtsCode)
+      expect(read('dist/.cache/b/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('scans Vite’s build.outDir when the output dir is below it', async () => {
+      const { writeBundle } = await setup()
+      write('dist/b/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist/esm') }, {}, 'dist')
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+    })
+
+    it('updates the sibling map', async () => {
+      const { writeBundle } = await setup()
+      const map = {
+        version: 3,
+        sources: ['../../src/b/card.component.ts'],
+        names: [],
+        mappings: 'AAAA;AAAA',
+      }
+      write('dist/b/card.component.d.ts', `${dtsCode}//# sourceMappingURL=card.component.d.ts.map`)
+      write('dist/b/card.component.d.ts.map', JSON.stringify(map))
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+      expect(JSON.parse(read('dist/b/card.component.d.ts.map'))).toEqual({
+        ...map,
+        mappings: ';AAAA;;;AAAA',
+      })
+    })
+
+    it('never rewrites files in or above the project root', async () => {
+      const { writeBundle } = await setup()
+      write('b/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: root })
+      await writeBundle({ dir: dirname(root) })
+      expect(read('b/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('is idempotent, also when two passes overlap', async () => {
+      const { writeBundle } = await setup()
+      write('dist/b/card.component.d.ts', dtsCode)
+      await Promise.all([
+        writeBundle({ dir: join(root, 'dist') }),
+        writeBundle({ dir: join(root, 'dist') }),
+      ])
+      const once = read('dist/b/card.component.d.ts')
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toBe(once)
+      expect(once.match(/import \* as i0/g)).toHaveLength(1)
+      expect(once.match(/static ɵcmp/g)).toHaveLength(1)
+    })
+
+    it('skips the bundle’s own declaration chunks as written', async () => {
+      const { writeBundle } = await setup()
+      // A bundled chunk at a path that matches a source: already done in `transform`.
+      write('dist/b/card.component.d.ts', dtsCode)
+      const bundle = {
+        'b/card.component.d.ts': {
+          type: 'chunk',
+          fileName: 'b/card.component.d.ts',
+          code: dtsCode,
+        },
+      }
+      await writeBundle({ dir: join(root, 'dist') }, bundle)
+      expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('does nothing when tsdown generates the declarations', async () => {
+      const { dts, writeBundle } = await setup()
+      hookOf(dts, 'tsdownConfigResolved')({ dts: {} })
+      write('dist/b/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('does nothing in full (app) mode', async () => {
+      const { transform, dts } = getPlugins('full', { workspaceRoot: root })
+      await runTransform(transform, cardSource('b-card'), join(root, 'src/b/card.component.ts'))
+      write('dist/b/card.component.d.ts', dtsCode)
+      await hookOf(dts, 'writeBundle').call({} as any, { dir: join(root, 'dist') }, {})
+      expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
+    })
   })
 
-  it('does not touch declarations in full (app) mode', async () => {
-    const { transform, dts } = getPlugins('full')
-    await runTransform(transform)
+  describe('tsdown cjs declaration pass', () => {
+    type InputOptions = (
+      options: { plugins?: unknown },
+      format: string,
+      context: { cjsDts: boolean },
+    ) => Promise<{ plugins?: unknown; [key: string]: unknown }>
 
-    const original = 'export declare class LibButtonComponent {\n}\n'
-    const bundle = makeBundle(original)
-    await runGenerateBundle(dts, bundle)
+    function configure(config: Record<string, unknown>, mode: 'full' | 'partial' = 'partial') {
+      const { dts } = getPlugins(mode)
+      hookOf(dts, 'tsdownConfig')(config)
+      return config.inputOptions as InputOptions
+    }
 
-    expect(bundle['index.d.ts'].source).toBe(original)
+    function names(plugins: unknown): string[] {
+      return (plugins as unknown[]).flat(Infinity).map((p: any) => p.name)
+    }
+
+    it('adds a fresh angular() to the cjs declaration pass only', async () => {
+      const inputOptions = configure({})
+      const own = { name: 'tsdown:own' }
+      const js = await inputOptions({ plugins: [own] }, 'cjs', { cjsDts: false })
+      expect(names(js.plugins)).toEqual(['tsdown:own'])
+      const dtsPass = await inputOptions({ plugins: [own] }, 'cjs', { cjsDts: true })
+      expect(names(dtsPass.plugins)).toEqual([
+        '@oxc-angular/vite',
+        '@oxc-angular/vite-dts',
+        'tsdown:own',
+      ])
+    })
+
+    it('keeps the user’s inputOptions, as a function or an object', async () => {
+      const calls: unknown[] = []
+      const fn = configure({
+        inputOptions(options: object, format: string, context: object) {
+          calls.push([format, context])
+          return { ...options, treeshake: false }
+        },
+      })
+      const out = await fn({ plugins: [] }, 'cjs', { cjsDts: true })
+      expect(out.treeshake).toBe(false)
+      expect(names(out.plugins)).toContain('@oxc-angular/vite-dts')
+      expect(calls).toEqual([['cjs', { cjsDts: true }]])
+
+      const obj = configure({ inputOptions: { treeshake: false, resolve: { mainFields: ['x'] } } })
+      const merged = await obj({ plugins: [], resolve: { alias: { a: 'b' } } } as any, 'cjs', {
+        cjsDts: false,
+      })
+      expect(merged).toEqual({
+        plugins: [],
+        treeshake: false,
+        resolve: { alias: { a: 'b' }, mainFields: ['x'] },
+      })
+    })
+
+    it('wraps once when the config is set up twice', async () => {
+      const config: Record<string, unknown> = {}
+      configure(config)
+      const first = config.inputOptions
+      configure(config)
+      expect(config.inputOptions).toBe(first)
+      const out = await (config.inputOptions as InputOptions)({ plugins: [] }, 'cjs', {
+        cjsDts: true,
+      })
+      expect(names(out.plugins).filter((n) => n === '@oxc-angular/vite-dts')).toHaveLength(1)
+    })
+
+    it('does not wrap in full (app) mode', () => {
+      const config: Record<string, unknown> = {}
+      configure(config, 'full')
+      expect(config.inputOptions).toBeUndefined()
+    })
+
+    it('the added instance keeps the source and adds members to the .d.ts', async () => {
+      const inputOptions = configure({})
+      const { plugins } = await inputOptions({ plugins: [] }, 'cjs', { cjsDts: true })
+      const [transform, dts] = (plugins as Plugin[][])[0]
+      const source = '/p/src/lib-button.component.ts'
+      // rolldown-plugin-dts then reads the source, not compiled code.
+      expect(await runTransform(transform, COMPONENT_SOURCE, source)).toBeUndefined()
+      const out = await runDtsTransform(
+        dts,
+        dtsContext([source]),
+        'export declare class LibButtonComponent {\n}\n',
+        '/p/src/lib-button.component.d.ts',
+      )
+      expect(out.code).toContain('static ɵcmp: i0.ɵɵComponentDeclaration<LibButtonComponent')
+      // tsdown writes its declarations: no disk pass.
+      expect(hookOf(dts, 'writeBundle').call({} as any, { dir: '/p/dist' }, {})).toBeUndefined()
+    })
   })
 })
