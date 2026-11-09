@@ -11,7 +11,9 @@
 import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
 import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { createDebug } from 'obug'
 import type { Plugin, ResolvedConfig, ViteDevServer, Connect, ModuleNode } from 'vite'
@@ -39,13 +41,14 @@ import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 import { installedAngularVersion } from './utils/angular-version.js'
 import { isFileSystemCaseSensitive } from './utils/case-sensitive.js'
 import {
+  dtsMapSource,
   dtsSourceCandidates,
   findDtsFiles,
   injectDtsDeclarationsWithIdentityMap,
   injectDtsFile,
   isDtsFile,
   isProjectTsSource,
-  matchDtsSource,
+  matchDtsSources,
   type DtsClassDeclaration,
 } from './utils/dts.js'
 
@@ -1773,7 +1776,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
    *   ng-packagr's rolldown flattening of the per-file ngtsc output;
    * - `.d.ts` assets (`emitFile`) in `generateBundle`, and files the
    *   generator writes itself in `writeBundle`, both matched to their source
-   *   by path, as tsc lays them out;
+   *   by their declaration map, else by one layout per output dir, as tsc
+   *   lays them out (`matchDtsSources`);
    * - tsdown's `.d.cts`, from a separate pass without user plugins, by adding
    *   a collect-only instance of this plugin to that pass.
    * The declaration map is kept in step each time.
@@ -1783,8 +1787,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   function dtsPlugin(): Plugin {
     // tsdown generates the declarations (the `transform` hook covers them).
     let tsdownOwnsDts = false
+    // A tsdown build, and whether tsdown called our `tsdownConfig` hook
+    // (tsdown < 0.21.9 has no plugin hooks).
+    let inTsdown = false
+    let tsdownHooks = false
     // Disk passes run one after another, never at the same time.
     let diskPass: Promise<void> = Promise.resolve()
+    const warnedDirs = new Set<string>()
 
     function declarationsOf(sourceId: string): DtsClassDeclaration[] | undefined {
       return collectedDtsDeclarations.get(sourceId)?.map((d) => ({ ...d, sourceFile: sourceId }))
@@ -1800,16 +1809,35 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       root: string,
       written: Map<string, string>,
       sourceIds: string[],
+      warn: (message: string) => void,
     ): Promise<void> {
       const caseSensitive = useCaseSensitiveFileNames()
       for (const dir of dirs) {
         // Never rewrite the project's own `.d.ts` sources.
         if (isSameOrAncestor(dir, root)) continue
+        const files: Array<{ file: string; code: string; fileName: string; mapSource?: string }> =
+          []
         for (const file of await findDtsFiles(dir)) {
           const code = await readFile(file, 'utf-8')
           // A chunk of this bundle as written: `transform` did it.
           if (written.get(file) === code) continue
-          const sourceId = matchDtsSource(relative(dir, file), sourceIds, caseSensitive)
+          const mapSource = dtsMapSource(code, file, (ref) =>
+            readTextFile(resolve(dirname(file), ref)),
+          )
+          files.push({ file, code, fileName: relative(dir, file), mapSource })
+        }
+        if (files.length === 0) continue
+
+        const sources = matchDtsSources(files, sourceIds, caseSensitive)
+        if (!sources.some(Boolean) && !warnedDirs.has(dir)) {
+          warnedDirs.add(dir)
+          warn(
+            `No declaration file under ${dir} could be matched to its source file, so none ` +
+              `got Angular's type members. Turn on \`declarationMap\` for an exact match.`,
+          )
+        }
+        for (const [i, { file, code }] of files.entries()) {
+          const sourceId = sources[i]
           const declarations = sourceId && declarationsOf(sourceId)
           if (!declarations) continue
           const result = injectDtsFile(code, declarations, file, (ref) =>
@@ -1856,34 +1884,38 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
         },
       },
-      generateBundle(_outputOptions, bundle) {
+      generateBundle(outputOptions, bundle) {
         if (pluginOptions.compilationMode !== 'partial') return
         if (collectedDtsDeclarations.size === 0) return
-        const sourceIds = graphTsIds(this)
-        const caseSensitive = useCaseSensitiveFileNames()
+        const outDir =
+          outputOptions.dir ?? (outputOptions.file ? dirname(outputOptions.file) : undefined)
 
-        for (const file of Object.values(bundle)) {
-          // Declaration chunks (rolldown-plugin-dts, tsdown) were done per
-          // module in `transform`; only `emitFile` assets are left.
-          if (file.type !== 'asset' || !isDtsFile(file.fileName)) continue
-          const sourceId = matchDtsSource(file.fileName, sourceIds, caseSensitive)
-          const declarations = sourceId && declarationsOf(sourceId)
-          if (!declarations) continue
-
+        // Declaration chunks (rolldown-plugin-dts, tsdown) were done per
+        // module in `transform`; only `emitFile` assets are left.
+        const files = Object.values(bundle).flatMap((file) => {
+          if (file.type !== 'asset' || !isDtsFile(file.fileName)) return []
+          const code = assetText(file.source)
           const dir = posix.dirname(file.fileName)
           const mapAsset = (ref: string) => {
             const asset = bundle[posix.join(dir, ref)]
             return asset?.type === 'asset' ? asset : undefined
           }
-          const result = injectDtsFile(
-            assetText(file.source),
-            declarations,
-            file.fileName,
-            (ref) => {
-              const asset = mapAsset(ref)
-              return asset && assetText(asset.source)
-            },
-          )
+          const readMap = (ref: string) => {
+            const asset = mapAsset(ref)
+            return asset && assetText(asset.source)
+          }
+          const mapSource = outDir
+            ? dtsMapSource(code, resolve(outDir, file.fileName), readMap)
+            : undefined
+          return [{ file, code, fileName: file.fileName, mapSource, mapAsset, readMap }]
+        })
+        const sources = matchDtsSources(files, graphTsIds(this), useCaseSensitiveFileNames())
+
+        for (const [i, { file, code, mapAsset, readMap }] of files.entries()) {
+          const sourceId = sources[i]
+          const declarations = sourceId && declarationsOf(sourceId)
+          if (!declarations) continue
+          const result = injectDtsFile(code, declarations, file.fileName, readMap)
           if (!result) continue
           file.source = result.code
           const map = result.map && mapAsset(result.map.ref)
@@ -1899,6 +1931,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         handler(outputOptions, bundle) {
           if (pluginOptions.compilationMode !== 'partial' || tsdownCjsDtsPass || tsdownOwnsDts)
             return
+          // An older tsdown that doesn't tell us whether it writes declarations.
+          if (inTsdown && !tsdownHooks) return
           if (collectedDtsDeclarations.size === 0) return
 
           const outDir =
@@ -1923,19 +1957,27 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             }
           }
 
-          const pass = diskPass.then(() => augmentOnDisk(scanDirs, root, written, graphTsIds(this)))
+          const sourceIds = graphTsIds(this)
+          const warn = (message: string) => this.warn(message)
+          const pass = diskPass.then(() => augmentOnDisk(scanDirs, root, written, sourceIds, warn))
           diskPass = pass.catch(() => {})
           return pass
         },
       },
       // tsdown builds a cjs format's `.d.cts` in a separate pass without user
       // plugins. Add our own plugins to that pass through `inputOptions`.
-      tsdownConfig(config) {
+      // tsdown < 0.21.9 has no such hook: its `.d.cts` stays without members.
+      async tsdownConfig(config) {
+        tsdownHooks = true
         if (pluginOptions.compilationMode !== 'partial' || tsdownCjsDtsPass) return
-        wrapTsdownInputOptions(config, tsdownCjsDtsPlugins)
+        await wrapTsdownInputOptions(config, tsdownCjsDtsPlugins)
       },
       tsdownConfigResolved(config) {
+        tsdownHooks = true
         if (config.dts) tsdownOwnsDts = true
+      },
+      options(inputOptions) {
+        if (hasTsdownPlugin(inputOptions.plugins)) inTsdown = true
       },
     }
     return plugin
@@ -1991,7 +2033,7 @@ function fingerprintOf(
 
 /** The tsdown plugin hooks `dtsPlugin` uses (Vite and Rolldown ignore them). */
 interface TsdownPluginHooks {
-  tsdownConfig?: (config: Record<string, unknown>) => void
+  tsdownConfig?: (config: Record<string, unknown>) => Promise<void>
   tsdownConfigResolved?: (config: { dts?: unknown }) => void
 }
 
@@ -2002,18 +2044,33 @@ type TsdownInputOptions = (
   context?: { cjsDts?: boolean },
 ) => unknown
 
+type TsdownMergeConfig = (defaults: object, ...overrides: object[]) => unknown
+
 /**
  * Make a tsdown config's `inputOptions` add `plugins()` to the cjs
  * declaration pass (`{ cjsDts: true }`), then apply the user's own
- * `inputOptions` as tsdown would. Wraps only once, also when one config
- * object is built twice.
+ * `inputOptions` as tsdown would: a function is called, an object is merged
+ * with tsdown's own `mergeConfig` (the merge its `mergeUserOptions` does,
+ * whose rules differ between versions). When that can't be loaded, an object
+ * is left alone and the `.d.cts` gets no members. Wraps only once, also when
+ * one config object is built twice.
  */
-function wrapTsdownInputOptions(config: Record<string, unknown>, plugins: () => Plugin[]): void {
+async function wrapTsdownInputOptions(
+  config: Record<string, unknown>,
+  plugins: () => Plugin[],
+): Promise<void> {
   const user = config.inputOptions as
     | (TsdownInputOptions & { [TSDOWN_WRAPPED]?: true })
     | Record<string, unknown>
     | undefined
   if (typeof user === 'function' && user[TSDOWN_WRAPPED]) return
+  let mergeConfig: TsdownMergeConfig | undefined
+  if (user && typeof user === 'object') {
+    mergeConfig = await loadTsdownMergeConfig(
+      typeof config.cwd === 'string' ? config.cwd : process.cwd(),
+    )
+    if (!mergeConfig) return
+  }
   const wrapped: TsdownInputOptions & { [TSDOWN_WRAPPED]?: true } = async function (
     options,
     format,
@@ -2022,28 +2079,30 @@ function wrapTsdownInputOptions(config: Record<string, unknown>, plugins: () => 
     if (context?.cjsDts) options.plugins = [plugins(), options.plugins]
     if (typeof user === 'function')
       return (await user.call(this, options, format, context)) ?? options
-    return user ? mergeDefaults(user, options as Record<string, unknown>) : options
+    return user && mergeConfig ? mergeConfig(options, user) : options
   }
   wrapped[TSDOWN_WRAPPED] = true
   config.inputOptions = wrapped
 }
 
-/** tsdown's merge of an object `inputOptions` into its own (`defu(user, defaults)`). */
-function mergeDefaults(
-  user: Record<string, unknown>,
-  defaults: Record<string, unknown>,
-): Record<string, unknown> {
-  const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    !!value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
-  const out = { ...defaults }
-  for (const [key, value] of Object.entries(user)) {
-    if (value == null || key === '__proto__' || key === 'constructor') continue
-    const base = out[key]
-    if (Array.isArray(value) && Array.isArray(base)) out[key] = [...value, ...base]
-    else if (isPlainObject(value) && isPlainObject(base)) out[key] = mergeDefaults(value, base)
-    else out[key] = value
+/** `mergeConfig` of the tsdown that `cwd` resolves, or `undefined`. */
+async function loadTsdownMergeConfig(cwd: string): Promise<TsdownMergeConfig | undefined> {
+  try {
+    const entry = createRequire(resolve(cwd, 'package.json')).resolve('tsdown/config')
+    const { mergeConfig } = (await import(/* @vite-ignore */ pathToFileURL(entry).href)) as {
+      mergeConfig?: unknown
+    }
+    return typeof mergeConfig === 'function' ? (mergeConfig as TsdownMergeConfig) : undefined
+  } catch {
+    return undefined
   }
-  return out
+}
+
+/** Whether a Rolldown `plugins` option holds one of tsdown's own plugins. */
+function hasTsdownPlugin(plugins: unknown): boolean {
+  if (Array.isArray(plugins)) return plugins.some(hasTsdownPlugin)
+  const name = (plugins as { name?: unknown } | null | undefined)?.name
+  return typeof name === 'string' && name.startsWith('tsdown:')
 }
 
 /** Whether `dir` is `target` or one of its parents. */

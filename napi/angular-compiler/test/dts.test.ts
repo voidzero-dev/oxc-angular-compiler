@@ -11,7 +11,7 @@ import {
   injectDtsDeclarations,
   injectDtsDeclarationsWithIdentityMap,
   injectDtsDeclarationsWithMap,
-  matchDtsSource,
+  matchDtsSources,
 } from '../vite-plugin/utils/dts.js'
 
 const COMPONENT_SOURCE = `
@@ -900,12 +900,78 @@ describe('angular() dts plugin (#104)', () => {
     })
   })
 
-  describe('matchDtsSource', () => {
-    it('takes the source whose path from the common dir ends the file name', () => {
+  describe('matchDtsSources', () => {
+    const match = (fileNames: string[], ids: string[], caseSensitive?: boolean) =>
+      matchDtsSources(
+        fileNames.map((fileName) => ({ fileName })),
+        ids,
+        caseSensitive,
+      )
+
+    it('matches each file to the source at the same path from one root', () => {
       const ids = ['/p/src/index.ts', '/p/src/b/index.ts']
-      expect(matchDtsSource('types/index.d.ts', ids)).toBe('/p/src/index.ts')
-      expect(matchDtsSource('types/b/index.d.ts', ids)).toBe('/p/src/b/index.ts')
-      expect(matchDtsSource('types/c/index.d.ts', ids)).toBe('/p/src/index.ts')
+      expect(match(['types/index.d.ts', 'types/b/index.d.ts', 'types/c/index.d.ts'], ids)).toEqual([
+        '/p/src/index.ts',
+        '/p/src/b/index.ts',
+        undefined,
+      ])
+    })
+
+    it('leaves a file whose source is not in the graph alone (test double)', () => {
+      // vite-plugin-dts writes every file in tsconfig `include`, also
+      // src/testing/button.ts, which the bundle doesn't import.
+      const ids = ['/p/src/index.ts', '/p/src/button.ts']
+      expect(match(['index.d.ts', 'button.d.ts', 'testing/button.d.ts'], ids)).toEqual([
+        '/p/src/index.ts',
+        '/p/src/button.ts',
+        undefined,
+      ])
+      // Same with the graph's common dir below the generator's root.
+      const lib = ['/p/src/lib/index.ts', '/p/src/lib/card.component.ts']
+      expect(
+        match(['lib/index.d.ts', 'lib/card.component.d.ts', 'testing/card.component.d.ts'], lib),
+      ).toEqual([...lib, undefined])
+    })
+
+    it('finds the root below the graph’s common dir (vite-plugin-dts entryRoot)', () => {
+      // entryRoot 'src', and src/button.ts imports ../shared/util.ts.
+      const ids = ['/p/src/index.ts', '/p/src/button.ts', '/p/shared/util.ts']
+      expect(match(['index.d.ts', 'button.d.ts'], ids)).toEqual(ids.slice(0, 2))
+      // Without entryRoot.
+      expect(match(['src/index.d.ts', 'src/button.d.ts', 'shared/util.d.ts'], ids)).toEqual(ids)
+    })
+
+    it('takes the source a declaration map names, and only that', () => {
+      const ids = ['/p/src/button.ts', '/p/src/index.ts']
+      const files = [
+        { fileName: 'index.d.ts' },
+        // The map wins over the layout.
+        { fileName: 'testing/button.d.ts', mapSource: '/p/src/button.ts' },
+        // A map naming a file outside the graph: left alone.
+        { fileName: 'button.d.ts', mapSource: '/p/src/testing/button.ts' },
+      ]
+      expect(matchDtsSources(files, ids)).toEqual([
+        '/p/src/index.ts',
+        '/p/src/button.ts',
+        undefined,
+      ])
+    })
+
+    it('breaks a tie by the root that holds more sources, as tsc’s common dir', () => {
+      expect(match(['types/index.d.ts'], ['/p/src/index.ts', '/p/src/b/index.ts'])).toEqual([
+        '/p/src/index.ts',
+      ])
+      // A plain src/utils.ts claims utils.d.ts from an Angular src/lib/utils.ts.
+      expect(match(['types/utils.d.ts'], ['/p/src/utils.ts', '/p/src/lib/utils.ts'])).toEqual([
+        '/p/src/utils.ts',
+      ])
+      // Two equal roots: nothing.
+      expect(
+        match(
+          ['card.component.d.ts'],
+          ['/p/src/b/card.component.ts', '/p/src/c/card.component.ts'],
+        ),
+      ).toEqual([undefined])
     })
 
     it('needs the same flavor and ignores non-sources', () => {
@@ -916,19 +982,35 @@ describe('angular() dts plugin (#104)', () => {
         '/p/node_modules/x/d.ts',
         '\0e.ts',
       ]
-      expect(matchDtsSource('a.d.mts', ids)).toBe('/p/src/a.mts')
-      expect(matchDtsSource('a.d.ts', ids)).toBeUndefined()
-      expect(matchDtsSource('b.d.cts', ids)).toBeUndefined()
-      expect(matchDtsSource('c.d.ts', ids)).toBeUndefined()
-      expect(matchDtsSource('d.d.ts', ids)).toBeUndefined()
-      expect(matchDtsSource('e.d.ts', ids)).toBeUndefined()
+      for (const fileName of ['a.d.ts', 'b.d.cts', 'c.d.ts', 'd.d.ts', 'e.d.ts']) {
+        expect(match(['a.d.mts', fileName], ids)).toEqual(['/p/src/a.mts', undefined])
+      }
     })
 
     it('splits on both separators and folds case when asked', () => {
       const ids = ['/p/src/b/Card.ts', '/p/src/c/card.ts']
-      expect(matchDtsSource('types\\b\\Card.d.ts', ids)).toBe('/p/src/b/Card.ts')
-      expect(matchDtsSource('types/b/card.d.ts', ids)).toBeUndefined()
-      expect(matchDtsSource('types/b/card.d.ts', ids, false)).toBe('/p/src/b/Card.ts')
+      expect(match(['types\\b\\Card.d.ts', 'types/c/card.d.ts'], ids)).toEqual(ids)
+      expect(match(['types/b/card.d.ts', 'types/c/card.d.ts'], ids)).toEqual([undefined, ids[1]])
+      expect(match(['types/b/card.d.ts', 'types/c/card.d.ts'], ids, false)).toEqual(ids)
+    })
+
+    it('handles thousands of files quickly', async () => {
+      const { transform, dts } = getPlugins('partial')
+      const n = 2000
+      const ids = Array.from({ length: n }, (_, i) => `/p/src/d${i % 40}/file${i}.ts`)
+      await runTransform(transform, cardSource('x-card'), ids[n - 1])
+      const code = 'export declare class Card {\n}\n'
+      const bundle = Object.fromEntries(
+        ids.map((id) => {
+          const fileName = `types/${id.slice('/p/src/'.length, -3)}.d.ts`
+          return [fileName, asset(fileName, code)]
+        }),
+      )
+      const start = performance.now()
+      await runGenerateBundle(dts, bundle, ids)
+      expect(performance.now() - start).toBeLessThan(500)
+      expect(bundle[`types/d39/file${n - 1}.d.ts`].source).toContain('"x-card"')
+      expect(bundle['types/d0/file0.d.ts'].source).toBe(code)
     })
   })
 
@@ -951,19 +1033,22 @@ describe('angular() dts plugin (#104)', () => {
       return readFileSync(join(root, file), 'utf8')
     }
 
-    async function setup(options: Record<string, unknown> = {}) {
+    async function setup(options: Record<string, unknown> = {}, moreIds: string[] = []) {
       const plugins = getPlugins('partial', { workspaceRoot: root, ...options })
       const b = join(root, 'src/b/card.component.ts')
       const c = join(root, 'src/c/card.component.ts')
       await runTransform(plugins.transform, cardSource('b-card'), b)
       await runTransform(plugins.transform, cardSource('c-card'), c)
-      const ids = [b, c, join(root, 'src/index.ts')]
+      const ids = [b, c, join(root, 'src/index.ts'), ...moreIds.map((id) => join(root, id))]
+      const warnings: string[] = []
       return {
         ...plugins,
+        warnings,
         writeBundle: (output: object, bundle: object = {}, outDir?: string) => {
           const ctx = {
             getModuleIds: () => ids[Symbol.iterator](),
             environment: outDir ? { config: { build: { outDir } } } : undefined,
+            warn: (message: string) => warnings.push(message),
           }
           return hookOf(plugins.dts, 'writeBundle').call(ctx as any, output, bundle)
         },
@@ -976,7 +1061,7 @@ describe('angular() dts plugin (#104)', () => {
     })
 
     it('adds members to the files in the output dir by path', async () => {
-      const { writeBundle } = await setup()
+      const { writeBundle, warnings } = await setup()
       write('dist/b/card.component.d.ts', dtsCode)
       write('dist/c/card.component.d.ts', dtsCode)
       write('dist/index.d.ts', dtsCode)
@@ -990,6 +1075,76 @@ describe('angular() dts plugin (#104)', () => {
       expect(read('dist/index.d.ts')).toBe(dtsCode)
       expect(read('dist/node_modules/pkg/b/card.component.d.ts')).toBe(dtsCode)
       expect(read('dist/.cache/b/card.component.d.ts')).toBe(dtsCode)
+      expect(warnings).toEqual([])
+    })
+
+    it('leaves a file whose source is not in the graph alone', async () => {
+      const { writeBundle } = await setup()
+      // A plain `Card` test double the library doesn't import.
+      write('dist/b/card.component.d.ts', dtsCode)
+      write('dist/index.d.ts', dtsCode)
+      write('dist/testing/b/card.component.d.ts', dtsCode)
+      write('dist/testing/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+      expect(read('dist/testing/b/card.component.d.ts')).toBe(dtsCode)
+      expect(read('dist/testing/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('finds files under vite-plugin-dts’s entryRoot with a source outside it', async () => {
+      // entryRoot 'src', and the graph also has ../shared/util.ts.
+      const { writeBundle, warnings } = await setup({}, ['shared/util.ts'])
+      write('dist/b/card.component.d.ts', dtsCode)
+      write('dist/c/card.component.d.ts', dtsCode)
+      write('dist/index.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+      expect(read('dist/c/card.component.d.ts')).toContain('"c-card"')
+      expect(warnings).toEqual([])
+    })
+
+    it('matches by the declaration map first', async () => {
+      const { writeBundle } = await setup()
+      const withMap = (source: string) =>
+        JSON.stringify({ version: 3, sources: [source], names: [], mappings: 'AAAA' })
+      // The map says where each file came from, whatever the path.
+      write('dist/x/card.component.d.ts', dtsCode)
+      write('dist/x/card.component.d.ts.map', withMap('../../src/c/card.component.ts'))
+      // A map naming a file outside the graph: left alone.
+      write('dist/b/card.component.d.ts', dtsCode)
+      write('dist/b/card.component.d.ts.map', withMap('../../src/testing/card.component.ts'))
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/x/card.component.d.ts')).toContain('"c-card"')
+      expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
+    })
+
+    it('finds one layout in each scanned dir', async () => {
+      const { writeBundle, warnings } = await setup()
+      // Rolldown's output dir and Vite's build.outDir apart, with other layouts.
+      write('out/types/b/card.component.d.ts', dtsCode)
+      write('out/types/c/card.component.d.ts', dtsCode)
+      write('dist/src/b/card.component.d.ts', dtsCode)
+      write('dist/src/c/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'out') }, {}, 'dist')
+      expect(read('out/types/b/card.component.d.ts')).toContain('"b-card"')
+      expect(read('out/types/c/card.component.d.ts')).toContain('"c-card"')
+      expect(read('dist/src/b/card.component.d.ts')).toContain('"b-card"')
+      expect(read('dist/src/c/card.component.d.ts')).toContain('"c-card"')
+      expect(warnings).toEqual([])
+    })
+
+    it('warns once per dir when no file matches', async () => {
+      const { writeBundle, warnings } = await setup()
+      write('dist/card.component.d.ts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/card.component.d.ts')).toBe(dtsCode)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain(join(root, 'dist'))
+      // No declaration files of another generator: nothing to say.
+      const other = await setup()
+      await other.writeBundle({ dir: join(root, 'empty') })
+      expect(other.warnings).toEqual([])
     })
 
     it('scans Vite’s build.outDir when the output dir is below it', async () => {
@@ -1062,6 +1217,24 @@ describe('angular() dts plugin (#104)', () => {
       expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
     })
 
+    it('does nothing in a tsdown without plugin hooks (< 0.21.9)', async () => {
+      const { dts, writeBundle, warnings } = await setup()
+      hookOf(dts, 'options')({ plugins: [{ name: 'other' }, [[{ name: 'tsdown:shebang' }]]] })
+      write('dist/b/card.component.d.ts', dtsCode)
+      write('dist/index.d.cts', dtsCode)
+      await writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toBe(dtsCode)
+      expect(warnings).toEqual([])
+
+      // A newer tsdown without `dts`: other generators still get the pass.
+      const newer = await setup()
+      hookOf(newer.dts, 'options')({ plugins: [{ name: 'tsdown:shebang' }] })
+      await hookOf(newer.dts, 'tsdownConfig')({})
+      hookOf(newer.dts, 'tsdownConfigResolved')({ dts: false })
+      await newer.writeBundle({ dir: join(root, 'dist') })
+      expect(read('dist/b/card.component.d.ts')).toContain('"b-card"')
+    })
+
     it('does nothing in full (app) mode', async () => {
       const { transform, dts } = getPlugins('full', { workspaceRoot: root })
       await runTransform(transform, cardSource('b-card'), join(root, 'src/b/card.component.ts'))
@@ -1073,14 +1246,17 @@ describe('angular() dts plugin (#104)', () => {
 
   describe('tsdown cjs declaration pass', () => {
     type InputOptions = (
-      options: { plugins?: unknown },
+      options: { plugins?: unknown; [key: string]: unknown },
       format: string,
       context: { cjsDts: boolean },
     ) => Promise<{ plugins?: unknown; [key: string]: unknown }>
 
-    function configure(config: Record<string, unknown>, mode: 'full' | 'partial' = 'partial') {
+    async function configure(
+      config: Record<string, unknown>,
+      mode: 'full' | 'partial' = 'partial',
+    ) {
       const { dts } = getPlugins(mode)
-      hookOf(dts, 'tsdownConfig')(config)
+      await hookOf(dts, 'tsdownConfig')(config)
       return config.inputOptions as InputOptions
     }
 
@@ -1089,7 +1265,7 @@ describe('angular() dts plugin (#104)', () => {
     }
 
     it('adds a fresh angular() to the cjs declaration pass only', async () => {
-      const inputOptions = configure({})
+      const inputOptions = await configure({})
       const own = { name: 'tsdown:own' }
       const js = await inputOptions({ plugins: [own] }, 'cjs', { cjsDts: false })
       expect(names(js.plugins)).toEqual(['tsdown:own'])
@@ -1103,7 +1279,7 @@ describe('angular() dts plugin (#104)', () => {
 
     it('keeps the user’s inputOptions, as a function or an object', async () => {
       const calls: unknown[] = []
-      const fn = configure({
+      const fn = await configure({
         inputOptions(options: object, format: string, context: object) {
           calls.push([format, context])
           return { ...options, treeshake: false }
@@ -1113,23 +1289,89 @@ describe('angular() dts plugin (#104)', () => {
       expect(out.treeshake).toBe(false)
       expect(names(out.plugins)).toContain('@oxc-angular/vite-dts')
       expect(calls).toEqual([['cjs', { cjsDts: true }]])
-
-      const obj = configure({ inputOptions: { treeshake: false, resolve: { mainFields: ['x'] } } })
-      const merged = await obj({ plugins: [], resolve: { alias: { a: 'b' } } } as any, 'cjs', {
+      // Other passes: exactly what the function gives.
+      const js = await fn({ plugins: [{ name: 'tsdown:own' }], external: ['y'] }, 'esm', {
         cjsDts: false,
       })
-      expect(merged).toEqual({
-        plugins: [],
-        treeshake: false,
-        resolve: { alias: { a: 'b' }, mainFields: ['x'] },
+      expect(js).toEqual({ plugins: [{ name: 'tsdown:own' }], external: ['y'], treeshake: false })
+    })
+
+    describe('object inputOptions', () => {
+      let cwd: string
+      beforeEach(() => {
+        cwd = realpathSync(mkdtempSync(join(tmpdir(), 'oxc-angular-tsdown-')))
+      })
+      afterEach(() => {
+        rmSync(cwd, { recursive: true, force: true })
+      })
+
+      // A tsdown whose `mergeConfig` follows tsdown 0.23: `plugins` are
+      // [defaults, user], any other array of the user replaces the default.
+      function installTsdown() {
+        const dir = join(cwd, 'node_modules/tsdown')
+        mkdirSync(join(dir, 'dist'), { recursive: true })
+        writeFileSync(
+          join(dir, 'package.json'),
+          JSON.stringify({
+            name: 'tsdown',
+            type: 'module',
+            exports: { './config': './dist/config.mjs' },
+          }),
+        )
+        writeFileSync(
+          join(dir, 'dist/config.mjs'),
+          `globalThis.__tsdownMergeCalls = []
+          export function mergeConfig(defaults, user) {
+            globalThis.__tsdownMergeCalls.push([defaults, user])
+            const out = { ...defaults }
+            for (const [key, value] of Object.entries(user)) {
+              out[key] = key === 'plugins' ? [].concat(defaults[key], value) : value
+            }
+            return out
+          }`,
+        )
+      }
+
+      it('merges it with tsdown’s own mergeConfig on every pass', async () => {
+        installTsdown()
+        const user = { plugins: [{ name: 'inputOptions-plugin' }], external: ['x'] }
+        const inputOptions = await configure({ cwd, inputOptions: user })
+        const defaults = () => ({
+          plugins: [{ name: 'tsdown:own' }, [{ name: 'user-plugin' }]],
+          external: ['y'],
+        })
+
+        const js = await inputOptions(defaults(), 'esm', { cjsDts: false })
+        expect(names(js.plugins)).toEqual(['tsdown:own', 'user-plugin', 'inputOptions-plugin'])
+        expect(js.external).toEqual(['x'])
+        const calls = (globalThis as any).__tsdownMergeCalls
+        expect(calls).toHaveLength(1)
+        expect(calls[0][1]).toBe(user)
+
+        const dtsPass = await inputOptions(defaults(), 'cjs', { cjsDts: true })
+        expect(names(dtsPass.plugins)).toEqual([
+          '@oxc-angular/vite',
+          '@oxc-angular/vite-dts',
+          'tsdown:own',
+          'user-plugin',
+          'inputOptions-plugin',
+        ])
+        expect(dtsPass.external).toEqual(['x'])
+      })
+
+      it('leaves it alone when tsdown can’t be loaded', async () => {
+        const user = { external: ['x'] }
+        const config = { cwd, inputOptions: user }
+        await configure(config)
+        expect(config.inputOptions).toBe(user)
       })
     })
 
     it('wraps once when the config is set up twice', async () => {
       const config: Record<string, unknown> = {}
-      configure(config)
+      await configure(config)
       const first = config.inputOptions
-      configure(config)
+      await configure(config)
       expect(config.inputOptions).toBe(first)
       const out = await (config.inputOptions as InputOptions)({ plugins: [] }, 'cjs', {
         cjsDts: true,
@@ -1137,14 +1379,14 @@ describe('angular() dts plugin (#104)', () => {
       expect(names(out.plugins).filter((n) => n === '@oxc-angular/vite-dts')).toHaveLength(1)
     })
 
-    it('does not wrap in full (app) mode', () => {
+    it('does not wrap in full (app) mode', async () => {
       const config: Record<string, unknown> = {}
-      configure(config, 'full')
+      await configure(config, 'full')
       expect(config.inputOptions).toBeUndefined()
     })
 
     it('the added instance keeps the source and adds members to the .d.ts', async () => {
-      const inputOptions = configure({})
+      const inputOptions = await configure({})
       const { plugins } = await inputOptions({ plugins: [] }, 'cjs', { cjsDts: true })
       const [transform, dts] = (plugins as Plugin[][])[0]
       const source = '/p/src/lib-button.component.ts'

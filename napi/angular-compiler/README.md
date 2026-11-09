@@ -301,20 +301,38 @@ the same name in different files each get their own), adds the namespace
 imports the members use (`import * as i0 from "@angular/core";`, …), and
 keeps the file's declaration map in step. What is covered:
 
-| Generator                                                | How                                                                          |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `rolldown-plugin-dts`, tsdown `dts` (`esm` and `cjs`)    | each `.d.ts` module as it loads, before bundling                             |
-| `.d.ts` assets (`@rollup/plugin-typescript`, `emitFile`) | in `generateBundle`, matched to their source by path, as `tsc` lays them out |
-| `vite-plugin-dts` with its default `outDir`              | the files it wrote under the build's output dir, matched by path             |
+| Generator                                                | How                                                              |
+| -------------------------------------------------------- | ---------------------------------------------------------------- |
+| `rolldown-plugin-dts`, tsdown `dts` with `esm`           | each `.d.ts` module as it loads, before bundling                 |
+| tsdown `dts` with `cjs` (tsdown 0.21.9 or later)         | the same, in tsdown's separate `.d.cts` pass                     |
+| `.d.ts` assets (`@rollup/plugin-typescript`, `emitFile`) | in `generateBundle`, matched to their source file (see below)    |
+| `vite-plugin-dts` with its default `outDir`              | the files it wrote under the build's output dir, matched as well |
+
+A `.d.ts` asset or written file is matched to its source file by its
+declaration map when it has one (`declarationMap` in tsconfig): the map names
+the source. Without a map, the plugin finds the one layout that fits the
+files in that output dir, as `tsc` writes them (an output prefix plus a source
+root, such as `vite-plugin-dts`'s `entryRoot`), and takes a file only when its
+path is exactly that layout for a source file of the build. A file whose source
+is not part of the build, such as a test double next to the library, is left
+alone. When none of the files a generator wrote in an output dir can be
+matched, the build prints a warning that names the dir.
 
 Not covered:
 
 - declarations written outside the build, such as a `tsc` run of its own, or
   `vite-plugin-dts` `outDirs` outside `build.outDir`;
+- several layouts in one output dir without declaration maps (for example two
+  `vite-plugin-dts` `outDirs` side by side): no layout wins, so turn on
+  `declarationMap`;
 - `vite-plugin-dts` `rollupTypes` bundles, which only get members when their
   path matches one source file;
-- the `.d.cts` of tsdown when the plugin comes through `fromVite` (such
-  plugins don't get tsdown's `tsdownConfig` hook, which that pass needs).
+- the `.d.cts` of tsdown older than 0.21.9, which has no plugin hooks for that
+  pass (the `.d.mts` still gets the members), and of tsdown when the plugin
+  comes through `fromVite` (such plugins don't get the `tsdownConfig` hook);
+- the `.d.cts` of tsdown when `inputOptions` is an object and the plugin can't
+  load `tsdown/config` from the project, which it needs to merge that object
+  the way tsdown does.
 
 Files written by another generator (`vite-plugin-dts`) are patched after they
 are written, so a tool that reads them earlier in the same build sees them
