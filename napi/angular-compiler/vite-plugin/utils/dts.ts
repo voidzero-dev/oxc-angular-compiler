@@ -31,7 +31,7 @@
  */
 import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import {
   injectDtsDeclarations as injectDtsDeclarationsNative,
@@ -205,58 +205,135 @@ function pathParts(path: string): string[] {
   return path.split(/[\\/]+/).filter(Boolean)
 }
 
+/** A declaration file of one output dir, see {@link matchDtsSources}. */
+export interface DtsFileToMatch {
+  /** The file's path in the output dir. */
+  fileName: string
+  /** The source its declaration map names (absolute), when it has a map. */
+  mapSource?: string
+}
+
 /**
- * The source a declaration file `fileName` (its path in the output dir) was
- * emitted from, or `undefined`.
+ * The graph source each declaration file of one output dir was emitted
+ * from, in the order of `files`, or `undefined`.
  *
- * tsc writes `<declarationDir>/<path relative to rootDir>.d.ts`, and the
- * default rootDir is the common directory of the sources (TypeScript
- * `getCommonSourceDirectory`). So a source matches when its whole path from
- * the common directory of `sourceIds`, without the extension, ends
- * `fileName`; the longest one wins. Two different paths of the same length
- * can't both end one path, so there is no tie. `sourceIds` should hold every
- * TS module of the graph, not only the Angular ones, so that a plain
- * `utils.ts` claims its own `utils.d.ts`. Never matches by class name.
+ * 1. A file with a declaration map: the source the map names, when it is in
+ *    the graph, else nothing.
+ * 2. Other files: tsc writes `<outDir>/<path from rootDir>.d.ts`, so one
+ *    layout is found for the whole dir, a file prefix plus a source root.
+ *    Each file and each graph source with the same base name and flavor
+ *    (`.ts`/`.tsx` → `.d.ts`, `.mts` → `.d.mts`, `.cts` → `.d.cts`) vote
+ *    for the layout that lines up the longest common end of their paths.
+ *    Most votes wins; on a tie the shorter prefix, then the root holding
+ *    more graph sources (tsc's default rootDir is their common dir); a full
+ *    tie matches nothing. A file then matches only when it is exactly the
+ *    prefix plus its source's path from the root.
+ *
+ * So a file whose source is not in the graph (a test double the library
+ * doesn't import, another package in the same dir) never gets another
+ * file's members. `sourceIds` should hold every TS module of the graph, not
+ * only the Angular ones, so that a plain `utils.ts` claims its own
+ * `utils.d.ts`. Never matches by class name.
  */
-export function matchDtsSource(
-  fileName: string,
+export function matchDtsSources(
+  files: readonly DtsFileToMatch[],
   sourceIds: Iterable<string>,
   caseSensitive = true,
-): string | undefined {
-  const m = DTS_EXT_REGEX.exec(fileName)
-  if (!m) return undefined
-  const flavor = m[1]
+): Array<string | undefined> {
   const fold = (s: string) => (caseSensitive ? s : s.toLowerCase())
-  const target = pathParts(fold(fileName.slice(0, m.index)))
+  const key = (flavor: string, parts: readonly string[]) => `${flavor}|${parts.join('/')}`
 
-  const sources: Array<{ id: string; parts: string[] }> = []
+  // The graph sources by full path (for maps), by path without the
+  // extension, and by base name.
+  const byId = new Map<string, string>()
+  const byPath = new Map<string, string>()
+  const byBase = new Map<string, string[][]>()
+  const sources: string[][] = []
   for (const id of sourceIds) {
-    if (isProjectTsSource(id)) sources.push({ id, parts: pathParts(fold(id)) })
-  }
-  if (sources.length === 0) return undefined
-
-  // Number of parts in the common source directory.
-  const first = sources[0].parts
-  let common = first.length - 1
-  for (const { parts } of sources) {
-    let i = 0
-    while (i < common && i < parts.length - 1 && parts[i] === first[i]) i++
-    common = i
-  }
-
-  let best: { id: string; length: number } | undefined
-  for (const { id, parts } of sources) {
+    if (!isProjectTsSource(id)) continue
+    const parts = pathParts(fold(id))
+    byId.set(parts.join('/'), id)
     const ext = TS_EXT_REGEX.exec(id)!
-    if (ext[1] !== flavor || (flavor && ext[2])) continue
-    const rel = parts.slice(common)
-    rel[rel.length - 1] = rel[rel.length - 1].replace(TS_EXT_REGEX, '')
-    if (rel.length > target.length || (best && rel.length <= best.length)) continue
-    const offset = target.length - rel.length
-    if (rel.every((part, i) => part === target[offset + i])) {
-      best = { id, length: rel.length }
+    if (ext[1] && ext[2]) continue
+    parts[parts.length - 1] = parts[parts.length - 1].replace(TS_EXT_REGEX, '')
+    const pathKey = key(ext[1], parts)
+    if (!byPath.has(pathKey)) byPath.set(pathKey, id)
+    const baseKey = key(ext[1], parts.slice(-1))
+    const group = byBase.get(baseKey)
+    if (group) group.push(parts)
+    else byBase.set(baseKey, [parts])
+    sources.push(parts)
+  }
+
+  const result: Array<string | undefined> = Array.from({ length: files.length })
+  const targets: Array<{ index: number; flavor: string; parts: string[] }> = []
+  for (const [index, file] of files.entries()) {
+    if (file.mapSource !== undefined) {
+      result[index] = byId.get(pathParts(fold(file.mapSource)).join('/'))
+      continue
+    }
+    const m = DTS_EXT_REGEX.exec(file.fileName)
+    if (m) {
+      const parts = pathParts(fold(file.fileName.slice(0, m.index)))
+      targets.push({ index, flavor: m[1], parts })
     }
   }
-  return best?.id
+
+  const votes = new Map<string, { prefix: string[]; root: string[]; count: number }>()
+  for (const { flavor, parts } of targets) {
+    for (const source of byBase.get(key(flavor, parts.slice(-1))) ?? []) {
+      let same = 1
+      while (
+        same < parts.length &&
+        same < source.length &&
+        parts[parts.length - 1 - same] === source[source.length - 1 - same]
+      ) {
+        same++
+      }
+      const prefix = parts.slice(0, parts.length - same)
+      const root = source.slice(0, source.length - same)
+      const voteKey = `${prefix.join('/')}\0${root.join('/')}`
+      const vote = votes.get(voteKey)
+      if (vote) vote.count++
+      else votes.set(voteKey, { prefix, root, count: 1 })
+    }
+  }
+
+  let best: Array<{ prefix: string[]; root: string[]; count: number }> = []
+  for (const vote of votes.values()) {
+    const top = best[0]
+    if (
+      !top ||
+      vote.count > top.count ||
+      (vote.count === top.count && vote.prefix.length < top.prefix.length)
+    ) {
+      best = [vote]
+    } else if (vote.count === top.count && vote.prefix.length === top.prefix.length) {
+      best.push(vote)
+    }
+  }
+  if (best.length > 1) {
+    // How many graph sources each dir holds.
+    const held = new Map<string, number>()
+    for (const parts of sources) {
+      let dir = ''
+      for (const part of parts) {
+        held.set(dir, (held.get(dir) ?? 0) + 1)
+        dir = dir ? `${dir}/${part}` : part
+      }
+    }
+    const count = best.map(({ root }) => held.get(root.join('/')) ?? 0)
+    const most = Math.max(...count)
+    best = best.filter((_, i) => count[i] === most)
+  }
+  if (best.length !== 1) return result
+
+  const { prefix, root } = best[0]
+  for (const { index, flavor, parts } of targets) {
+    if (parts.length <= prefix.length || !prefix.every((part, i) => part === parts[i])) continue
+    result[index] = byPath.get(key(flavor, [...root, ...parts.slice(prefix.length)]))
+  }
+  return result
 }
 
 const SOURCE_MAPPING_URL_REGEX = /\/\/# sourceMappingURL=(\S+)/g
@@ -286,34 +363,78 @@ export function injectDtsFile(
   fileName: string,
   readMap: (ref: string) => string | undefined,
 ): DtsFileResult | undefined {
+  const map = locateMap(code, fileName)
+  if ('url' in map) {
+    const { url, inline } = map
+    const result = injectDtsDeclarationsWithMap(code, declarations, map.json)
+    if (result.code === code) return undefined
+    const at = result.code.lastIndexOf(url)
+    if (!inline || !result.map || at === -1) return { code: result.code }
+    const newUrl = inline + Buffer.from(result.map, 'utf8').toString('base64')
+    return { code: result.code.slice(0, at) + newUrl + result.code.slice(at + url.length) }
+  }
+
+  const { ref } = map
+  const result = injectDtsDeclarationsWithMap(code, declarations, readMap(ref))
+  if (result.code === code) return undefined
+  return result.map ? { code: result.code, map: { ref, json: result.map } } : { code: result.code }
+}
+
+/**
+ * The source a declaration file's map names: its first `sources` entry,
+ * resolved against the map's location and `sourceRoot`, as tsc writes it.
+ * `file` is the declaration file's absolute path; the map is found and read
+ * as in {@link injectDtsFile}. `undefined` when there is no usable map.
+ */
+export function dtsMapSource(
+  code: string,
+  file: string,
+  readMap: (ref: string) => string | undefined,
+): string | undefined {
+  const map = locateMap(code, file)
+  const json = 'url' in map ? map.json : readMap(map.ref)
+  let value: { sources?: unknown; sourceRoot?: unknown } | undefined
+  try {
+    value = json ? JSON.parse(json) : undefined
+  } catch {
+    return undefined
+  }
+  const source = Array.isArray(value?.sources) ? value.sources[0] : undefined
+  if (typeof source !== 'string' || !source) return undefined
+  const sourceRoot = typeof value?.sourceRoot === 'string' ? value.sourceRoot : ''
+  if (/^[a-z][\w+.-]*:\/\//i.test(sourceRoot) || /^[a-z][\w+.-]*:\/\//i.test(source)) {
+    return undefined
+  }
+  const mapDir = 'url' in map ? dirname(file) : dirname(resolve(dirname(file), map.ref))
+  return resolve(mapDir, sourceRoot, source)
+}
+
+/**
+ * Where a declaration file's map is: the last `//# sourceMappingURL=`
+ * comment, either a `data:` URL (with the base64 JSON prefix and the JSON,
+ * when it is one) or a path; with no comment, `<file>.map`.
+ */
+function locateMap(
+  code: string,
+  fileName: string,
+): { url: string; inline?: string; json?: string } | { ref: string } {
   let url: string | undefined
   for (const match of code.matchAll(SOURCE_MAPPING_URL_REGEX)) url = match[1]
 
   if (url?.startsWith('data:')) {
-    const inline = INLINE_MAP_REGEX.exec(url)
+    const inline = INLINE_MAP_REGEX.exec(url)?.[0]
     // Maps can hold non-ASCII names, so decode with Buffer, not `atob`.
     const json = inline
-      ? Buffer.from(url.slice(inline[0].length), 'base64').toString('utf8')
+      ? Buffer.from(url.slice(inline.length), 'base64').toString('utf8')
       : undefined
-    const result = injectDtsDeclarationsWithMap(code, declarations, json)
-    if (result.code === code) return undefined
-    const at = result.code.lastIndexOf(url)
-    if (!inline || !result.map || at === -1) return { code: result.code }
-    const newUrl = inline[0] + Buffer.from(result.map, 'utf8').toString('base64')
-    return { code: result.code.slice(0, at) + newUrl + result.code.slice(at + url.length) }
+    return { url, inline, json }
   }
-
-  let ref = `${pathParts(fileName).pop()}.map`
-  if (url) {
-    try {
-      ref = decodeURI(url)
-    } catch {
-      ref = url
-    }
+  if (!url) return { ref: `${pathParts(fileName).pop()}.map` }
+  try {
+    return { ref: decodeURI(url) }
+  } catch {
+    return { ref: url }
   }
-  const result = injectDtsDeclarationsWithMap(code, declarations, readMap(ref))
-  if (result.code === code) return undefined
-  return result.map ? { code: result.code, map: { ref, json: result.map } } : { code: result.code }
 }
 
 /** Every declaration file under `dir`, skipping `node_modules` and dot-dirs. */
