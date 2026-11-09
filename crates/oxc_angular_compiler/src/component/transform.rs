@@ -587,6 +587,10 @@ pub struct ImportInfo<'a> {
     /// - `import Foo from "./mod"` → `Some("default")` (default export)
     /// - `import * as ns from "./mod"` → `None` (namespace, not deferrable)
     pub imported_name: Option<Ident<'a>>,
+    /// The export name of `import { "s-dir" as SDir }`: a string that is not
+    /// an identifier name (`imported_name` is `None` then). The `.d.ts`
+    /// names it `typeof i1["s-dir"]`.
+    pub string_export_name: Option<Ident<'a>>,
     /// Whether this binding is a default import (`import Foo from "./mod"`),
     /// as opposed to `import { default as Foo }`, which `imported_name` alone
     /// cannot distinguish. ngtsc's `typeToValue` treats the two differently:
@@ -691,6 +695,12 @@ pub fn build_import_map<'a>(
                     let imported_name = imported_export_name
                         .filter(|exported| *exported != local_name.as_str())
                         .map(|exported| Ident::from(allocator.alloc_str(exported)));
+                    let string_export_name = match &spec.imported {
+                        ModuleExportName::StringLiteral(lit) if imported_export_name.is_none() => {
+                            lit.value.as_str().map(|name| Ident::from(allocator.alloc_str(name)))
+                        }
+                        _ => None,
+                    };
 
                     import_map.insert(
                         local_name,
@@ -699,6 +709,7 @@ pub fn build_import_map<'a>(
                             is_named_import: true,
                             is_type_only,
                             imported_name,
+                            string_export_name,
                             is_default_import: false,
                             is_const_enum: false,
                         },
@@ -728,6 +739,7 @@ pub fn build_import_map<'a>(
                             // dynamic-import chains, regardless of the local
                             // binding name.
                             imported_name: Some(Ident::from("default")),
+                            string_export_name: None,
                             is_default_import: true,
                             is_const_enum: false,
                         },
@@ -754,6 +766,7 @@ pub fn build_import_map<'a>(
                             is_named_import: false,
                             is_type_only: decl_is_type_only,
                             imported_name: None,
+                            string_export_name: None,
                             is_default_import: false,
                             is_const_enum: false,
                         },
@@ -766,14 +779,17 @@ pub fn build_import_map<'a>(
     import_map
 }
 
-/// Extract a `ModuleExportName` as a plain string slice when it's a textual
-/// name. Quoted-string export names (e.g., `import { "string-name" as foo }`)
-/// are not supported for deferrable resolution and return `None`.
+/// Extract a `ModuleExportName` as a plain string slice when it's an
+/// identifier name, also one written as a string (`import { "Foo" as F }`
+/// reads `i1.Foo`, as in ngtsc). Other strings (`import { "string-name" as
+/// foo }`) can't be read as `i1.name` and return `None`.
 fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str> {
     match name {
         ModuleExportName::IdentifierName(id) => Some(id.name.as_str()),
         ModuleExportName::IdentifierReference(id) => Some(id.name.as_str()),
-        ModuleExportName::StringLiteral(_) => None,
+        ModuleExportName::StringLiteral(lit) => {
+            lit.value.as_str().filter(|name| oxc_syntax::identifier::is_identifier_name(name))
+        }
     }
 }
 
@@ -909,6 +925,11 @@ fn member_chain_root<'b, 'a>(expr: &'b mut OutputExpression<'a>) -> &'b mut Outp
 /// class this file declares, and any other is its export through a
 /// namespace import of the `.d.ts` (`i1.Dep`, `i1.default`). A name that
 /// isn't imported stays as written.
+///
+/// An export named by a string that isn't an identifier name gives
+/// `i1["s-dir"]`, so the type is `typeof i1["s-dir"]` (TS reads
+/// `(typeof i1)["s-dir"]`); ngtsc writes `typeof i1.s-dir`, which does not
+/// parse.
 fn dts_type_ref<'a>(
     local: &str,
     import_map: &ImportMap<'a>,
@@ -916,11 +937,12 @@ fn dts_type_ref<'a>(
 ) -> String {
     match import_map.get(&Ident::from(local)) {
         Some(info) if info.is_named_import => {
-            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
-            if !oxc_syntax::identifier::is_identifier_name(export) {
-                return local.to_string();
+            let namespace = registry.get_or_assign(&info.source_module);
+            if let Some(name) = &info.string_export_name {
+                return format!("{namespace}[{}]", crate::directive::ts_string_literal(name));
             }
-            format!("{}.{export}", registry.get_or_assign(&info.source_module))
+            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
+            format!("{namespace}.{export}")
         }
         _ => local.to_string(),
     }

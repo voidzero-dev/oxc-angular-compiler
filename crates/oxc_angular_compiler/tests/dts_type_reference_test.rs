@@ -186,7 +186,43 @@ export class CDir {
     }
 }
 
-/// A class in a function is not in the `.d.ts`: it takes no alias.
+/// The `.d.ts` names an export written as a string by that string: ngtsc
+/// writes `typeof i1.Plain` for `"Plain"`, and `typeof i1.s-dir`, which
+/// does not parse, for `"s-dir"`; here it is `typeof i1["s-dir"]`, which
+/// TS reads as `(typeof i1)["s-dir"]`.
+#[test]
+fn string_export_names_use_type_references() {
+    let source = r#"
+import { Component, NgModule } from '@angular/core';
+import { "s-dir" as SDir, "Plain" as P } from './dep/str';
+
+@Component({ selector: 'app', template: '', hostDirectives: [SDir, P] })
+export class App {}
+
+@NgModule({ imports: [SDir, P], exports: [SDir] })
+export class M {}
+"#;
+    for mode in MODES {
+        let result = transform(source, mode);
+        let (members, imports) = dts(&result, "App");
+        assert!(
+            members.contains(
+                "[{ directive: typeof i1[\"s-dir\"]; inputs: {}; outputs: {}; }, \
+                 { directive: typeof i1.Plain; inputs: {}; outputs: {}; }]>;"
+            ),
+            "{mode:?}:\n{members}"
+        );
+        assert_eq!(imports, &map(&[("i0", "@angular/core"), ("i1", "./dep/str")]), "{mode:?}");
+        let (members, _) = dts(&result, "M");
+        assert!(
+            members.contains(
+                "ɵɵNgModuleDeclaration<M, never, [typeof i1[\"s-dir\"], typeof i1.Plain], \
+                 [typeof i1[\"s-dir\"]]>;"
+            ),
+            "{mode:?}:\n{members}"
+        );
+    }
+}
 #[test]
 fn nested_class_takes_no_dts_alias() {
     let source = r"

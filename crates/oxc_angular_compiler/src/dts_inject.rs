@@ -382,6 +382,22 @@ impl<'a> Visit<'a> for HeadCollector<'_, '_> {
         // identifier `left`.
         walk::walk_ts_qualified_name(self, node);
     }
+
+    /// `typeof i1["s-dir"]`, for an export named by a string: the head is
+    /// the whole type query `i1`, when it is a namespace the members map.
+    fn visit_ts_type_query(&mut self, node: &oxc_ast::ast::TSTypeQuery<'a>) {
+        if let oxc_ast::ast::TSTypeQueryExprName::IdentifierReference(id) = &node.expr_name
+            && let Some(specifier) = self.namespace_imports.get(id.name.as_str())
+        {
+            self.collected.push((
+                id.span.start as usize - self.offset,
+                id.name.to_string(),
+                specifier.clone(),
+                (self.resolve)(specifier),
+            ));
+        }
+        walk::walk_ts_type_query(self, node);
+    }
 }
 
 /// Parse `members` (wrapped in a dummy `declare class`) into per-member
@@ -472,6 +488,49 @@ fn import_insert_position(
             None => return cursor,
         }
     }
+}
+
+/// Where the imports go in a file with no import: before the comments of
+/// the first statement (at `statement_start`), as ngtsc's ImportManager
+/// adds them in front of that statement and TS prints its leading comments
+/// after them. So the statement's JSDoc stays on it: `import * as i0 …;`,
+/// `/** doc */`, `export declare class X`.
+///
+/// Two kinds of comments stay above the imports: `/// <reference …/>`
+/// directives, which only work at the top of the file, and the file's
+/// header, which is TS's detached comments (`emitDetachedComments`): the
+/// first group of comments with no blank line between them, when a blank
+/// line follows it.
+fn first_import_position(source: &str, statement_start: usize, program: &Program<'_>) -> usize {
+    let leading: Vec<Span> = program
+        .comments
+        .iter()
+        .map(|comment| comment.span)
+        .take_while(|span| span.end as usize <= statement_start)
+        .collect();
+    let text = |span: &Span| &source[span.start as usize..span.end as usize];
+    let blank_line_between = |end: u32, start: usize| {
+        source[end as usize..start].bytes().filter(|&b| b == b'\n').count() >= 2
+    };
+    // Comments up to the last `/// <reference …/>` directive.
+    let mut kept = leading
+        .iter()
+        .rposition(|span| {
+            text(span).strip_prefix("///").is_some_and(|rest| rest.trim_start().starts_with('<'))
+        })
+        .map_or(0, |index| index + 1);
+    if kept < leading.len() {
+        let rest = &leading[kept..];
+        let group = 1 + rest
+            .windows(2)
+            .take_while(|pair| !blank_line_between(pair[0].end, pair[1].start as usize))
+            .count();
+        let next = rest.get(group).map_or(statement_start, |span| span.start as usize);
+        if blank_line_between(rest[group - 1].end, next) {
+            kept += group;
+        }
+    }
+    leading.get(kept).map_or(statement_start, |span| span.start as usize)
 }
 
 /// Resolve `dir + specifier` the way Node would see it — collapsing `..`
@@ -742,9 +801,7 @@ fn plan_splices(source: &str, declarations: &[DtsInjectDeclaration]) -> Vec<(usi
                 ),
             ));
         } else if let Some(first) = program.body.first() {
-            // Before the first statement keeps leading comments and
-            // triple-slash reference directives at the top of the file.
-            let start = first.span().start as usize;
+            let start = first_import_position(source, first.span().start as usize, program);
             splices.push((start, format!("{text}\n")));
         } else {
             splices.push((
@@ -814,40 +871,69 @@ fn utf16_len(text: &str) -> i64 {
 /// segment order stays, so they are copied as they are. Injected text is
 /// unmapped: where it starts after mapped code on a line, a 1-field segment
 /// ends that code's mapping. `None` on bad VLQ.
+///
+/// One pass over `source` and the splices finds where each splice is; each
+/// segment then moves in `O(log splices)`.
 fn shift_mappings(source: &str, splices: &[(usize, String)], mappings: &str) -> Option<String> {
-    let shifts: Vec<SpliceShift> = splices
-        .iter()
-        .map(|(pos, text)| {
-            let before = &source[..*pos];
-            let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-            let last_line_start = text.rfind('\n').map_or(0, |i| i + 1);
-            SpliceShift {
-                line: before.bytes().filter(|&b| b == b'\n').count(),
-                col: utf16_len(&before[line_start..]),
-                newlines: text.bytes().filter(|&b| b == b'\n').count(),
-                last_len: utf16_len(&text[last_line_start..]),
-                first_nonempty: !text.starts_with('\n'),
+    let mut shifts: Vec<SpliceShift> = Vec::with_capacity(splices.len());
+    // The scan so far: up to `scanned`, at `(line, col)`.
+    let (mut scanned, mut line, mut col) = (0, 0, 0);
+    for (pos, text) in splices {
+        let gap = &source[scanned..*pos];
+        match gap.rfind('\n') {
+            Some(last) => {
+                line += gap.bytes().filter(|&b| b == b'\n').count();
+                col = utf16_len(&gap[last + 1..]);
             }
-        })
-        .collect();
-    // `newlines_before[k]`: lines added by `shifts[..k]`.
-    let mut newlines_before = vec![0];
-    for shift in &shifts {
-        newlines_before.push(newlines_before[newlines_before.len() - 1] + shift.newlines);
+            None => col += utf16_len(gap),
+        }
+        scanned = *pos;
+        let last_line_start = text.rfind('\n').map_or(0, |i| i + 1);
+        shifts.push(SpliceShift {
+            line,
+            col,
+            newlines: text.bytes().filter(|&b| b == b'\n').count(),
+            last_len: utf16_len(&text[last_line_start..]),
+            first_nonempty: !text.starts_with('\n'),
+        });
     }
+    // Over `shifts[..k]`: `newlines_before[k]` lines added, `len_before[k]`
+    // the sum of `last_len`, and `last_break[k]` the last splice with a
+    // line break.
+    let mut newlines_before = Vec::with_capacity(shifts.len() + 1);
+    let mut len_before = Vec::with_capacity(shifts.len() + 1);
+    let mut last_break = Vec::with_capacity(shifts.len() + 1);
+    let (mut newlines, mut len, mut last) = (0, 0, None);
+    for (index, s) in shifts.iter().enumerate() {
+        newlines_before.push(newlines);
+        len_before.push(len);
+        last_break.push(last);
+        newlines += s.newlines;
+        len += s.last_len;
+        if s.newlines > 0 {
+            last = Some(index);
+        }
+    }
+    newlines_before.push(newlines);
+    len_before.push(len);
+    last_break.push(last);
     // Where an original `(line, col)` lands. A splice right at `col` moves
-    // it when `at_col_moves` (the text goes in before that char).
+    // it when `at_col_moves` (the text goes in before that char). The
+    // splices before it on its line apply in order: one with a line break
+    // starts a new line, the others add their length.
     let shift = |line: usize, col: i64, at_col_moves: bool| -> (usize, i64) {
         let first = shifts.partition_point(|s| s.line < line);
-        let (mut new_line, mut new_col) = (line + newlines_before[first], col);
-        for s in shifts[first..].iter().take_while(|s| s.line == line) {
-            if s.col > col || (s.col == col && !at_col_moves) {
-                break;
+        let end = first
+            + shifts[first..].partition_point(|s| {
+                s.line == line && (s.col < col || (s.col == col && at_col_moves))
+            });
+        let new_line = line + newlines_before[end];
+        let new_col = match last_break[end] {
+            Some(b) if b >= first => {
+                shifts[b].last_len + (col - shifts[b].col) + len_before[end] - len_before[b + 1]
             }
-            new_line += s.newlines;
-            new_col =
-                if s.newlines > 0 { s.last_len + (col - s.col) } else { new_col + s.last_len };
-        }
+            _ => col + len_before[end] - len_before[first],
+        };
         (new_line, new_col)
     };
 
@@ -880,22 +966,31 @@ fn shift_mappings(source: &str, splices: &[(usize, String)], mappings: &str) -> 
         lines.resize_with(line_count, Vec::new);
     }
 
-    for s in shifts.iter().filter(|s| s.first_nonempty) {
-        let (line, col) = shift(s.line, s.col, false);
-        let Some(segments) = lines.get_mut(line) else { continue };
-        let at = segments.partition_point(|(segment_col, _)| *segment_col < col);
-        if at > 0 && segments[at - 1].1.is_some() {
-            segments.insert(at, (col, None));
-        }
-    }
+    // Where injected text starts after mapped code, a 1-field segment ends
+    // that code's mapping. These come in order, so they merge into each
+    // line as it is written.
+    let mut breaks =
+        shifts.iter().filter(|s| s.first_nonempty).map(|s| shift(s.line, s.col, false)).peekable();
+    let mut merged: Vec<(i64, Option<&str>)> = Vec::new();
 
     let mut output = String::with_capacity(mappings.len() + lines.len());
     for (index, segments) in lines.iter().enumerate() {
         if index > 0 {
             output.push(';');
         }
+        merged.clear();
+        for &(col, rest) in segments.iter().chain(std::iter::once(&(i64::MAX, None))) {
+            while let Some((_, at)) = breaks.next_if(|&(line, at)| line == index && at <= col) {
+                if merged.last().is_some_and(|(_, rest)| rest.is_some()) {
+                    merged.push((at, None));
+                }
+            }
+            if col != i64::MAX {
+                merged.push((col, rest));
+            }
+        }
         let mut prev = 0;
-        for (segment_index, (col, rest)) in segments.iter().enumerate() {
+        for (segment_index, (col, rest)) in merged.iter().enumerate() {
             if segment_index > 0 {
                 output.push(',');
             }
@@ -1025,6 +1120,35 @@ mod tests {
     }
 
     #[test]
+    fn imports_the_namespace_of_an_indexed_type_query() {
+        // `typeof i1["s-dir"]` (an export named by a string) is `i1` alone
+        // in a type query; it is canonicalized and imported like `i1.X`.
+        let declaration = DtsInjectDeclaration {
+            class_name: "M".into(),
+            members:
+                "static ɵmod: i0.ɵɵNgModuleDeclaration<M, never, [typeof i1[\"s-dir\"]], never>;"
+                    .into(),
+            namespace_imports: [
+                ("i0".to_string(), CORE.to_string()),
+                ("i1".to_string(), "./dep".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            source_file: None,
+        };
+        let source = "import { i1 } from \"./other\";\nexport declare class M {\n}\n";
+        assert_eq!(
+            inject_dts_declarations(source, &[declaration]),
+            "import { i1 } from \"./other\";\n\
+             import * as i0 from \"@angular/core\";\n\
+             import * as i1_1 from \"./dep\";\n\
+             export declare class M {\n    \
+             static ɵmod: i0.ɵɵNgModuleDeclaration<M, never, [typeof i1_1[\"s-dir\"]], never>;\n\
+             }\n"
+        );
+    }
+
+    #[test]
     fn shifts_by_the_utf16_length_of_injected_text() {
         // `ɵ` is 1 UTF-16 unit (2 bytes), `𝒳` is 2 (4 bytes); `a` at 0,
         // `;` at 1, `b` at 2.
@@ -1051,6 +1175,14 @@ mod tests {
         assert_eq!(
             shift_mappings(source, &splices, "AAAA,EAAE,EAAE").as_deref(),
             Some("AAAA,E,CAAE;AAAE")
+        );
+        // A line break, then text after it: `b` goes to (1, 2), `z` ends
+        // its mapping at (1, 4), `c` goes to (1, 5) and `d` to (1, 7).
+        let source = "a b c d";
+        let splices = vec![(2, "\nxy".to_string()), (4, "z".to_string())];
+        assert_eq!(
+            shift_mappings(source, &splices, "AAAA,EAAE,EAAE,EAAE").as_deref(),
+            Some("AAAA;EAAE,E,CAAE,EAAE")
         );
     }
 }

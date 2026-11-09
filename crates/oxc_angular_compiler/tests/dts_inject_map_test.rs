@@ -182,21 +182,89 @@ fn moves_code_after_an_import_on_the_same_line() {
 }
 
 #[test]
-fn ends_a_comment_mapping_where_the_import_starts() {
-    // The import goes in before the first statement at col 9; the 1-field
-    // segment sits there, not at col 0, so the comment keeps its mapping.
+fn maps_the_jsdoc_below_the_new_import() {
+    // The JSDoc of the first statement keeps its mapping at its new place,
+    // below the import; the import line is unmapped.
     let source = "/** d */ export declare class X {\n}\n";
     let result = inject_dts_declarations_with_map(source, &[decl("X")], Some("AAAA"));
-    assert!(result.code.starts_with("/** d */ import * as i0"), "{}", result.code);
+    assert!(result.code.starts_with("import * as i0 from \"@angular/core\";\n/** d */ export"));
     let decoded = decode(result.mappings.as_deref().unwrap());
-    assert_eq!(decoded[0], vec![vec![0, 0, 0, 0], vec![9]]);
+    assert_eq!(decoded[0], Vec::<Vec<i64>>::new());
+    assert_eq!(decoded[1], vec![vec![0, 0, 0, 0]]);
 
     let identity = inject_dts_declarations_with_identity_map(source, &[decl("X")]);
     let decoded = decode(identity.mappings.as_deref().unwrap());
-    assert_eq!(lookup(&decoded, 0, 0), Some((0, 0)));
-    assert_eq!(lookup(&decoded, 0, 9), None);
-    assert_eq!(lookup(&decoded, 1, 0), Some((0, 9)));
+    assert_eq!(lookup(&decoded, 0, 0), None);
+    assert_eq!(lookup(&decoded, 1, 0), Some((0, 0)));
+    assert_eq!(lookup(&decoded, 1, 9), Some((0, 9)));
     assert_identity(source, &identity.code, identity.mappings.as_deref().unwrap());
+}
+
+/// The import ngtsc adds to a file with no imports goes above the comments
+/// of the first statement, so its JSDoc stays on the class (and a bundler
+/// that drops the import keeps it). `/// <reference>` directives and a
+/// header followed by a blank line (TS's detached comments) stay on top.
+#[test]
+fn puts_the_import_above_the_jsdoc_of_the_first_class() {
+    let import = "import * as i0 from \"@angular/core\";\n";
+    let cases = [
+        // ngc: `import`, `/** Doc for H. */`, `export declare class H`.
+        ("/** Doc for H. */\nexport declare class H {\n}\n", 0),
+        ("// header\n/** Doc for H. */\nexport declare class H {\n}\n", 0),
+        ("/*! pinned */\n/** Doc for H. */ export declare class H {\n}\n", 0),
+        ("/// <reference types=\"node\" />\n/** Doc for H. */\nexport declare class H {\n}\n", 31),
+        ("/* license */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 15),
+        // A JSDoc a blank line away is still the class's in TS.
+        ("/* a */\n\n/** Doc for H. */\n\nexport declare class H {\n}\n", 9),
+        // Only the first group of comments is detached.
+        ("/* a */\n\n/* b */\n\n/** Doc for H. */\nexport declare class H {\n}\n", 9),
+        (
+            "/// <reference types=\"node\" />\n/// <reference lib=\"dom\" />\n\
+             // header\n\n// more\n/** Doc for H. */\nexport declare class H {\n}\n",
+            70,
+        ),
+        ("/// <reference types=\"node\" />\nexport declare class H {\n}\n", 31),
+        ("/* license */\n\nexport declare class H {\n}\n", 15),
+    ];
+    for (source, at) in cases {
+        let result = inject_dts_declarations_with_identity_map(source, &[decl("H")]);
+        let code = &result.code;
+        assert_eq!(&code[..at], &source[..at], "{code}");
+        assert!(code[at..].starts_with(import), "{code}");
+        assert!(code[at + import.len()..].starts_with(&source[at..source.find(" {").unwrap()]));
+        assert_identity(source, code, result.mappings.as_deref().unwrap());
+    }
+}
+
+/// The map shift is linear in the file and the splices: a 2 MB `.d.ts`
+/// with 11000 classes, on many lines and on one line, takes well under a
+/// second in release (it took minutes when every splice rescanned the file
+/// up to it).
+#[test]
+fn shifts_the_map_of_a_large_file_quickly() {
+    let classes = 11_000;
+    let names: Vec<String> = (0..classes).map(|i| format!("Component{i}")).collect();
+    let declarations: Vec<DtsInjectDeclaration> = names.iter().map(|name| decl(name)).collect();
+    for separator in ["\n", " "] {
+        let source: String = names
+            .iter()
+            .map(|name| {
+                format!(
+                    "/** The {name}. */{separator}export declare class {name} {{{separator}    \
+                     value: string;{separator}    other(x: number): Record<string, number>;\
+                     {separator}    readonly items: ReadonlyArray<{{ id: number; label: string }}>;\
+                     {separator}}}{separator}"
+                )
+            })
+            .collect();
+        assert!(source.len() > 2_000_000, "{}", source.len());
+        let start = std::time::Instant::now();
+        let result = inject_dts_declarations_with_identity_map(&source, &declarations);
+        let elapsed = start.elapsed();
+        assert_eq!(result.code.matches("static ɵfac").count(), classes);
+        assert_identity(&source, &result.code, result.mappings.as_deref().unwrap());
+        assert!(elapsed.as_secs() < 20, "took {elapsed:?}");
+    }
 }
 
 #[test]
