@@ -180,39 +180,69 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       return root
     }
 
-    /** Runs the client's generateBundle (when given a bundle), then the server build. */
-    async function serverBuild(
+    const ENGINE = 'const engine = new AngularNodeAppEngine();'
+    const page = (source: string) => ({
+      'index.html': { type: 'asset', fileName: 'index.html', source },
+    })
+
+    /** One plugin shared by a `client` and an `ssr` environment, listed in `order`. */
+    function app(
       root: string,
-      { bundle, builder }: { bundle?: Record<string, unknown>; builder?: boolean } = {},
+      {
+        builder,
+        watch,
+        order = ['client', 'ssr'],
+      }: { builder?: boolean; watch?: boolean; order?: string[] } = {},
     ) {
       const plugin = ssrManifestPlugin({}) as any
       plugin.configResolved({ root, base: '/' })
-      if (bundle) {
-        plugin.generateBundle.handler.call(
-          { environment: { config: { consumer: 'client' } } },
-          {},
-          bundle,
-        )
-      }
+      const environments = Object.fromEntries(
+        order.map((name) => [name, name === 'client' ? { build: { outDir: 'dist/client' } } : {}]),
+      )
       const warnings: string[] = []
-      const context = {
+      const context = (name: string) => ({
         environment: {
+          name,
           config: {
-            consumer: 'server',
+            consumer: name === 'client' ? 'client' : 'server',
             root,
-            environments: { client: { build: { outDir: 'dist/client' } } },
+            build: { watch: watch ? {} : null },
+            environments,
           },
           getTopLevelConfig: () => ({ builder: builder ? {} : undefined }),
         },
+        meta: { watchMode: !!watch },
         warn: (message: string) => warnings.push(message),
+      })
+      return {
+        warnings,
+        clientStart: () => plugin.buildStart.call(context('client')),
+        clientBundle: (bundle: Record<string, unknown>) =>
+          plugin.generateBundle.handler.call(context('client'), {}, bundle),
+        /** The server's buildStart, then a transform of each module. */
+        async server(...modules: string[]): Promise<(string | undefined)[]> {
+          await plugin.buildStart.call(context('ssr'))
+          return modules.map(
+            (code, i) =>
+              plugin.transform.call(context('ssr'), code, join(root, `src/server${i}.ts`))?.code,
+          )
+        },
       }
-      await plugin.buildStart.call(context)
-      const code: string = plugin.transform.call(
-        context,
-        'const engine = new AngularNodeAppEngine();',
-        join(root, 'src/server.ts'),
-      ).code
-      return { code, warnings }
+    }
+
+    /** Runs the client's generateBundle (when given a bundle), then the server build. */
+    async function serverBuild(
+      root: string,
+      {
+        bundle,
+        builder,
+        order,
+      }: { bundle?: Record<string, unknown>; builder?: boolean; order?: string[] } = {},
+    ) {
+      const build = app(root, { builder, order })
+      if (bundle) build.clientBundle(bundle)
+      const [code] = await build.server(ENGINE)
+      return { code: code!, warnings: build.warnings }
     }
 
     it('shares one plugin instance across environments', () => {
@@ -251,11 +281,15 @@ describe('SSR Manifest Generation (Issue #60)', () => {
 
     it('warns that the page may be stale when the server builds first with --app', async () => {
       const root = tempRoot(BUILT)
-      const { code, warnings } = await serverBuild(root, { builder: true })
+      const { code, warnings } = await serverBuild(root, {
+        builder: true,
+        order: ['ssr', 'client'],
+      })
       expect(code).toContain('/assets/index-abc.js')
       expect(warnings).toHaveLength(1)
       expect(warnings[0]).toContain('may be stale')
       expect(warnings[0]).toContain(join(root, 'dist/client/index.html'))
+      expect(warnings[0]).toContain('List `client` first')
     })
 
     it('falls back to the source index.html with a warning', async () => {
@@ -267,10 +301,77 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       expect(warnings[0]).toContain('vite build --app')
 
       // With --app, the client was not built first.
-      const app = await serverBuild(tempRoot(), { builder: true })
-      expect(app.code).toContain('/src/main.ts')
-      expect(app.warnings).toHaveLength(1)
-      expect(app.warnings[0]).toContain('List `client` first')
+      const ssrFirst = await serverBuild(tempRoot(), { builder: true, order: ['ssr', 'client'] })
+      expect(ssrFirst.code).toContain('/src/main.ts')
+      expect(ssrFirst.warnings).toHaveLength(1)
+      expect(ssrFirst.warnings[0]).toContain('List `client` first')
+
+      // The client is listed first but built no index.html.
+      const clientFirst = await serverBuild(tempRoot(), { builder: true })
+      expect(clientFirst.code).toContain('/src/main.ts')
+      expect(clientFirst.warnings).toHaveLength(1)
+      expect(clientFirst.warnings[0]).not.toContain('List `client` first')
+    })
+
+    it('warns only when a manifest embeds the page, once per build', async () => {
+      const build = app(tempRoot())
+      expect(await build.server('export function render() {}')).toEqual([undefined])
+      expect(build.warnings).toEqual([])
+
+      const codes = await build.server('export function render() {}', ENGINE, ENGINE)
+      expect(codes[0]).toBeUndefined()
+      expect(codes[1]).toContain('/src/main.ts')
+      expect(codes[2]).toContain('/src/main.ts')
+      expect(build.warnings).toHaveLength(1)
+      expect(build.warnings[0]).toContain('built client index.html not found')
+
+      await build.server(ENGINE)
+      expect(build.warnings).toHaveLength(2)
+    })
+
+    it('does not silently reuse the previous round in watch mode', async () => {
+      // `vite build --app --watch` builds the environments at the same time.
+      const root = tempRoot()
+      const build = app(root, { builder: true, watch: true })
+      const NEXT = BUILT.replace('index-abc', 'index-def')
+
+      // Round 1: the server starts before the client has built.
+      await build.clientStart()
+      const [first] = await build.server(ENGINE)
+      build.clientBundle(page(BUILT))
+      expect(first).toContain('/src/main.ts')
+      expect(build.warnings).toHaveLength(1)
+      expect(build.warnings[0]).toContain('In watch mode')
+      expect(build.warnings[0]).not.toContain('List `client` first')
+
+      // Round 2: the client starts first and drops its old page, so the server
+      // reads the client outDir of round 1.
+      mkdirSync(join(root, 'dist/client'), { recursive: true })
+      writeFileSync(join(root, 'dist/client/index.html'), BUILT)
+      await build.clientStart()
+      const [second] = await build.server(ENGINE)
+      build.clientBundle(page(NEXT))
+      expect(second).toContain('/assets/index-abc.js')
+      expect(build.warnings).toHaveLength(2)
+      expect(build.warnings[1]).toContain('may be stale')
+      expect(build.warnings[1]).toContain('In watch mode')
+
+      // Round 3: the server starts first, with the page of round 2.
+      const [third] = await build.server(ENGINE)
+      await build.clientStart()
+      expect(third).toContain('/assets/index-def.js')
+      expect(build.warnings).toHaveLength(3)
+      expect(build.warnings[2]).toContain('may be stale')
+      expect(build.warnings[2]).toContain('In watch mode')
+    })
+
+    it('embeds the page of this round without a warning outside watch mode', async () => {
+      const build = app(tempRoot(), { builder: true })
+      await build.clientStart()
+      build.clientBundle(page(BUILT))
+      const [code] = await build.server(ENGINE)
+      expect(code).toContain('/assets/index-abc.js')
+      expect(build.warnings).toEqual([])
     })
 
     it('falls back to a minimal page without any index.html', async () => {

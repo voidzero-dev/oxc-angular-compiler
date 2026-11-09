@@ -167,6 +167,21 @@ export default defineConfig({
     rmSync(SSR_OUT_DIR, { recursive: true, force: true })
   })
 
+  test('vite build --ssr without an app engine does not warn about index.html (#696)', () => {
+    writeTempFile('src/plain-server.ts', `export const render = () => '<app-root></app-root>';`)
+    const output = execSync(
+      'npx vite build --config vite.config.ssr.ts --ssr src/plain-server.ts 2>&1',
+      { cwd: APP_DIR, encoding: 'utf-8', timeout: 60000 },
+    )
+
+    expect(readFileSync(join(SSR_OUT_DIR, 'plain-server.js'), 'utf-8')).not.toContain(
+      'setAngularAppManifest',
+    )
+    expect(output).not.toContain('vite-ssr-manifest')
+
+    rmSync(SSR_OUT_DIR, { recursive: true, force: true })
+  })
+
   test('vite build --ssr injects ɵsetAngularAppManifest into server entry', () => {
     // Run the SSR build
     execSync('npx vite build --config vite.config.ssr.ts', {
