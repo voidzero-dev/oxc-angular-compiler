@@ -1777,16 +1777,25 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         const declarations = Array.from(byClassName.values())
 
         for (const file of Object.values(bundle)) {
-          if (file.type !== 'asset') continue
           if (!/\.d\.[cm]?ts$/.test(file.fileName)) continue
 
-          const source =
-            typeof file.source === 'string'
-              ? file.source
-              : Buffer.from(file.source).toString('utf-8')
+          // rolldown-plugin-dts (and so tsdown) emits declarations as
+          // chunks; generators that call `emitFile` emit them as assets.
+          let source: string
+          if (file.type === 'chunk') {
+            source = file.code
+          } else {
+            source =
+              typeof file.source === 'string'
+                ? file.source
+                : Buffer.from(file.source).toString('utf-8')
+          }
 
           const augmented = injectDtsDeclarations(source, declarations)
-          if (augmented !== source) {
+          if (augmented === source) continue
+          if (file.type === 'chunk') {
+            file.code = augmented
+          } else {
             file.source = augmented
           }
         }
