@@ -1316,6 +1316,7 @@ M.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", t
     let linked = link_for_version(code, None);
     assert!(linked.contains(r#"ɵɵdomProperty("id",ctx["my-prop"])("title",ctx.m)"#), "{linked}");
     assert!(linked.contains(r#"ɵɵattribute("v",ctx["it's"])"#), "{linked}");
+}
 
 /// #688: a linked `@trigger` host property sorts with the DOM properties, as
 /// Angular's linker does.
