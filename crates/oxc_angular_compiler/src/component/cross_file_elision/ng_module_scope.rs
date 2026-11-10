@@ -1343,7 +1343,9 @@ fn read_declared<'a>(
                 ty = &operator.type_annotation;
             }
             let TSType::TSTupleType(_) = ty else { return None };
-            return Some(Declared::TypeList(type_list(ty, &decl.file)?));
+            let mut refs = Vec::new();
+            const_type_list(ty, &decl.file, &mut refs)?;
+            return Some(Declared::TypeList(refs));
         };
         let mut refs = Vec::new();
         collect_refs(init, consts, &decl.file, &mut refs, 0, false, false)?;
@@ -1399,6 +1401,48 @@ fn read_declaration_type(class: &Class<'_>, file: &str) -> Option<Declared> {
             _ => None,
         }
     })
+}
+
+/// The classes a declared `const`'s tuple type names, nested tuples
+/// flattened, read like ngtsc's evaluator (`visitType`): `typeof A`, a
+/// tuple, a `readonly` one, or a named member (`name: typeof A`).
+fn const_type_list(ty: &TSType<'_>, file: &str, out: &mut Vec<RawRef>) -> Option<()> {
+    const MAX_NESTING: u8 = 8;
+    fn read(ty: &TSType<'_>, file: &str, out: &mut Vec<RawRef>, depth: u8) -> Option<()> {
+        if depth > MAX_NESTING {
+            return None;
+        }
+        match ty {
+            TSType::TSTypeQuery(query) => {
+                out.push(type_name_ref(file, query.expr_name.as_ts_type_name()?)?);
+                Some(())
+            }
+            TSType::TSTupleType(tuple) => tuple
+                .element_types
+                .iter()
+                .try_for_each(|element| read_element(element, file, out, depth)),
+            TSType::TSTypeOperatorType(operator)
+                if operator.operator == TSTypeOperatorOperator::Readonly =>
+            {
+                read(&operator.type_annotation, file, out, depth + 1)
+            }
+            _ => None,
+        }
+    }
+    fn read_element(
+        element: &TSTupleElement<'_>,
+        file: &str,
+        out: &mut Vec<RawRef>,
+        depth: u8,
+    ) -> Option<()> {
+        match element {
+            TSTupleElement::TSNamedTupleMember(member) => {
+                read_element(&member.element_type, file, out, depth + 1)
+            }
+            _ => read(element.as_ts_type()?, file, out, depth + 1),
+        }
+    }
+    read(ty, file, out, 0)
 }
 
 /// The classes a `[typeof A, typeof i1.B]` tuple type names; `never` names

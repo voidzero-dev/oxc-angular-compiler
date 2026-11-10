@@ -47,6 +47,8 @@ export declare class LibTwoModule {
   static ɵinj: i0.ɵɵInjectorDeclaration<LibTwoModule>;
 }
 export declare const LIB_ALL: [typeof LibModule, typeof LibTwoModule];
+export declare const LIB_NESTED: [typeof LibModule, [typeof LibTwoModule]];
+export declare const LIB_NAMED: [first: typeof LibModule, rest: [typeof LibTwoModule]];
 ";
 
 fn write(dir: &TempDir, name: &str, content: &str) -> std::path::PathBuf {
@@ -289,6 +291,130 @@ import * as d2 from './dep2';
         "{imports:[i1.LibModule,i1.LibTwoModule,i2.Dep2Module],exports:[i2.Dep2Module]}",
         "imports:[i1.LibModule,i1.LibTwoModule,i2.Dep2Module],exports:[i2.Dep2Module]",
         "never,[typeofi1.LibModule,typeofi1.LibTwoModule,typeofi2.Dep2Module],[typeofi2.Dep2Module]",
+    );
+}
+
+#[test]
+fn a_package_tuple_with_nested_tuples() {
+    // ngtsc's evaluator reads a nested tuple type and a named member too.
+    check(
+        &format!(
+            "{H}import * as lib from 'fakelib';
+import * as dep from './dep';
+@NgModule({{ imports: [lib.LIB_NESTED], exports: [dep.DepModule] }}) export class M {{}}"
+        ),
+        "import*asi1from'fakelib';import*asi2from'./dep';",
+        "{imports:[i1.LibModule,i1.LibTwoModule],exports:[i2.DepModule]}",
+        "imports:[i1.LibModule,i1.LibTwoModule],exports:[i2.DepModule]",
+        "never,[typeofi1.LibModule,typeofi1.LibTwoModule],[typeofi2.DepModule]",
+    );
+    check(
+        &format!(
+            "{H}import {{ LIB_NAMED }} from 'fakelib';
+@NgModule({{ imports: [...LIB_NAMED] }}) export class M {{}}"
+        ),
+        "import*asi1from'fakelib';",
+        "{imports:[i1.LibModule,i1.LibTwoModule]}",
+        "imports:[i1.LibModule,i1.LibTwoModule]",
+        "never,[typeofi1.LibModule,typeofi1.LibTwoModule],never",
+    );
+}
+
+#[test]
+fn an_import_listed_in_a_variable_written_after_the_module_is_wrapped() {
+    // ngtsc wraps the lists when the name it writes sits after the
+    // NgModule: here the import's name inside the later variable.
+    let wrapped = [
+        "@NgModule({ imports: [VLIST] }) export class M {}
+var VLIST = [DepModule];",
+        "@NgModule({ imports: [forwardRef(() => MODS)] }) export class M {}
+const MODS = [DepModule];",
+        "@NgModule({ imports: [forwardRef(() => ALIAS)] }) export class M {}
+const ALIAS = DepModule;",
+        "@NgModule({ imports: [forwardRef(() => P)] }) export class M {}
+const P = { ngModule: DepModule, providers: [] };",
+        "const EARLY = [forwardRef(() => LATE)];
+@NgModule({ imports: EARLY }) export class M {}
+const LATE = DepModule;",
+    ];
+    for source in wrapped {
+        check(
+            &format!("{H}import {{ DepModule }} from './dep';\n{source}"),
+            "import*asi0from'@angular/core';",
+            "{imports:()=>[DepModule]}",
+            "imports:()=>[DepModule]",
+            "never,[typeofi1.DepModule],never",
+        );
+    }
+    check(
+        &format!(
+            "{H}import {{ DepModule, OtherModule }} from './dep';
+@NgModule({{ imports: [forwardRef(() => MODS)], exports: [OtherModule] }}) export class M {{}}
+const MODS = [DepModule];"
+        ),
+        "import*asi0from'@angular/core';",
+        "{imports:()=>[DepModule],exports:()=>[OtherModule]}",
+        "imports:()=>[DepModule],exports:()=>[OtherModule]",
+        "never,[typeofi1.DepModule],[typeofi1.OtherModule]",
+    );
+    check(
+        &format!(
+            "{H}import {{ DepModule }} from './dep';
+@NgModule({{ exports: [forwardRef(() => LLIST)] }}) export class M {{}}
+let LLIST = [DepModule];"
+        ),
+        "import*asi0from'@angular/core';",
+        "{exports:()=>[DepModule]}",
+        "exports:()=>[DepModule]",
+        "never,never,[typeofi1.DepModule]",
+    );
+}
+
+#[test]
+fn a_name_written_before_the_module_is_not_wrapped() {
+    // The later variable leads back to a name written earlier, or to a
+    // namespace member ngtsc names through its own import.
+    let plain = [
+        "const EARLY = [DepModule];
+@NgModule({ imports: [forwardRef(() => L)] }) export class M {}
+const L = [...EARLY];",
+        "const EARLY = DepModule;
+@NgModule({ imports: [forwardRef(() => L)] }) export class M {}
+const L = EARLY;",
+        "export class Holder { static forRoot() { return { ngModule: DepModule, providers: [] }; } }
+@NgModule({ imports: [forwardRef(() => P)] }) export class M {}
+const P = Holder.forRoot();",
+    ];
+    for source in plain {
+        check(
+            &format!("{H}import {{ DepModule }} from './dep';\n{source}"),
+            "import*asi0from'@angular/core';",
+            "{imports:[DepModule]}",
+            "imports:[DepModule]",
+            "never,[typeofi1.DepModule],never",
+        );
+    }
+    check(
+        &format!(
+            "{H}import * as dep from './dep';
+@NgModule({{ imports: [forwardRef(() => LATE)] }}) export class M {{}}
+const LATE = [dep.DepModule];"
+        ),
+        "import*asi1from'./dep';",
+        "{imports:[i1.DepModule]}",
+        "imports:[i1.DepModule]",
+        "never,[typeofi1.DepModule],never",
+    );
+    check(
+        &format!(
+            "{H}@NgModule({{}}) export class A {{}}
+@NgModule({{ imports: [forwardRef(() => L)] }}) export class M {{}}
+const L = [A];"
+        ),
+        "import*asi0from'@angular/core';",
+        "{imports:[A]}",
+        "imports:[A]",
+        "never,[typeofA],never",
     );
 }
 
