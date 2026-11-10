@@ -2115,10 +2115,26 @@ fn evaluate_host_metadata_uncached<'a>(
     if let Some(error) = parse_error {
         return Err(error);
     }
-    // `verifyHostBindings`' `validateNoEventBindings`: binding a host property
-    // or attribute to an event (`[onclick]`, `[attr.onload]`) is disallowed
-    // (compiler.ts). The other errors it collects come from parsing the
-    // binding expressions, which oxc doesn't do.
+    // `verifyHostBindings` (compiler.ts) collects every error, in this order,
+    // and ngtsc joins their messages with "\n" into one NG5001:
+    // 1. `createDirectiveHostEventAsts`: `()` has no event name.
+    // 2. `createBoundHostProperties`: `[]` has no property name.
+    // 3. `validateNoEventBindings`: binding a host property or attribute to an
+    //    event (`[onclick]`, `[attr.onload]`) is disallowed.
+    // The other errors these steps report come from parsing the binding
+    // expressions, which oxc doesn't do. Only the name inside the brackets is
+    // checked, so `[ ]` and `( )` are not errors.
+    let mut errors: std::vec::Vec<String> = std::vec::Vec::new();
+    for (key, _) in &entries {
+        if matches!(HostKey::of(key.as_str()), HostKey::Listener) && key.len() == 2 {
+            errors.push("Event name is missing in binding".to_string());
+        }
+    }
+    for (key, _) in &entries {
+        if matches!(HostKey::of(key.as_str()), HostKey::Property) && key.len() == 2 {
+            errors.push("Property name is missing in binding".to_string());
+        }
+    }
     for (key, _) in &entries {
         let HostKey::Property = HostKey::of(key.as_str()) else { continue };
         let prop = &key.as_str()[1..key.as_str().len() - 1];
@@ -2137,8 +2153,11 @@ fn evaluate_host_metadata_uncached<'a>(
                      by the current module."
                 ));
             }
-            return Err(msg);
+            errors.push(msg);
         }
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
     }
     Ok(entries)
 }

@@ -1342,6 +1342,25 @@ D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", t
     assert!(linked.contains("hostVars:7"), "{linked}");
 }
 
+/// #704: Angular's linker never reads the binding parser's errors, so an
+/// empty host property or listener name links (Angular 22.2.4's
+/// `compileDirectiveDeclaration` gives the same output).
+#[test]
+fn test_link_host_empty_binding_names() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.4", type: D, isStandalone: true, selector: "[d]", host: { properties: { "": "a" }, listeners: { "": "b()" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    assert!(
+        linked.contains(r#"i0.ɵɵlistener("",functionD__HostBindingHandler(){returnctx.b();})"#),
+        "{linked}"
+    );
+    assert!(linked.contains(r#"i0.ɵɵdomProperty("",ctx.a)"#), "{linked}");
+}
+
 /// #689: a linked `animate.enter` host property is a create-mode callback.
 #[test]
 fn test_link_host_animate_property() {

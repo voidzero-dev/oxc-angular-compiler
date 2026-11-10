@@ -700,6 +700,74 @@ fn binding_to_an_event_is_disallowed() {
     assert_same_as_literal("Component", "const H = { '(onx)': 'go()', onx: 'a' };", "H", literal);
 }
 
+/// #704: `verifyHostBindings` reports every bad key, and ngtsc 22.2.4 joins
+/// the messages with "\n" in one NG5001.
+#[test]
+fn every_event_binding_is_reported() {
+    assert_error(
+        "",
+        "{ '[onclick]': 't', '[attr.onload]': 't' }",
+        "Binding to event property 'onclick' is disallowed for security reasons, please use \
+         (click)=...\nIf 'onclick' is a directive input, make sure the directive is imported by \
+         the current module.\nBinding to event attribute 'onload' is disallowed for security \
+         reasons, please use (load)=...",
+    );
+}
+
+/// #704: a `()` or `[]` key has no name. ngtsc 22.2.4 reports the listeners
+/// first, then the properties, then the event bindings, whatever the order
+/// of the keys.
+#[test]
+fn empty_binding_name_is_an_error() {
+    const EVENT: &str = "Event name is missing in binding";
+    const PROPERTY: &str = "Property name is missing in binding";
+    const ONCLICK: &str = "Binding to event property 'onclick' is disallowed for security \
+                           reasons, please use (click)=...\nIf 'onclick' is a directive input, \
+                           make sure the directive is imported by the current module.";
+    assert_error("", "{ '()': 'go()' }", EVENT);
+    assert_error("", "{ '[]': 't' }", PROPERTY);
+    assert_error("", "{ '[]': 't', '()': 'go()' }", &format!("{EVENT}\n{PROPERTY}"));
+    assert_error("", "{ '[]': 't', '[onclick]': 't' }", &format!("{PROPERTY}\n{ONCLICK}"));
+    assert_error("", "{ '[onclick]': 't', '[]': 't' }", &format!("{PROPERTY}\n{ONCLICK}"));
+    // An evaluated host: a constant, a spread, a key given twice.
+    assert_error("const H = { '[]': 't' };", "H", PROPERTY);
+    assert_error(
+        "const S = { '()': 'go()' };",
+        "{ ...S, '[]': 't' }",
+        &format!("{EVENT}\n{PROPERTY}"),
+    );
+    assert_error(
+        "const S = { '[]': 't' };",
+        "{ '[]': 'w', ...S, '()': 'go()' }",
+        &format!("{EVENT}\n{PROPERTY}"),
+    );
+}
+
+/// Only the name inside the brackets is checked, so `[ ]` and `( )` compile
+/// (ngtsc 22.2.4 with `typeCheckHostBindings: false`; its host type-check
+/// reports NG8002 for `' '` otherwise, which oxc doesn't do). The decorators
+/// are not checked by NG5001 either: `@HostListener('')` compiles, and
+/// `@HostBinding('')` only fails ngtsc's type-check.
+#[test]
+fn blank_or_decorator_binding_name_is_not_an_error() {
+    let source = source("Directive", "", "{ '[ ]': 't', '( )': 'go()' }");
+    let (code, diagnostics) = compile(&source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(code.contains(r#"i0.ɵɵlistener(" ",function X___HostBindingHandler()"#), "{code}");
+    assert!(code.contains(r#"i0.ɵɵdomProperty(" ",ctx.t)"#), "{code}");
+
+    let code = host_part(
+        "import { Directive, HostBinding, HostListener } from '@angular/core';
+@Directive({ selector: '[x]' })
+export class X { @HostBinding('') a = 1; @HostListener('') b() {} }",
+    );
+    assert!(
+        code.contains(r#"i0.ɵɵlistener("",functionX__HostBindingHandler(){returnctx.b();})"#),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵdomProperty("",ctx.a)"#), "{code}");
+}
+
 /// A method or accessor called `host` in the decorator object is a class
 /// member, not metadata — ngtsc's `reflectObjectLiteral` skips it, so it must
 /// not produce the "must be an object" error (regression: `config_property`
