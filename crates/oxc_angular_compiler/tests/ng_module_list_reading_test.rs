@@ -32,6 +32,16 @@ import { DepModule } from './dep';
 export const LIST2 = [DepModule, Dep2Module];
 ";
 
+// `H` is exported only under a string name. ngtsc 22.2.4 writes
+// `i1.h-dir` for it, which does not parse; Oxc writes `i1["h-dir"]`, the
+// same read in valid code (like the hostDirectives of #702).
+const DEP3: &str = r#"
+import { Directive } from '@angular/core';
+@Directive({ selector: '[h]', standalone: false }) class H {}
+export { H as "h-dir" };
+export const DECLS = [H];
+"#;
+
 const FAKELIB: &str = r"
 import * as i0 from '@angular/core';
 import { ModuleWithProviders } from '@angular/core';
@@ -62,6 +72,7 @@ fn project() -> TempDir {
     let dir = TempDir::new().unwrap();
     write(&dir, "src/dep.ts", DEP);
     write(&dir, "src/dep2.ts", DEP2);
+    write(&dir, "src/dep3.ts", DEP3);
     write(
         &dir,
         "node_modules/fakelib/package.json",
@@ -452,5 +463,20 @@ import * as lib from 'fakelib';
         "{imports:[i1.LibModule,i1.LibModule,i1.LibModule],exports:[i1.LibModule]}",
         "imports:[i1.LibModule,i1.LibModule,i1.LibModule],exports:[i1.LibModule]",
         "never,[typeofi1.LibModule,typeofi1.LibModule,typeofi1.LibModule],[typeofi1.LibModule]",
+    );
+}
+
+#[test]
+fn a_string_export_name_is_read_off_the_namespace() {
+    let source = format!(
+        "{H}import {{ DECLS }} from './dep3';
+@NgModule({{ declarations: DECLS }}) export class M {{}}"
+    );
+    check(
+        &source,
+        "import*asi1from'./dep3';",
+        r#"{declarations:[i1["h-dir"]]}"#,
+        r#"declarations:[i1["h-dir"]]"#,
+        r#"[typeofi1["h-dir"]],never,never"#,
     );
 }

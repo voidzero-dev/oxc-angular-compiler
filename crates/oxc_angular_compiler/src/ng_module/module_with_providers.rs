@@ -537,7 +537,7 @@ impl ModuleLists {
         key: ListKey,
         mut namespace_of: impl FnMut(&str) -> oxc_str::Ident<'a>,
     ) -> Option<oxc_allocator::Vec<'a, crate::output::ast::OutputExpression<'a>>> {
-        use crate::output::ast::{OutputExpression, ReadPropExpr, ReadVarExpr};
+        use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
         use oxc_allocator::Box;
 
         let entries = &self.lists[key as usize];
@@ -560,20 +560,12 @@ impl ModuleLists {
             for class in refs {
                 list.push(match class {
                     Ref::Local(local) => read_var(name(local)),
-                    Ref::Module { specifier, name: export } => {
-                        OutputExpression::ReadProp(Box::new_in(
-                            ReadPropExpr {
-                                receiver: Box::new_in(
-                                    read_var(namespace_of(specifier)),
-                                    &allocator,
-                                ),
-                                name: name(export),
-                                optional: false,
-                                source_span: None,
-                            },
-                            &allocator,
-                        ))
-                    }
+                    // `i1.X`, or `i1["h-dir"]` for an export named by a string.
+                    Ref::Module { specifier, name: export } => OutputAstBuilder::export_read(
+                        allocator,
+                        read_var(namespace_of(specifier)),
+                        name(export),
+                    ),
                 });
             }
         }

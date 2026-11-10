@@ -986,15 +986,15 @@ fn host_directive_namespace_member<'e, 'a>(
     Some((info, export))
 }
 
-/// `i1.name` for the export `name` of `specifier` in the `.d.ts`.
+/// `i1.name` for the export `name` of `specifier` in the `.d.ts`, or
+/// `i1["h-dir"]` for an export named by a string.
 fn dts_module_ref<'a>(
     allocator: &'a Allocator,
     specifier: &str,
     name: &str,
     registry: &mut NamespaceRegistry<'a>,
 ) -> String {
-    let namespace = registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
-    format!("{namespace}.{name}")
+    dts_export_ref(&Ident::from(allocator.alloc_str(specifier)), name, registry)
 }
 
 /// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
