@@ -1731,7 +1731,35 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
 
     // Reify update operations (property bindings)
     // Host bindings use Full mode (not DomOnly)
+    // In v20.2.0-next.2 to v20.3.2 and v21.0.0-next.0 to next.4, an `aria*`
+    // DOM property is written as `ɵɵattribute(ariaAttrName(name), expr)` in
+    // its own place (Angular's `reifyDomProperty`).
+    let aria_properties_as_attributes =
+        job.angular_version.is_some_and(|v| v.reifies_host_aria_properties_as_attributes());
     for op in job.root.update.iter() {
+        if aria_properties_as_attributes
+            && let UpdateOp::DomProperty(prop) = op
+            && !matches!(prop.binding_kind, BindingKind::LegacyAnimation | BindingKind::Animation)
+            && is_aria_property(prop.name.as_str())
+        {
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &prop.expression,
+                &job.expressions,
+                root_xref,
+            );
+            let name = Ident::from(allocator.alloc_str(&aria_attr_name(prop.name.as_str())));
+            job.root.update_statements.push(create_attribute_stmt_with_expr(
+                allocator,
+                core_namespace,
+                &name,
+                expr,
+                None,
+                None,
+            ));
+            continue;
+        }
         let stmt = reify_update_op(
             &allocator,
             core_namespace,

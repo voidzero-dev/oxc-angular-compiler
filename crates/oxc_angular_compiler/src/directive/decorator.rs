@@ -21,6 +21,7 @@ use super::metadata::{
     R3InputMetadata,
 };
 use super::property_decorators::try_unwrap_forward_ref;
+use crate::component::AngularVersion;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression};
 use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
@@ -489,7 +490,7 @@ pub struct StringConsts<'a> {
     /// `["k", "KeyCodes"]`), whose import the cross-file analysis followed
     /// to a `const enum` (see [`Self::is_imported_const_enum`]).
     imported_const_enums: rustc_hash::FxHashSet<std::vec::Vec<Ident<'a>>>,
-    /// `host:` expressions already run through [`evaluate_host_metadata`],
+    /// `host:` expressions already run through [`parse_host_metadata`],
     /// keyed by the expression's address and the decorator's name: the
     /// diagnostic pass (`decorator_io_errors`) and the metadata extraction
     /// both evaluate it, and evaluation is deterministic.
@@ -1211,6 +1212,7 @@ pub fn decorator_io_errors<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
+    angular_version: Option<AngularVersion>,
 ) -> std::vec::Vec<OxcDiagnostic> {
     use super::property_decorators::{
         IO_ACCESS, decorator_argument, initializer_api_access_error, literal_alias_error,
@@ -1542,7 +1544,8 @@ pub fn decorator_io_errors<'a>(
     // to the member name and `parse_host_listener_config` drops a non-string
     // argument instead of reporting it — except for a string with a lone
     // surrogate, which oxc can't read.
-    let host = || host_metadata_error(allocator, config, decorator_name, consts).map(at);
+    let host =
+        || host_metadata_error(allocator, config, decorator_name, consts, angular_version).map(at);
     let host_members =
         || super::property_decorators::lone_surrogate_host_error(class, consts).map(at);
 
@@ -2007,6 +2010,22 @@ pub(crate) fn evaluate_host_metadata<'a>(
     decorator_name: &str,
     consts: &StringConsts<'a>,
 ) -> Result<std::vec::Vec<(Ident<'a>, HostValue<'a>)>, String> {
+    let entries = parse_host_metadata(allocator, expr, decorator_name, consts)?;
+    match host_binding_errors(&entries, false) {
+        Some(error) => Err(error),
+        None => Ok(entries),
+    }
+}
+
+/// The entries of the `host` metadata `expr` evaluates to, or the error
+/// ngtsc's `parseHostBindings` reports for it. The checks of
+/// `verifyHostBindings` are left to [`host_binding_errors`].
+fn parse_host_metadata<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    decorator_name: &str,
+    consts: &StringConsts<'a>,
+) -> Result<std::vec::Vec<(Ident<'a>, HostValue<'a>)>, String> {
     // This runs twice per decorated class — the diagnostic checks it and the
     // metadata extraction reads the entries — so each `host:` expression is
     // evaluated once and the result shared (`StringConsts::host_values`).
@@ -2014,12 +2033,12 @@ pub(crate) fn evaluate_host_metadata<'a>(
     if let Some(cached) = consts.host_values.borrow().get(&key) {
         return cached.clone();
     }
-    let result = evaluate_host_metadata_uncached(allocator, expr, decorator_name, consts);
+    let result = parse_host_metadata_uncached(allocator, expr, decorator_name, consts);
     consts.host_values.borrow_mut().insert(key, result.clone());
     result
 }
 
-fn evaluate_host_metadata_uncached<'a>(
+fn parse_host_metadata_uncached<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
     decorator_name: &str,
@@ -2115,11 +2134,40 @@ fn evaluate_host_metadata_uncached<'a>(
     if let Some(error) = parse_error {
         return Err(error);
     }
-    // `verifyHostBindings`' `validateNoEventBindings`: binding a host property
-    // or attribute to an event (`[onclick]`, `[attr.onload]`) is disallowed
-    // (compiler.ts). The other errors it collects come from parsing the
-    // binding expressions, which oxc doesn't do.
-    for (key, _) in &entries {
+    Ok(entries)
+}
+
+/// The error ngtsc's `verifyHostBindings` reports for the parsed `host`
+/// `entries`, if any. The checks for a `[]` / `()` key run only when
+/// `check_empty_names` is set (see
+/// [`AngularVersion::reports_empty_host_binding_names`]).
+fn host_binding_errors(
+    entries: &[(Ident<'_>, HostValue<'_>)],
+    check_empty_names: bool,
+) -> Option<String> {
+    // `verifyHostBindings` (compiler.ts) collects every error, in this order,
+    // and ngtsc joins their messages with "\n" into one NG5001:
+    // 1. `createDirectiveHostEventAsts`: `()` has no event name.
+    // 2. `createBoundHostProperties`: `[]` has no property name.
+    // 3. `validateNoEventBindings`: binding a host property or attribute to an
+    //    event (`[onclick]`, `[attr.onload]`) is disallowed.
+    // The other errors these steps report come from parsing the binding
+    // expressions, which oxc doesn't do. Only the name inside the brackets is
+    // checked, so `[ ]` and `( )` are not errors.
+    let mut errors: std::vec::Vec<String> = std::vec::Vec::new();
+    if check_empty_names {
+        for (key, _) in entries {
+            if matches!(HostKey::of(key.as_str()), HostKey::Listener) && key.len() == 2 {
+                errors.push("Event name is missing in binding".to_string());
+            }
+        }
+        for (key, _) in entries {
+            if matches!(HostKey::of(key.as_str()), HostKey::Property) && key.len() == 2 {
+                errors.push("Property name is missing in binding".to_string());
+            }
+        }
+    }
+    for (key, _) in entries {
         let HostKey::Property = HostKey::of(key.as_str()) else { continue };
         let prop = &key.as_str()[1..key.as_str().len() - 1];
         let is_attr = prop.starts_with("attr.");
@@ -2137,10 +2185,10 @@ fn evaluate_host_metadata_uncached<'a>(
                      by the current module."
                 ));
             }
-            return Err(msg);
+            errors.push(msg);
         }
     }
-    Ok(entries)
+    (!errors.is_empty()).then(|| errors.join("\n"))
 }
 
 /// The error ngtsc reports for the `host` of a `@Component` / `@Directive` whose
@@ -2150,11 +2198,15 @@ fn host_metadata_error<'a>(
     config: Option<&'a ObjectExpression<'a>>,
     decorator_name: &str,
     consts: &StringConsts<'a>,
+    angular_version: Option<AngularVersion>,
 ) -> Option<(String, Span)> {
     let expr = config_property(config?, "host", consts)?;
-    evaluate_host_metadata(allocator, expr, decorator_name, consts)
-        .err()
-        .map(|message| (message, expr.span()))
+    let check_empty_names = angular_version.is_none_or(|v| v.reports_empty_host_binding_names());
+    let error = match parse_host_metadata(allocator, expr, decorator_name, consts) {
+        Ok(entries) => host_binding_errors(&entries, check_empty_names)?,
+        Err(error) => error,
+    };
+    Some((error, expr.span()))
 }
 
 /// Extract host metadata from a host expression.
