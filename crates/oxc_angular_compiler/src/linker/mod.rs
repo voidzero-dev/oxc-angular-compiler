@@ -1721,7 +1721,7 @@ fn link_directive<'a>(
         parts.push("signals: true".to_string());
     }
 
-    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
+    if let Some(features) = build_features(meta, source, ns, options.angular_version, false) {
         parts.push(format!("features: {features}"));
     }
 
@@ -2158,6 +2158,7 @@ fn build_features(
     source: &str,
     ns: &str,
     angular_version: Option<AngularVersion>,
+    template_animations_feature: bool,
 ) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
@@ -2204,8 +2205,10 @@ fn build_features(
     }
 
     // 6. AnimationsFeature — v20.2.0 to v20.3.0, for a host `animate.leave`
+    //    or one in a component's template (`template_animations_feature`)
     if angular_version.is_some_and(|v| v.needs_animations_feature())
-        && get_object_property(meta, "host").is_some_and(has_animate_leave_host)
+        && (template_animations_feature
+            || get_object_property(meta, "host").is_some_and(has_animate_leave_host))
     {
         features.push(format!("{ns}.\u{0275}\u{0275}AnimationsFeature()"));
     }
@@ -2439,7 +2442,13 @@ fn link_component<'a>(
     }
 
     // 12. features
-    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
+    if let Some(features) = build_features(
+        meta,
+        source,
+        ns,
+        options.angular_version,
+        template_output.animations_feature,
+    ) {
         parts.push(format!("features: {features}"));
     }
 

@@ -48,6 +48,7 @@ pub use evaluator::input_transform_types;
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
 pub(crate) use metadata::{
     MemberHostBindings, has_animate_leave_host_binding, merge_host_bindings, strip_host_key,
+    template_uses_animate_leave,
 };
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,

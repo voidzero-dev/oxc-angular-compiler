@@ -528,6 +528,11 @@ pub struct HmrTemplateCompileOutput {
     /// content. It refers to a constant declared in `declarations_js`.
     pub ng_content_selectors_js: Option<String>,
 
+    /// Whether the template needs `ɵɵAnimationsFeature()`: it uses
+    /// `animate.leave` and the version is v20.2.0 to v20.3.0 (see
+    /// [`crate::hmr::HmrTemplateFields::animations_feature`]).
+    pub animations_feature: bool,
+
     /// Non-fatal diagnostics the pipeline reported while compiling (warnings,
     /// advice). Error-severity diagnostics are returned as `Err` instead, since
     /// the emitted code cannot be trusted.
@@ -5690,6 +5695,8 @@ struct HmrUpdateParts {
     ng_content_selectors_js: Option<String>,
     /// The ɵcmp's `styles`.
     styles: Vec<String>,
+    /// Whether the template adds `ɵɵAnimationsFeature()` to the ɵcmp.
+    animations_feature: bool,
 }
 
 /// The `dependencies` entries of the directives and pipes of `entries`,
@@ -6256,6 +6263,7 @@ pub fn compile_component_hmr_update(
                 vars: parts.vars,
                 consts_js: parts.consts_js.as_deref(),
                 ng_content_selectors_js: parts.ng_content_selectors_js.as_deref(),
+                animations_feature: parts.animations_feature,
             }),
             styles: update.styles.as_deref(),
             declarations_js: Some(parts.declarations_js.as_str()).filter(|d| !d.is_empty()),
@@ -7208,6 +7216,11 @@ fn compile_component_full<'a>(
     // `setClassMetadataAsync` gate both depend on whether the template uses
     // `@defer`.
     let has_defer_block = super::defer_resolver::template_has_defer_block(&r3_result.nodes);
+    // ngtsc's `addFeatures` adds `ɵɵAnimationsFeature()` on v20.2.0 to v20.3.0
+    // when the template uses `animate.leave`, and so does an HMR update.
+    let template_animations_feature =
+        options.angular_version.is_some_and(|v| v.needs_animations_feature())
+            && crate::directive::template_uses_animate_leave(&r3_result.nodes);
 
     // An HMR update module cannot carry the resolver: its dynamic `import()`s
     // would resolve against the update module's URL, not the component file.
@@ -7422,6 +7435,7 @@ fn compile_component_full<'a>(
         view_query_fn,
         content_queries_fn,
         namespace_registry,
+        template_animations_feature,
     );
 
     // Emit JavaScript
@@ -7459,6 +7473,7 @@ fn compile_component_full<'a>(
         )
         .map(|selectors| emitter.emit_expression(selectors)),
         styles: cmp_definition_styles(&definitions.cmp_definition, &job.pool),
+        animations_feature: template_animations_feature,
     });
 
     // Emit the long styles this component shared (the pool's last constants)
@@ -8186,6 +8201,9 @@ pub fn compile_template_for_hmr<'a>(
         return Err(diagnostics);
     }
 
+    let animations_feature = options.angular_version.is_some_and(|v| v.needs_animations_feature())
+        && crate::directive::template_uses_animate_leave(&r3_result.nodes);
+
     // Build IngestOptions from TransformOptions
     // OXC is a single-file compiler (local compilation mode): always use Full mode.
     let mode = TemplateCompilationMode::Full;
@@ -8337,6 +8355,7 @@ pub fn compile_template_for_hmr<'a>(
         decls: job.root.decl_count.unwrap_or(0),
         vars: job.root.vars.unwrap_or(0),
         ng_content_selectors_js,
+        animations_feature,
         diagnostics,
     })
 }
@@ -8859,6 +8878,11 @@ pub struct LinkerTemplateOutput {
 
     /// The ngContentSelectors array as a JavaScript expression string, if any.
     pub ng_content_selectors_js: Option<String>,
+
+    /// Whether the template needs `ɵɵAnimationsFeature()`: it uses
+    /// `animate.leave` and the version is v20.2.0 to v20.3.0. Angular's linker
+    /// runs the same `addFeatures` as a full compile.
+    pub animations_feature: bool,
 }
 
 /// Compile a template for the linker, returning all data needed to build a `defineComponent` call.
@@ -8937,6 +8961,9 @@ pub fn compile_template_for_linker<'a>(
         }
         return Err(diagnostics);
     }
+
+    let animations_feature = angular_version.is_some_and(|v| v.needs_animations_feature())
+        && crate::directive::template_uses_animate_leave(&r3_result.nodes);
 
     // Like the TS linker's `createR3ComponentDeferMetadata`: the i-th entry of
     // `deferBlockDependencies` belongs to the i-th `@defer` block, and a block
@@ -9079,6 +9106,7 @@ pub fn compile_template_for_linker<'a>(
         vars,
         consts_js,
         ng_content_selectors_js,
+        animations_feature,
     })
 }
 

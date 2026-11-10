@@ -88,6 +88,8 @@ fn split_ns_name(name: &str) -> (Option<&str>, &str) {
 pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
     let mode = job.mode;
+    // Before v20.2 an `animate.*` attribute is a plain attribute.
+    let animate = job.angular_version.is_none_or(|v| v.supports_animate_instructions());
 
     // First pass: Build element map from create operations
     let mut elements: FxHashMap<XrefId, ElementInfo> = FxHashMap::default();
@@ -112,12 +114,14 @@ pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
     let mut all_non_bindable: Vec<XrefId> = Vec::new();
 
     // Process root view
-    let root_non_bindable = specialize_in_view(&mut job.root.update, &allocator, &elements, mode);
+    let root_non_bindable =
+        specialize_in_view(&mut job.root.update, &allocator, &elements, mode, animate);
     all_non_bindable.extend(root_non_bindable);
 
     // Process embedded views
     for view in job.views.values_mut() {
-        let view_non_bindable = specialize_in_view(&mut view.update, &allocator, &elements, mode);
+        let view_non_bindable =
+            specialize_in_view(&mut view.update, &allocator, &elements, mode, animate);
         all_non_bindable.extend(view_non_bindable);
     }
 
@@ -185,6 +189,7 @@ fn specialize_in_view<'a>(
     allocator: &'a oxc_allocator::Allocator,
     _elements: &FxHashMap<XrefId, ElementInfo>,
     mode: TemplateCompilationMode,
+    animate: bool,
 ) -> Vec<XrefId> {
     // Track ops to remove (ngNonBindable)
     let mut to_remove: Vec<std::ptr::NonNull<UpdateOp<'a>>> = Vec::new();
@@ -210,7 +215,7 @@ fn specialize_in_view<'a>(
                             to_remove.push(ptr);
                         }
                         mark_non_bindable.push(target);
-                    } else if name.as_str().starts_with("animate.") {
+                    } else if animate && name.as_str().starts_with("animate.") {
                         // Convert to animation binding
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(

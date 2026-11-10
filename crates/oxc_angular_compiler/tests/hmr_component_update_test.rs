@@ -303,3 +303,52 @@ fn leaves_deferred_imports_to_the_live_definition() {
     assert!(!module.contains("import("), "{module}");
     assert!(module.contains("ɵɵdefer("), "{module}");
 }
+
+/// #701: on 20.2.0 to 20.3.0 an `animate.leave` template needs
+/// `ɵɵAnimationsFeature()`. ngtsc's update module runs `ɵɵdefineComponent` again,
+/// which runs it; this one copies the live definition, so it runs the feature
+/// on the new one.
+#[test]
+fn runs_the_animations_feature_for_animate_leave() {
+    use oxc_angular_compiler::AngularVersion;
+
+    let source = component("", r#"<p animate.leave="out"></p>"#);
+    let call = "i0.ɵɵAnimationsFeature()(X.ɵcmp);\n}";
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 1, 8)), false),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (None, false),
+    ];
+    for (version, feature) in cases {
+        let options = hmr(TransformOptions { angular_version: version, ..Default::default() });
+        let module = update(&source, &options, None).module.unwrap();
+        assert_eq!(module.contains(call), feature, "{version:?}\n{module}");
+        assert_eq!(
+            transform(&source, &options, None).contains("ɵɵAnimationsFeature()"),
+            feature,
+            "{version:?}"
+        );
+
+        let allocator = Allocator::default();
+        let old = compile_template_for_hmr(
+            &allocator,
+            r#"<p animate.leave="out"></p>"#,
+            "X",
+            PATH,
+            &options,
+        )
+        .unwrap();
+        assert_eq!(old.animations_feature, feature, "{version:?}");
+    }
+
+    // `animate.enter` alone needs no feature.
+    let source = component("", r#"<p animate.enter="in"></p>"#);
+    let options = hmr(TransformOptions {
+        angular_version: Some(AngularVersion::new(20, 2, 0)),
+        ..Default::default()
+    });
+    let module = update(&source, &options, None).module.unwrap();
+    assert!(!module.contains("AnimationsFeature"), "{module}");
+}

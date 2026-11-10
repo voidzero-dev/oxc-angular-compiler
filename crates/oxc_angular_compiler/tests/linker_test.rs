@@ -1478,3 +1478,81 @@ fn test_link_host_animate_before_20_2() {
         assert!(!linked.contains("hostAttrs"), "{linked}");
     }
 }
+
+/// #701: the partial declaration ngtsc 20.2.0 emits for the issue's template.
+const ANIMATE_701_COMPONENT: &str = r#"
+import * as i0 from "@angular/core";
+class T_issue {
+}
+T_issue.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.2.0", type: T_issue, isStandalone: true, selector: "t-issue", ngImport: i0, template: "<p animate.leave=\"out\" [animate.enter]=\"e\" (animate.leave)=\"g($event)\"></p>", isInline: true });
+"#;
+
+/// #701: before 20.2 the linker keeps template `animate.*` as a plain
+/// attribute, property and listener, as Angular's 20.1.8 linker does.
+#[test]
+fn test_link_template_animate_before_20_2() {
+    let linked: String =
+        link_for_version(ANIMATE_701_COMPONENT, Some(AngularVersion::new(20, 1, 8)))
+            .split_whitespace()
+            .collect();
+    assert!(
+        linked.contains(r#"decls:1,vars:1,consts:[["animate.leave","out",3,"animate.leave","animate.enter"]],template:functionT_issue_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p",0);i0.ɵɵdomListener("animate.leave",functionT_issue_Template_p_animate_leave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();}if((rf&2)){i0.ɵɵdomProperty("animate.enter",ctx.e);}}"#),
+        "{linked}"
+    );
+    assert!(!linked.contains("ɵɵanimate"), "{linked}");
+}
+
+/// #701: Angular's 20.2.0 to 20.3.0 linker adds `ɵɵAnimationsFeature()` for a
+/// template `animate.leave`, after the host fields and before `decls`, and
+/// orders the animate ops like ngtsc.
+#[test]
+fn test_link_template_animate_leave_feature() {
+    let linked: String =
+        link_for_version(ANIMATE_701_COMPONENT, Some(AngularVersion::new(20, 2, 0)))
+            .split_whitespace()
+            .collect();
+    assert!(
+        linked.contains(r#"selectors:[["t-issue"]],features:[i0.ɵɵAnimationsFeature()],decls:1,vars:0,template:functionT_issue_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateEnter(functionT_issue_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave("out");i0.ɵɵanimateLeaveListener(functionT_issue_Template_p_animateleave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();}}"#),
+        "{linked}"
+    );
+
+    let cases = [
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(22, 2, 4)), false),
+        (None, false),
+    ];
+    for (version, feature) in cases {
+        let linked = link_for_version(ANIMATE_701_COMPONENT, version);
+        assert_eq!(linked.contains("ɵɵAnimationsFeature()"), feature, "{version:?}\n{linked}");
+    }
+
+    // `animate.enter` alone needs no feature.
+    let enter_only = ANIMATE_701_COMPONENT.replace(
+        r#"template: "<p animate.leave=\"out\" [animate.enter]=\"e\" (animate.leave)=\"g($event)\"></p>""#,
+        r#"template: "<p animate.enter=\"a\"></p>""#,
+    );
+    assert!(enter_only.contains("animate.enter"));
+    let linked = link_for_version(&enter_only, Some(AngularVersion::new(20, 2, 0)));
+    assert!(!linked.contains("AnimationsFeature"), "{linked}");
+}
+
+/// #701: before 20.2 a host `animate.*` listener links to a plain `ɵɵlistener`.
+#[test]
+fn test_link_host_animate_listener_before_20_2() {
+    for code in host_declarations(r#"{ listeners: { "animate.enter": "g($event)" } }"#) {
+        let linked: String = link_for_version(&code, Some(AngularVersion::new(20, 1, 8)))
+            .split_whitespace()
+            .collect();
+        assert!(
+            linked.contains(r#"i0.ɵɵlistener("animate.enter",functionD_animate_enter_HostBindingHandler($event){returnctx.g($event);});"#),
+            "{linked}"
+        );
+        assert!(!linked.contains("ɵɵanimate"), "{linked}");
+
+        let linked: String = link_for_version(&code, Some(AngularVersion::new(20, 2, 0)))
+            .split_whitespace()
+            .collect();
+        assert!(linked.contains("i0.ɵɵanimateEnterListener("), "{linked}");
+    }
+}
