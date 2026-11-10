@@ -1172,7 +1172,7 @@ fn propagate_name_to_expression<'a>(
 /// Names functions and variables for host binding compilation.
 ///
 /// Host version - only processes the root unit (no embedded views).
-/// Also names listener handler functions for host bindings.
+/// Also names listener and animation handler functions for host bindings.
 pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
     let component_name = job.component_name.as_str();
@@ -1186,6 +1186,7 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
         let fn_name = format!("{}_{}", component_name, job.fn_suffix);
         job.root.fn_name = Some(Ident::from(allocator.alloc_str(&fn_name)));
     }
+    let host_fn_name = job.root.fn_name.as_ref().map_or("", |n| n.as_str()).to_string();
 
     // Name listener handlers in create ops
     // Host listeners need names like: ComponentName_click_HostBindingHandler
@@ -1229,6 +1230,17 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
                     let sanitized = sanitize_identifier(&handler_name);
                     let name_str = allocator.alloc_str(&sanitized);
                     listener.handler_fn_name = Some(Ident::from(name_str));
+                }
+            }
+            CreateOp::Animation(animation) => {
+                // Angular naming.ts: `${unit.fnName}_${op.name.replace('.', '')}_cb`.
+                // JS `replace` drops only the first '.'.
+                if animation.handler_fn_name.is_none() {
+                    let animation_kind = animation.name.as_str().replacen('.', "", 1);
+                    let handler_name = format!("{host_fn_name}_{animation_kind}_cb");
+                    let sanitized = sanitize_identifier(&handler_name);
+                    let name_str = allocator.alloc_str(&sanitized);
+                    animation.handler_fn_name = Some(Ident::from(name_str));
                 }
             }
             _ => {}

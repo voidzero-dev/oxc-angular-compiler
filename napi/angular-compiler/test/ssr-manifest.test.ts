@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterAll, describe, it, expect } from 'vitest'
 /**
  * Tests for SSR manifest generation.
  *
@@ -152,6 +156,230 @@ describe('SSR Manifest Generation (Issue #60)', () => {
           '/app/src/server.ts',
         ),
       ).toBeUndefined()
+    })
+  })
+
+  describe('index.server.html (#696)', () => {
+    const SOURCE =
+      '<html><body><app-root></app-root><script type="module" src="/src/main.ts"></script></body></html>'
+    const BUILT =
+      '<html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><body><app-root></app-root></body></html>'
+
+    const roots: string[] = []
+    afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })))
+
+    /** A root with the source index.html and, when given, a built `dist/client/index.html`. */
+    function tempRoot(built?: string): string {
+      const root = mkdtempSync(join(tmpdir(), 'oxc-angular-ssr-manifest-'))
+      roots.push(root)
+      writeFileSync(join(root, 'index.html'), SOURCE)
+      if (built) {
+        mkdirSync(join(root, 'dist/client'), { recursive: true })
+        writeFileSync(join(root, 'dist/client/index.html'), built)
+      }
+      return root
+    }
+
+    const ENGINE = 'const engine = new AngularNodeAppEngine();'
+    const page = (source: string) => ({
+      'index.html': { type: 'asset', fileName: 'index.html', source },
+    })
+
+    /** One plugin shared by a `client` and an `ssr` environment, listed in `order`. */
+    function app(
+      root: string,
+      {
+        builder,
+        watch,
+        order = ['client', 'ssr'],
+      }: { builder?: boolean; watch?: boolean; order?: string[] } = {},
+    ) {
+      const plugin = ssrManifestPlugin({}) as any
+      plugin.configResolved({ root, base: '/' })
+      const environments = Object.fromEntries(
+        order.map((name) => [name, name === 'client' ? { build: { outDir: 'dist/client' } } : {}]),
+      )
+      const warnings: string[] = []
+      const context = (name: string) => ({
+        environment: {
+          name,
+          config: {
+            consumer: name === 'client' ? 'client' : 'server',
+            root,
+            build: { watch: watch ? {} : null },
+            environments,
+          },
+          getTopLevelConfig: () => ({ builder: builder ? {} : undefined }),
+        },
+        meta: { watchMode: !!watch },
+        warn: (message: string) => warnings.push(message),
+      })
+      return {
+        warnings,
+        clientStart: () => plugin.buildStart.call(context('client')),
+        clientBundle: (bundle: Record<string, unknown>) =>
+          plugin.generateBundle.handler.call(context('client'), {}, bundle),
+        /** The server's buildStart, then a transform of each module. */
+        async server(...modules: string[]): Promise<(string | undefined)[]> {
+          await plugin.buildStart.call(context('ssr'))
+          return modules.map(
+            (code, i) =>
+              plugin.transform.call(context('ssr'), code, join(root, `src/server${i}.ts`))?.code,
+          )
+        },
+      }
+    }
+
+    /** Runs the client's generateBundle (when given a bundle), then the server build. */
+    async function serverBuild(
+      root: string,
+      {
+        bundle,
+        builder,
+        order,
+      }: { bundle?: Record<string, unknown>; builder?: boolean; order?: string[] } = {},
+    ) {
+      const build = app(root, { builder, order })
+      if (bundle) build.clientBundle(bundle)
+      const [code] = await build.server(ENGINE)
+      return { code: code!, warnings: build.warnings }
+    }
+
+    it('shares one plugin instance across environments', () => {
+      expect(ssrManifestPlugin({}).sharedDuringBuild).toBe(true)
+    })
+
+    it('embeds the index.html the client built in the same run', async () => {
+      for (const source of [BUILT, new TextEncoder().encode(BUILT)]) {
+        const { code, warnings } = await serverBuild(tempRoot(), {
+          bundle: { 'index.html': { type: 'asset', fileName: 'index.html', source } },
+          builder: true,
+        })
+        expect(code).toContain('/assets/index-abc.js')
+        expect(code).not.toContain('/src/main.ts')
+        expect(warnings).toEqual([])
+      }
+    })
+
+    it('ignores an index.html in a server bundle', async () => {
+      const plugin = ssrManifestPlugin({}) as any
+      plugin.configResolved({ root: '/app', base: '/' })
+      plugin.generateBundle.handler.call(
+        { environment: { config: { consumer: 'server' } } },
+        {},
+        { 'index.html': { type: 'asset', fileName: 'index.html', source: BUILT } },
+      )
+      const { code } = await serverBuild(tempRoot())
+      expect(code).toContain('/src/main.ts')
+    })
+
+    it("reads the client outDir's index.html from an earlier run", async () => {
+      const { code, warnings } = await serverBuild(tempRoot(BUILT))
+      expect(code).toContain('/assets/index-abc.js')
+      expect(warnings).toEqual([])
+    })
+
+    it('warns that the page may be stale when the server builds first with --app', async () => {
+      const root = tempRoot(BUILT)
+      const { code, warnings } = await serverBuild(root, {
+        builder: true,
+        order: ['ssr', 'client'],
+      })
+      expect(code).toContain('/assets/index-abc.js')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('may be stale')
+      expect(warnings[0]).toContain(join(root, 'dist/client/index.html'))
+      expect(warnings[0]).toContain('List `client` first')
+    })
+
+    it('falls back to the source index.html with a warning', async () => {
+      const root = tempRoot()
+      const { code, warnings } = await serverBuild(root)
+      expect(code).toContain('/src/main.ts')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain(join(root, 'dist/client/index.html'))
+      expect(warnings[0]).toContain('vite build --app')
+
+      // With --app, the client was not built first.
+      const ssrFirst = await serverBuild(tempRoot(), { builder: true, order: ['ssr', 'client'] })
+      expect(ssrFirst.code).toContain('/src/main.ts')
+      expect(ssrFirst.warnings).toHaveLength(1)
+      expect(ssrFirst.warnings[0]).toContain('List `client` first')
+
+      // The client is listed first but built no index.html.
+      const clientFirst = await serverBuild(tempRoot(), { builder: true })
+      expect(clientFirst.code).toContain('/src/main.ts')
+      expect(clientFirst.warnings).toHaveLength(1)
+      expect(clientFirst.warnings[0]).not.toContain('List `client` first')
+    })
+
+    it('warns only when a manifest embeds the page, once per build', async () => {
+      const build = app(tempRoot())
+      expect(await build.server('export function render() {}')).toEqual([undefined])
+      expect(build.warnings).toEqual([])
+
+      const codes = await build.server('export function render() {}', ENGINE, ENGINE)
+      expect(codes[0]).toBeUndefined()
+      expect(codes[1]).toContain('/src/main.ts')
+      expect(codes[2]).toContain('/src/main.ts')
+      expect(build.warnings).toHaveLength(1)
+      expect(build.warnings[0]).toContain('built client index.html not found')
+
+      await build.server(ENGINE)
+      expect(build.warnings).toHaveLength(2)
+    })
+
+    it('does not silently reuse the previous round in watch mode', async () => {
+      // `vite build --app --watch` builds the environments at the same time.
+      const root = tempRoot()
+      const build = app(root, { builder: true, watch: true })
+      const NEXT = BUILT.replace('index-abc', 'index-def')
+
+      // Round 1: the server starts before the client has built.
+      await build.clientStart()
+      const [first] = await build.server(ENGINE)
+      build.clientBundle(page(BUILT))
+      expect(first).toContain('/src/main.ts')
+      expect(build.warnings).toHaveLength(1)
+      expect(build.warnings[0]).toContain('In watch mode')
+      expect(build.warnings[0]).not.toContain('List `client` first')
+
+      // Round 2: the client starts first and drops its old page, so the server
+      // reads the client outDir of round 1.
+      mkdirSync(join(root, 'dist/client'), { recursive: true })
+      writeFileSync(join(root, 'dist/client/index.html'), BUILT)
+      await build.clientStart()
+      const [second] = await build.server(ENGINE)
+      build.clientBundle(page(NEXT))
+      expect(second).toContain('/assets/index-abc.js')
+      expect(build.warnings).toHaveLength(2)
+      expect(build.warnings[1]).toContain('may be stale')
+      expect(build.warnings[1]).toContain('In watch mode')
+
+      // Round 3: the server starts first, with the page of round 2.
+      const [third] = await build.server(ENGINE)
+      await build.clientStart()
+      expect(third).toContain('/assets/index-def.js')
+      expect(build.warnings).toHaveLength(3)
+      expect(build.warnings[2]).toContain('may be stale')
+      expect(build.warnings[2]).toContain('In watch mode')
+    })
+
+    it('embeds the page of this round without a warning outside watch mode', async () => {
+      const build = app(tempRoot(), { builder: true })
+      await build.clientStart()
+      build.clientBundle(page(BUILT))
+      const [code] = await build.server(ENGINE)
+      expect(code).toContain('/assets/index-abc.js')
+      expect(build.warnings).toEqual([])
+    })
+
+    it('falls back to a minimal page without any index.html', async () => {
+      const root = tempRoot()
+      rmSync(join(root, 'index.html'))
+      const { code, warnings } = await serverBuild(root)
+      expect(code).toContain('<app-root></app-root>')
+      expect(warnings).toEqual([])
     })
   })
 })

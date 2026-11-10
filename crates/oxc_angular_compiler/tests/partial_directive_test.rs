@@ -166,11 +166,11 @@ fn host_listeners_and_properties_keyed_by_bare_name() {
     // its name without the `(…)` / `[…]`, and carries the expression as a raw
     // unparsed string — the linker parses both.
     assert!(
-        js.contains(r#"listeners:{click:"onClick($event)","window:resize":"onResize()"}"#),
+        js.contains(r#"listeners:{"click":"onClick($event)","window:resize":"onResize()"}"#),
         "expected listeners keyed by event name, got: {js}"
     );
     assert!(
-        js.contains(r#"properties:{disabled:"isDisabled","style.height.px":"height"}"#),
+        js.contains(r#"properties:{"disabled":"isDisabled","style.height.px":"height"}"#),
         "expected properties keyed by property name, got: {js}"
     );
 }
@@ -446,5 +446,108 @@ export class MyDir {}
         !result.code.contains("\u{0275}\u{0275}ngDeclareDirective"),
         "Full mode must not leak ngDeclare calls, got:\n{}",
         result.code
+    );
+}
+
+/// The whitespace-free `ɵɵngDeclareDirective({...})` call of each class in
+/// `source`, compiled in partial mode. The class metadata call that follows
+/// repeats the decorators as written, so it is cut off.
+fn partial_declarations(source: &str) -> std::vec::Vec<String> {
+    let allocator = Allocator::default();
+    let options =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "host.directive.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "should not have errors, got: {:?}", result.diagnostics);
+    let code: String = result.code.split_whitespace().collect();
+    code.split("\u{0275}\u{0275}ngDeclareDirective(")
+        .skip(1)
+        .map(|call| call[..call.find("ngImport:i0").expect("ngImport")].to_string())
+        .collect()
+}
+
+#[test]
+fn partial_host_quotes_every_key() {
+    // ngtsc's `toOptionalLiteralMap` (partial/util.ts) quotes every key of
+    // `host.attributes` / `listeners` / `properties` (#686); inputs and
+    // outputs only quote a key with `-` or `.`.
+    let source = "import { Directive, EventEmitter, HostBinding, HostListener, Input, Output } from '@angular/core';
+
+@Directive({ selector: '[d]', host: { '(click)': 'a()', '[disabled]': 'b', 'role': 'x', '$x': 'z' } })
+export class D {
+  @Input() plain = '';
+  @Input('al') aliased = '';
+  @Output() out = new EventEmitter();
+  @HostListener('keydown') onKey() {}
+  @HostBinding('title') t = '';
+  a() {}
+  b = false;
+}
+";
+    let [js] = partial_declarations(source).try_into().unwrap();
+    // ngtsc 22.2.2 emits the same text.
+    assert!(
+        js.contains(
+            r#"host:{attributes:{"role":"x","$x":"z"},listeners:{"click":"a()","keydown":"onKey()"},properties:{"disabled":"b","title":"this.t"}}"#
+        ),
+        "{js}"
+    );
+    assert!(js.contains(r#"inputs:{plain:"plain",aliased:["al","aliased"]}"#), "{js}");
+    assert!(js.contains(r#"outputs:{out:"out"}"#), "{js}");
+    assert!(!js.contains(r#""attributes""#) && !js.contains(r#""listeners""#), "{js}");
+}
+
+#[test]
+fn partial_host_drops_proto_bindings() {
+    // ngtsc's `parseHostBindings` / `extractHostBindings` assign into a plain
+    // object, so a binding named `__proto__` is lost (#687).
+    let source = "import { Directive, HostBinding, HostListener } from '@angular/core';
+
+@Directive({ selector: '[p]', host: { '(__proto__)': 'pp()', '(click)': 'a()', '[__proto__]': 'q' } })
+export class P {
+  a() {}
+  pp() {}
+  q = '';
+  @HostBinding('__proto__') m = 1;
+  @HostListener('__proto__') n() {}
+}
+
+@Directive({ selector: '[o]' })
+export class O {
+  @HostBinding('__proto__') m = 1;
+  @HostListener('__proto__') n() {}
+}
+";
+    let [p, o] = partial_declarations(source).try_into().unwrap();
+    assert!(p.contains(r#"host:{listeners:{"click":"a()"}}"#), "{p}");
+    assert!(!p.contains("__proto__"), "{p}");
+    assert!(!o.contains("host:"), "{o}");
+}
+
+#[test]
+fn partial_host_binding_reads_member_through_this() {
+    // ngtsc's `getSafePropertyAccessString('this', member.name)` (#690).
+    let source = "import { Directive, HostBinding } from '@angular/core';
+
+@Directive({ selector: '[m]' })
+export class M {
+  @HostBinding('id') 'my-prop' = 1;
+  @HostBinding('title') m = 2;
+  @HostBinding() 'aria-label' = 3;
+  @HostBinding('attr.t') true = 4;
+  @HostBinding('attr.u') this = 5;
+  @HostBinding('attr.v') \"it's\" = 6;
+  @HostBinding('attr.w') 'a.b' = 7;
+  @HostBinding('attr.x') 'a{{b}}' = 8;
+  @HostBinding('attr.y') $ok = 9;
+}
+";
+    let [js] = partial_declarations(source).try_into().unwrap();
+    // ngtsc 22.2.2 emits the same text.
+    assert!(
+        js.contains(
+            r#"properties:{"id":"this['my-prop']","title":"this.m","aria-label":"this['aria-label']","attr.t":"this.true","attr.u":"this.this","attr.v":"this['it\\'s']","attr.w":"this['a.b']","attr.x":"this['a{{b}}']","attr.y":"this.$ok"}"#
+        ),
+        "{js}"
     );
 }

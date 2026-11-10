@@ -37,7 +37,7 @@ use super::metadata::{
 };
 use super::namespace_registry::NamespaceRegistry;
 use super::signal_debug_name;
-use crate::ast::expression::{BindingType, ParsedEventType};
+use crate::ast::expression::ParsedEventType;
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata_in,
@@ -48,7 +48,8 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     decorator_io_errors, extract_class_queries, extract_directive_metadata,
-    find_directive_decorator, generate_directive_definitions, param_decorator_errors, styles_error,
+    find_directive_decorator, generate_directive_definitions, param_decorator_errors,
+    parse_host_property_name, styles_error,
 };
 use crate::dts;
 use crate::injectable::{
@@ -586,6 +587,10 @@ pub struct ImportInfo<'a> {
     /// - `import Foo from "./mod"` → `Some("default")` (default export)
     /// - `import * as ns from "./mod"` → `None` (namespace, not deferrable)
     pub imported_name: Option<Ident<'a>>,
+    /// The export name of `import { "s-dir" as SDir }`: a string that is not
+    /// an identifier name (`imported_name` is `None` then). The `.d.ts`
+    /// names it `typeof i1["s-dir"]`.
+    pub string_export_name: Option<Ident<'a>>,
     /// Whether this binding is a default import (`import Foo from "./mod"`),
     /// as opposed to `import { default as Foo }`, which `imported_name` alone
     /// cannot distinguish. ngtsc's `typeToValue` treats the two differently:
@@ -690,6 +695,12 @@ pub fn build_import_map<'a>(
                     let imported_name = imported_export_name
                         .filter(|exported| *exported != local_name.as_str())
                         .map(|exported| Ident::from(allocator.alloc_str(exported)));
+                    let string_export_name = match &spec.imported {
+                        ModuleExportName::StringLiteral(lit) if imported_export_name.is_none() => {
+                            lit.value.as_str().map(|name| Ident::from(allocator.alloc_str(name)))
+                        }
+                        _ => None,
+                    };
 
                     import_map.insert(
                         local_name,
@@ -698,6 +709,7 @@ pub fn build_import_map<'a>(
                             is_named_import: true,
                             is_type_only,
                             imported_name,
+                            string_export_name,
                             is_default_import: false,
                             is_const_enum: false,
                         },
@@ -727,6 +739,7 @@ pub fn build_import_map<'a>(
                             // dynamic-import chains, regardless of the local
                             // binding name.
                             imported_name: Some(Ident::from("default")),
+                            string_export_name: None,
                             is_default_import: true,
                             is_const_enum: false,
                         },
@@ -753,6 +766,7 @@ pub fn build_import_map<'a>(
                             is_named_import: false,
                             is_type_only: decl_is_type_only,
                             imported_name: None,
+                            string_export_name: None,
                             is_default_import: false,
                             is_const_enum: false,
                         },
@@ -765,14 +779,17 @@ pub fn build_import_map<'a>(
     import_map
 }
 
-/// Extract a `ModuleExportName` as a plain string slice when it's a textual
-/// name. Quoted-string export names (e.g., `import { "string-name" as foo }`)
-/// are not supported for deferrable resolution and return `None`.
+/// Extract a `ModuleExportName` as a plain string slice when it's an
+/// identifier name, also one written as a string (`import { "Foo" as F }`
+/// reads `i1.Foo`, as in ngtsc). Other strings (`import { "string-name" as
+/// foo }`) can't be read as `i1.name` and return `None`.
 fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str> {
     match name {
         ModuleExportName::IdentifierName(id) => Some(id.name.as_str()),
         ModuleExportName::IdentifierReference(id) => Some(id.name.as_str()),
-        ModuleExportName::StringLiteral(_) => None,
+        ModuleExportName::StringLiteral(lit) => {
+            lit.value.as_str().filter(|name| oxc_syntax::identifier::is_identifier_name(name))
+        }
     }
 }
 
@@ -899,6 +916,47 @@ fn member_chain_root<'b, 'a>(expr: &'b mut OutputExpression<'a>) -> &'b mut Outp
         OutputExpression::ReadProp(prop) => member_chain_root(&mut prop.receiver),
         other => other,
     }
+}
+
+/// The `.d.ts` type reference of the class named `local` in this file,
+/// like ngtsc's `toR3Reference` (annotations/common/src/util.ts), which
+/// emits it with `ImportFlags.ForceNewImport | AllowTypeImports`:
+/// `LocalIdentifierStrategy` (imports/src/emitter.ts) keeps the name of a
+/// class this file declares, and any other is its export through a
+/// namespace import of the `.d.ts` (`i1.Dep`, `i1.default`). A name that
+/// isn't imported stays as written.
+///
+/// An export named by a string that isn't an identifier name gives
+/// `i1["s-dir"]`, so the type is `typeof i1["s-dir"]` (TS reads
+/// `(typeof i1)["s-dir"]`); ngtsc writes `typeof i1.s-dir`, which does not
+/// parse.
+fn dts_type_ref<'a>(
+    local: &str,
+    import_map: &ImportMap<'a>,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    match import_map.get(&Ident::from(local)) {
+        Some(info) if info.is_named_import => {
+            let namespace = registry.get_or_assign(&info.source_module);
+            if let Some(name) = &info.string_export_name {
+                return format!("{namespace}[{}]", crate::directive::ts_string_literal(name));
+            }
+            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
+            format!("{namespace}.{export}")
+        }
+        _ => local.to_string(),
+    }
+}
+
+/// `i1.name` for the export `name` of `specifier` in the `.d.ts`.
+fn dts_module_ref<'a>(
+    allocator: &'a Allocator,
+    specifier: &str,
+    name: &str,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    let namespace = registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
+    format!("{namespace}.{name}")
 }
 
 /// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
@@ -3445,14 +3503,18 @@ pub fn transform_angular_file(
     // `import * as i0` would redeclare a user binding of the same name.
     let file_used_names = file_identifiers(&parser_ret.program);
     let mut file_namespace_registry =
-        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names));
+        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names.clone()));
     jit_core_namespace = Some((file_namespace_registry.angular_core_ns(), false));
-    // `.d.ts` members use the same alias: upstream's second ImportManager
-    // (`IvyDeclarationDtsTransform`) dedupes `i0` against the ORIGINAL
-    // file's `SourceFile.identifiers` too (declaration.ts:96-98,160; the
-    // dts transform receives `original.getSourceFile()`, not the emitted
-    // file), so the alias it picks is identical to the registry's.
-    let dts_core_namespace = file_namespace_registry.angular_core_ns();
+    // The `.d.ts` has its own registry, like upstream's second ImportManager
+    // (`IvyDeclarationDtsTransform`, declaration.ts:96-98): its `iN` are
+    // numbered by first use in the `.d.ts`, and a class reference there
+    // never adds an import to the JS. It dedupes against the ORIGINAL
+    // file's `SourceFile.identifiers` too (declaration.ts:160; the dts
+    // transform receives `original.getSourceFile()`), so its `i0` is the
+    // same as the JS one.
+    let mut dts_namespace_registry =
+        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names));
+    let dts_core_namespace = dts_namespace_registry.angular_core_ns();
 
     // Shared constant pool index across all components in this file.
     // This ensures constant names (_c0, _c1, etc.) don't conflict when
@@ -4426,6 +4488,17 @@ pub fn transform_angular_file(
                                 dts_core_namespace.as_str(),
                             );
                             if in_dts {
+                                let host_directive_types: Vec<String> = metadata
+                                    .host_directives
+                                    .iter()
+                                    .map(|hd| {
+                                        dts_type_ref(
+                                            hd.directive.as_str(),
+                                            &import_map,
+                                            &mut dts_namespace_registry,
+                                        )
+                                    })
+                                    .collect();
                                 result.dts_declarations.push(dts_entry(
                                     dts::generate_component_dts(
                                         dts_core_namespace.as_str(),
@@ -4435,6 +4508,7 @@ pub fn transform_angular_file(
                                         has_injectable,
                                         &compilation_result.ng_content_selectors,
                                         &accept_types,
+                                        &host_directive_types,
                                     ),
                                 ));
                             }
@@ -4511,6 +4585,26 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
                     }
+
+                    // The `.d.ts` type of each host directive, read while each
+                    // is still the name written in the file: the JS rewrite
+                    // below uses the JS registry's aliases.
+                    let host_directive_types: Vec<String> = if in_dts {
+                        directive_metadata
+                            .host_directives
+                            .iter()
+                            .map(|hd| match &hd.directive {
+                                OutputExpression::ReadVar(var) => dts_type_ref(
+                                    var.name.as_str(),
+                                    &import_map,
+                                    &mut dts_namespace_registry,
+                                ),
+                                _ => dts::extract_directive_name_from_expr(&hd.directive),
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
 
                     // Resolve namespace imports for hostDirectives references.
                     // Host directive references (e.g., BrnTooltipTrigger from '@spartan-ng/brain/tooltip')
@@ -4596,6 +4690,7 @@ pub fn transform_angular_file(
                             &directive_metadata,
                             has_injectable,
                             &accept_types,
+                            &host_directive_types,
                         )));
                     }
 
@@ -4785,7 +4880,9 @@ pub fn transform_angular_file(
                     // they are wrapped when one names a class declared
                     // later. A class in a function may see local bindings:
                     // it stays as before.
-                    if !site.nested {
+                    let module_lists = if site.nested {
+                        None
+                    } else {
                         resolve_ng_module_lists(
                             allocator,
                             &parser_ret.program,
@@ -4801,8 +4898,8 @@ pub fn transform_angular_file(
                                 .map(|analyzer| (analyzer, path, source)),
                             matches!(options.compilation_mode, crate::CompilationMode::Partial)
                                 .then_some(&mut file_namespace_registry),
-                        );
-                    }
+                        )
+                    };
 
                     // Like ngtsc in full and partial compilation, ɵinj leaves
                     // out the directives, pipes and provider-less standalone
@@ -4904,11 +5001,39 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         if in_dts {
+                            // Like ngtsc, the `.d.ts` lists the classes the
+                            // lists give (ng_module/src/handler.ts:522-552),
+                            // each as a type reference (`toR3Reference`).
+                            let mut type_ref = |specifier: Option<&str>, name: &str| {
+                                let registry = &mut dts_namespace_registry;
+                                match specifier {
+                                    Some(specifier) => {
+                                        dts_module_ref(allocator, specifier, name, registry)
+                                    }
+                                    None => dts_type_ref(name, &import_map, registry),
+                                }
+                            };
+                            let [declarations, imports, exports] = match &module_lists {
+                                Some(lists) => {
+                                    use crate::ng_module::module_with_providers::ListKey;
+                                    [ListKey::Declarations, ListKey::Imports, ListKey::Exports]
+                                        .map(|key| lists.type_refs(key, &mut type_ref))
+                                }
+                                None => [
+                                    &ng_module_metadata.declarations,
+                                    &ng_module_metadata.imports,
+                                    &ng_module_metadata.exports,
+                                ]
+                                .map(|list| {
+                                    list.iter().map(|name| type_ref(None, name.as_str())).collect()
+                                }),
+                            };
                             result.dts_declarations.push(dts_entry(dts::generate_ng_module_dts(
                                 dts_core_namespace.as_str(),
                                 &ng_module_metadata,
                                 type_argument_count,
                                 has_injectable,
+                                [&declarations, &imports, &exports],
                             )));
                         }
 
@@ -5416,21 +5541,24 @@ pub fn transform_angular_file(
     let debug_name_edits = debug_names_scope.finish().into_file_edits(&edits);
     edits.extend(debug_name_edits);
 
-    // Members can reference namespace aliases the registry assigned to
-    // other modules (e.g. `typeof i1.SomeDirective` for host directives).
-    // Record each referenced alias's module so the consumer emits the
-    // matching `import * as <alias> from "<module>"` in the `.d.ts` —
-    // what upstream's `IvyDeclarationDtsTransform` `ImportManager` adds
-    // when a declaration references an external type.
+    // Members can reference namespace aliases the `.d.ts` registry assigned
+    // to other modules (`typeof i1.SomeDirective` for host directives and
+    // NgModule lists). Record each referenced alias's module so the
+    // consumer emits the matching `import * as <alias> from "<module>"` in
+    // the `.d.ts` — what upstream's `IvyDeclarationDtsTransform`
+    // `ImportManager` adds when a declaration references an external type.
     if !result.dts_declarations.is_empty() {
-        let module_by_alias: HashMap<String, String> = file_namespace_registry
+        let module_by_alias: HashMap<String, String> = dts_namespace_registry
             .get_all_modules()
             .into_iter()
             .map(|(module, alias)| (alias.as_str().to_string(), module.as_str().to_string()))
             .collect();
         for declaration in &mut result.dts_declarations {
             for (alias, module) in &module_by_alias {
-                if declaration.members.contains(&format!("{alias}.")) {
+                // `i1.Dep`, or `i1["s-dir"]` for an export named by a string.
+                if declaration.members.contains(&format!("{alias}."))
+                    || declaration.members.contains(&format!("{alias}["))
+                {
                     declaration.namespace_imports.insert(alias.clone(), module.clone());
                 }
             }
@@ -5613,7 +5741,8 @@ fn scope_dependencies<'a>(
 /// (partial mode), the declaration lists what they give. With cross-file
 /// analysis, a name of another file is read too, and a class found there
 /// is named through a namespace import, like `ɵɵsetComponentScope` names
-/// classes. Anything unread keeps its old output.
+/// classes. Anything unread keeps its old output. Gives the lists read,
+/// for the `.d.ts`.
 #[expect(clippy::too_many_arguments)]
 fn resolve_ng_module_lists<'a>(
     allocator: &'a Allocator,
@@ -5625,7 +5754,7 @@ fn resolve_ng_module_lists<'a>(
     import_elision: &ImportElisionAnalyzer<'_>,
     #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
     registry: Option<&mut NamespaceRegistry<'a>>,
-) {
+) -> Option<crate::ng_module::module_with_providers::ModuleLists> {
     #[cfg(feature = "cross_file_elision")]
     use crate::ng_module::module_with_providers::{Answer, Question, ResolveImported};
     use crate::ng_module::module_with_providers::{Binding, ListKey, read_module_lists};
@@ -5659,7 +5788,7 @@ fn resolve_ng_module_lists<'a>(
         &metadata.imports[..],
         &metadata.exports[..],
     ];
-    let Some(lists) = read_module_lists(
+    let lists = read_module_lists(
         program,
         class,
         string_consts,
@@ -5667,11 +5796,9 @@ fn resolve_ng_module_lists<'a>(
         metadata.contains_forward_decls,
         binding,
         resolve_imported,
-    ) else {
-        return;
-    };
+    )?;
     metadata.contains_forward_decls = lists.wrap;
-    let Some(registry) = registry else { return };
+    let Some(registry) = registry else { return Some(lists) };
     // In the order the declaration lists them, so namespaces are numbered
     // like ngtsc's.
     let mut namespace_of =
@@ -5679,6 +5806,7 @@ fn resolve_ng_module_lists<'a>(
     metadata.partial_declarations = lists.emit(allocator, ListKey::Declarations, &mut namespace_of);
     metadata.partial_imports = lists.emit(allocator, ListKey::Imports, &mut namespace_of);
     metadata.partial_exports = lists.emit(allocator, ListKey::Exports, &mut namespace_of);
+    Some(lists)
 }
 
 /// `i0.ɵɵsetComponentScope(Cmp, () => [directives], () => [pipes]);` for
@@ -8424,36 +8552,6 @@ fn convert_host_metadata_to_input<'a>(
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }
-}
-
-/// Parse a host property name to determine binding type and extract the final name.
-///
-/// Examples:
-/// - "class.active" -> (BindingType::Class, "active", None)
-/// - "style.color" -> (BindingType::Style, "color", None)
-/// - "style.width.px" -> (BindingType::Style, "width", Some("px"))
-/// - "attr.role" -> (BindingType::Attribute, "role", None)
-/// - "disabled" -> (BindingType::Property, "disabled", None)
-fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
-    if let Some(rest) = name.strip_prefix("class.") {
-        (BindingType::Class, rest, None)
-    } else if let Some(rest) = name.strip_prefix("style.") {
-        // Check for unit suffix: style.width.px
-        if let Some(dot_pos) = rest.find('.') {
-            let prop = &rest[..dot_pos];
-            let unit = &rest[dot_pos + 1..];
-            (BindingType::Style, prop, Some(unit))
-        } else {
-            (BindingType::Style, rest, None)
-        }
-    } else if let Some(rest) = name.strip_prefix("attr.") {
-        (BindingType::Attribute, rest, None)
-    } else if name.starts_with('@') {
-        // Animation binding like @triggerName
-        (BindingType::Animation, name, None)
-    } else {
-        (BindingType::Property, name, None)
-    }
 }
 
 /// Classify a host event name as a legacy animation event.

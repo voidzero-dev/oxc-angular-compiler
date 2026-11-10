@@ -1,4 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+import { build, createServer, type Rolldown } from 'vite'
+import { afterAll, describe, it, expect } from 'vitest'
 
 import { linkAngularPackageSync, type AngularVersion } from '../index.js'
 import { angularLinkerPlugin } from '../vite-plugin/angular-linker-plugin.js'
@@ -427,5 +432,126 @@ describe('linker: sourcemap', () => {
     expect((await link({ scripts: false, vendor: true })).map).toBeNull()
     expect(JSON.parse((await link({ scripts: true, vendor: true })).map).sources).toEqual([id])
     expect(JSON.parse((await link({ vendor: true })).map).sources).toEqual([id])
+  })
+})
+
+describe('linker: optimizeDeps.exclude (#695)', () => {
+  const PLATFORM_SERVER = '/app/node_modules/@angular/platform-server/fesm2022/platform-server.mjs'
+  const PRIMENG = '/app/node_modules/primeng/fesm2022/primeng-table.mjs?v=abc'
+
+  const transform = (environment: unknown, id: string, exclude?: string[]) => {
+    const plugin = angularLinkerPlugin() as any
+    if (exclude) plugin.configResolved({ optimizeDeps: { exclude } })
+    return plugin.transform.handler.call({ environment }, PIPE_CHUNK, id)
+  }
+  const env = (name: string, mode: string, exclude: string[]) => ({
+    name,
+    mode,
+    config: { optimizeDeps: { exclude } },
+  })
+
+  it('links excluded packages in builds', async () => {
+    const ssr = await transform(
+      env('ssr', 'build', ['@angular/platform-server']),
+      PLATFORM_SERVER,
+      ['@angular/platform-server'],
+    )
+    expect(ssr?.code).not.toContain('ngDeclare')
+    const client = await transform(env('client', 'build', ['primeng']), PRIMENG, ['primeng'])
+    expect(client?.code).not.toContain('ngDeclare')
+  })
+
+  it('skips excluded packages in dev (#210)', async () => {
+    expect(await transform(env('client', 'dev', ['primeng']), PRIMENG)).toBeUndefined()
+  })
+
+  it("uses the environment's own list in dev, not the top-level (client) one", async () => {
+    const result = await transform(env('ssr', 'dev', []), PLATFORM_SERVER, [
+      '@angular/platform-server',
+    ])
+    expect(result?.code).not.toContain('ngDeclare')
+  })
+
+  it('links when there is no environment (plain Rolldown)', async () => {
+    const result = await transform(undefined, PLATFORM_SERVER, ['@angular/platform-server'])
+    expect(result?.code).not.toContain('ngDeclare')
+  })
+
+  describe('in Vite', () => {
+    const roots: string[] = []
+    afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })))
+
+    /**
+     * A root with fake `@angular/platform-server` and `fakelib` packages holding
+     * PIPE_CHUNK, and an empty `@angular/core`.
+     */
+    function tempRoot(): string {
+      // realpath.native: the dev server only serves files under the real root.
+      const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'oxc-angular-linker-exclude-')))
+      roots.push(root)
+      const pkg = (name: string, code: string) => {
+        const file = join(root, 'node_modules', name, 'fesm2022/index.mjs')
+        mkdirSync(dirname(file), { recursive: true })
+        writeFileSync(
+          join(root, 'node_modules', name, 'package.json'),
+          JSON.stringify({ name, type: 'module', module: 'fesm2022/index.mjs' }),
+        )
+        writeFileSync(file, code)
+      }
+      pkg('@angular/core', 'export {};\n')
+      pkg('@angular/platform-server', PIPE_CHUNK)
+      pkg('fakelib', PIPE_CHUNK)
+      writeFileSync(
+        join(root, 'main.js'),
+        "export { AsyncPipe } from '@angular/platform-server';\n" +
+          "export { AsyncPipe as FakePipe } from 'fakelib';\n",
+      )
+      return root
+    }
+
+    it('links the SSR bundle, though angular() excludes platform-server from client prebundling', async () => {
+      const root = tempRoot()
+      const output = (await build({
+        root,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [angular({ liveReload: false })],
+        optimizeDeps: { exclude: ['fakelib'] },
+        ssr: { noExternal: true },
+        build: {
+          ssr: join(root, 'main.js'),
+          write: false,
+        },
+      })) as Rolldown.RolldownOutput
+      const code = output.output.map((chunk) => (chunk.type === 'chunk' ? chunk.code : '')).join()
+      // Both packages are linked, the one the user excluded too, like the Angular CLI.
+      expect(code.match(/function AsyncPipe_Factory/g)).toHaveLength(2)
+      expect(code).not.toContain('ngDeclare')
+    })
+
+    it('links platform-server in dev SSR and keeps excluded packages unlinked in the client', async () => {
+      const root = tempRoot()
+      const server = await createServer({
+        root,
+        configFile: false,
+        logLevel: 'silent',
+        server: { middlewareMode: true, ws: false },
+        plugins: [angular({ liveReload: false })],
+        optimizeDeps: { exclude: ['fakelib'], noDiscovery: true },
+        ssr: { noExternal: true },
+      })
+      try {
+        const ssr = await server.environments.ssr.transformRequest(
+          join(root, 'node_modules/@angular/platform-server/fesm2022/index.mjs'),
+        )
+        expect(ssr?.code).not.toContain('ngDeclare')
+        const client = await server.environments.client.transformRequest(
+          join(root, 'node_modules/fakelib/fesm2022/index.mjs'),
+        )
+        expect(client?.code).toContain('ngDeclare')
+      } finally {
+        await server.close()
+      }
+    })
   })
 })

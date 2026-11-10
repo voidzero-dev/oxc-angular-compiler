@@ -419,6 +419,9 @@ fn specialize_in_view<'a>(
 /// The key difference is that property bindings become host properties (`is_host: true`).
 pub fn specialize_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
+    // Before v20.2 Angular has no `animate.*` bindings: a static `animate.*`
+    // host attribute stays a plain attribute (in `hostAttrs`).
+    let animate = job.angular_version.is_none_or(|v| v.supports_animate_instructions());
 
     // Process bindings in the host binding unit
     let mut cursor = job.root.update.cursor();
@@ -433,7 +436,7 @@ pub fn specialize_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
 
             match kind {
                 BindingKind::Attribute => {
-                    if name.as_str().starts_with("animate.") {
+                    if animate && name.as_str().starts_with("animate.") {
                         // Convert to animation binding
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(

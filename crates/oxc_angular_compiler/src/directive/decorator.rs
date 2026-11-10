@@ -2871,7 +2871,7 @@ mod tests {
         assert_directive_metadata(code, |meta| {
             assert_eq!(meta.host.properties.len(), 1);
             assert_eq!(meta.host.properties[0].0.as_str(), "[class.active]");
-            assert_eq!(meta.host.properties[0].1.as_str(), "isActive");
+            assert_eq!(meta.host.properties[0].1.as_str(), "this.isActive");
         });
     }
 
@@ -2945,7 +2945,11 @@ mod tests {
                 meta.host.properties.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
             assert_eq!(
                 props,
-                [("[title]", "memberTitle"), ("[id]", "hostId"), ("[tabIndex]", "tabIndex")]
+                [
+                    ("[title]", "this.memberTitle"),
+                    ("[id]", "hostId"),
+                    ("[tabIndex]", "this.tabIndex")
+                ]
             );
             let listeners: std::vec::Vec<_> =
                 meta.host.listeners.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();

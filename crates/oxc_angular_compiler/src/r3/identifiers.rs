@@ -904,6 +904,7 @@ impl Identifiers {
 
     /// External styles feature.
     pub const EXTERNAL_STYLES_FEATURE: &'static str = "ɵɵExternalStylesFeature";
+    pub const ANIMATIONS_FEATURE: &'static str = "ɵɵAnimationsFeature";
 
     // ========================================================================
     // Listener Instructions

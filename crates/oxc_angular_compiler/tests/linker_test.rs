@@ -1272,3 +1272,209 @@ fn test_link_safe_navigation_version_read_like_npm_semver() {
     let linked = link_for_version(&quoted, None);
     assert_eq!(linked.matches("== null)? null:").count(), 3, "{linked}");
 }
+
+/// Angular's linker reads `host.attributes` / `listeners` / `properties` with
+/// `AstObject.toLiteral`, which assigns into a plain `{}`: a `__proto__` key is
+/// lost, quoted or not (#687).
+#[test]
+fn test_link_host_proto_keys_are_dropped() {
+    let hosts = [
+        r#"{ attributes: { __proto__: "x", role: "r" }, listeners: { __proto__: "pp()", click: "a()" }, properties: { __proto__: "q", title: "t" } }"#,
+        r#"{ attributes: { "__proto__": "x", "role": "r" }, listeners: { "__proto__": "pp()", "click": "a()" }, properties: { "__proto__": "q", "title": "t" } }"#,
+    ];
+    for host in hosts {
+        let directive = format!(
+            r#"import * as i0 from "@angular/core";
+class D {{}}
+D.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", host: {host}, ngImport: i0 }});"#
+        );
+        let component = format!(
+            r#"import * as i0 from "@angular/core";
+class C {{}}
+C.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "22.2.2", type: C, isStandalone: true, selector: "c", host: {host}, ngImport: i0, template: "" }});"#
+        );
+        for code in [directive, component] {
+            let linked = link_for_version(&code, None);
+            assert!(linked.contains(r#"hostAttrs: ["role", "r"]"#), "{linked}");
+            assert!(linked.contains("hostVars: 1,"), "{linked}");
+            assert!(linked.contains(r#"ɵɵlistener("click""#), "{linked}");
+            assert!(linked.contains(r#"ɵɵdomProperty("title",ctx.t)"#), "{linked}");
+            assert!(!linked.contains("ctx.pp("), "{linked}");
+            assert!(!linked.contains(r#""__proto__""#), "{linked}");
+        }
+    }
+}
+
+/// ngtsc keys a `@HostBinding` member by `this.member` / `this['member']`
+/// (`getSafePropertyAccessString`), which links to `ctx.member` /
+/// `ctx["member"]` (#690).
+#[test]
+fn test_link_host_binding_member_access() {
+    let code = r#"import * as i0 from "@angular/core";
+class M {}
+M.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", type: M, isStandalone: true, selector: "[m]", host: { properties: { "id": "this['my-prop']", "title": "this.m", "attr.v": "this['it\\'s']" } }, ngImport: i0 });"#;
+    let linked = link_for_version(code, None);
+    assert!(linked.contains(r#"ɵɵdomProperty("id",ctx["my-prop"])("title",ctx.m)"#), "{linked}");
+    assert!(linked.contains(r#"ɵɵattribute("v",ctx["it's"])"#), "{linked}");
+}
+
+/// #688: a linked `@trigger` host property sorts with the DOM properties, as
+/// Angular's linker does.
+#[test]
+fn test_link_host_legacy_trigger_order() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: { properties: { "id": "x", "attr.aria-label": "y", "style.height.px": "h", "@fade": "s", "class.active": "a" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    let parts = [
+        r#"ɵɵdomProperty("id",ctx.x)"#,
+        r#"ɵɵsyntheticHostProperty("@fade",ctx.s)"#,
+        r#"ɵɵattribute("aria-label",ctx.y)"#,
+        r#"ɵɵstyleProp("height",ctx.h,"px")"#,
+        r#"ɵɵclassProp("active",ctx.a)"#,
+    ];
+    let positions: Vec<_> = parts.iter().map(|p| linked.find(p)).collect();
+    assert!(positions.iter().all(Option::is_some), "{linked}");
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{linked}");
+    assert!(linked.contains("hostVars:7"), "{linked}");
+}
+
+/// #689: a linked `animate.enter` host property is a create-mode callback.
+#[test]
+fn test_link_host_animate_property() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: { properties: { "animate.enter": "x" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    assert!(
+        linked.contains(
+            "if((rf&1)){i0.ɵɵanimateEnter(functionD_HostBindings_animateenter_cb(){returnctx.x;});}"
+        ),
+        "{linked}"
+    );
+    assert!(!linked.contains("domProperty"), "{linked}");
+    assert!(!linked.contains("hostVars"), "{linked}");
+}
+
+/// Partial declarations of a directive and a component with this `host`.
+fn host_declarations(host: &str) -> [String; 2] {
+    [
+        format!(
+            r#"import * as i0 from "@angular/core";
+class D {{}}
+D.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: {host}, ngImport: i0 }});"#
+        ),
+        format!(
+            r#"import * as i0 from "@angular/core";
+class D {{}}
+D.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "22.2.3", type: D, isStandalone: true, selector: "d", host: {host}, ngImport: i0, template: "" }});"#
+        ),
+    ]
+}
+
+/// #689: a static `animate.*` host attribute links to `ɵɵanimateEnter` /
+/// `ɵɵanimateLeave("value")`, not to `hostAttrs`, as Angular's linker does.
+#[test]
+fn test_link_host_animate_attribute() {
+    for code in host_declarations(r#"{ attributes: { "animate.leave": "out" } }"#) {
+        let linked: String = link_for_version(&code, None).split_whitespace().collect();
+        assert!(
+            linked.contains(
+                r#"selectors:[["d"]],hostBindings:functionD_HostBindings(rf,ctx){if((rf&1)){i0.ɵɵanimateLeave("out");}}"#
+            ),
+            "{linked}"
+        );
+        assert!(!linked.contains("hostAttrs"), "{linked}");
+    }
+
+    // Properties, then attributes, then listeners, as Angular ingests them;
+    // the animate ops follow the listeners in the create block.
+    let host = r#"{ attributes: { "role": "r", "animate.enter": "a" }, listeners: { "click": "c()" }, properties: { "animate.leave": "x", "@t": "y" } }"#;
+    for code in host_declarations(host) {
+        let linked: String = link_for_version(&code, None).split_whitespace().collect();
+        assert!(
+            linked.contains(
+                r#"hostAttrs:["role","r"],hostVars:1,hostBindings:functionD_HostBindings(rf,ctx){if((rf&1)){i0.ɵɵlistener("click",functionD_click_HostBindingHandler(){returnctx.c();});i0.ɵɵanimateLeave(functionD_HostBindings_animateleave_cb(){returnctx.x;});i0.ɵɵanimateEnter("a");}if((rf&2)){i0.ɵɵsyntheticHostProperty("@t",ctx.y);}}"#
+            ),
+            "{linked}"
+        );
+    }
+}
+
+/// #689: Angular 20.2.0 to 20.3.0 needs `ɵɵAnimationsFeature()` for a host
+/// `animate.leave` (attribute, property or listener), as its linker adds it.
+#[test]
+fn test_link_host_animate_leave_feature() {
+    let hosts = [
+        r#"{ attributes: { "animate.leave": "out" } }"#,
+        r#"{ properties: { "animate.leave": "x" } }"#,
+        r#"{ listeners: { "animate.leave": "g($event)" } }"#,
+    ];
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(20, 1, 8)), false),
+        (Some(AngularVersion::new(22, 2, 3)), false),
+        (None, false),
+    ];
+    for host in hosts {
+        for code in host_declarations(host) {
+            for (version, feature) in cases {
+                let linked: String = link_for_version(&code, version).split_whitespace().collect();
+                assert_eq!(
+                    linked.contains("features:[i0.ɵɵAnimationsFeature()]"),
+                    feature,
+                    "{version:?} {linked}"
+                );
+            }
+        }
+    }
+    // `animate.enter` alone needs no feature.
+    for code in host_declarations(r#"{ properties: { "animate.enter": "x" } }"#) {
+        let linked = link_for_version(&code, Some(AngularVersion::new(20, 2, 0)));
+        assert!(!linked.contains("AnimationsFeature"), "{linked}");
+    }
+}
+
+/// #689: Angular before 20.2 has no `ɵɵanimateEnter` / `ɵɵanimateLeave`: its
+/// linker keeps `animate.*` attributes in `hostAttrs` and binds `animate.*`
+/// properties as DOM properties.
+#[test]
+fn test_link_host_animate_before_20_2() {
+    let host =
+        r#"{ attributes: { "animate.leave": "out" }, properties: { "animate.enter": "x" } }"#;
+    let cases = [
+        (AngularVersion::new(20, 1, 8), "ɵɵdomProperty"),
+        (AngularVersion::new(19, 2, 15), "ɵɵhostProperty"),
+    ];
+    for code in host_declarations(host) {
+        for (version, instruction) in cases {
+            let linked: String =
+                link_for_version(&code, Some(version)).split_whitespace().collect();
+            assert!(
+                linked.contains(&format!(
+                    r#"hostAttrs:["animate.leave","out"],hostVars:1,hostBindings:functionD_HostBindings(rf,ctx){{if((rf&2)){{i0.{instruction}("animate.enter",ctx.x);}}}}"#
+                )),
+                "{linked}"
+            );
+            assert!(!linked.contains("ɵɵanimate"), "{linked}");
+        }
+
+        let linked: String = link_for_version(&code, Some(AngularVersion::new(20, 2, 0)))
+            .split_whitespace()
+            .collect();
+        assert!(linked.contains(r#"i0.ɵɵanimateLeave("out")"#), "{linked}");
+        assert!(
+            linked.contains("i0.ɵɵanimateEnter(functionD_HostBindings_animateenter_cb()"),
+            "{linked}"
+        );
+        assert!(!linked.contains("hostAttrs"), "{linked}");
+    }
+}

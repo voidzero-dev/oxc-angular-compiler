@@ -405,6 +405,17 @@ export interface DtsInjectDeclaration {
 }
 
 /**
+ * The result of [`inject_dts_declarations_with_map`] and
+ * [`inject_dts_declarations_with_identity_map`].
+ */
+export interface DtsInjectResult {
+  /** The `.d.ts` with the members and imports injected. */
+  code: string
+  /** The source map `mappings` for `code`, if any. */
+  mappings?: string
+}
+
+/**
  * Encapsulate CSS styles for a component using attribute selectors.
  *
  * This implements Angular's ViewEncapsulation.Emulated behavior,
@@ -789,6 +800,28 @@ export declare function injectDtsDeclarations(
   source: string,
   declarations: Array<DtsInjectDeclaration>,
 ): string
+
+/**
+ * [`inject_dts_declarations`], plus `mappings` from the new code back to
+ * `source` (source index 0), e.g. for a bundler `transform` hook. Injected
+ * text is unmapped. Nothing injected gives no `mappings`.
+ */
+export declare function injectDtsDeclarationsWithIdentityMap(
+  source: string,
+  declarations: Array<DtsInjectDeclaration>,
+): DtsInjectResult
+
+/**
+ * [`inject_dts_declarations`], and also shift the `mappings` of the file's
+ * existing declaration map to fit the new code. Original tokens keep their
+ * mapping, injected text is unmapped. Nothing injected gives `mappings`
+ * back as is; bad VLQ gives no `mappings`.
+ */
+export declare function injectDtsDeclarationsWithMap(
+  source: string,
+  declarations: Array<DtsInjectDeclaration>,
+  mappings?: string | undefined | null,
+): DtsInjectResult
 
 /**
  * Input for compiling an injector.

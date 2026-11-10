@@ -2466,7 +2466,7 @@ mod tests {
             assert_eq!(host.properties.len(), 1);
             // Keys are wrapped with brackets: "class.active" -> "[class.active]"
             assert_eq!(host.properties[0].0.as_str(), "[class.active]");
-            assert_eq!(host.properties[0].1.as_str(), "isActive");
+            assert_eq!(host.properties[0].1.as_str(), "this.isActive");
         });
     }
 
@@ -2487,7 +2487,7 @@ mod tests {
             assert_eq!(host.properties.len(), 1);
             // When no name is provided, uses the property name, wrapped in brackets
             assert_eq!(host.properties[0].0.as_str(), "[title]");
-            assert_eq!(host.properties[0].1.as_str(), "title");
+            assert_eq!(host.properties[0].1.as_str(), "this.title");
         });
     }
 
@@ -2623,7 +2623,7 @@ mod tests {
             assert_eq!(host.properties.len(), 1);
             // Keys are wrapped with brackets
             assert_eq!(host.properties[0].0.as_str(), "[style.color]");
-            assert_eq!(host.properties[0].1.as_str(), "textColor");
+            assert_eq!(host.properties[0].1.as_str(), "this.textColor");
         });
     }
 

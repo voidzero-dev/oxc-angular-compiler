@@ -178,10 +178,11 @@ impl<'a> R3HostMetadata<'a> {
 // =============================================================================
 
 /// The `@HostBinding` and `@HostListener` members of a class, keyed like `host:`
-/// entries: `[hostPropertyName]` → member name, and `(eventName)` →
-/// `member(args)`.
+/// entries: `[hostPropertyName]` → `this.member` (or `this['member']`), and
+/// `(eventName)` → `member(args)`.
 pub struct MemberHostBindings<'a> {
-    /// `[hostPropertyName]` → member name, for each `@HostBinding`.
+    /// `[hostPropertyName]` → `this.member` / `this['member']`, for each
+    /// `@HostBinding`.
     pub properties: std::vec::Vec<(Ident<'a>, Ident<'a>)>,
     /// `(eventName)` → `member(args)`, for each `@HostListener`.
     pub listeners: std::vec::Vec<(Ident<'a>, Ident<'a>)>,
@@ -201,8 +202,16 @@ impl<'a> MemberHostBindings<'a> {
         let properties =
             super::property_decorators::extract_host_bindings_in(allocator, class, consts)
                 .into_iter()
-                .map(|(host_prop, class_prop)| (wrap('[', host_prop.as_str(), ']'), class_prop))
+                .map(|(host_prop, class_prop)| {
+                    // ngtsc reads the member through `this`, so a member named
+                    // `true` or `my-prop` is not parsed as a literal or a minus:
+                    // `getSafePropertyAccessString('this', member.name)`
+                    // (compiler-cli/src/ngtsc/annotations/directive/src/shared.ts).
+                    let value = safe_property_access("this", class_prop.as_str());
+                    (wrap('[', host_prop.as_str(), ']'), Ident::from(allocator.alloc_str(&value)))
+                })
                 .collect();
+        // Listener values are not wrapped in `this`, like ngtsc:
         // `bindings.listeners[eventName] = `${member.name}(${args.join(',')})``
         let listeners =
             super::property_decorators::extract_host_listeners_in(allocator, class, consts)
@@ -225,6 +234,32 @@ impl<'a> MemberHostBindings<'a> {
     }
 }
 
+/// Angular's `getSafePropertyAccessString(accessor, name)`
+/// (compiler/src/render3/util.ts): `accessor.name` when `name` matches
+/// `/^[$A-Z_][0-9A-Z_$]*$/i` (ASCII only), else `accessor['name']` with only
+/// `'`, `\`, LF and CR escaped (`escapeIdentifier(name, false)` in
+/// compiler/src/output/abstract_emitter.ts).
+fn safe_property_access(accessor: &str, name: &str) -> String {
+    let legal =
+        name.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_' || b == b'$')
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$');
+    if legal {
+        return format!("{accessor}.{name}");
+    }
+    let mut out = format!("{accessor}['");
+    for c in name.chars() {
+        match c {
+            '\'' => out.push_str("\\'"),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out.push_str("']");
+    out
+}
+
 /// Merges the `@HostBinding` / `@HostListener` members into the bindings read
 /// from `host:`, the way ngtsc's `extractHostBindings` does, and puts every
 /// kind in the order ngtsc emits it.
@@ -235,7 +270,10 @@ impl<'a> MemberHostBindings<'a> {
 ///   key, where that entry was, and each key is bound once;
 /// - the entries are in the order they were first written, except that keys
 ///   that are array indices (`'2'`, `'[10]'`) come first, in ascending order,
-///   like the keys of any JS object.
+///   like the keys of any JS object;
+/// - a listener or property named exactly `__proto__` is dropped:
+///   `listeners['__proto__'] = '…'` runs the prototype setter, which ignores
+///   a string, so ngtsc never compiles that binding.
 ///
 /// Used by both the directive and the component metadata, so `host:` and the
 /// member decorators combine the same way for both.
@@ -257,9 +295,28 @@ pub fn merge_host_bindings<'a, V>(
     for (key, value) in members.listeners {
         upsert(listeners, key, value);
     }
+    // ngtsc's `parseHostBindings` (compiler/src/render3/view/compiler.ts) and
+    // `extractHostBindings` assign into a plain `{}`, so a `__proto__` key is lost.
+    properties.retain(|(key, _)| strip_host_key(key.as_str(), '[', ']') != "__proto__");
+    listeners.retain(|(key, _)| strip_host_key(key.as_str(), '(', ')') != "__proto__");
     sort_like_object_keys(properties, |key| strip_host_key(key, '[', ']'));
     sort_like_object_keys(listeners, |key| strip_host_key(key, '(', ')'));
     sort_like_object_keys(attributes, |key| key);
+}
+
+/// Whether a host attribute, property or listener is `animate.leave`, as
+/// ngtsc's `hasAnimationHostBinding` checks for `ɵɵAnimationsFeature()` (see
+/// [`crate::AngularVersion::needs_animations_feature`]). The keys may keep
+/// their `[…]` / `(…)` brackets.
+pub fn has_animate_leave_host_binding<'k>(
+    attributes: impl IntoIterator<Item = &'k str>,
+    properties: impl IntoIterator<Item = &'k str>,
+    listeners: impl IntoIterator<Item = &'k str>,
+) -> bool {
+    const ANIMATE_LEAVE: &str = "animate.leave";
+    attributes.into_iter().any(|key| key == ANIMATE_LEAVE)
+        || properties.into_iter().any(|key| strip_host_key(key, '[', ']') == ANIMATE_LEAVE)
+        || listeners.into_iter().any(|key| strip_host_key(key, '(', ')') == ANIMATE_LEAVE)
 }
 
 /// `key` without the brackets of a `[property]` / `(event)` host key: the key
@@ -891,10 +948,10 @@ mod tests {
 
         // Check host bindings - keys are wrapped with brackets
         assert_eq!(metadata.host.properties[0].0.as_str(), "[class.active]");
-        assert_eq!(metadata.host.properties[0].1.as_str(), "isActive");
+        assert_eq!(metadata.host.properties[0].1.as_str(), "this.isActive");
 
         assert_eq!(metadata.host.properties[1].0.as_str(), "[attr.role]");
-        assert_eq!(metadata.host.properties[1].1.as_str(), "role");
+        assert_eq!(metadata.host.properties[1].1.as_str(), "this.role");
     }
 
     #[test]
@@ -1028,5 +1085,32 @@ mod tests {
         assert_eq!(metadata.inputs.len(), 2);
         assert_eq!(metadata.inputs[0].class_property_name.as_str(), "existingInput");
         assert_eq!(metadata.inputs[1].class_property_name.as_str(), "fromClass");
+    }
+
+    #[test]
+    fn test_safe_property_access() {
+        // What Angular's `getSafePropertyAccessString('this', name)` returns.
+        for (name, expected) in [
+            ("m", "this.m"),
+            ("$ok", "this.$ok"),
+            ("_x", "this._x"),
+            ("$", "this.$"),
+            ("class", "this.class"),
+            ("true", "this.true"),
+            ("this", "this.this"),
+            ("my-prop", "this['my-prop']"),
+            ("café", "this['café']"),
+            ("it's", r"this['it\'s']"),
+            (r"a\b", r"this['a\\b']"),
+            ("line\nbreak", r"this['line\nbreak']"),
+            ("cr\rx", r"this['cr\rx']"),
+            ("", "this['']"),
+            ("1abc", "this['1abc']"),
+            ("a\tb", "this['a\tb']"),
+            ("\"q\"", "this['\"q\"']"),
+            ("a{{b}}", "this['a{{b}}']"),
+        ] {
+            assert_eq!(safe_property_access("this", name), expected, "for {name:?}");
+        }
     }
 }

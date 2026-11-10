@@ -1011,15 +1011,30 @@ fn parse_selector(selector: &str) -> String {
 /// - `classAttribute`: `"cdk-tree"` → `[1, "cdk-tree"]` (1 = AttributeMarker.Classes)
 /// - `styleAttribute`: `"display: block"` → `[2, "display", "block"]` (2 = AttributeMarker.Styles)
 ///
-/// Properties and listeners go into `hostBindings`, not `hostAttrs`.
-fn build_host_attrs(host_obj: &ObjectExpression<'_>, source: &str) -> String {
+/// Properties and listeners go into `hostBindings`, not `hostAttrs`, and so do
+/// `animate.*` attributes (see [`host_animation_attribute`]).
+fn build_host_attrs(
+    host_obj: &ObjectExpression<'_>,
+    source: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
     let mut attrs: Vec<String> = Vec::new();
 
     // Static attributes: { "role": "tree", "tabindex": "-1" }
     if let Some(attr_obj) = get_object_property(host_obj, "attributes") {
         for prop in &attr_obj.properties {
             if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                if host_animation_attribute(p, angular_version).is_some() {
+                    continue;
+                }
                 let key = match &p.key {
+                    // Angular's linker reads the map with `AstObject.toLiteral`
+                    // (linker/src/ast/ast_value.ts), which assigns into a plain
+                    // `{}`: a `__proto__` key is lost there.
+                    PropertyKey::StaticIdentifier(ident) if ident.name == "__proto__" => continue,
+                    PropertyKey::StringLiteral(s) if s.value.as_str() == Some("__proto__") => {
+                        continue;
+                    }
                     PropertyKey::StaticIdentifier(ident) => {
                         crate::output::emitter::escape_string(&ident.name, false)
                     }
@@ -1706,20 +1721,20 @@ fn link_directive<'a>(
         parts.push("signals: true".to_string());
     }
 
-    if let Some(features) = build_features(meta, source, ns) {
+    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
         parts.push(format!("features: {features}"));
     }
 
     // Host bindings (hostAttrs, hostVars, hostBindings)
     if let Some(host_obj) = get_object_property(meta, "host") {
         // Static attributes → hostAttrs
-        let host_attrs = build_host_attrs(host_obj, source);
+        let host_attrs = build_host_attrs(host_obj, source, options.angular_version);
         if !host_attrs.is_empty() {
             parts.push(format!("hostAttrs: [{host_attrs}]"));
         }
 
         // Dynamic bindings → hostVars + hostBindings function
-        let host_input = extract_host_metadata_input(host_obj);
+        let host_input = extract_host_metadata_input(host_obj, options.angular_version);
         let selector = get_string_property(meta, "selector");
         if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
             allocator,
@@ -1789,6 +1804,7 @@ fn get_array_property<'a>(
 /// the Angular expression parser (not simple string interpolation).
 fn extract_host_metadata_input(
     host_obj: &ObjectExpression<'_>,
+    angular_version: Option<AngularVersion>,
 ) -> crate::component::HostMetadataInput {
     let mut input = crate::component::HostMetadataInput::default();
 
@@ -1803,8 +1819,22 @@ fn extract_host_metadata_input(
                 },
                 _ => continue,
             };
+            // Lost in Angular's linker, as in `build_host_attrs`.
+            if key == "__proto__" {
+                continue;
+            }
             let Some(value) = as_static_string(&p.value) else { continue };
             input.properties.push((format!("[{key}]"), value.to_string()));
+        }
+    }
+
+    // The other static attributes go into `hostAttrs` (`build_host_attrs`).
+    if let Some(attributes) = get_object_property(host_obj, "attributes") {
+        for prop in &attributes.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
+            if let Some((key, value)) = host_animation_attribute(p, angular_version) {
+                input.attributes.push((key.to_string(), value.to_string()));
+            }
         }
     }
 
@@ -1819,12 +1849,37 @@ fn extract_host_metadata_input(
                 },
                 _ => continue,
             };
+            if key == "__proto__" {
+                continue;
+            }
             let Some(value) = as_static_string(&p.value) else { continue };
             input.listeners.push((format!("({key})"), value.to_string()));
         }
     }
 
     input
+}
+
+/// The name and value of a static `animate.*` host attribute. Angular's linker
+/// ingests it with the other host attributes (`ingestHostAttribute`), and
+/// binding specialization makes it `ɵɵanimateEnter` / `ɵɵanimateLeave("value")`
+/// rather than a `hostAttrs` entry. Before v20.2 it stays in `hostAttrs`.
+fn host_animation_attribute<'a>(
+    prop: &'a oxc_ast::ast::ObjectProperty<'a>,
+    angular_version: Option<AngularVersion>,
+) -> Option<(&'a str, &'a str)> {
+    if angular_version.is_some_and(|v| !v.supports_animate_instructions()) {
+        return None;
+    }
+    let key = match &prop.key {
+        PropertyKey::StaticIdentifier(ident) => ident.name.as_str(),
+        PropertyKey::StringLiteral(s) => s.value.as_str()?,
+        _ => return None,
+    };
+    if !key.starts_with("animate.") {
+        return None;
+    }
+    Some((key, as_static_string(&prop.value)?))
 }
 
 /// Build a query function (contentQueries or viewQuery) from query metadata.
@@ -2098,7 +2153,12 @@ fn declare_pooled_constants_js(pool: &mut ConstantPool<'_>, ns: &str) -> String 
 /// - `controlCreate: { passThroughInput }` → `ns.ɵɵControlFeature(passThroughInput)`
 /// Order is important: ProvidersFeature → HostDirectivesFeature → InheritDefinitionFeature → NgOnChangesFeature → ControlFeature
 /// (see packages/compiler/src/render3/view/compiler.ts:119-161)
-fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
+fn build_features(
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    ns: &str,
+    angular_version: Option<AngularVersion>,
+) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
     // 1. ProvidersFeature — must come before InheritDefinitionFeature
@@ -2143,7 +2203,41 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
         features.push(format!("{ns}.\u{0275}\u{0275}ControlFeature({pass_through})"));
     }
 
+    // 6. AnimationsFeature — v20.2.0 to v20.3.0, for a host `animate.leave`
+    if angular_version.is_some_and(|v| v.needs_animations_feature())
+        && get_object_property(meta, "host").is_some_and(has_animate_leave_host)
+    {
+        features.push(format!("{ns}.\u{0275}\u{0275}AnimationsFeature()"));
+    }
+
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
+}
+
+/// Whether the partial `host: { attributes, properties, listeners }` has an
+/// `animate.leave` key, as ngtsc's `hasAnimationHostBinding` checks.
+fn has_animate_leave_host(host: &ObjectExpression<'_>) -> bool {
+    let keys = |name: &str| -> std::vec::Vec<&str> {
+        get_object_property(host, name)
+            .map(|obj| {
+                obj.properties
+                    .iter()
+                    .filter_map(|prop| match prop {
+                        ObjectPropertyKind::ObjectProperty(p) => match &p.key {
+                            PropertyKey::StaticIdentifier(ident) => Some(ident.name.as_str()),
+                            PropertyKey::StringLiteral(s) => s.value.as_str(),
+                            _ => None,
+                        },
+                        ObjectPropertyKind::SpreadProperty(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    crate::directive::has_animate_leave_host_binding(
+        keys("attributes"),
+        keys("properties"),
+        keys("listeners"),
+    )
 }
 
 /// Whether a component is not standalone or has a directive, component or NgModule
@@ -2226,7 +2320,7 @@ fn link_component<'a>(
         // through the full Angular expression parser for correct output.
         crate::component::compile_host_bindings_for_linker(
             allocator,
-            &extract_host_metadata_input(host_obj),
+            &extract_host_metadata_input(host_obj, options.angular_version),
             type_name,
             get_string_property(meta, "selector"),
             pool.next_index,
@@ -2299,7 +2393,7 @@ fn link_component<'a>(
     // 5-7. Host bindings (hostAttrs, hostVars, hostBindings)
     if let Some(host_obj) = host_obj {
         // Static attributes → hostAttrs
-        let host_attrs = build_host_attrs(host_obj, source);
+        let host_attrs = build_host_attrs(host_obj, source, options.angular_version);
         if !host_attrs.is_empty() {
             parts.push(format!("hostAttrs: [{host_attrs}]"));
         }
@@ -2345,7 +2439,7 @@ fn link_component<'a>(
     }
 
     // 12. features
-    if let Some(features) = build_features(meta, source, ns) {
+    if let Some(features) = build_features(meta, source, ns, options.angular_version) {
         parts.push(format!("features: {features}"));
     }
 

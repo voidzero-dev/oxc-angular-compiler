@@ -595,8 +595,8 @@ fn compile_host_metadata<'a>(
     if !host.attributes.is_empty() {
         let mut attr_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         for (key, value) in &host.attributes {
-            let quoted = is_unsafe_object_key(key.as_str());
-            attr_entries.push(LiteralMapEntry::new(key.clone(), value.clone_in(allocator), quoted));
+            // Every key is quoted, like ngtsc's `toOptionalLiteralMap` (partial/util.ts).
+            attr_entries.push(LiteralMapEntry::new(key.clone(), value.clone_in(allocator), true));
         }
         entries.push(LiteralMapEntry::new(
             Ident::from("attributes"),

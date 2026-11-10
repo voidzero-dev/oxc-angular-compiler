@@ -9,9 +9,11 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { ServerResponse } from 'node:http'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { createDebug } from 'obug'
 import type { Plugin, ResolvedConfig, ViteDevServer, Connect, ModuleNode } from 'vite'
@@ -38,7 +40,17 @@ import { angularLinkerPlugin } from './angular-linker-plugin.js'
 import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 import { installedAngularVersion } from './utils/angular-version.js'
 import { isFileSystemCaseSensitive } from './utils/case-sensitive.js'
-import { injectDtsDeclarations } from './utils/dts.js'
+import {
+  dtsMapSource,
+  dtsSourceCandidates,
+  findDtsFiles,
+  injectDtsDeclarationsWithIdentityMap,
+  injectDtsFile,
+  isDtsFile,
+  isProjectTsSource,
+  matchDtsSources,
+  type DtsClassDeclaration,
+} from './utils/dts.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -223,7 +235,13 @@ const ANGULAR_TS_REGEX = /\.tsx?$/
 const SIGNAL_API_NAME_REGEX =
   /\b(?:signal|computed|linkedSignal|input|model|viewChild|viewChildren|contentChild|contentChildren|effect|afterRenderEffect|resource|httpResource)\b/
 const TEMPLATE_REGEX = /\.html?$/
+const DTS_REGEX = /\.d\.[cm]?ts$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
+
+// Marks the instance `dtsPlugin` adds to tsdown's cjs declaration pass.
+const TSDOWN_CJS_DTS = Symbol('oxc-angular:tsdown-cjs-dts')
+// Marks a tsdown `inputOptions` that `dtsPlugin` already wrapped.
+const TSDOWN_WRAPPED = Symbol.for('oxc-angular:tsdown-input-options')
 
 /**
  * `ResolvedResources` as the plugin builds it: NAPI-RS binds its `HashMap`s
@@ -340,6 +358,9 @@ function resolveMinifyComponentStyles(
  */
 export function angular(options: PluginOptions = {}): Plugin[] {
   const workspaceRoot = options.workspaceRoot ?? process.cwd()
+  // This instance only collects declarations in tsdown's cjs declaration
+  // pass, for its `.d.cts` (see `dtsPlugin`).
+  const tsdownCjsDtsPass = (options as { [TSDOWN_CJS_DTS]?: boolean })[TSDOWN_CJS_DTS] === true
 
   // Process file replacements
   let fileReplacements: Record<string, string> | undefined
@@ -601,14 +622,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
   // Angular Ivy `.d.ts` static member declarations collected across the build,
   // keyed by module id. Populated during `transform` in `compilationMode:
-  // 'partial'` (library) builds and consumed by `dtsPlugin`'s `generateBundle`
-  // to augment the declaration files a separate dts generator emits.
+  // 'partial'` (library) builds and consumed by `dtsPlugin`, which adds each
+  // module's members only to that module's own declaration file.
   //
   // Keyed by module (not class name) so `vite build --watch` rebuilds can evict
   // a module's prior declarations before re-transforming it. Otherwise removing
   // a decorator — which makes the quick decorator check early-return, skipping
   // the transform entirely — would leave the old `ɵfac`/`ɵcmp` entries in place
-  // and `generateBundle` would re-inject Ivy metadata into a now-plain class.
+  // and `dtsPlugin` would re-inject Ivy metadata into a now-plain class.
   const collectedDtsDeclarations = new Map<
     string,
     Array<{
@@ -617,6 +638,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       namespaceImports: Record<string, string>
     }>
   >()
+  // Every TS module `transform` saw in a library build: the candidates
+  // `dtsPlugin` matches declaration files to, when `getModuleIds` is missing.
+  const transformedTsIds = new Set<string>()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -1119,6 +1143,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // doesn't keep stale Ivy metadata in the regenerated `.d.ts`.
           if (pluginOptions.compilationMode === 'partial') {
             collectedDtsDeclarations.delete(id)
+            transformedTsIds.add(id)
           }
 
           // Quick check for Angular decorators - avoids parsing files without them
@@ -1154,6 +1179,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Such a file has no component: nothing to resolve or register for HMR.
           if (mayNameSignals) {
+            if (tsdownCjsDtsPass) return
             const result = await transformAngularFile(
               code,
               actualId,
@@ -1414,6 +1440,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               result.hmrFingerprint ?? fingerprintOf(code, actualId, classNamesInFile),
             )
           }
+
+          // tsdown's cjs declaration pass: keep the source, so the declaration
+          // generator after us reads it, not the compiled code.
+          if (tsdownCjsDtsPass) return
 
           return {
             code: result.code,
@@ -1731,76 +1761,229 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   /**
    * Augment library `.d.ts` files with Angular's Ivy type declarations.
    *
-   * Vite/Rolldown don't emit declarations themselves — a separate dts
-   * generator (rolldown-plugin-dts, vite-plugin-dts, tsdown, `tsc`) produces
-   * the base `.d.ts`. This plugin runs after them (`enforce: 'post'`) and
-   * splices the static `ɵfac`/`ɵcmp`/… members collected during `transform`
-   * into the matching classes so consumers get full template type-checking.
+   * Vite/Rolldown don't emit declarations themselves: a separate generator
+   * (rolldown-plugin-dts, tsdown, `@rollup/plugin-typescript`,
+   * vite-plugin-dts) writes the base `.d.ts`. This plugin splices the static
+   * `ɵfac`/`ɵcmp`/… members collected in `transform` into them, so consumers
+   * get full template type-checking.
    *
-   * Only active in `compilationMode: 'partial'` (library) builds; app builds
-   * collect nothing, so this is a no-op there.
+   * Like ngtsc, each declaration file only gets the members of its own source
+   * module (ngtsc keys them by source file and class node, never by name:
+   * compiler-cli/src/ngtsc/transform/src/declaration.ts
+   * `DtsTransformRegistry` / `IvyDeclarationDtsTransform`):
+   * - bundled declarations (rolldown-plugin-dts, tsdown): each `.d.ts` module
+   *   in `transform`, before the bundler merges and renames them, like
+   *   ng-packagr's rolldown flattening of the per-file ngtsc output;
+   * - `.d.ts` assets (`emitFile`) in `generateBundle`, and files the
+   *   generator writes itself in `writeBundle`, both matched to their source
+   *   by their declaration map, else by one layout per output dir, as tsc
+   *   lays them out (`matchDtsSources`);
+   * - tsdown's `.d.cts`, from a separate pass without user plugins, by adding
+   *   a collect-only instance of this plugin to that pass.
+   * The declaration map is kept in step each time.
+   *
+   * Only active in `compilationMode: 'partial'` (library) builds.
    */
   function dtsPlugin(): Plugin {
-    return {
+    // tsdown generates the declarations (the `transform` hook covers them).
+    let tsdownOwnsDts = false
+    // A tsdown build, and whether tsdown called our `tsdownConfig` hook
+    // (tsdown < 0.21.9 has no plugin hooks).
+    let inTsdown = false
+    let tsdownHooks = false
+    // Disk passes run one after another, never at the same time.
+    let diskPass: Promise<void> = Promise.resolve()
+    const warnedDirs = new Set<string>()
+
+    function declarationsOf(sourceId: string): DtsClassDeclaration[] | undefined {
+      return collectedDtsDeclarations.get(sourceId)?.map((d) => ({ ...d, sourceFile: sourceId }))
+    }
+
+    function graphTsIds(context: { getModuleIds?: () => IterableIterator<string> }): string[] {
+      return [...(context.getModuleIds?.() ?? transformedTsIds)].filter(isProjectTsSource)
+    }
+
+    /** Augment the declaration files a generator wrote itself under `dirs`. */
+    async function augmentOnDisk(
+      dirs: string[],
+      root: string,
+      written: Map<string, string>,
+      sourceIds: string[],
+      warn: (message: string) => void,
+    ): Promise<void> {
+      const caseSensitive = useCaseSensitiveFileNames()
+      for (const dir of dirs) {
+        // Never rewrite the project's own `.d.ts` sources.
+        if (isSameOrAncestor(dir, root)) continue
+        const files: Array<{ file: string; code: string; fileName: string; mapSource?: string }> =
+          []
+        for (const file of await findDtsFiles(dir)) {
+          const code = await readFile(file, 'utf-8')
+          // A chunk of this bundle as written: `transform` did it.
+          if (written.get(file) === code) continue
+          const mapSource = dtsMapSource(code, file, (ref) =>
+            readTextFile(resolve(dirname(file), ref)),
+          )
+          files.push({ file, code, fileName: relative(dir, file), mapSource })
+        }
+        if (files.length === 0) continue
+
+        const sources = matchDtsSources(files, sourceIds, caseSensitive)
+        if (!sources.some(Boolean) && !warnedDirs.has(dir)) {
+          warnedDirs.add(dir)
+          warn(
+            `No declaration file under ${dir} could be matched to its source file, so none ` +
+              `got Angular's type members. ` +
+              (files.some((f) => f.mapSource !== undefined)
+                ? `Their declaration maps name no source file of this build.`
+                : `Turn on \`declarationMap\` for an exact match.`),
+          )
+        }
+        for (const [i, { file, code }] of files.entries()) {
+          const sourceId = sources[i]
+          const declarations = sourceId && declarationsOf(sourceId)
+          if (!declarations) continue
+          const result = injectDtsFile(code, declarations, file, (ref) =>
+            readTextFile(resolve(dirname(file), ref)),
+          )
+          if (!result) continue
+          await writeFile(file, result.code)
+          if (result.map) await writeFile(resolve(dirname(file), result.map.ref), result.map.json)
+        }
+      }
+    }
+
+    // The extra plugins for tsdown's cjs declaration pass: a fresh instance
+    // with the same options that only collects declarations, ahead of
+    // rolldown-plugin-dts (which then replaces each source with a stub).
+    function tsdownCjsDtsPlugins(): Plugin[] {
+      return angular({ ...options, [TSDOWN_CJS_DTS]: true } as PluginOptions).filter(
+        (plugin) => plugin.name === '@oxc-angular/vite' || plugin.name === '@oxc-angular/vite-dts',
+      )
+    }
+
+    const plugin: Plugin & TsdownPluginHooks = {
       name: '@oxc-angular/vite-dts',
       enforce: 'post',
-      generateBundle(_outputOptions, bundle) {
-        // `injectDtsDeclarations` emits relative specifiers verbatim — the
-        // right behavior under structure-preserving declaration emit (the
-        // dominant mode), where dist mirrors src. Bundled declarations that
-        // collapse directories can't represent two same-named relative
-        // modules regardless; that is a dts-generator limitation.
+      // Before rolldown-plugin-dts's fake-js transform (normal order), which
+      // turns each `.d.ts` module into code to bundle.
+      transform: {
+        order: 'pre',
+        filter: {
+          id: { include: DTS_REGEX, exclude: /[\\/]node_modules[\\/]|^\0/ },
+        },
+        async handler(code, id) {
+          if (pluginOptions.compilationMode !== 'partial') return
+          for (const sourceId of dtsSourceCandidates(id)) {
+            // A hand-written `.d.ts` has no source module.
+            if (!this.getModuleInfo(sourceId)) continue
+            // An entry `.d.ts` can come before its source's transform ends.
+            if (!collectedDtsDeclarations.has(sourceId)) await this.load({ id: sourceId })
+            const declarations = declarationsOf(sourceId)
+            if (!declarations) return
+            // The map lets the bundler chain the declaration map through us.
+            const result = injectDtsDeclarationsWithIdentityMap(code, declarations, id)
+            return result.map ? { code: result.code, map: result.map } : undefined
+          }
+        },
+      },
+      generateBundle(outputOptions, bundle) {
         if (pluginOptions.compilationMode !== 'partial') return
         if (collectedDtsDeclarations.size === 0) return
+        const outDir =
+          outputOptions.dir ?? (outputOptions.file ? dirname(outputOptions.file) : undefined)
 
-        // Flatten every module's declarations into a class-name-keyed list.
-        // A library publishes one class per name; if names ever collide the
-        // last module wins, matching the previous (class-name-keyed) behavior.
-        // Keep each declaration's source module id: relative specifiers in
-        // `namespaceImports` ("./dep") mean different modules under
-        // different directories, so canonicalization keys on the resolved
-        // identity, not the raw string.
-        const byClassName = new Map<
-          string,
-          {
-            className: string
-            members: string
-            namespaceImports: Record<string, string>
-            sourceFile: string
+        // Declaration chunks (rolldown-plugin-dts, tsdown) were done per
+        // module in `transform`; only `emitFile` assets are left.
+        const files = Object.values(bundle).flatMap((file) => {
+          if (file.type !== 'asset' || !isDtsFile(file.fileName)) return []
+          const code = assetText(file.source)
+          const dir = posix.dirname(file.fileName)
+          const mapAsset = (ref: string) => {
+            const asset = bundle[posix.join(dir, ref)]
+            return asset?.type === 'asset' ? asset : undefined
           }
-        >()
-        for (const [moduleId, moduleDecls] of collectedDtsDeclarations) {
-          for (const decl of moduleDecls) {
-            byClassName.set(decl.className, { ...decl, sourceFile: moduleId })
+          const readMap = (ref: string) => {
+            const asset = mapAsset(ref)
+            return asset && assetText(asset.source)
           }
-        }
-        const declarations = Array.from(byClassName.values())
+          const mapSource = outDir
+            ? dtsMapSource(code, resolve(outDir, file.fileName), readMap)
+            : undefined
+          return [{ file, code, fileName: file.fileName, mapSource, mapAsset, readMap }]
+        })
+        const sources = matchDtsSources(files, graphTsIds(this), useCaseSensitiveFileNames())
 
-        for (const file of Object.values(bundle)) {
-          if (!/\.d\.[cm]?ts$/.test(file.fileName)) continue
-
-          // rolldown-plugin-dts (and so tsdown) emits declarations as
-          // chunks; generators that call `emitFile` emit them as assets.
-          let source: string
-          if (file.type === 'chunk') {
-            source = file.code
-          } else {
-            source =
-              typeof file.source === 'string'
-                ? file.source
-                : Buffer.from(file.source).toString('utf-8')
-          }
-
-          const augmented = injectDtsDeclarations(source, declarations)
-          if (augmented === source) continue
-          if (file.type === 'chunk') {
-            file.code = augmented
-          } else {
-            file.source = augmented
-          }
+        for (const [i, { file, code, mapAsset, readMap }] of files.entries()) {
+          const sourceId = sources[i]
+          const declarations = sourceId && declarationsOf(sourceId)
+          if (!declarations) continue
+          const result = injectDtsFile(code, declarations, file.fileName, readMap)
+          if (!result) continue
+          file.source = result.code
+          const map = result.map && mapAsset(result.map.ref)
+          if (map) map.source = result.map!.json
         }
       },
+      // Generators like vite-plugin-dts write their files in their own
+      // `writeBundle`. `order: 'post'` puts this pass after them, also in
+      // plain Rolldown, where `enforce` does nothing.
+      writeBundle: {
+        order: 'post',
+        sequential: true,
+        handler(outputOptions, bundle) {
+          if (pluginOptions.compilationMode !== 'partial' || tsdownCjsDtsPass || tsdownOwnsDts)
+            return
+          // An older tsdown that doesn't tell us whether it writes declarations.
+          if (inTsdown && !tsdownHooks) return
+          if (collectedDtsDeclarations.size === 0) return
+
+          const outDir =
+            outputOptions.dir ?? (outputOptions.file ? dirname(outputOptions.file) : undefined)
+          const dirs: string[] = []
+          if (outDir) dirs.push(resolve(outDir))
+          // vite-plugin-dts writes to `build.outDir`, which `output.dir` may not be.
+          const root = resolvedConfig?.root ?? workspaceRoot
+          const viteOutDir = this.environment?.config.build.outDir ?? resolvedConfig?.build.outDir
+          if (viteOutDir) dirs.push(resolve(root, viteOutDir))
+          // A dir inside another one is scanned with it.
+          const scanDirs = [...new Set(dirs)].filter(
+            (dir, _, all) => !all.some((other) => other !== dir && isSameOrAncestor(other, dir)),
+          )
+
+          const written = new Map<string, string>()
+          if (outDir) {
+            for (const file of Object.values(bundle)) {
+              if (file.type === 'chunk' && isDtsFile(file.fileName)) {
+                written.set(resolve(outDir, file.fileName), file.code)
+              }
+            }
+          }
+
+          const sourceIds = graphTsIds(this)
+          const warn = (message: string) => this.warn(message)
+          const pass = diskPass.then(() => augmentOnDisk(scanDirs, root, written, sourceIds, warn))
+          diskPass = pass.catch(() => {})
+          return pass
+        },
+      },
+      // tsdown builds a cjs format's `.d.cts` in a separate pass without user
+      // plugins. Add our own plugins to that pass through `inputOptions`.
+      // tsdown < 0.21.9 has no such hook: its `.d.cts` stays without members.
+      async tsdownConfig(config) {
+        tsdownHooks = true
+        if (pluginOptions.compilationMode !== 'partial' || tsdownCjsDtsPass) return
+        await wrapTsdownInputOptions(config, tsdownCjsDtsPlugins)
+      },
+      tsdownConfigResolved(config) {
+        tsdownHooks = true
+        if (config.dts) tsdownOwnsDts = true
+      },
+      options(inputOptions) {
+        if (hasTsdownPlugin(inputOptions.plugins)) inTsdown = true
+      },
     }
+    return plugin
   }
 
   return [
@@ -1849,6 +2032,100 @@ function fingerprintOf(
   classNames: ReadonlySet<string> | undefined,
 ): string {
   return componentHmrFingerprint(code, fileId, classNames ? [...classNames] : []).fingerprint
+}
+
+/** The tsdown plugin hooks `dtsPlugin` uses (Vite and Rolldown ignore them). */
+interface TsdownPluginHooks {
+  tsdownConfig?: (config: Record<string, unknown>) => Promise<void>
+  tsdownConfigResolved?: (config: { dts?: unknown }) => void
+}
+
+type TsdownInputOptions = (
+  this: unknown,
+  options: { plugins?: unknown },
+  format: unknown,
+  context?: { cjsDts?: boolean },
+) => unknown
+
+type TsdownMergeConfig = (defaults: object, ...overrides: object[]) => unknown
+
+/**
+ * Make a tsdown config's `inputOptions` add `plugins()` to the cjs
+ * declaration pass (`{ cjsDts: true }`), then apply the user's own
+ * `inputOptions` as tsdown would: a function is called, an object is merged
+ * with tsdown's own `mergeConfig` (the merge its `mergeUserOptions` does,
+ * whose rules differ between versions). When that can't be loaded, an object
+ * is left alone and the `.d.cts` gets no members. Wraps only once, also when
+ * one config object is built twice.
+ */
+async function wrapTsdownInputOptions(
+  config: Record<string, unknown>,
+  plugins: () => Plugin[],
+): Promise<void> {
+  const user = config.inputOptions as
+    | (TsdownInputOptions & { [TSDOWN_WRAPPED]?: true })
+    | Record<string, unknown>
+    | undefined
+  if (typeof user === 'function' && user[TSDOWN_WRAPPED]) return
+  let mergeConfig: TsdownMergeConfig | undefined
+  if (user && typeof user === 'object') {
+    mergeConfig = await loadTsdownMergeConfig(
+      typeof config.cwd === 'string' ? config.cwd : process.cwd(),
+    )
+    if (!mergeConfig) return
+  }
+  const wrapped: TsdownInputOptions & { [TSDOWN_WRAPPED]?: true } = async function (
+    options,
+    format,
+    context,
+  ) {
+    if (context?.cjsDts) options.plugins = [plugins(), options.plugins]
+    if (typeof user === 'function')
+      return (await user.call(this, options, format, context)) ?? options
+    return user && mergeConfig ? mergeConfig(options, user) : options
+  }
+  wrapped[TSDOWN_WRAPPED] = true
+  config.inputOptions = wrapped
+}
+
+/** `mergeConfig` of the tsdown that `cwd` resolves, or `undefined`. */
+async function loadTsdownMergeConfig(cwd: string): Promise<TsdownMergeConfig | undefined> {
+  try {
+    const entry = createRequire(resolve(cwd, 'package.json')).resolve('tsdown/config')
+    const { mergeConfig } = (await import(/* @vite-ignore */ pathToFileURL(entry).href)) as {
+      mergeConfig?: unknown
+    }
+    return typeof mergeConfig === 'function' ? (mergeConfig as TsdownMergeConfig) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether a Rolldown `plugins` option holds one of tsdown's own plugins. */
+function hasTsdownPlugin(plugins: unknown): boolean {
+  if (Array.isArray(plugins)) return plugins.some(hasTsdownPlugin)
+  const name = (plugins as { name?: unknown } | null | undefined)?.name
+  return typeof name === 'string' && name.startsWith('tsdown:')
+}
+
+/** Whether `dir` is `target` or one of its parents. */
+function isSameOrAncestor(dir: string, target: string): boolean {
+  const rel = relative(dir, target)
+  return !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+}
+
+/** The text of a bundle asset's `source`. */
+function assetText(source: string | Uint8Array): string {
+  return typeof source === 'string' ? source : Buffer.from(source).toString('utf-8')
+}
+
+/** The text of a file, or `undefined` when it can't be read. */
+function readTextFile(file: string): string | undefined {
+  try {
+    return readFileSync(file, 'utf-8')
+  } catch {
+    return undefined
+  }
 }
 
 export { angular as default }

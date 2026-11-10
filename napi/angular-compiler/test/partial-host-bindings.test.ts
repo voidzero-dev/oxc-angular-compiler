@@ -118,6 +118,55 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(code).toMatch(/ɵɵsyntheticHostListener\("@fade\.done",/)
   })
 
+  it('orders a legacy trigger with the DOM properties', async () => {
+    const code = await link(
+      `
+        import { Directive } from '@angular/core';
+        @Directive({
+          selector: '[d]',
+          host: {
+            '[id]': 'x',
+            '[attr.aria-label]': 'y',
+            '[style.height.px]': 'h',
+            '[@fade]': 's',
+            '[class.active]': 'a',
+          },
+        })
+        export class D {}
+      `,
+      linker,
+    )
+    const at = (re: RegExp) => code.search(re)
+    const order = [
+      at(/ɵɵdomProperty\("id",\s*ctx\.x\)/),
+      at(/ɵɵsyntheticHostProperty\("@fade",\s*ctx\.s\)/),
+      at(/ɵɵattribute\("aria-label",\s*ctx\.y\)/),
+      at(/ɵɵstyleProp\("height",\s*ctx\.h,\s*"px"\)/),
+      at(/ɵɵclassProp\("active",\s*ctx\.a\)/),
+    ]
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
+
+  it('binds animate.enter / animate.leave properties as callbacks', async () => {
+    const code = await link(
+      `
+        import { Directive, HostBinding } from '@angular/core';
+        @Directive({ selector: '[d]', host: { '[animate.enter]': 'x' } })
+        export class D {
+          @HostBinding('animate.leave') y = 'out';
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(
+      /ɵɵanimateEnter\(function D_HostBindings_animateenter_cb\(\) \{\s*return ctx\.x;\s*\}\)/,
+    )
+    expect(code).toMatch(/\(function D_HostBindings_animateleave_cb\(\) \{\s*return ctx\.y;\s*\}\)/)
+    expect(code).not.toMatch(/domProperty\("animate\./)
+    expect(code).not.toMatch(/hostVars/)
+  })
+
   it('strips only the outer brackets of a host key', async () => {
     // ngtsc keeps `[y]` / `(z)` as the name, and the linker binds it as is.
     const code = await link(
@@ -147,5 +196,135 @@ describe.each(Object.keys(LINKERS) as (keyof typeof LINKERS)[])('linked by %s', 
     expect(code).toMatch(/ɵɵlistener\("keydown\.enter",\s*function C_keydown_enter_/)
     expect(code).toMatch(/\("keyup\.control\.a",\s*function C_keyup_control_a_/)
     expect(code).toMatch(/ɵɵstyleProp\("width",\s*ctx\.width,\s*"%"\)/)
+  })
+
+  it('reads @HostBinding members through `this` (#690)', async () => {
+    const code = await link(
+      `
+        import { Directive, HostBinding } from '@angular/core';
+        @Directive({ selector: '[d]' })
+        export class D {
+          @HostBinding('id') 'my-prop' = 1;
+          @HostBinding('title') m = 2;
+          @HostBinding('attr.t') true = 3;
+          @HostBinding('attr.v') "it's" = 4;
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(/ɵɵdomProperty\("id",\s*ctx\["my-prop"\]\)\(\s*"title",\s*ctx\.m\)/)
+    expect(code).toMatch(/ɵɵattribute\("t",\s*ctx\.true\)\(\s*"v",\s*ctx\["it's"\]\)/)
+  })
+
+  it('drops host bindings named `__proto__` (#687)', async () => {
+    const code = await link(
+      `
+        import { Directive, HostListener } from '@angular/core';
+        @Directive({
+          selector: '[d]',
+          host: { '(__proto__)': 'pp()', '(click)': 'a()', '[__proto__]': 'q', '[title]': 't' },
+        })
+        export class D {
+          @HostListener('__proto__') n() {}
+        }
+      `,
+      linker,
+    )
+    expect(code).toMatch(/ɵɵlistener\("click",/)
+    expect(code).toMatch(/ɵɵdomProperty\("title",\s*ctx\.t\)/)
+    expect(code).toMatch(/hostVars:\s*1,/)
+    // The class metadata repeats the decorators as written, so only the
+    // compiled bindings are checked.
+    expect(code).not.toMatch(/ɵɵ(listener|domProperty)\("__proto__"/)
+    expect(code).not.toContain('ctx.pp(')
+    expect(code).not.toContain('ctx.n(')
+  })
+
+  it('drops `__proto__` keys of a partial declaration (#687)', async () => {
+    const code = await LINKERS[linker](
+      `
+        import * as i0 from "@angular/core";
+        export class D {}
+        D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "[d]", host: { attributes: { __proto__: "x", role: "r" }, listeners: { "__proto__": "pp()", click: "a()" }, properties: { __proto__: "q", "title": "t" } }, ngImport: i0 });
+      `,
+      '/lib/dir.mjs',
+    )
+    expect(code).toMatch(/hostAttrs:\s*\["role",\s*"r"\]/)
+    expect(code).toMatch(/hostVars:\s*1,/)
+    expect(code).toMatch(/ɵɵlistener\("click",/)
+    expect(code).toMatch(/ɵɵdomProperty\("title",\s*ctx\.t\)/)
+    expect(code).not.toContain('__proto__')
+  })
+})
+
+describe('static animate host attributes (#689)', () => {
+  /** The `ɵɵdefine*` call, printed by Babel so that both linkers' output compares as text. */
+  const definition = (code: string) => {
+    const require = createRequire(import.meta.url)
+    const babel = createRequire(require.resolve('@angular/compiler-cli/package.json'))(
+      '@babel/core',
+    )
+    const printed: string = babel.transformSync(code, { babelrc: false, configFile: false }).code
+    return printed.slice(printed.indexOf('i0.ɵɵdefine'))
+  }
+  const declaration = (kind: string, host: string) => `
+    import * as i0 from "@angular/core";
+    export class D {}
+    D.ɵ${kind === 'Directive' ? 'dir' : 'cmp'} = i0.ɵɵngDeclare${kind}({ minVersion: "14.0.0", version: "22.2.2", type: D, isStandalone: true, selector: "d", ${kind === 'Component' ? 'template: "", isInline: true, ' : ''}host: ${host}, ngImport: i0 });
+  `
+
+  it.each([
+    ['Directive', '{ attributes: { "animate.leave": "out" } }', 'i0.ɵɵanimateLeave("out");'],
+    ['Component', '{ attributes: { "animate.leave": "out" } }', 'i0.ɵɵanimateLeave("out");'],
+    [
+      'Directive',
+      '{ attributes: { "animate.enter": "a" }, properties: { "animate.leave": "x", "@t": "y" } }',
+      'i0.ɵɵanimateLeave(function D_HostBindings_animateleave_cb() {',
+    ],
+    [
+      'Component',
+      '{ attributes: { "role": "r", "animate.enter": "a" }, listeners: { "click": "c()" }, properties: { "animate.leave": "x", "id": "i" }, classAttribute: "k" }',
+      'i0.ɵɵanimateEnter("a");',
+    ],
+  ])('links a %s with host %s like Angular', async (kind, host, expected) => {
+    const code = declaration(kind, host)
+    const angular = definition(await LINKERS.angular(code, '/lib/dir.mjs'))
+    const oxc = definition(await LINKERS.oxc(code, '/lib/dir.mjs'))
+    expect(oxc).toContain(expected)
+    expect(oxc).not.toContain('"animate.')
+    expect(oxc).toBe(angular)
+  })
+})
+
+describe('partial host declaration', () => {
+  const declare = (source: string) => {
+    const result = transformAngularFileSync(source, '/lib/dir.mts', { compilationMode: 'partial' })
+    expect(result.errors).toEqual([])
+    // The class metadata call that follows repeats the decorators as written.
+    const start = result.code.indexOf('ɵɵngDeclareDirective(')
+    return result.code.slice(start, result.code.indexOf('ngImport', start)).replace(/\s+/g, '')
+  }
+
+  it('quotes every host key, like ngtsc (#686)', () => {
+    const code = declare(`
+      import { Directive } from '@angular/core';
+      @Directive({ selector: '[d]', host: { '(click)': 'a()', '[disabled]': 'b', 'role': 'x' } })
+      export class D {}
+    `)
+    expect(code).toContain(
+      'host:{attributes:{"role":"x"},listeners:{"click":"a()"},properties:{"disabled":"b"}}',
+    )
+  })
+
+  it('writes @HostBinding values as ngtsc does (#690)', () => {
+    const code = declare(`
+      import { Directive, HostBinding } from '@angular/core';
+      @Directive({ selector: '[d]' })
+      export class D {
+        @HostBinding('id') 'my-prop' = 1;
+        @HostBinding('title') m = 2;
+      }
+    `)
+    expect(code).toContain(`properties:{"id":"this['my-prop']","title":"this.m"}`)
   })
 })

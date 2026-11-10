@@ -4389,9 +4389,15 @@ fn ingest_host_dom_property<'a>(
 
     // Determine binding kind, handling special prefixes
     let (binding_kind, name) = if property.name.starts_with("attr.") {
-        // Handle `attr.` prefix
+        // Handle `attr.` prefix. An animation kind still wins over the strip
+        // (`[@attr.foo]` stays a trigger), as in Angular's `ingestHostBinding` (ingest.ts).
         let stripped = &property.name[5..];
-        (BindingKind::Attribute, Ident::from(allocator.alloc_str(stripped)))
+        let kind = match property.binding_type {
+            BindingType::LegacyAnimation => BindingKind::LegacyAnimation,
+            BindingType::Animation => BindingKind::Animation,
+            _ => BindingKind::Attribute,
+        };
+        (kind, Ident::from(allocator.alloc_str(stripped)))
     } else {
         let kind = match property.binding_type {
             BindingType::Property => BindingKind::Property,
@@ -4399,6 +4405,13 @@ fn ingest_host_dom_property<'a>(
             BindingType::Class => BindingKind::ClassName,
             BindingType::Style => BindingKind::StyleProperty,
             BindingType::TwoWay => BindingKind::TwoWayProperty,
+            // Before v20.2 Angular has no `animate.*` bindings: ngtsc binds
+            // the name as a DOM property.
+            BindingType::Animation
+                if job.angular_version.is_some_and(|v| !v.supports_animate_instructions()) =>
+            {
+                BindingKind::Property
+            }
             BindingType::Animation => BindingKind::Animation,
             BindingType::LegacyAnimation => BindingKind::LegacyAnimation,
         };

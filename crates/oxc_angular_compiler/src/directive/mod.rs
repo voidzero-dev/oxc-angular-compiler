@@ -21,11 +21,11 @@ mod metadata;
 mod property_decorators;
 mod query;
 
-pub(crate) use compiler::create_host_directives_feature_arg;
 pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
+pub(crate) use compiler::{create_host_directives_feature_arg, parse_host_property_name};
 pub(crate) use decorator::evaluate_host_directives;
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{
@@ -46,7 +46,9 @@ pub(crate) use dts_type::{quote as ts_string_literal, quote_literal as quote_str
 pub use evaluator::input_transform_types;
 #[cfg(feature = "cross_file_elision")]
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
-pub(crate) use metadata::{MemberHostBindings, merge_host_bindings, strip_host_key};
+pub(crate) use metadata::{
+    MemberHostBindings, has_animate_leave_host_binding, merge_host_bindings, strip_host_key,
+};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,

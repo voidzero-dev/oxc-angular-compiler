@@ -46,8 +46,9 @@ pub struct DtsDeclaration {
     pub members: String,
     /// Module specifier for every namespace alias the members reference
     /// (alias → specifier: `i0` → `"@angular/core"` for `i0.ɵɵCmp` and
-    /// `i0.Signal`, `i1` → `"./dep"` for `typeof i1.SomeDirective`
-    /// host-directive references). Consumers must emit
+    /// `i0.Signal`, `i1` → `"./dep"` for `typeof i1.SomeDirective` in
+    /// host directives and NgModule lists). The `.d.ts` numbers its own
+    /// aliases, apart from the JS. Consumers must emit
     /// `import * as <alias> from "<specifier>"` for each — or rewrite the
     /// heads to their own canonical aliases — matching what upstream's
     /// `IvyDeclarationDtsTransform` `ImportManager` produces.
@@ -73,6 +74,7 @@ pub fn generate_component_dts(
     has_injectable: bool,
     ng_content_selectors: &[String],
     accept_types: &HashMap<String, String>,
+    host_directive_types: &[String],
 ) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
     let type_with_params = type_with_parameters(class_name, type_argument_count);
@@ -144,7 +146,10 @@ pub fn generate_component_dts(
     let host_directives = if metadata.host_directives.is_empty() {
         "never".to_string()
     } else {
-        generate_host_directives_type_from_component(&metadata.host_directives)
+        generate_host_directives_type_from_component(
+            &metadata.host_directives,
+            host_directive_types,
+        )
     };
 
     let mut type_params = vec![
@@ -201,6 +206,7 @@ pub fn generate_directive_dts(
     metadata: &R3DirectiveMetadata,
     has_injectable: bool,
     accept_types: &HashMap<String, String>,
+    host_directive_types: &[String],
 ) -> DtsDeclaration {
     let class_name = metadata.name.as_str();
     let type_with_params = type_with_parameters(class_name, metadata.type_argument_count);
@@ -260,7 +266,10 @@ pub fn generate_directive_dts(
     let host_directives = if metadata.host_directives.is_empty() {
         "never".to_string()
     } else {
-        generate_host_directives_type_from_directive(&metadata.host_directives)
+        generate_host_directives_type_from_directive(
+            &metadata.host_directives,
+            host_directive_types,
+        )
     };
 
     let mut type_params = vec![
@@ -364,11 +373,15 @@ pub fn generate_pipe_dts(
 /// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
 /// - `static ɵmod: {core_namespace}.ɵɵNgModuleDeclaration<T, Declarations, Imports, Exports>;`
 /// - `static ɵinj: {core_namespace}.ɵɵInjectorDeclaration<T>;`
+///
+/// `lists` holds the type reference of each class in `declarations`,
+/// `imports` and `exports` (`Local`, `i1.Dep`).
 pub fn generate_ng_module_dts(
     core_namespace: &str,
     metadata: &NgModuleMetadata,
     type_argument_count: u32,
     has_injectable: bool,
+    lists: [&[String]; 3],
 ) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
     let type_with_params = type_with_parameters(class_name, type_argument_count);
@@ -380,48 +393,9 @@ pub fn generate_ng_module_dts(
         "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
     );
 
-    // ɵmod declaration - uses typeof references for declarations/imports/exports
-    let declarations_type = if metadata.declarations.is_empty() {
-        "never".to_string()
-    } else {
-        format!(
-            "[{}]",
-            metadata
-                .declarations
-                .iter()
-                .map(|d| format!("typeof {}", d.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-
-    let imports_type = if metadata.imports.is_empty() {
-        "never".to_string()
-    } else {
-        format!(
-            "[{}]",
-            metadata
-                .imports
-                .iter()
-                .map(|i| format!("typeof {}", i.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-
-    let exports_type = if metadata.exports.is_empty() {
-        "never".to_string()
-    } else {
-        format!(
-            "[{}]",
-            metadata
-                .exports
-                .iter()
-                .map(|e| format!("typeof {}", e.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
+    // ɵmod declaration: `typeof` of each class, like `tupleTypeOf` in
+    // compiler/src/render3/r3_module_compiler.ts.
+    let [declarations_type, imports_type, exports_type] = lists.map(tuple_type_of);
 
     let mod_decl = format!(
         "static ɵmod: {core_namespace}.ɵɵNgModuleDeclaration<{type_with_params}, {declarations_type}, {imports_type}, {exports_type}>;"
@@ -517,6 +491,15 @@ pub fn generate_service_dts(
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/// `[typeof A, typeof i1.B]` for type references, `never` when empty.
+fn tuple_type_of(refs: &[String]) -> String {
+    if refs.is_empty() {
+        return "never".to_string();
+    }
+    let types: Vec<String> = refs.iter().map(|r| format!("typeof {r}")).collect();
+    format!("[{}]", types.join(", "))
+}
 
 /// Generate the type parameter `T` with any generic params filled as `any`.
 ///
@@ -711,13 +694,18 @@ fn generate_output_map_type(outputs: &[(Ident, Ident)]) -> String {
 }
 
 /// Generate the host directives type from component host directives.
+/// `types` holds the type reference of each directive; the local name is
+/// used for a missing one.
 fn generate_host_directives_type_from_component(
     host_directives: &[HostDirectiveMetadata],
+    types: &[String],
 ) -> String {
     let entries: Vec<String> = host_directives
         .iter()
-        .map(|hd| {
-            let directive = format!("typeof {}", hd.directive.as_str());
+        .enumerate()
+        .map(|(i, hd)| {
+            let directive_name = types.get(i).map_or(hd.directive.as_str(), String::as_str);
+            let directive = format!("typeof {directive_name}");
             let inputs = if hd.inputs.is_empty() {
                 "{}".to_string()
             } else {
@@ -758,14 +746,20 @@ fn generate_host_directives_type_from_component(
 }
 
 /// Generate the host directives type from directive host directives.
+/// `types` holds the type reference of each directive; a missing one is
+/// read from its expression.
 fn generate_host_directives_type_from_directive(
     host_directives: &[crate::directive::R3HostDirectiveMetadata],
+    types: &[String],
 ) -> String {
     let entries: Vec<String> = host_directives
         .iter()
-        .map(|hd| {
-            // Extract the directive name from the OutputExpression
-            let directive_name = extract_directive_name_from_expr(&hd.directive);
+        .enumerate()
+        .map(|(i, hd)| {
+            let directive_name = types
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| extract_directive_name_from_expr(&hd.directive));
             let directive = format!("typeof {directive_name}");
             let inputs = if hd.inputs.is_empty() {
                 "{}".to_string()
@@ -812,7 +806,9 @@ fn generate_host_directives_type_from_directive(
 /// - `ReadVar`: simple variable name (e.g. `SomeDirective`)
 /// - `ReadProp`: namespace-qualified reference (e.g. `i1.SomeDirective`)
 /// - `External`: external module reference, using the export name
-fn extract_directive_name_from_expr(expr: &crate::output::ast::OutputExpression) -> String {
+pub(crate) fn extract_directive_name_from_expr(
+    expr: &crate::output::ast::OutputExpression,
+) -> String {
     match expr {
         crate::output::ast::OutputExpression::ReadVar(read_var) => {
             read_var.name.as_str().to_string()

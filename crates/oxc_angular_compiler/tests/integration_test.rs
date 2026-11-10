@@ -3621,6 +3621,416 @@ export class SlideDirective {
     );
 }
 
+/// Compiles `source` and returns the code with whitespace removed.
+fn compile_compact(source: &str, options: Option<&ComponentTransformOptions>) -> String {
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "d.ts", source, options, None);
+    assert!(!result.has_errors(), "{:?}", result.diagnostics);
+    result.code.split_whitespace().collect()
+}
+
+/// Asserts that each part is in `code`, in this order.
+fn assert_in_order(code: &str, parts: &[&str]) {
+    let mut from = 0;
+    for part in parts {
+        let Some(i) = code[from..].find(part) else {
+            panic!("missing or out of order: {part}\nGot:\n{code}");
+        };
+        from += i + part.len();
+    }
+}
+
+/// #688: a host `[@trigger]` is a DOM property, sorted like ngtsc's `UPDATE_HOST_ORDERING`.
+#[test]
+fn test_host_legacy_trigger_ordered_with_dom_properties() {
+    let code = compile_compact(
+        r"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'c',
+    template: '',
+    host: {
+        '[id]': 'x',
+        '[attr.aria-label]': 'y',
+        '[style.height.px]': 'h',
+        '[@fade]': 's',
+        '[class.active]': 'a',
+    },
+})
+export class C { x: any; y: any; h: any; s: any; a: any; }
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[
+            r#"ɵɵdomProperty("id",ctx.x)"#,
+            r#"ɵɵsyntheticHostProperty("@fade",ctx.s)"#,
+            r#"ɵɵattribute("aria-label",ctx.y)"#,
+            r#"ɵɵstyleProp("height",ctx.h,"px")"#,
+            r#"ɵɵclassProp("active",ctx.a)"#,
+        ],
+    );
+    assert!(code.contains("hostVars:7"), "{code}");
+}
+
+/// #688: adjacent triggers chain and sort first, like ngtsc.
+#[test]
+fn test_host_legacy_triggers_chain() {
+    let code = compile_compact(
+        r"
+import { Directive } from '@angular/core';
+@Directive({
+    selector: 'd',
+    host: { '[class.c]': 'x', '[@a]': 'x', '[style.width]': 'y', '[@b]': 'y', '[title]': 'z' },
+})
+export class D { x: any; y: any; z: any; }
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[
+            r#"ɵɵsyntheticHostProperty("@a",ctx.x)("@b",ctx.y)"#,
+            r#"ɵɵdomProperty("title",ctx.z)"#,
+            r#"ɵɵstyleProp("width",ctx.y)"#,
+            r#"ɵɵclassProp("c",ctx.x)"#,
+        ],
+    );
+}
+
+/// #688: `@HostBinding('@grow')` sorts like the host map form and keeps one `@`.
+#[test]
+fn test_host_binding_decorator_legacy_trigger_order() {
+    let code = compile_compact(
+        r"
+import { Directive, HostBinding } from '@angular/core';
+@Directive({ selector: 'd' })
+export class D {
+    @HostBinding('class.on') on: any;
+    @HostBinding('@grow') g: any;
+    @HostBinding('title') t: any;
+}
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[
+            r#"ɵɵsyntheticHostProperty("@grow",ctx.g)"#,
+            r#"ɵɵdomProperty("title",ctx.t)"#,
+            r#"ɵɵclassProp("on",ctx.on)"#,
+        ],
+    );
+    assert!(!code.contains("@@"), "{code}");
+}
+
+/// #688: `[@attr.foo]` stays a trigger named `@foo` (Angular ingest.ts strips `attr.`
+/// but keeps the animation kind).
+#[test]
+fn test_host_legacy_trigger_with_attr_prefix() {
+    let code = compile_compact(
+        r"
+import { Directive } from '@angular/core';
+@Directive({ selector: 'd', host: { '[@attr.foo]': 'a', '[title]': 't' } })
+export class D { a: any; t: any; }
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[r#"ɵɵsyntheticHostProperty("@foo",ctx.a)"#, r#"ɵɵdomProperty("title",ctx.t)"#],
+    );
+    assert!(!code.contains("ɵɵattribute"), "{code}");
+}
+
+/// #689: `[animate.enter]` / `[animate.leave]` on a host emit a callback in the
+/// create block and use no host vars, as in ngtsc.
+#[test]
+fn test_host_animate_property_binding() {
+    let code = compile_compact(
+        r"
+import { Component } from '@angular/core';
+@Component({ selector: 'c', template: '', host: { '[animate.enter]': 'x' } })
+export class FadeComponent { x: any; }
+",
+        None,
+    );
+    assert!(
+        code.contains(
+            r#"if((rf&1)){i0.ɵɵanimateEnter(functionFadeComponent_HostBindings_animateenter_cb(){returnctx.x;});}"#
+        ),
+        "{code}"
+    );
+    assert!(!code.contains("domProperty"), "{code}");
+    assert!(!code.contains("hostVars"), "{code}");
+
+    let code = compile_compact(
+        r"
+import { Directive } from '@angular/core';
+@Directive({ selector: 'd', host: { '[animate.leave]': 'x' } })
+export class D { x: any; }
+",
+        None,
+    );
+    assert!(
+        code.contains(
+            r#"i0.ɵɵanimateLeave(functionD_HostBindings_animateleave_cb(){returnctx.x;})"#
+        ),
+        "{code}"
+    );
+    assert!(!code.contains("hostVars"), "{code}");
+}
+
+/// #689: any other `animate.*` name is a leave animation; only the first `.` is
+/// dropped from the callback name (JS `replace('.', '')`).
+#[test]
+fn test_host_animate_property_binding_other_names() {
+    let code = compile_compact(
+        r"
+import { Directive } from '@angular/core';
+@Directive({ selector: 'd', host: { '[animate.foo]': 'x', '[animate.a.b]': 'y' } })
+export class D { x: any; y: any; }
+",
+        None,
+    );
+    assert!(code.contains("ɵɵanimateLeave(functionD_HostBindings_animatefoo_cb()"), "{code}");
+    assert!(code.contains("(functionD_HostBindings_animatea_b_cb()"), "{code}");
+}
+
+/// #689: `@HostBinding('animate.leave')` chains with a static `animate.leave` attribute.
+#[test]
+fn test_host_binding_decorator_animate_leave() {
+    let code = compile_compact(
+        r"
+import { Directive, HostBinding } from '@angular/core';
+@Directive({ selector: 'd', host: { 'animate.leave': 'out' } })
+export class D { @HostBinding('animate.leave') get y(): any { return 1; } }
+",
+        None,
+    );
+    assert!(
+        code.contains(
+            r#"i0.ɵɵanimateLeave(functionD_HostBindings_animateleave_cb(){returnctx.y;})("out");"#
+        ),
+        "{code}"
+    );
+}
+
+/// #689: Angular before 20.2 has no `ɵɵanimateEnter` / `ɵɵanimateLeave`, so a
+/// host `[animate.*]` stays a DOM property, as ngtsc 20.1.8 / 19.2.15 emit it.
+#[test]
+fn test_host_animate_property_binding_before_20_2() {
+    let sources = [
+        r"
+import { Component, HostBinding } from '@angular/core';
+@Component({ selector: 'd', template: '', host: { '[animate.enter]': 'x' } })
+export class D { @HostBinding('animate.leave') y = 'o'; }
+",
+        r"
+import { Directive, HostBinding } from '@angular/core';
+@Directive({ selector: 'd', host: { '[animate.enter]': 'x' } })
+export class D { @HostBinding('animate.leave') y = 'o'; }
+",
+    ];
+    let cases = [
+        (AngularVersion::new(20, 1, 8), "ɵɵdomProperty"),
+        (AngularVersion::new(19, 2, 15), "ɵɵhostProperty"),
+    ];
+    for source in sources {
+        for (version, instruction) in cases {
+            let options = ComponentTransformOptions {
+                angular_version: Some(version),
+                ..ComponentTransformOptions::default()
+            };
+            let code = compile_compact(source, Some(&options));
+            assert!(code.contains("hostVars:2,"), "{code}");
+            assert!(
+                code.contains(&format!(
+                    r#"if((rf&2)){{i0.{instruction}("animate.enter",ctx.x)("animate.leave",ctx.y);}}"#
+                )),
+                "{code}"
+            );
+            assert!(!code.contains("ɵɵanimate"), "{code}");
+        }
+
+        let options = ComponentTransformOptions {
+            angular_version: Some(AngularVersion::new(20, 2, 0)),
+            ..ComponentTransformOptions::default()
+        };
+        let code = compile_compact(source, Some(&options));
+        assert!(code.contains("ɵɵanimateEnter(functionD_HostBindings_animateenter_cb()"), "{code}");
+        assert!(!code.contains("hostVars"), "{code}");
+    }
+}
+
+/// #689: Angular 20.2.0 to 20.3.0 needs `ɵɵAnimationsFeature()` for a host
+/// `animate.leave` (attribute, property or listener), as ngtsc adds it; and
+/// before 20.2 a static `animate.*` host attribute stays in `hostAttrs`.
+#[test]
+fn test_host_animate_leave_feature_and_static_attribute() {
+    let hosts = [
+        "{ 'animate.leave': 'out' }",
+        "{ '[animate.leave]': 'x' }",
+        "{ '(animate.leave)': 'g($event)' }",
+    ];
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(22, 2, 3)), false),
+        (None, false),
+    ];
+    for host in hosts {
+        for decorator in ["Component({ selector: 'd', template: '',", "Directive({ selector: 'd',"]
+        {
+            let kind = decorator.split('(').next().unwrap();
+            let source = format!(
+                "import {{ {kind} }} from '@angular/core';\n@{decorator} host: {host} }})\nexport class D {{ x = 1; g(e: unknown) {{}} }}\n"
+            );
+            for (version, feature) in cases {
+                let options = ComponentTransformOptions {
+                    angular_version: version,
+                    ..ComponentTransformOptions::default()
+                };
+                let code = compile_compact(&source, Some(&options));
+                assert_eq!(
+                    code.contains("features:[i0.ɵɵAnimationsFeature()]"),
+                    feature,
+                    "{version:?} {code}"
+                );
+            }
+        }
+    }
+
+    for decorator in ["Component({ selector: 'd', template: '',", "Directive({ selector: 'd',"] {
+        let kind = decorator.split('(').next().unwrap();
+        let source = format!(
+            "import {{ {kind} }} from '@angular/core';\n@{decorator} host: {{ 'animate.leave': 'out' }} }})\nexport class D {{}}\n"
+        );
+        for version in [AngularVersion::new(20, 1, 8), AngularVersion::new(19, 2, 15)] {
+            let options = ComponentTransformOptions {
+                angular_version: Some(version),
+                ..ComponentTransformOptions::default()
+            };
+            let code = compile_compact(&source, Some(&options));
+            assert!(code.contains(r#"hostAttrs:["animate.leave","out"]"#), "{code}");
+            assert!(!code.contains("ɵɵanimate"), "{code}");
+        }
+    }
+}
+
+/// #689: a callback body is not a binding slot, so literals and arrow functions
+/// stay inline (no pure function, no host vars).
+#[test]
+fn test_host_animate_property_binding_inline_values() {
+    let code = compile_compact(
+        r#"
+import { Directive } from '@angular/core';
+@Directive({ selector: 'd', host: { '[animate.enter]': "['a', y]", '[animate.leave]': '(() => x)()' } })
+export class D { x: any; y: any; }
+"#,
+        None,
+    );
+    assert!(code.contains(r#"return["a",ctx.y];"#), "{code}");
+    assert!(code.contains("return(()=>ctx.x)();"), "{code}");
+    assert!(!code.contains("ɵɵpureFunction"), "{code}");
+    assert!(!code.contains("ɵɵarrowFunction"), "{code}");
+    assert!(!code.contains("hostVars"), "{code}");
+}
+
+/// #689: host animate ops keep source order with `[attr.animate.*]` strings.
+#[test]
+fn test_host_animate_bindings_keep_source_order() {
+    let code = compile_compact(
+        r"
+import { Directive } from '@angular/core';
+@Directive({
+    selector: 'd',
+    host: { '[animate.leave]': 'y', '[animate.enter]': 'x', '[attr.animate.leave]': 'z' },
+})
+export class D { x: any; y: any; z: any; }
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[
+            "ɵɵanimateLeave(functionD_HostBindings_animateleave_cb(){returnctx.y;})",
+            "ɵɵanimateEnter(functionD_HostBindings_animateenter_cb(){returnctx.x;})",
+            "ɵɵanimateLeave(ctx.z)",
+        ],
+    );
+}
+
+/// #688 + #689: the mixed golden from ngtsc 22.2.3.
+#[test]
+fn test_host_animations_mixed_golden() {
+    let code = compile_compact(
+        r"
+import { Directive, HostBinding } from '@angular/core';
+@Directive({
+    selector: 'd',
+    host: {
+        '[attr.animate.leave]': 'x',
+        '[animate.enter]': 'y',
+        '(@trig.done)': 'f()',
+        '(click)': 'f()',
+        '[@trig]': 'x',
+        '[id]': 'x',
+        '[style.width.px]': 'x',
+    },
+})
+export class D {
+    x: any; y: any; f() {}
+    @HostBinding('animate.leave') zm: any;
+}
+",
+        None,
+    );
+    assert_in_order(
+        &code,
+        &[
+            "if((rf&1)){",
+            r#"ɵɵsyntheticHostListener("@trig.done",functionD_animation_trig_done_HostBindingHandler()"#,
+            r#"ɵɵlistener("click",functionD_click_HostBindingHandler()"#,
+            "ɵɵanimateLeave(ctx.x);",
+            "ɵɵanimateEnter(functionD_HostBindings_animateenter_cb(){returnctx.y;});",
+            "ɵɵanimateLeave(functionD_HostBindings_animateleave_cb(){returnctx.zm;});",
+            "if((rf&2)){",
+            r#"ɵɵsyntheticHostProperty("@trig",ctx.x);"#,
+            r#"ɵɵdomProperty("id",ctx.x);"#,
+            r#"ɵɵstyleProp("width",ctx.x,"px");"#,
+        ],
+    );
+    assert!(code.contains("hostVars:4"), "{code}");
+    assert!(!code.contains("@@"), "{code}");
+}
+
+/// #689: temporaries in an `animate.*` callback are declared inside it, for the
+/// host and the template (Angular temporary_variables.ts recurses into `Animation`).
+#[test]
+fn test_animate_callback_declares_temporaries() {
+    let options =
+        ComponentTransformOptions { legacy_optional_chaining: Some(true), ..Default::default() };
+    let code = compile_compact(
+        r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'c',
+    template: '<div [animate.enter]="f()?.b"></div>',
+    host: { '[animate.leave]': 'f()?.b' },
+})
+export class C { f(): any { return null; } }
+"#,
+        Some(&options),
+    );
+    let body = "{lettmp_0_0;return(((tmp_0_0=ctx.f())==null)?null:tmp_0_0.b);}";
+    assert!(code.contains(&format!("functionC_HostBindings_animateleave_cb(){body}")), "{code}");
+    assert!(code.contains(&format!("functionC_Template_animateenter_cb(){body}")), "{code}");
+    assert!(!code.contains("_tmp"), "{code}");
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where
@@ -11056,10 +11466,18 @@ export class MyModule {}
         "Should reference MyComponent with typeof. Got:\n{}",
         decl.members
     );
+    // An imported class goes through a namespace import of the `.d.ts`,
+    // like ngtsc's `toR3Reference` (#692).
     assert!(
-        decl.members.contains("typeof CommonModule"),
-        "Should reference CommonModule with typeof. Got:\n{}",
+        decl.members.contains("[typeof i1.CommonModule]"),
+        "Should reference CommonModule through its namespace. Got:\n{}",
         decl.members
+    );
+    assert_eq!(
+        decl.namespace_imports.get("i1").map(String::as_str),
+        Some("@angular/common"),
+        "{:?}",
+        decl.namespace_imports
     );
 
     // Should have ɵinj
