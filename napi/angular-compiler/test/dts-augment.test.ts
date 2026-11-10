@@ -190,7 +190,12 @@ function project(name: string): string {
 }
 
 function tsc(dir: string, ...args: string[]): void {
-  execFileSync(process.execPath, [tscBin, ...args], { cwd: dir, stdio: 'pipe' })
+  try {
+    execFileSync(process.execPath, [tscBin, ...args], { cwd: dir, stdio: 'pipe', encoding: 'utf8' })
+  } catch (error) {
+    const { stdout = '', stderr = '' } = error as { stdout?: string; stderr?: string }
+    throw new Error(`tsc ${args.join(' ')} failed in ${dir}:\n${stdout}${stderr}`)
+  }
 }
 
 function read(file: string): string {
@@ -218,7 +223,9 @@ function mappings(file: string): string {
 }
 
 beforeAll(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'oxc-angular-dts-augment-')))
+  // `native` also expands a Windows short name (`C:\Users\RUNNER~1`), so
+  // tsc sees one spelling of every path.
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'oxc-angular-dts-augment-')))
   // `typescript` and `@angular/core` for the projects, as a library has them.
   symlinkSync(join(packageDir, 'node_modules'), join(root, 'node_modules'), 'junction')
 })
