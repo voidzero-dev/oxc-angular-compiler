@@ -4875,11 +4875,11 @@ pub fn transform_angular_file(
                         );
                     }
 
-                    // Read the lists like ngtsc: in partial mode the
-                    // declaration lists what they give, and in both modes
-                    // they are wrapped when one names a class declared
-                    // later. A class in a function may see local bindings:
-                    // it stays as before.
+                    // Read the lists like ngtsc: the partial declaration
+                    // and the full-mode scope list what they give, and in
+                    // both modes they are wrapped when one names a class
+                    // declared later. A class in a function may see local
+                    // bindings: it stays as before.
                     let module_lists = if site.nested {
                         None
                     } else {
@@ -4896,8 +4896,8 @@ pub fn transform_angular_file(
                                 .as_ref()
                                 .filter(|_| options.resolve_imported_values)
                                 .map(|analyzer| (analyzer, path, source)),
-                            matches!(options.compilation_mode, crate::CompilationMode::Partial)
-                                .then_some(&mut file_namespace_registry),
+                            &mut file_namespace_registry,
+                            matches!(options.compilation_mode, crate::CompilationMode::Partial),
                         )
                     };
 
@@ -5737,12 +5737,14 @@ fn scope_dependencies<'a>(
 
 /// Read the `declarations`, `imports` and `exports` of the NgModule
 /// `class` like ngtsc (see `ng_module::module_with_providers`), and set
-/// whether its lists are wrapped in `() => [...]`. With a `registry`
-/// (partial mode), the declaration lists what they give. With cross-file
+/// whether its lists are wrapped in `() => [...]`. In `partial` mode, the
+/// declaration lists what they give. In full mode, so does
+/// `ɵɵsetNgModuleScope`, for each list whose entries were all read; any
+/// other list stays as written (the runtime flattens it). With cross-file
 /// analysis, a name of another file is read too, and a class found there
-/// is named through a namespace import, like `ɵɵsetComponentScope` names
-/// classes. Anything unread keeps its old output. Gives the lists read,
-/// for the `.d.ts`.
+/// is named through a namespace import of `registry`, like
+/// `ɵɵsetComponentScope` names classes. Anything unread keeps its old
+/// output. Gives the lists read, for the `.d.ts`.
 #[expect(clippy::too_many_arguments)]
 fn resolve_ng_module_lists<'a>(
     allocator: &'a Allocator,
@@ -5753,7 +5755,8 @@ fn resolve_ng_module_lists<'a>(
     import_map: &ImportMap<'_>,
     import_elision: &ImportElisionAnalyzer<'_>,
     #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
-    registry: Option<&mut NamespaceRegistry<'a>>,
+    registry: &mut NamespaceRegistry<'a>,
+    partial: bool,
 ) -> Option<crate::ng_module::module_with_providers::ModuleLists> {
     #[cfg(feature = "cross_file_elision")]
     use crate::ng_module::module_with_providers::{Answer, Question, ResolveImported};
@@ -5769,6 +5772,12 @@ fn resolve_ng_module_lists<'a>(
     let binding = |name: &str| match import_map.get(&Ident::from(name)) {
         Some(info) if info.is_type_only => Binding::Other,
         Some(info) if !info.is_named_import => Binding::Namespace,
+        Some(info)
+            if info.source_module == "@angular/core"
+                && info.imported_name.as_ref().is_some_and(|name| name == "forwardRef") =>
+        {
+            Binding::ForwardRef
+        }
         Some(_) => Binding::Import { kept: !import_elision.should_elide(name) },
         None => Binding::Other,
     };
@@ -5798,14 +5807,34 @@ fn resolve_ng_module_lists<'a>(
         resolve_imported,
     )?;
     metadata.contains_forward_decls = lists.wrap;
-    let Some(registry) = registry else { return Some(lists) };
-    // In the order the declaration lists them, so namespaces are numbered
-    // like ngtsc's.
+    // In the order ngtsc lists them (declarations, imports, exports), so
+    // namespaces are numbered like ngtsc's. In full mode this comes after
+    // the factory and before ɵinj, as in ngtsc.
     let mut namespace_of =
         |specifier: &str| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
-    metadata.partial_declarations = lists.emit(allocator, ListKey::Declarations, &mut namespace_of);
-    metadata.partial_imports = lists.emit(allocator, ListKey::Imports, &mut namespace_of);
-    metadata.partial_exports = lists.emit(allocator, ListKey::Exports, &mut namespace_of);
+    let mut emit = |key: ListKey| {
+        // A full-mode list with an unread entry stays as written, and takes
+        // no namespace.
+        if partial || lists.is_complete(key) {
+            lists.emit(allocator, key, &mut namespace_of)
+        } else {
+            None
+        }
+    };
+    metadata.partial_declarations = emit(ListKey::Declarations);
+    metadata.partial_imports = emit(ListKey::Imports);
+    metadata.partial_exports = emit(ListKey::Exports);
+    if !partial {
+        if metadata.partial_declarations.is_some() {
+            metadata.declarations_scope_expr = None;
+        }
+        if metadata.partial_imports.is_some() {
+            metadata.imports_scope_expr = None;
+        }
+        if metadata.partial_exports.is_some() {
+            metadata.exports_scope_expr = None;
+        }
+    }
     Some(lists)
 }
 

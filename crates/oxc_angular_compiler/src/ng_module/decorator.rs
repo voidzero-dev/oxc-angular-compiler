@@ -50,18 +50,20 @@ pub struct NgModuleMetadata<'a> {
     /// The `declarations`, `imports` and `exports` expressions as written,
     /// kept only for a list that is not a plain array of class references
     /// (a const array, a spread, a `forRoot()` call...), whose names above
-    /// are incomplete. `ɵɵsetNgModuleScope` emits these instead.
+    /// are incomplete. `ɵɵsetNgModuleScope` emits these instead, unless the
+    /// transform read every entry (it clears them then).
     pub declarations_scope_expr: Option<OutputExpression<'a>>,
     /// See [`Self::declarations_scope_expr`].
     pub imports_scope_expr: Option<OutputExpression<'a>>,
     /// See [`Self::declarations_scope_expr`].
     pub exports_scope_expr: Option<OutputExpression<'a>>,
 
-    /// The partial `ɵɵngDeclareNgModule` declarations, read like ngtsc
-    /// (lists flattened, each `ModuleWithProviders` as its NgModule), set
-    /// by the transform when it could read an entry (see
-    /// `module_with_providers`). `None` lists [`Self::declarations`]. Full
-    /// mode never reads it.
+    /// The lists read like ngtsc (flattened, each `ModuleWithProviders` as
+    /// its NgModule), set by the transform (see `module_with_providers`):
+    /// in partial mode when it could read an entry, in full mode when it
+    /// read them all. The partial `ɵɵngDeclareNgModule` and the full-mode
+    /// `ɵɵsetNgModuleScope` list them. `None` lists
+    /// [`Self::declarations`].
     pub partial_declarations: Option<Vec<'a, OutputExpression<'a>>>,
     /// See [`Self::partial_declarations`]; `None` lists [`Self::imports`].
     pub partial_imports: Option<Vec<'a, OutputExpression<'a>>>,

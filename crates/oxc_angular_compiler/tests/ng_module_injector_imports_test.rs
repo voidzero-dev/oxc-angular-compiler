@@ -1175,9 +1175,19 @@ export class AModule {}
             assert!(code.contains("import * as i1 from './dep';"), "{code}");
             assert!(code.contains("import * as i2 from 'fakelib';"), "{code}");
         }
-        // The JIT scope keeps the lists as written.
+        // Like ngtsc, the JIT scope lists the classes too, the package's
+        // tuple type read as a list: ngtsc full gives
+        // `ɵɵsetNgModuleScope(SpreadModule, { imports: [i1.Dir, i1.ProvModule] })`
+        // and `ɵɵsetNgModuleScope(LibListModule, { imports: [i2.LibDir, i2.LibModule] })`.
         let full: String = code[0].chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(full.contains("ɵɵsetNgModuleScope(SpreadModule,{imports:[...LIST]})"), "{full}");
+        assert!(
+            full.contains("ɵɵsetNgModuleScope(SpreadModule,{imports:[i1.Dir,i1.ProvModule]})"),
+            "{full}"
+        );
+        assert!(
+            full.contains("ɵɵsetNgModuleScope(LibListModule,{imports:[i2.LibDir,i2.LibModule]})"),
+            "{full}"
+        );
     }
 
     #[test]
