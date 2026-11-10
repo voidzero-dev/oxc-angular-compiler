@@ -825,6 +825,7 @@ pub fn compile_for_hmr_sync(
                     vars: output.vars,
                     consts_js: output.consts_js.as_deref(),
                     ng_content_selectors_js: output.ng_content_selectors_js.as_deref(),
+                    animations_feature: output.animations_feature,
                 }),
                 styles: encapsulated_styles.as_deref(),
                 declarations_js,

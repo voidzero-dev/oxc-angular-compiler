@@ -19400,3 +19400,305 @@ export class LaterDirective {}
         result.code
     );
 }
+
+// ============================================================================
+// #701: template `animate.*`: version gate, AnimationsFeature, order
+// ============================================================================
+
+/// A standalone component `T_{name}` with `template`, as the ngtsc reference
+/// build compiles it.
+fn animate_component(name: &str, template: &str) -> String {
+    format!(
+        "import {{ Component, NO_ERRORS_SCHEMA }} from '@angular/core';\n\
+         @Component({{ selector: 't-{name}', schemas: [NO_ERRORS_SCHEMA], template: {template:?} }})\n\
+         export class T_{name} {{ e = 'in'; c = 1; l = [1]; g(_: unknown) {{}} }}\n"
+    )
+}
+
+fn compile_for_version(source: &str, version: Option<AngularVersion>) -> String {
+    let options = ComponentTransformOptions {
+        angular_version: version,
+        ..ComponentTransformOptions::default()
+    };
+    compile_compact(source, Some(&options))
+}
+
+const ISSUE_701_TEMPLATE: &str =
+    r#"<p animate.leave="out" [animate.enter]="e" (animate.leave)="g($event)"></p>"#;
+
+/// #701: Angular before 20.2 has no `animate.*` bindings: a static `animate.*`
+/// is a plain attribute, `[animate.*]` a property and `(animate.*)` a plain
+/// listener. Expected strings are from ngtsc 20.1.8 and 19.2.15.
+#[test]
+fn test_template_animate_before_20_2() {
+    let source = animate_component("issue", ISSUE_701_TEMPLATE);
+
+    let code = compile_for_version(&source, Some(AngularVersion::new(20, 1, 8)));
+    assert!(
+        code.contains(r#"consts:[["animate.leave","out",3,"animate.leave","animate.enter"]]"#),
+        "{code}"
+    );
+    assert!(
+        code.contains(r#"i0.ɵɵdomElementStart(0,"p",0);i0.ɵɵdomListener("animate.leave",functionT_issue_Template_p_animate_leave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();"#),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵdomProperty("animate.enter",ctx.e);"#), "{code}");
+    assert!(!code.contains("ɵɵanimate"), "{code}");
+
+    let code = compile_for_version(&source, Some(AngularVersion::new(19, 2, 15)));
+    assert!(
+        code.contains(r#"consts:[["animate.leave","out",3,"animate.leave","animate.enter"]]"#),
+        "{code}"
+    );
+    assert!(
+        code.contains(r#"i0.ɵɵelementStart(0,"p",0);i0.ɵɵlistener("animate.leave",functionT_issue_Template_p_animate_leave_0_listener($event){returnctx.g($event);});i0.ɵɵelementEnd();"#),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵproperty("animate.enter",ctx.e);"#), "{code}");
+    assert!(!code.contains("ɵɵanimate"), "{code}");
+
+    // More shapes, from ngtsc 20.1.8.
+    let v20_1 = Some(AngularVersion::new(20, 1, 8));
+    let cases: [(&str, &str, &[&str]); 5] = [
+        (
+            "attrleave",
+            r#"<p [attr.animate.leave]="e"></p>"#,
+            &[r#"i0.ɵɵdomElement(0,"p");"#, r#"i0.ɵɵattribute("animate.leave",ctx.e);"#],
+        ),
+        (
+            "ifblock",
+            r#"@if (c) { <p animate.leave="out"></p> }"#,
+            &[
+                r#"consts:[["animate.leave","out"]]"#,
+                r#"i0.ɵɵconditionalCreate(0,T_ifblock_Conditional_0_Template,1,0,"p",0);"#,
+            ],
+        ),
+        (
+            "structural",
+            r#"<p *foo="c" animate.leave="out"></p>"#,
+            &[
+                r#"consts:[["animate.leave","out",4,"foo"],["animate.leave","out"]]"#,
+                r#"i0.ɵɵdomTemplate(0,T_structural_p_0_Template,1,0,"p",0);"#,
+            ],
+        ),
+        (
+            "container",
+            r#"<ng-container animate.leave="x"></ng-container>"#,
+            &[r#"consts:[["animate.leave","x"]]"#, "i0.ɵɵdomElementContainer(0,0);"],
+        ),
+        (
+            "twoway",
+            r#"<p [(animate.leave)]="e"></p>"#,
+            &[
+                r#"consts:[[3,"animate.leaveChange","animate.leave"]]"#,
+                r#"i0.ɵɵtwoWayListener("animate.leaveChange",functionT_twoway_Template_p_animate_leaveChange_0_listener($event){(i0.ɵɵtwoWayBindingSet(ctx.e,$event)||(ctx.e=$event));return$event;});"#,
+                r#"i0.ɵɵtwoWayProperty("animate.leave",ctx.e);"#,
+            ],
+        ),
+    ];
+    for (name, template, parts) in cases {
+        let code = compile_for_version(&animate_component(name, template), v20_1);
+        for part in parts {
+            assert!(code.contains(part), "{name}: missing {part}\n{code}");
+        }
+        assert!(!code.contains("ɵɵanimate"), "{name}: {code}");
+    }
+}
+
+/// #701: before 20.2 a host `(animate.*)` listener is a plain `ɵɵlistener`, and
+/// it chains with the other listeners. Expected strings are from ngtsc 20.1.8.
+#[test]
+fn test_host_animate_listener_before_20_2() {
+    let source = r"
+import { Directive } from '@angular/core';
+@Directive({ selector: '[d]', host: { '(animate.leave)': 'g($event)', '[attr.animate.enter]': 'e', '(click)': 'g(1)' } })
+export class D { e = 'in'; g(_: unknown) {} }
+";
+    for version in [AngularVersion::new(20, 1, 8), AngularVersion::new(19, 2, 15)] {
+        let code = compile_for_version(source, Some(version));
+        assert!(
+            code.contains(r#"i0.ɵɵlistener("animate.leave",functionD_animate_leave_HostBindingHandler($event){returnctx.g($event);})("click",functionD_click_HostBindingHandler(){returnctx.g(1);});"#),
+            "{version:?} {code}"
+        );
+        assert!(code.contains(r#"i0.ɵɵattribute("animate.enter",ctx.e);"#), "{code}");
+        assert!(!code.contains("ɵɵanimate"), "{version:?} {code}");
+    }
+
+    let code = compile_for_version(source, Some(AngularVersion::new(20, 2, 0)));
+    assert!(
+        code.contains(
+            "i0.ɵɵanimateLeaveListener(functionD_animateleave_HostBindingHandler($event){returnctx.g($event);});"
+        ),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵanimateEnter(ctx.e);"#), "{code}");
+
+    let component = r"
+import { Component } from '@angular/core';
+@Component({ selector: 'hc-hlis', template: '', host: { '(animate.enter)': 'g($event)' } })
+export class HC_hlis { g(_: unknown) {} }
+";
+    let code = compile_for_version(component, Some(AngularVersion::new(20, 1, 8)));
+    assert!(
+        code.contains(r#"hostBindings:functionHC_hlis_HostBindings(rf,ctx){if((rf&1)){i0.ɵɵlistener("animate.enter",functionHC_hlis_animate_enter_HostBindingHandler($event){returnctx.g($event);});}}"#),
+        "{code}"
+    );
+    assert!(!code.contains("ɵɵanimate"), "{code}");
+
+    let decorators = r"
+import { Directive, HostListener, HostBinding } from '@angular/core';
+@Directive({ selector: '[hl]' })
+export class HL { @HostListener('animate.leave', ['$event']) g(_: unknown) {} @HostListener('document:animate.enter') h() {} @HostBinding('attr.animate.enter') e = 'in'; }
+";
+    let code = compile_for_version(decorators, Some(AngularVersion::new(20, 1, 8)));
+    assert!(
+        code.contains(r#"i0.ɵɵlistener("animate.leave",functionHL_animate_leave_HostBindingHandler($event){returnctx.g($event);})("animate.enter",functionHL_animate_enter_HostBindingHandler(){returnctx.h();},i0.ɵɵresolveDocument);"#),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵattribute("animate.enter",ctx.e);"#), "{code}");
+    assert!(!code.contains("ɵɵanimate"), "{code}");
+}
+
+/// #701: Angular 20.2.0 to 20.3.0 adds `ɵɵAnimationsFeature()` when the
+/// template uses `animate.leave` on an element (`analyzeTemplateForAnimations`).
+#[test]
+fn test_template_animate_leave_feature() {
+    let with_feature = [
+        r#"<p animate.leave="out"></p>"#,
+        r#"<p [animate.leave]="e"></p>"#,
+        r#"<p (animate.leave)="g($event)"></p>"#,
+        r#"<p [attr.animate.leave]="e"></p>"#,
+        r#"<p [(animate.leave)]="e"></p>"#,
+        r#"<p [@animate.leave]="e"></p>"#,
+        r#"@if (c) { <p animate.leave="out"></p> }"#,
+        r#"@defer { <p animate.leave="x"></p> } @placeholder { <span></span> }"#,
+        r#"@for (i of l; track i) { <b></b> } @empty { <p [animate.leave]="e"></p> }"#,
+        r#"@switch (c) { @case (1) { <p (animate.leave)="g($event)"></p> } }"#,
+        r#"<ng-template><div [animate.leave]="e"></div></ng-template>"#,
+        r#"<p *foo="c" animate.leave="out"></p>"#,
+        r#"<ng-container animate.leave="x"></ng-container>"#,
+    ];
+    let cases = [
+        (Some(AngularVersion::new(20, 2, 0)), true),
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 1, 8)), false),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(22, 2, 4)), false),
+        (None, false),
+    ];
+    for template in with_feature {
+        let source = animate_component("f", template);
+        for (version, feature) in cases {
+            let code = compile_for_version(&source, version);
+            assert_eq!(
+                code.contains("features:[i0.ɵɵAnimationsFeature()]"),
+                feature,
+                "{template} {version:?}\n{code}"
+            );
+        }
+    }
+
+    // Angular checks elements only, and names `[class.animate.leave]` `animate`.
+    let without_feature = [
+        r#"<p animate.enter="a"></p>"#,
+        r#"<ng-template animate.leave="x"></ng-template>"#,
+        r#"<ng-template [animate.leave]="e" (animate.leave)="g($event)"></ng-template>"#,
+        r#"<p [class.animate.leave]="e"></p>"#,
+    ];
+    for template in without_feature {
+        let code = compile_for_version(
+            &animate_component("f", template),
+            Some(AngularVersion::new(20, 2, 0)),
+        );
+        assert!(!code.contains("AnimationsFeature"), "{template}\n{code}");
+    }
+
+    // The ngtsc 20.2.0 output of the issue's template.
+    let code = compile_for_version(
+        &animate_component("issue", ISSUE_701_TEMPLATE),
+        Some(AngularVersion::new(20, 2, 0)),
+    );
+    assert!(
+        code.contains(r#"ɵɵdefineComponent({type:T_issue,selectors:[["t-issue"]],features:[i0.ɵɵAnimationsFeature()],decls:1,vars:0,template:functionT_issue_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateEnter(functionT_issue_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave("out");i0.ɵɵanimateLeaveListener(functionT_issue_Template_p_animateleave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();}},encapsulation:2"#),
+        "{code}"
+    );
+
+    // A host and a template `animate.leave` give one feature.
+    let source = r#"
+import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
+@Component({ selector: 'c', schemas: [NO_ERRORS_SCHEMA], template: '<p animate.leave="y"></p>', host: { 'animate.leave': 'x' } })
+export class C {}
+"#;
+    let code = compile_for_version(source, Some(AngularVersion::new(20, 2, 0)));
+    assert_eq!(code.matches("ɵɵAnimationsFeature()").count(), 1, "{code}");
+}
+
+/// #701: each animate op goes right after its element in update-list order, so
+/// the last binding comes first, as ngtsc 22.2.4 (and 20.2.0) emit it.
+#[test]
+fn test_template_animate_order_matches_ngtsc() {
+    let cases = [
+        (
+            "issue",
+            ISSUE_701_TEMPLATE,
+            r#"i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateEnter(functionT_issue_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave("out");i0.ɵɵanimateLeaveListener(functionT_issue_Template_p_animateleave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();"#,
+        ),
+        (
+            "order2",
+            r#"<p animate.leave="a" animate.enter="b" [animate.enter]="e"></p>"#,
+            r#"i0.ɵɵanimateEnter(functionT_order2_Template_animateenter_cb(){returnctx.e;})("b");i0.ɵɵanimateLeave("a");"#,
+        ),
+        (
+            "order4",
+            r#"<p [attr.animate.leave]="e" [animate.enter]="e"></p>"#,
+            r#"i0.ɵɵanimateEnter(functionT_order4_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave(ctx.e);"#,
+        ),
+        (
+            "order5",
+            r#"<p animate.enter="a" [attr.animate.leave]="e" [animate.enter]="e"></p>"#,
+            r#"i0.ɵɵanimateEnter(functionT_order5_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave(ctx.e);i0.ɵɵanimateEnter("a");"#,
+        ),
+        (
+            "order6",
+            r#"<div [animate.enter]="e"><span animate.leave="x" [animate.leave]="e"></span></div>"#,
+            r#"i0.ɵɵdomElementStart(0,"div");i0.ɵɵanimateEnter(functionT_order6_Template_animateenter_cb(){returnctx.e;});i0.ɵɵdomElementStart(1,"span");i0.ɵɵanimateLeave(functionT_order6_Template_animateleave_cb(){returnctx.e;})("x");i0.ɵɵdomElementEnd()();"#,
+        ),
+    ];
+    for version in [None, Some(AngularVersion::new(22, 2, 4))] {
+        for (name, template, expected) in cases {
+            let code = compile_for_version(&animate_component(name, template), version);
+            assert!(code.contains(expected), "{name} {version:?}\n{code}");
+        }
+    }
+}
+
+/// #701: from 20.2 a two-way `[(animate.x)]` / `bindon-animate.x` is an
+/// animation binding with an animation listener, as ngtsc 22.2.4 / 20.2.0 emit.
+#[test]
+fn test_template_two_way_animate() {
+    let cases = [
+        (
+            "twoway",
+            r#"<p [(animate.leave)]="e"></p>"#,
+            r#"decls:1,vars:0,template:functionT_twoway_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateLeave(functionT_twoway_Template_animateleave_cb(){returnctx.e;});i0.ɵɵanimateLeaveListener(functionT_twoway_Template_p_animateleaveChange_0_listener(){returnctx.e;});i0.ɵɵdomElementEnd();}}"#,
+        ),
+        (
+            "bindon",
+            r#"<p bindon-animate.leave="e"></p>"#,
+            r#"decls:1,vars:0,template:functionT_bindon_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateLeave(functionT_bindon_Template_animateleave_cb(){returnctx.e;});i0.ɵɵanimateLeaveListener(functionT_bindon_Template_p_animateleaveChange_0_listener(){returnctx.e;});i0.ɵɵdomElementEnd();}}"#,
+        ),
+        (
+            "twowaymix",
+            r#"<p [(animate.enter)]="e" animate.leave="x" (click)="g(1)"></p>"#,
+            r#"decls:1,vars:0,consts:[[3,"click"]],template:functionT_twowaymix_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p",0);i0.ɵɵanimateEnter(functionT_twowaymix_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave("x");i0.ɵɵanimateLeaveListener(functionT_twowaymix_Template_p_animateenterChange_0_listener(){returnctx.e;});i0.ɵɵdomListener("click",functionT_twowaymix_Template_p_click_0_listener(){returnctx.g(1);});i0.ɵɵdomElementEnd();}}"#,
+        ),
+    ];
+    for version in [None, Some(AngularVersion::new(22, 2, 4)), Some(AngularVersion::new(20, 2, 0))]
+    {
+        for (name, template, expected) in cases {
+            let code = compile_for_version(&animate_component(name, template), version);
+            assert!(code.contains(expected), "{name} {version:?}\n{code}");
+            assert!(!code.contains("twoWay"), "{name} {version:?}\n{code}");
+        }
+    }
+}

@@ -26,6 +26,13 @@ pub struct HmrTemplateFields<'a> {
     /// The `ngContentSelectors` array as JavaScript code, if the template projects
     /// content.
     pub ng_content_selectors_js: Option<&'a str>,
+
+    /// Whether the new template needs `ɵɵAnimationsFeature()` (an `animate.leave`
+    /// on v20.2.0 to v20.3.0). ngtsc's update module runs `ɵɵdefineComponent`
+    /// again, which runs the feature and sets up the registry `ɵɵanimateLeave`
+    /// needs. The live definition is copied here instead, so the module runs
+    /// the feature itself.
+    pub animations_feature: bool,
 }
 
 /// Options for generating HMR update modules.
@@ -115,6 +122,7 @@ pub fn generate_hmr_update_module(options: &HmrUpdateModuleOptions<'_>) -> Strin
         // matches the template it was built for, so keep it and let
         // recreateMatchingLViews re-render rather than rebuilding it.
         options.template.is_some(),
+        options.template.is_some_and(|template| template.animations_feature),
     )
 }
 
@@ -169,13 +177,16 @@ pub fn generate_hmr_update_module_from_js(
         styles,
         declarations_js,
         !template_js.is_empty(),
+        false,
     )
 }
 
 /// Emits an update module that copies the live definition and overrides `fields`
 /// (name and JavaScript value) and, when known, `styles`. `clear_tview` writes
 /// `tView: null`, making the runtime build the view for the new template; it
-/// must only be set when `fields` replaces the template.
+/// must only be set when `fields` replaces the template. `animations_feature`
+/// runs `ɵɵAnimationsFeature()` on the new definition (see
+/// [`HmrTemplateFields::animations_feature`]).
 fn emit_update_module(
     component_id: &str,
     class_name: &str,
@@ -183,6 +194,7 @@ fn emit_update_module(
     styles: Option<&[String]>,
     declarations_js: Option<&str>,
     clear_tview: bool,
+    animations_feature: bool,
 ) -> String {
     let mut output = String::new();
 
@@ -241,6 +253,9 @@ fn emit_update_module(
         output.push_str("    tView: null,\n");
     }
     output.push_str("  };\n");
+    if animations_feature {
+        output.push_str(&format!("  i0.ɵɵAnimationsFeature()({class_name}.ɵcmp);\n"));
+    }
     output.push_str("}\n");
 
     output
@@ -256,6 +271,7 @@ mod tests {
         vars: 2,
         consts_js: None,
         ng_content_selectors_js: None,
+        animations_feature: false,
     };
 
     fn module(

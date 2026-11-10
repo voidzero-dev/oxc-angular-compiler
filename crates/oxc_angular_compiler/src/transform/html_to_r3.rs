@@ -338,6 +338,14 @@ impl<'a> HtmlToR3Transform<'a> {
         }))
     }
 
+    /// Whether `animate.*` names are animation bindings (v20.2.0+, or no version
+    /// given). Before v20.2 Angular had no such bindings: `[animate.x]`,
+    /// `(animate.x)` and a static `animate.x` are plain properties, events and
+    /// attributes.
+    fn supports_animate(&self) -> bool {
+        self.angular_version.is_none_or(|v| v.supports_animate_instructions())
+    }
+
     fn security_context(&self, element: &str, property: &str) -> SecurityContext {
         // Element bindings go through `calcPossibleSecurityContexts` upstream,
         // which promotes a bare element missing from the DOM schema to its
@@ -3482,11 +3490,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     }
                     BindingPrefix::BindOn => {
                         // Two-way binding creates both input and output
+                        let binding_type = self.two_way_binding_type(rest);
                         inputs.push(self.create_bound_attribute(
                             element_name,
                             rest,
                             attr,
-                            BindingType::TwoWay,
+                            binding_type,
                             None,
                             property_binding_key_span(rest, key_span),
                         ));
@@ -3528,11 +3537,12 @@ impl<'a> HtmlToR3Transform<'a> {
                 // delims.start, identifier)`)
                 let key_span = create_key_span(attr, BANANA_BOX_START, prop_name);
                 // Two-way binding creates both input and output
+                let binding_type = self.two_way_binding_type(prop_name);
                 inputs.push(self.create_bound_attribute(
                     element_name,
                     prop_name,
                     attr,
-                    BindingType::TwoWay,
+                    binding_type,
                     None,
                     property_binding_key_span(prop_name, key_span),
                 ));
@@ -3564,7 +3574,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         } else {
                             (BindingType::Style, stripped, None)
                         }
-                    } else if prop_name.starts_with("animate.") {
+                    } else if prop_name.starts_with("animate.") && self.supports_animate() {
                         // [animate.xxx] keeps the full name "animate.xxx"
                         (BindingType::Animation, prop_name, None)
                     } else if prop_name.starts_with('@') {
@@ -3811,7 +3821,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let handler = self.parse_event_expression(&attr.value, handler_span);
 
         // Check for animation events (animate.xxx)
-        let event_type = if name.starts_with("animate.") {
+        let event_type = if name.starts_with("animate.") && self.supports_animate() {
             ParsedEventType::Animation
         } else {
             ParsedEventType::Regular
@@ -3851,7 +3861,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let handler = self.parse_event_expression(&attr.value, handler_span);
         let name_atom = Ident::from(self.allocator.alloc_str(name));
         // `on-animate.enter` is an animation event, like `(animate.enter)`
-        let event_type = if name.starts_with("animate.") {
+        let event_type = if name.starts_with("animate.") && self.supports_animate() {
             ParsedEventType::Animation
         } else {
             ParsedEventType::Regular
@@ -3914,6 +3924,17 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
+    /// The input type of a two-way binding `[(prop)]` / `bindon-prop`. From v20.2
+    /// `[(animate.x)]` is an animation binding: Angular's `parsePropertyBinding`
+    /// checks the `animate.` prefix before it looks at two-way.
+    fn two_way_binding_type(&self, prop_name: &str) -> BindingType {
+        if prop_name.starts_with("animate.") && self.supports_animate() {
+            BindingType::Animation
+        } else {
+            BindingType::TwoWay
+        }
+    }
+
     /// Creates a bound event for two-way binding.
     /// The handler is just the target expression (e.g., `name`), not the full assignment.
     /// The `$event` is added separately in the ingest phase.
@@ -3925,6 +3946,23 @@ impl<'a> HtmlToR3Transform<'a> {
     ) -> R3BoundEvent<'a> {
         let handler_span = self.calculate_event_handler_span(attr);
         let name_atom = Ident::from(self.allocator.alloc_str(name));
+
+        // From v20.2 `animate.xChange` is an animation event, as Angular's
+        // `_parseRegularEvent` gives it that type over two-way. Its handler is
+        // the action itself (`return ctx.x`), with no `$event` assignment.
+        if name.starts_with("animate.") && self.supports_animate() {
+            let handler = self.parse_event_expression(&attr.value, handler_span);
+            return R3BoundEvent {
+                name: name_atom,
+                event_type: ParsedEventType::Animation,
+                handler,
+                target: None,
+                phase: None,
+                source_span: attr.span,
+                handler_span,
+                key_span,
+            };
+        }
 
         // For two-way binding, the handler is just the target expression (e.g., `name`)
         // NOT the full assignment `name = $event`.
@@ -4539,13 +4577,15 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Filters out animation attributes (those starting with "animate.").
     /// These should remain on the inner element, not be hoisted to the template.
+    /// Before v20.2 they are plain attributes and are hoisted like the others.
     fn filter_animation_attributes(
         &self,
         attributes: &Vec<'a, R3TextAttribute<'a>>,
     ) -> Vec<'a, R3TextAttribute<'a>> {
+        let animate = self.supports_animate();
         let mut result = Vec::new_in(&self.allocator);
         for attr in attributes {
-            if !attr.name.as_str().starts_with("animate.") {
+            if !(animate && attr.name.as_str().starts_with("animate.")) {
                 result.push(R3TextAttribute {
                     name: attr.name,
                     value: attr.value,
