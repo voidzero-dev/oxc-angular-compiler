@@ -73,9 +73,14 @@ fn needs_object_key_quoting(key: &str) -> bool {
     key.contains('.') || key.contains('-')
 }
 
-/// Quote a property key if it contains unsafe characters (dots or hyphens).
+/// Quote a property key if it contains unsafe characters (dots or hyphens),
+/// or isn't an identifier at all (`"some event"`).
 fn quote_key(key: &str) -> String {
-    if needs_object_key_quoting(key) { escape_string_for_linker(key) } else { key.to_string() }
+    if needs_object_key_quoting(key) || !oxc_syntax::identifier::is_identifier_name(key) {
+        escape_string_for_linker(key)
+    } else {
+        key.to_string()
+    }
 }
 
 /// Partial declaration function names to link.

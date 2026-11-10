@@ -1643,3 +1643,22 @@ export class L {{}}
         assert!(!linked.contains("hostDirectives"), "{linked}");
     }
 }
+
+/// A key that isn't an identifier stays quoted, so the linked code parses.
+#[test]
+fn test_link_keys_that_are_not_identifiers_stay_quoted() {
+    for (code, expected) in [
+        (
+            make_directive_source_with_outputs(r#""some event": "changed""#),
+            r#""some event": "changed""#,
+        ),
+        (make_directive_source(r#""some input": "someInput""#), r#""some input": "someInput""#),
+        (make_directive_source_with_outputs(r#""1": "one""#), r#""1": "one""#),
+    ] {
+        let allocator = Allocator::default();
+        let linked = link(&allocator, &code, "test.mjs").code;
+        assert!(linked.contains(expected), "{expected}:\n{linked}");
+        let parsed = Parser::new(&allocator, &linked, SourceType::mjs()).parse();
+        assert!(parsed.diagnostics.is_empty(), "does not parse:\n{linked}");
+    }
+}
