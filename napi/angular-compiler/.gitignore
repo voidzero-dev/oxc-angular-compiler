@@ -11,3 +11,4 @@
 /e2e/app/dist
 /tsconfig.tsbuildinfo
 /test/.hmr-update-module-tmp
+/test/.dts-augment-tmp

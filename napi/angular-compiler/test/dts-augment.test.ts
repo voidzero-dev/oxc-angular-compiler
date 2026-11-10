@@ -223,11 +223,12 @@ function mappings(file: string): string {
 }
 
 beforeAll(() => {
-  // `native` also expands a Windows short name (`C:\Users\RUNNER~1`), so
-  // tsc sees one spelling of every path.
-  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'oxc-angular-dts-augment-')))
-  // `typescript` and `@angular/core` for the projects, as a library has them.
-  symlinkSync(join(packageDir, 'node_modules'), join(root, 'node_modules'), 'junction')
+  // Inside the package, so the projects find `typescript` and
+  // `@angular/core` in its `node_modules` like a library does. (Through a
+  // junction from the temp dir, tsc on Windows did not find them.)
+  const parent = join(packageDir, 'test/.dts-augment-tmp')
+  mkdirSync(parent, { recursive: true })
+  root = realpathSync.native(mkdtempSync(join(parent, 'run-')))
 })
 
 afterAll(() => {
