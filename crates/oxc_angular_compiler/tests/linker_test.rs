@@ -1575,3 +1575,64 @@ fn test_link_host_animate_listener_before_20_2() {
         assert!(linked.contains("i0.ɵɵanimateEnterListener("), "{linked}");
     }
 }
+
+/// `hostDirectives` is rebuilt like Angular's linker (`toHostDirectivesMetadata`
+/// then `createHostDirectivesFeatureArg`), not copied: a forward reference is
+/// unwrapped and wraps the whole list in a function, so the classes are read
+/// after they are defined (#702). Expected text is what the
+/// `@angular/compiler-cli` 22.2.4 babel linker writes for the same input; the
+/// first four inputs are ngtsc's own partial output.
+#[test]
+fn test_link_host_directives_like_angular_linker() {
+    let cases = [
+        ("[{ directive: i1.H }, { directive: i1.H }]", Some("[i1.H, i1.H]")),
+        ("[{ directive: i0.forwardRef(() => L) }]", Some("function () { return [L]; }")),
+        (
+            r#"[{ directive: i0.forwardRef(() => L), inputs: ["color", "c"] }]"#,
+            Some(r#"function () { return [{ directive: L, inputs: ["color", "c"] }]; }"#),
+        ),
+        (
+            "[{ directive: i1.H }, { directive: i0.forwardRef(() => L) }]",
+            Some("function () { return [i1.H, L]; }"),
+        ),
+        // Oxc's own partial output.
+        (
+            r#"[{ directive: i0.forwardRef(function () { return L; }), inputs: ["color", "c"], outputs: ["changed", "ch"] }]"#,
+            Some(
+                r#"function () { return [{ directive: L, inputs: ["color", "c"], outputs: ["changed", "ch"] }]; }"#,
+            ),
+        ),
+        // Hand-written: no feature for an empty list, empty mappings give the
+        // bare class, and the pairs are read into an object (a trailing odd
+        // element dropped, the last alias kept, index keys first).
+        ("[]", None),
+        ("[{ directive: L, inputs: [], outputs: [] }]", Some("[L]")),
+        (
+            r#"[{ directive: L, inputs: ["color", "a", "color", "b", "1", "one", "x"], outputs: ["changed"] }]"#,
+            Some(r#"[{ directive: L, inputs: ["1", "one", "color", "b"] }]"#),
+        ),
+    ];
+    for (host_directives, expected) in cases {
+        let code = format!(
+            r#"import * as i0 from "@angular/core";
+import * as i1 from "./dep";
+export class Dir {{}}
+Dir.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "22.2.2", type: Dir, isStandalone: true, selector: "[d]", hostDirectives: {host_directives}, ngImport: i0 }});
+export class L {{}}
+"#
+        );
+        let allocator = Allocator::default();
+        let linked: String = link(&allocator, &code, "test.mjs").code.split_whitespace().collect();
+        match expected {
+            Some(arg) => {
+                let arg: String = arg.split_whitespace().collect();
+                assert!(
+                    linked.contains(&format!("features:[i0.ɵɵHostDirectivesFeature({arg})]")),
+                    "{host_directives}:\n{linked}"
+                );
+            }
+            None => assert!(!linked.contains("HostDirectivesFeature"), "{linked}"),
+        }
+        assert!(!linked.contains("hostDirectives"), "{linked}");
+    }
+}

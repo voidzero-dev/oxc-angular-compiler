@@ -32,7 +32,8 @@ use crate::factory::create_invalid_factory_call;
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, FnParam, FunctionExpr, InstantiateExpr,
     InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
-    LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr, ReturnStatement,
+    LiteralValue, OutputAstBuilder, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
+    ReturnStatement,
 };
 use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
 use crate::pipeline::emit::HostBindingCompilationResult;
@@ -1184,39 +1185,37 @@ fn generate_host_directives_feature<'a>(
 /// Create a directive reference expression.
 ///
 /// For imported directives (those with a `source_module`), generates namespaced
-/// references like `i1.MyDirective`. For local directives, generates bare
-/// variable references like `MyDirective`.
+/// references to the module's export, like ngtsc's `toR3Reference`:
+/// `i1.MyDirective` (also for `import { MyDirective as Alias }`), `i1.default`
+/// for a default import, and `i1["s-dir"]` for a string export name. For local
+/// directives, generates bare variable references like `MyDirective`.
 ///
 /// See: packages/compiler/src/render3/view/compiler.ts:689-692
-fn create_directive_reference<'a>(
+pub(crate) fn create_directive_reference<'a>(
     allocator: &'a Allocator,
     directive: &HostDirectiveMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
+    let export = directive.export_name.unwrap_or(directive.directive);
     if let Some(ref source_module) = directive.source_module {
         // Imported directive - use namespace.DirectiveName (e.g., i1.ExternalDir)
         let namespace = namespace_registry.get_or_assign(source_module);
-        return OutputExpression::ReadProp(Box::new_in(
-            ReadPropExpr {
-                receiver: Box::new_in(
-                    OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: namespace, source_span: None },
-                        &allocator,
-                    )),
-                    &allocator,
-                ),
-                name: directive.directive.clone(),
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
+        return OutputAstBuilder::export_read(
+            allocator,
+            OutputAstBuilder::variable(allocator, namespace),
+            export,
+        );
+    }
+    // `ns.X` whose namespace import has no module to alias: as written.
+    if let Some(namespace) = directive.namespace {
+        return OutputAstBuilder::export_read(
+            allocator,
+            OutputAstBuilder::variable(allocator, namespace),
+            export,
+        );
     }
     // No source module - use bare type name (local directive)
-    OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: directive.directive.clone(), source_span: None },
-        &allocator,
-    ))
+    OutputAstBuilder::variable(allocator, directive.directive)
 }
 
 /// Create the host directives argument array.

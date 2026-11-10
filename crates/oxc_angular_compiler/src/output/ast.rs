@@ -1736,6 +1736,34 @@ impl OutputAstBuilder {
     ) -> OutputExpression<'a> {
         OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, &allocator))
     }
+
+    /// Read the export `name` off a namespace object: `ns.name`, or
+    /// `ns["s-dir"]` when the name is not an identifier name (a string
+    /// export, `export { X as "s-dir" }`). ngtsc writes `ns.s-dir` there,
+    /// which does not parse.
+    pub fn export_read<'a>(
+        allocator: &'a oxc_allocator::Allocator,
+        namespace: OutputExpression<'a>,
+        name: Ident<'a>,
+    ) -> OutputExpression<'a> {
+        let receiver = Box::new_in(namespace, &allocator);
+        if oxc_syntax::identifier::is_identifier_name(name.as_str()) {
+            OutputExpression::ReadProp(Box::new_in(
+                ReadPropExpr { receiver, name, optional: false, source_span: None },
+                &allocator,
+            ))
+        } else {
+            OutputExpression::ReadKey(Box::new_in(
+                ReadKeyExpr {
+                    receiver,
+                    index: Box::new_in(Self::string(allocator, name), &allocator),
+                    optional: false,
+                    source_span: None,
+                },
+                &allocator,
+            ))
+        }
+    }
 }
 
 // ============================================================================
