@@ -2178,7 +2178,9 @@ fn build_features(
     }
 
     // 2. HostDirectivesFeature — must come before InheritDefinitionFeature
-    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
+    if let Some(host_directives) = get_property_expression(meta, "hostDirectives")
+        .and_then(|expr| host_directives_feature_arg(expr, source))
+    {
         features.push(format!("{ns}.\u{0275}\u{0275}HostDirectivesFeature({host_directives})"));
     }
 
@@ -2211,6 +2213,86 @@ fn build_features(
     }
 
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
+}
+
+/// The `ɵɵHostDirectivesFeature` argument for a partial `hostDirectives`
+/// array, rebuilt like Angular's linker (`toHostDirectivesMetadata` then
+/// `createHostDirectivesFeatureArg`): `{ directive: forwardRef(() => X) }`
+/// becomes `X`, an entry with no mapping is the bare directive, and any
+/// forward reference wraps the list in `function () { return [...]; }` so
+/// it's read after the classes are defined. `None` for an empty array, which
+/// gets no feature (`meta.hostDirectives?.length`). A shape this can't read
+/// is copied as written.
+fn host_directives_feature_arg(expr: &Expression<'_>, source: &str) -> Option<String> {
+    let as_written = || {
+        let span = expr.span();
+        Some(source[span.start as usize..span.end as usize].to_string())
+    };
+    let Expression::ArrayExpression(array) = expr else { return as_written() };
+    if array.elements.is_empty() {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(array.elements.len());
+    let mut has_forward_ref = false;
+    for element in &array.elements {
+        let Some(Expression::ObjectExpression(object)) = element.as_expression() else {
+            return as_written();
+        };
+        let Some(directive) = get_property_expression(object, "directive") else {
+            return as_written();
+        };
+        let (directive, is_forward_ref) = extract_forward_ref(directive, source);
+        has_forward_ref |= is_forward_ref;
+        let mut mappings = Vec::new();
+        for key in ["inputs", "outputs"] {
+            let Some(value) = get_property_expression(object, key) else { continue };
+            let Some(mapping) = host_directive_binding_mapping(value) else {
+                return as_written();
+            };
+            if !mapping.is_empty() {
+                let pairs: Vec<String> = mapping
+                    .iter()
+                    .flat_map(|(field, alias)| {
+                        [escape_string(field, false), escape_string(alias, false)]
+                    })
+                    .collect();
+                mappings.push(format!("{key}: [{}]", pairs.join(", ")));
+            }
+        }
+        if mappings.is_empty() {
+            entries.push(directive.to_string());
+        } else {
+            entries.push(format!("{{ directive: {directive}, {} }}", mappings.join(", ")));
+        }
+    }
+    let list = format!("[{}]", entries.join(", "));
+    Some(if has_forward_ref { format!("function () {{ return {list}; }}") } else { list })
+}
+
+/// A partial host directive `inputs` / `outputs` array read like Angular's
+/// `getHostDirectiveBindingMapping`: pairs collected into an object, so a
+/// trailing odd element is dropped, a field listed twice keeps its first
+/// place and its last alias, and array-index fields come first. `None` when
+/// it isn't an array of strings.
+fn host_directive_binding_mapping<'a>(expr: &'a Expression<'a>) -> Option<Vec<(&'a str, &'a str)>> {
+    let Expression::ArrayExpression(array) = expr else { return None };
+    let mut mapping: Vec<(&str, &str)> = Vec::new();
+    for pair in array.elements.chunks_exact(2) {
+        let field = as_static_string(pair[0].as_expression()?)?;
+        let alias = as_static_string(pair[1].as_expression()?)?;
+        match mapping.iter_mut().find(|(f, _)| *f == field) {
+            Some(entry) => entry.1 = alias,
+            None => mapping.push((field, alias)),
+        }
+    }
+    // Array-index keys come first, in numeric order, as in a JS object.
+    let index = |key: &str| {
+        let canonical =
+            key == "0" || (!key.starts_with('0') && key.bytes().all(|b| b.is_ascii_digit()));
+        if canonical { key.parse::<u32>().ok().filter(|n| *n != u32::MAX) } else { None }
+    };
+    mapping.sort_by_key(|(field, _)| index(field).map_or((1, 0), |n| (0, n)));
+    Some(mapping)
 }
 
 /// Whether the partial `host: { attributes, properties, listeners }` has an
