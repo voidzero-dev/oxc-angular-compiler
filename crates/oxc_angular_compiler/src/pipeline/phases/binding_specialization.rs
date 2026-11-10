@@ -422,6 +422,9 @@ pub fn specialize_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
     // Before v20.2 Angular has no `animate.*` bindings: a static `animate.*`
     // host attribute stays a plain attribute (in `hostAttrs`).
     let animate = job.angular_version.is_none_or(|v| v.supports_animate_instructions());
+    // From v20.3.3 / v21.0.0-next.5 a host job is always DomOnly, so an
+    // `aria-*` property becomes an attribute binding.
+    let aria_attributes = job.angular_version.is_none_or(|v| v.specializes_host_aria_attributes());
 
     // Process bindings in the host binding unit
     let mut cursor = job.root.update.cursor();
@@ -492,6 +495,33 @@ pub fn specialize_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
                             name: binding.name.clone(),
                             expression,
                             kind: AnimationBindingKind::Value,
+                        });
+                        cursor.replace_current(new_op);
+                    }
+                }
+                BindingKind::Property | BindingKind::LegacyAnimation
+                    if aria_attributes && is_aria_attribute(name.as_str()) =>
+                {
+                    // Angular checks the DomOnly `aria-*` case before the host
+                    // case, so a host `[aria-x]` (and a legacy `[@aria-x]`, whose
+                    // name has no `@` here) becomes `ɵɵattribute("aria-x", ...)`.
+                    if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
+                        let expression = std::mem::replace(
+                            &mut binding.expression,
+                            create_placeholder_expression(allocator),
+                        );
+                        let new_op = UpdateOp::Attribute(AttributeOp {
+                            base: UpdateOpBase { source_span, ..Default::default() },
+                            target,
+                            name: binding.name.clone(),
+                            expression,
+                            namespace: None,
+                            security_context,
+                            sanitizer: None,
+                            i18n_context: None,
+                            i18n_message: binding.i18n_message,
+                            is_text_attribute: false,
+                            is_structural_template_attribute: false,
                         });
                         cursor.replace_current(new_op);
                     }

@@ -25,6 +25,29 @@ pub fn is_aria_attribute(name: &str) -> bool {
     name.starts_with(ARIA_PREFIX) && name.len() > ARIA_PREFIX.len()
 }
 
+/// Checks if a property name is an ARIA property (or attribute) name: it
+/// begins with and is longer than `aria`, like `ariaLabel` or `aria-label`.
+///
+/// Port of `isAriaProperty` in Angular 20.2.0-next.2 to 20.3.2 and
+/// 21.0.0-next.0 to 21.0.0-next.4 (`reify.ts`).
+pub fn is_aria_property(name: &str) -> bool {
+    name.starts_with("aria") && name.len() > "aria".len()
+}
+
+/// The attribute name of an ARIA property: `ariaLabel` gives `aria-label`,
+/// and `aria-label` stays as it is.
+///
+/// Port of `ariaAttrName` in Angular 20.2.0-next.2 to 20.3.2 and
+/// 21.0.0-next.0 to 21.0.0-next.4 (`reify.ts`).
+pub fn aria_attr_name(name: &str) -> std::borrow::Cow<'_, str> {
+    let rest = &name["aria".len()..];
+    if rest.starts_with('-') {
+        std::borrow::Cow::Borrowed(name)
+    } else {
+        std::borrow::Cow::Owned(format!("aria-{}", rest.to_lowercase()))
+    }
+}
+
 /// DOM properties that need to be remapped on the compiler side.
 /// Note: this mapping has to be kept in sync with the equally named mapping in the Angular runtime.
 /// See: Angular's `template/pipeline/src/phases/reify.ts`

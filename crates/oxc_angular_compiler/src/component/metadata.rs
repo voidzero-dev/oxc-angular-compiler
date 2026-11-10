@@ -451,6 +451,33 @@ impl AngularVersion {
         ])
     }
 
+    /// Check if a host `[aria-*]` binding becomes an attribute binding when
+    /// bindings are specialized (v20.3.3+ / v21.0.0-next.5+), so it is emitted
+    /// as `ɵɵattribute("aria-x", ...)` after the `ɵɵdomProperty` calls.
+    ///
+    /// `angular/angular@f008045ded` (#63925, first in 21.0.0-next.5) and its
+    /// 20.3.x backport `angular/angular@542cd0019a` (#64089, first in 20.3.3).
+    /// They replace the rule of
+    /// [`AngularVersion::reifies_host_aria_properties_as_attributes`].
+    pub fn specializes_host_aria_attributes(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(20, 3, 3),
+            Self::new(21, 0, 0).with_prerelease(Prerelease::Next(5)),
+        ])
+    }
+
+    /// Check if a host property binding whose name starts with `aria` (and
+    /// is longer) is written as `ɵɵattribute(ariaAttrName(name), ...)` when
+    /// it is reified, in the place of its `ɵɵdomProperty` call
+    /// (v20.2.0-next.2 to v20.3.2, v21.0.0-next.0 to v21.0.0-next.4).
+    ///
+    /// `angular/angular@4138aca91f` (#62630) added it in 20.2.0-next.2;
+    /// [`AngularVersion::specializes_host_aria_attributes`] replaced it.
+    pub fn reifies_host_aria_properties_as_attributes(&self) -> bool {
+        !self.specializes_host_aria_attributes()
+            && self.cmp_release(&Self::new(20, 2, 0).with_prerelease(Prerelease::Next(2))).is_ge()
+    }
+
     /// Whether a fix is in this version, given the first fixed release on
     /// each release line, oldest line first.
     ///
@@ -1256,6 +1283,52 @@ mod tests {
         ] {
             assert!(!version.drops_img_video_src_url_context(), "{version:?}");
             assert!(!version.strips_namespaced_block_tag(), "{version:?}");
+        }
+    }
+
+    /// Host `aria` bindings have three eras: plain DOM properties, then
+    /// attributes chosen when reified (20.2.0-next.2 to 20.3.2 and
+    /// 21.0.0-next.0 to next.4), then attributes chosen when bindings are
+    /// specialized (20.3.3+, 21.0.0-next.5+).
+    #[test]
+    fn host_aria_eras_follow_each_release_line() {
+        let parse = |s| AngularVersion::parse(s).unwrap();
+        let era = |s| {
+            let v = parse(s);
+            match (
+                v.reifies_host_aria_properties_as_attributes(),
+                v.specializes_host_aria_attributes(),
+            ) {
+                (false, false) => 'A',
+                (true, false) => 'B',
+                (false, true) => 'C',
+                (true, true) => panic!("{s} is in two eras"),
+            }
+        };
+        for (version, expected) in [
+            ("19.2.15", 'A'),
+            ("20.1.8", 'A'),
+            ("20.2.0-next.0", 'A'),
+            ("20.2.0-next.1", 'A'),
+            ("20.2.0-beta.1", 'A'),
+            ("20.2.0-next.2", 'B'),
+            ("20.2.0-rc.0", 'B'),
+            ("20.2.0", 'B'),
+            ("20.2.4", 'B'),
+            ("20.3.0", 'B'),
+            ("20.3.2", 'B'),
+            ("20.3.3", 'C'),
+            ("20.3.15", 'C'),
+            ("21.0.0-next.0", 'B'),
+            ("21.0.0-next.4", 'B'),
+            ("21.0.0-next.5", 'C'),
+            ("21.0.0-rc.0", 'C'),
+            ("21.0.0", 'C'),
+            ("21.2.1", 'C'),
+            ("22.2.4", 'C'),
+            ("0.0.0-PLACEHOLDER", 'C'),
+        ] {
+            assert_eq!(era(version), expected, "{version}");
         }
     }
 
