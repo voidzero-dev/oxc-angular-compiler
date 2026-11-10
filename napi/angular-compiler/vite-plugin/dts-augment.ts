@@ -364,28 +364,44 @@ async function augmentTarget(
   let base = disk
   let mapFile: string | undefined
   let baseMap: string | undefined
+  // Whether `base` is the text `tsc` writes for these options.
+  let fresh = false
   if (emitted) {
     mapFile = emitted.mapFile
-    if (disk === emitted.code || sameApartFromIvyMembers(disk, emitted.code)) {
+    if (disk === emitted.code) {
+      // Keep the map `tsc` wrote: its paths are spelled as `tsc` saw them.
+      fresh = true
+      baseMap = (mapFile && (await readText(mapFile))) ?? emitted.map
+    } else if (sameApartFromIvyMembers(disk, emitted.code)) {
+      fresh = true
       base = emitted.code
       baseMap = emitted.map
-    } else {
-      baseMap = mapFile && (await readText(mapFile))
+    } else if (mapFile) {
+      baseMap = await readText(mapFile)
     }
   }
 
-  // tsc writes `\r\n` with `newLine: "crlf"`; the splice works on `\n`
-  // lines. Lines stay where they are, so the map is the same either way.
+  // The splice works on `\n` lines. tsc ends lines with `\r\n` under
+  // `newLine: "crlf"`, but copies the line breaks inside a template literal
+  // type from the source as they are. So the line break tsc used is the
+  // last one in the file, and only the lines the splice adds get it. Lines
+  // stay where they are, so the map is the same either way.
   const bom = base.startsWith(BOM) ? BOM : ''
-  const crlf = base.includes('\r\n')
   let code = base.slice(bom.length)
-  if (crlf) code = code.replace(/\r\n/g, '\n')
+  const lastBreak = code.lastIndexOf('\n')
+  const crlf = lastBreak > 0 && code[lastBreak - 1] === '\r'
+  // Marks a `\n` that is not part of a `\r\n`, so it stays a lone `\n`.
+  const mark = crlf && !code.includes(LONE_LF_MARK)
+  if (crlf) {
+    if (mark) code = code.replace(/(?<!\r)\n/g, `${LONE_LF_MARK}\n`)
+    code = code.replace(/\r\n/g, '\n')
+  }
   let map = baseMap
   if (declarations.length > 0) {
-    // With a known map file (`mapRoot` makes the comment a URL), use it.
-    const readMap = emitted
-      ? () => baseMap
-      : (ref: string) => readTextSync(resolve(dirname(file), ref))
+    // With a known map file (`mapRoot` makes the comment a URL), use it;
+    // else follow the file's own `//# sourceMappingURL=` comment.
+    const readMap = (ref: string) =>
+      fresh || mapFile ? baseMap : readTextSync(resolve(dirname(file), ref))
     const injected = injectDtsFile(code, declarations, file, readMap)
     if (injected) {
       code = injected.code
@@ -395,13 +411,17 @@ async function augmentTarget(
       }
     }
   }
-  if (crlf) code = code.replace(/\n/g, '\r\n')
+  if (crlf) {
+    code = mark
+      ? code.replace(/(?<!\0)\n/g, '\r\n').replace(/\0\n/g, '\n')
+      : code.replace(/\n/g, '\r\n')
+  }
   code = bom + code
 
-  if (code !== disk) {
-    await writeFile(file, code)
-    result.written.push(file)
-  }
+  // A file that stays as it is keeps its map as it is too.
+  if (code === disk) return
+  await writeFile(file, code)
+  result.written.push(file)
   if (mapFile && map !== undefined && map !== (await readText(mapFile))) {
     await writeFile(mapFile, map)
   }
@@ -475,16 +495,21 @@ async function compile(
 // A byte order mark, which `tsc` writes with `emitBOM`.
 const BOM = String.fromCharCode(0xfeff)
 
+// See `augmentTarget`: put in front of a lone `\n` while the splice runs.
+const LONE_LF_MARK = '\0'
+
 // The lines the splice adds: Ivy statics, and the namespace imports they use.
 const IVY_MEMBER_LINE =
   /^\s*static (?:ɵ(?:fac|cmp|dir|pipe|mod|inj|prov)|ngAcceptInputType_[^\s:?]+)\??:/
-const NAMESPACE_IMPORT_LINE = /^import \* as i\d+(?:_\d+)* from (["']).*\1;$/
+const NAMESPACE_IMPORT_LINE = /^import \* as i\d+(?:_\d+)* from (["']).*\1;\r?$/
 
-/** Whether `a` and `b` are the same text once the lines the splice adds are removed. */
+/**
+ * Whether `a` and `b` are the same text once the lines the splice adds are
+ * removed. Line breaks must match too: `\r\n` is not the same as `\n`.
+ */
 function sameApartFromIvyMembers(a: string, b: string): boolean {
   const strip = (text: string) =>
     text
-      .replace(/\r\n/g, '\n')
       .split('\n')
       .filter((line) => !IVY_MEMBER_LINE.test(line) && !NAMESPACE_IMPORT_LINE.test(line))
       .join('\n')

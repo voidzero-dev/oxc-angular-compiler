@@ -369,6 +369,10 @@ tsconfig form, with paths relative to `cwd`:
 await augmentDeclarations({ tsconfig: 'tsconfig.json', compilerOptions: { outDir: 'types' } })
 ```
 
+When such an option is left out but the file is still found, it is patched
+as `tsc` wrote it (its line breaks and the map its comment points at are
+kept), but members from an earlier run are then kept as they are.
+
 Without TypeScript, pass the output dir and the library's source files
 instead. Each declaration file is then matched to its source as in the Vite
 build: by its declaration map, else by the one layout of the dir. A file that

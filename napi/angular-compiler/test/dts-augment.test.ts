@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -197,13 +197,18 @@ function read(file: string): string {
   return readFileSync(file, 'utf8')
 }
 
+/** The path of `file` from `dir`, with `/` on every platform. */
+function rel(dir: string, file: string): string {
+  return relative(dir, file).split(sep).join('/')
+}
+
 /** Every file under `dir`, by path from `dir`, with its text. */
 function snapshot(dir: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue
     const file = join(entry.parentPath, entry.name)
-    out[relative(dir, file)] = read(file)
+    out[rel(dir, file)] = read(file)
   }
   return out
 }
@@ -235,7 +240,7 @@ describe('augmentDeclarations with a tsconfig', () => {
     expect(result.errors).toEqual([])
     expect(result.missing).toEqual([])
     expect(result.unmatched).toEqual([])
-    expect(result.written.map((f) => relative(dist, f)).sort()).toEqual(ANGULAR_FILES)
+    expect(result.written.map((f) => rel(dist, f)).sort()).toEqual(ANGULAR_FILES)
     expect(result.matched).toHaveLength(Object.keys(NGC).length)
     for (const [file, text] of Object.entries(NGC)) {
       expect(read(join(dist, file)), file).toBe(text)
@@ -294,7 +299,7 @@ describe('augmentDeclarations with a tsconfig', () => {
       declarationDir: 'dd',
       cwd: dir,
     })
-    expect(byDir.written.map((f) => relative(join(dir, 'dd'), f)).sort()).toEqual(ANGULAR_FILES)
+    expect(byDir.written.map((f) => rel(join(dir, 'dd'), f)).sort()).toEqual(ANGULAR_FILES)
   })
 
   it('keeps CRLF line endings', async () => {
@@ -312,6 +317,92 @@ describe('augmentDeclarations with a tsconfig', () => {
       expect(read(join(dir, 'dist', file)), file).toBe(text.replace(/\n/g, '\r\n'))
     }
     expect(mappings(join(dir, 'dist/lib/bar.directive.d.ts.map'))).toBe(AUGMENTED_BAR_MAPPINGS)
+  })
+
+  it('keeps CRLF when newLine was only given to tsc, and leaves plain files alone', async () => {
+    const dir = project('crlf-cli')
+    tsc(dir, '-p', 'tsconfig.json', '--newLine', 'crlf')
+    const dist = join(dir, 'dist')
+    const plain = snapshot(dist)
+
+    const result = await augmentDeclarations({ tsconfig: join(dir, 'tsconfig.json') })
+
+    expect(result.errors).toEqual([])
+    expect(result.written.map((f) => rel(dist, f)).sort()).toEqual(ANGULAR_FILES)
+    for (const [file, text] of Object.entries(NGC)) {
+      expect(read(join(dist, file)), file).toBe(text.replace(/\n/g, '\r\n'))
+    }
+    expect(read(join(dist, 'lib/util.d.ts'))).toBe(plain['lib/util.d.ts'])
+    expect(mappings(join(dist, 'lib/bar.directive.d.ts.map'))).toBe(AUGMENTED_BAR_MAPPINGS)
+  })
+
+  it('keeps the line breaks inside template literal types as they are', async () => {
+    const dir = project('template-literal')
+    // tsc copies these line breaks from the source: `\r\n` in one file,
+    // `\n` in the other, whatever `newLine` is.
+    writeFileSync(
+      join(dir, 'src/lib/crlf.ts'),
+      [
+        'import { Directive } from "@angular/core";',
+        'export type W = `x\r\ny`;',
+        '@Directive({ selector: "[libW]" })',
+        'export class WDir {}',
+        '',
+      ].join('\r\n'),
+    )
+    writeFileSync(
+      join(dir, 'src/lib/lf.ts'),
+      "import { Directive } from '@angular/core';\nexport type T = `x\ny`;\n" +
+        "@Directive({ selector: '[libT]' })\nexport class TDir {}\n",
+    )
+    writeFileSync(
+      join(dir, 'src/public-api.ts'),
+      "export * from './lib/crlf';\nexport * from './lib/lf';\n",
+    )
+    tsc(dir, '-p', 'tsconfig.json')
+    tsc(dir, '-p', 'tsconfig.json', '--newLine', 'crlf', '--outDir', 'dist-crlf')
+
+    await augmentDeclarations({ tsconfig: join(dir, 'tsconfig.json') })
+    await augmentDeclarations({
+      tsconfig: join(dir, 'tsconfig.json'),
+      compilerOptions: { newLine: 'crlf', outDir: 'dist-crlf' },
+      cwd: dir,
+    })
+
+    // What ngc writes, with `\r\n` and `\n` in the template literal types.
+    const ngc = (name: string, selector: string, type: string, file: string) => [
+      'import * as i0 from "@angular/core";',
+      type,
+      `export declare class ${name} {`,
+      `    static ɵfac: i0.ɵɵFactoryDeclaration<${name}, never>;`,
+      `    static ɵdir: i0.ɵɵDirectiveDeclaration<${name}, "${selector}", never, {}, {}, never, never, true, never>;`,
+      '}',
+      `//# sourceMappingURL=${file}.d.ts.map`,
+    ]
+    const w = ngc('WDir', '[libW]', 'export type W = `x\r\ny`;', 'crlf')
+    const t = ngc('TDir', '[libT]', 'export type T = `x\ny`;', 'lf')
+    expect(read(join(dir, 'dist/lib/crlf.d.ts'))).toBe(w.join('\n'))
+    expect(read(join(dir, 'dist/lib/lf.d.ts'))).toBe(t.join('\n'))
+    expect(read(join(dir, 'dist-crlf/lib/crlf.d.ts'))).toBe(w.join('\r\n'))
+    expect(read(join(dir, 'dist-crlf/lib/lf.d.ts'))).toBe(t.join('\r\n'))
+  })
+
+  it('shifts the map when declarationMap was only given to tsc', async () => {
+    const dir = project('map-cli')
+    const { declarationMap, ...rest } = TSCONFIG.compilerOptions
+    expect(declarationMap).toBe(true)
+    writeFileSync(
+      join(dir, 'tsconfig.json'),
+      JSON.stringify({ ...TSCONFIG, compilerOptions: rest }, null, 2),
+    )
+    tsc(dir, '-p', 'tsconfig.json', '--declarationMap')
+    const map = join(dir, 'dist/lib/bar.directive.d.ts.map')
+    expect(mappings(map)).toBe(TSC_BAR_MAPPINGS)
+
+    await augmentDeclarations({ tsconfig: join(dir, 'tsconfig.json') })
+
+    expect(read(join(dir, 'dist/lib/bar.directive.d.ts'))).toBe(NGC['lib/bar.directive.d.ts'])
+    expect(mappings(map)).toBe(AUGMENTED_BAR_MAPPINGS)
   })
 
   it('keeps the byte order mark of emitBOM', async () => {
@@ -334,11 +425,22 @@ describe('augmentDeclarations with a tsconfig', () => {
   it('shifts the map when mapRoot makes the map comment a URL', async () => {
     const dir = project('map-root')
     tsc(dir, '-p', 'tsconfig.json', '--mapRoot', 'https://example.com/maps/')
+    const plain = snapshot(join(dir, 'dist'))
 
+    // With `mapRoot` the maps name their sources by absolute file URL, and
+    // `tsc` saw the real path. A path through a link gives other URLs, so
+    // the maps `tsc` wrote must be kept.
+    const link = join(root, 'map-root-link')
+    symlinkSync(dir, link, 'junction')
     await augmentDeclarations({
-      tsconfig: join(dir, 'tsconfig.json'),
+      tsconfig: join(link, 'tsconfig.json'),
       compilerOptions: { mapRoot: 'https://example.com/maps/' },
     })
+    expect(read(join(dir, 'dist/lib/util.d.ts.map'))).toBe(plain['lib/util.d.ts.map'])
+    const sources = (file: string) => JSON.parse(file).sources
+    expect(sources(read(join(dir, 'dist/lib/bar.directive.d.ts.map')))).toEqual(
+      sources(plain['lib/bar.directive.d.ts.map']),
+    )
 
     const bar = read(join(dir, 'dist/lib/bar.directive.d.ts'))
     expect(bar).toBe(
@@ -386,7 +488,7 @@ describe('augmentDeclarations with a tsconfig', () => {
     const result = await augmentDeclarations({ tsconfig: join(dir, 'tsconfig.json') })
     expect(result.written).toEqual([])
     expect(result.matched).toEqual([])
-    expect(result.missing.map((f) => relative(join(dir, 'dist'), f)).sort()).toEqual(
+    expect(result.missing.map((f) => rel(join(dir, 'dist'), f)).sort()).toEqual(
       Object.keys(NGC).sort(),
     )
   })
@@ -423,7 +525,7 @@ describe('augmentDeclarations with sources', () => {
 
     expect(result.errors).toEqual([])
     expect(result.unmatched).toEqual([stray])
-    expect(result.written.map((f) => relative(join(dir, 'dist'), f)).sort()).toEqual(ANGULAR_FILES)
+    expect(result.written.map((f) => rel(join(dir, 'dist'), f)).sort()).toEqual(ANGULAR_FILES)
     for (const [file, text] of Object.entries(NGC)) {
       expect(read(join(dir, 'dist', file)), file).toBe(
         text.replace(/\n\/\/# sourceMappingURL=.*$/, '\n'),
