@@ -2456,6 +2456,16 @@ fn build_jit_decorator_text<'a>(
     apply_jit_decorator_text_edits(expr_text, edits)
 }
 
+/// The import line for a JIT resource (`angular:jit:template:file;./a.html`).
+/// The Angular CLI builds the specifier with `factory.createStringLiteral`, so
+/// the TypeScript printer escapes text outside ASCII (`./t\u00E9.html`).
+fn jit_resource_import(import_name: &str, specifier: &str) -> String {
+    format!(
+        "import {import_name} from {};\n",
+        crate::output::emitter::escape_string(specifier, false)
+    )
+}
+
 /// `text` with `edits` (offsets into it) applied.
 fn apply_jit_decorator_text_edits(
     text: &str,
@@ -3292,7 +3302,7 @@ fn transform_angular_file_jit(
             .push_str(&format!("import * as {core_namespace} from \"@angular/core\";\n"));
     }
     for (import_name, specifier) in &resource_imports {
-        additional_imports.push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
+        additional_imports.push_str(&jit_resource_import(import_name, specifier));
     }
 
     // Insert additional imports after the last existing import
@@ -3361,6 +3371,21 @@ fn transform_angular_file_jit(
 
     // 5. Strip TypeScript syntax from JIT output
     result.code = strip_typescript(allocator, path, &result.code);
+
+    // The printer above writes the resource specifiers as raw text; the Angular
+    // CLI's TypeScript printer escapes text outside ASCII in them.
+    for (import_name, specifier) in &resource_imports {
+        if specifier.is_ascii() {
+            continue;
+        }
+        let printed = format!("import {import_name} from \"{specifier}\";\n");
+        if let Some(start) = result.code.find(&printed) {
+            result.code.replace_range(
+                start..start + printed.len(),
+                &jit_resource_import(import_name, specifier),
+            );
+        }
+    }
 
     result
 }
@@ -5376,8 +5401,7 @@ pub fn transform_angular_file(
         // registry below under whatever alias the file allows (`i0` or a
         // uniquified `i0_1`, ...), for every alias shape.
         for (import_name, specifier) in &jit_resource_imports {
-            additional_imports
-                .push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
+            additional_imports.push_str(&jit_resource_import(import_name, specifier));
         }
     }
 

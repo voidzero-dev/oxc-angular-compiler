@@ -266,6 +266,24 @@ import { Svc } from './sé';
     assert_has(&code, &[r"import * as i1 from './s\u00E9';", "i0.ɵɵdirectiveInject(i1.Svc)"]);
 }
 
+#[test]
+fn jit_resource_imports_escape_the_specifier() {
+    let allocator = Allocator::default();
+    let options = TransformOptions { jit: true, ..Default::default() };
+    let source = r"import { Component } from '@angular/core';
+@Component({ selector: 'd', templateUrl: './té.html', styleUrls: ['./sé.css'] }) export class Y {}";
+    let result = transform_angular_file(&allocator, "c.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "unexpected errors: {:?}", result.diagnostics);
+    // @angular/build 22.2.6 `createJitResourceTransformer` + TypeScript printer.
+    assert_has(
+        &result.code,
+        &[
+            r#"import __NG_CLI_RESOURCE__0 from "angular:jit:template:file;./t\u00E9.html";"#,
+            r#"import __NG_CLI_RESOURCE__1 from "angular:jit:style:file;./s\u00E9.css";"#,
+        ],
+    );
+}
+
 // ---- partial compile -------------------------------------------------------
 
 #[test]
@@ -359,6 +377,26 @@ export class C {
             "i0.ɵɵProvidersFeature([{ provide: 'pé', useValue: 'vü' }])",
         ],
     );
+}
+
+#[test]
+fn linker_reads_host_directive_names_like_angular() {
+    // ngtsc 22.2.4 partial output of
+    // `hostDirectives: [{ directive: H, inputs: ['é: a'], outputs: ['ö: b'] }]`.
+    let partial = r#"import * as i0 from "@angular/core";
+export class X {
+    static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.2.4", type: X, isStandalone: true, selector: "c", hostDirectives: [{ directive: H, inputs: ["\u00E9", "a"], outputs: ["\u00F6", "b"] }], ngImport: i0, template: '', isInline: true });
+}"#;
+    let code = link(partial, None);
+    // Angular linker 22.2.4 (Babel 8): the names are read with `getString()`
+    // and printed as new literals, `inputs: ["é", "a"], outputs: ["ö", "b"]`.
+    assert_has(
+        &code,
+        &[
+            r#"i0.ɵɵHostDirectivesFeature([{ directive: H, inputs: ["é", "a"], outputs: ["ö", "b"] }])"#,
+        ],
+    );
+    assert_lacks(&code, &[r"\u00"]);
 }
 
 // ---- linker changeDetection -------------------------------------------------

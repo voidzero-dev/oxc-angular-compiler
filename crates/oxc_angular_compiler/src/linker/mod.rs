@@ -1747,6 +1747,42 @@ fn link_export_as(meta: &ObjectExpression<'_>, source: &str) -> Option<String> {
     Some(names.map_or_else(|| as_written.to_string(), |names| format!("[{}]", names.join(", "))))
 }
 
+/// A declaration's `hostDirectives` for `ɵɵHostDirectivesFeature`: the source
+/// text, but with each `inputs` and `outputs` name printed as a new string, as
+/// the Angular linker reads them with `getString()`
+/// (`getHostDirectiveBindingMapping`).
+fn link_host_directives(meta: &ObjectExpression<'_>, source: &str) -> Option<String> {
+    let as_written = get_property_source(meta, "hostDirectives", source)?;
+    let Some(entries) = get_array_property(meta, "hostDirectives") else {
+        return Some(as_written.to_string());
+    };
+    let start = entries.span.start as usize;
+    let mut names: Vec<(Span, String)> = Vec::new();
+    for entry in &entries.elements {
+        let Some(Expression::ObjectExpression(entry)) = entry.as_expression() else {
+            continue;
+        };
+        for field in ["inputs", "outputs"] {
+            let Some(mapping) = get_array_property(entry, field) else { continue };
+            for name in &mapping.elements {
+                let Some(name) = name.as_expression() else { continue };
+                if let Some(literal) = static_string_literal(name, source) {
+                    names.push((name.span(), literal));
+                }
+            }
+        }
+    }
+    let mut linked = String::with_capacity(as_written.len());
+    let mut copied = start;
+    for (span, literal) in names {
+        linked.push_str(&source[copied..span.start as usize]);
+        linked.push_str(&literal);
+        copied = span.end as usize;
+    }
+    linked.push_str(&source[copied..entries.span.end as usize]);
+    Some(linked)
+}
+
 /// Link ɵɵngDeclareDirective → ɵɵdefineDirective.
 fn link_directive<'a>(
     meta: &ObjectExpression<'_>,
@@ -2251,7 +2287,7 @@ fn build_features(
     }
 
     // 2. HostDirectivesFeature — must come before InheritDefinitionFeature
-    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
+    if let Some(host_directives) = link_host_directives(meta, source) {
         features.push(format!("{ns}.\u{0275}\u{0275}HostDirectivesFeature({host_directives})"));
     }
 
