@@ -7,7 +7,7 @@
  *
  * @see https://github.com/voidzero-dev/oxc-angular-compiler/issues/60
  */
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -165,6 +165,81 @@ export default defineConfig({
     expect(content).not.toContain('/src/main.ts')
 
     rmSync(SSR_OUT_DIR, { recursive: true, force: true })
+  })
+
+  test('vite build --app --watch embeds the client page of each round (#705)', async () => {
+    test.setTimeout(180000)
+    rmSync(SSR_OUT_DIR, { recursive: true, force: true })
+
+    const mainPath = join(APP_DIR, 'src/main.ts')
+    const mainSource = readFileSync(mainPath, 'utf-8')
+    const vite = join(APP_DIR, 'node_modules/vite/bin/vite.js')
+    const child = spawn(
+      process.execPath,
+      [vite, 'build', '--app', '--watch', '--config', 'vite.config.app.ts'],
+      { cwd: APP_DIR, stdio: 'pipe' },
+    )
+    let log = ''
+    child.stdout.on('data', (data) => (log += data))
+    child.stderr.on('data', (data) => (log += data))
+
+    // A watch round empties the outDir before it writes it again.
+    const read = (path: string) => {
+      try {
+        return readFileSync(join(SSR_OUT_DIR, path), 'utf-8')
+      } catch {
+        return undefined
+      }
+    }
+    const clientEntry = () => read('client/index.html')?.match(/\/assets\/index-[^"]+\.js/)?.[0]
+
+    /**
+     * Waits until the client page loads another entry than `previous`, the
+     * server embeds it, and no build has logged for a while.
+     */
+    async function settle(previous?: string) {
+      const deadline = Date.now() + 90000
+      let seen = log.length
+      let quietSince = Date.now()
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250))
+        if (log.length !== seen) {
+          seen = log.length
+          quietSince = Date.now()
+          continue
+        }
+        const entry = clientEntry()
+        const server = read('server/server.js')
+        if (
+          entry &&
+          entry !== previous &&
+          server?.includes(entry) &&
+          Date.now() - quietSince > 3000
+        ) {
+          return { entry, server }
+        }
+      }
+      throw new Error(
+        `the server did not embed the client page ${clientEntry()} (before: ${previous}):\n${log}`,
+      )
+    }
+
+    try {
+      // Round 1, fresh outDir.
+      const first = await settle()
+      expect(first.server).toContain('index.server.html')
+      expect(first.server).not.toContain('/src/main.ts')
+
+      // A client-only change: the server has no import of main.ts.
+      writeFileSync(mainPath, `${mainSource}\nconsole.log('oxc-705')\n`)
+      const second = await settle(first.entry)
+      expect(second.server).not.toContain(first.entry)
+      expect(log).not.toContain('vite-ssr-manifest')
+    } finally {
+      child.kill()
+      writeFileSync(mainPath, mainSource)
+      rmSync(SSR_OUT_DIR, { recursive: true, force: true })
+    }
   })
 
   test('vite build --ssr without an app engine does not warn about index.html (#696)', () => {
