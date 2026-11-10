@@ -14,9 +14,8 @@
  * @see https://github.com/voidzero-dev/oxc-angular-compiler/issues/60
  */
 
-import { createHash } from 'node:crypto'
-import { realpathSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
@@ -136,8 +135,39 @@ interface ServerState {
   page?: string
   /** Its renderChunk calls that wait for a client round. */
   waiting: number
+  /**
+   * It is between buildStart and the point where renderChunk takes the page.
+   * Such a build takes the newest client page by itself, so it needs no rebuild.
+   */
+  building: boolean
   /** It gave the warning of this round. */
   warned: boolean
+}
+
+// The dirs of the files below, removed when the process exits normally. Vite
+// sets no signal handler for `vite build --watch`, so a watch stopped with
+// Ctrl+C leaves its empty dir to the system's temp cleanup. A signal handler
+// here would change how the process exits, so there is none.
+const stampDirs: string[] = []
+
+/**
+ * Makes the file a watched server watches. It lives in a new private dir
+ * (mode 0700), so no other user can plant a link there or make it read-only.
+ * The dir is in the temp dir, by its real path: rolldown does not watch files
+ * in node_modules (Vite's cacheDir), and on macOS it missed changes to a file
+ * under the /var symlink of the temp dir.
+ */
+function createStampFile(): string {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'oxc-angular-ssr-'))
+  if (stampDirs.length === 0) {
+    process.once('exit', () =>
+      stampDirs.forEach((path) => rmSync(path, { recursive: true, force: true })),
+    )
+  }
+  stampDirs.push(dir)
+  const path = join(dir, 'client.stamp')
+  writeFileSync(path, '', { flag: 'wx' })
+  return path
 }
 
 function newClientRound(): ClientRound {
@@ -258,11 +288,13 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
   // A file each watched server environment watches. Rolldown has no call that
   // starts a rebuild, so the client writes this file when a server needs its page.
   let stampPath: string | undefined
+  // Making the file failed once, so do not try (and warn) again.
+  let stampFailed = false
   const servers = new Map<string, ServerState>()
 
   const serverState = (name: string): ServerState => {
     let state = servers.get(name)
-    if (!state) servers.set(name, (state = { waiting: 0, warned: false }))
+    if (!state) servers.set(name, (state = { waiting: 0, building: false, warned: false }))
     return state
   }
 
@@ -322,19 +354,30 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
       // 'post': vite:build-html adds index.html to the bundle in its own generateBundle.
       order: 'post',
       async handler(_, bundle) {
-        if (this.environment?.config.consumer !== 'client') return
+        const environment = this.environment
+        if (environment?.config.consumer === 'server') {
+          // A build with no manifest to fill in has no renderChunk that takes the page.
+          const server = servers.get(environment.name)
+          if (server) server.building = false
+          return
+        }
+        if (environment?.config.consumer !== 'client') return
         const asset = bundle['index.html']
         if (asset?.type === 'asset') clientIndexHtml = asset
-        if (!isAppClient(this.environment)) return
+        if (!isAppClient(environment)) return
 
         if (asset?.type === 'asset') clientPage = sourceText(asset.source)
-        // A watched server that embedded another page, and does not wait for
-        // this one, must rebuild.
+        // A watched server that embedded another page, and is not building
+        // now (a build in progress takes this page in renderChunk), must rebuild.
         const page = clientPage
         const rebuild =
           page !== undefined &&
           [...servers.values()].some(
-            (server) => server.page !== undefined && server.waiting === 0 && server.page !== page,
+            (server) =>
+              server.page !== undefined &&
+              !server.building &&
+              server.waiting === 0 &&
+              server.page !== page,
           )
         endClientRound(false)
         if (rebuild && stampPath) {
@@ -350,11 +393,18 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
     },
 
     buildEnd(error) {
-      if (error && this.environment && isAppClient(this.environment)) endClientRound(true)
+      if (!error || !this.environment) return
+      if (isAppClient(this.environment)) endClientRound(true)
+      // A failed server build takes no page, so a client change must rebuild it.
+      const server = servers.get(this.environment.name)
+      if (server) server.building = false
     },
 
     renderError() {
-      if (this.environment && isAppClient(this.environment)) endClientRound(true)
+      if (!this.environment) return
+      if (isAppClient(this.environment)) endClientRound(true)
+      const server = servers.get(this.environment.name)
+      if (server) server.building = false
     },
 
     closeBundle() {
@@ -386,21 +436,17 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         if (isAppWatchServer(this.environment, this.meta)) {
           // The page comes in renderChunk. Watch a file that exists before this
           // build ends (rolldown never watches a path that was missing then),
-          // so a client-only change can rebuild the server. It lives in the
-          // temp dir, by its real path: rolldown does not watch files in
-          // node_modules (Vite's cacheDir), and on macOS it missed changes to a
-          // file under the /var symlink of the temp dir.
-          serverState(name).warned = false
-          const clientOutDir = resolve(config.root, config.environments.client.build?.outDir ?? '')
-          const hash = createHash('sha256').update(clientOutDir).digest('hex').slice(0, 16)
-          try {
-            stampPath = join(realpathSync(tmpdir()), 'oxc-angular-ssr', `${hash}.stamp`)
-            await mkdir(dirname(stampPath), { recursive: true })
-            await writeFile(stampPath, '', { flag: 'wx' })
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          // so a client-only change can rebuild the server.
+          const server = serverState(name)
+          server.warned = false
+          server.building = true
+          if (!stampPath && !stampFailed) {
+            try {
+              stampPath = createStampFile()
+            } catch (error) {
+              stampFailed = true
               this.warn(
-                `could not write ${stampPath ?? tmpdir()}, so client-only changes do not rebuild the server: ${String(error)}`,
+                `could not make a file in ${tmpdir()}, so client-only changes do not rebuild the server: ${String(error)}`,
               )
             }
           }
@@ -503,6 +549,7 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         server.waiting--
       }
 
+      server.building = false
       let page = clientPage
       let warning: string | undefined
       if (page === undefined) {

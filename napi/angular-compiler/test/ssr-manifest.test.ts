@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
 import { afterAll, describe, it, expect } from 'vitest'
@@ -167,7 +167,7 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       '<html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><body><app-root></app-root></body></html>'
 
     const roots: string[] = []
-    // The watched files of watch mode, in the temp dir.
+    // The dirs of the watched files of watch mode, in the temp dir.
     const stamps: string[] = []
     afterAll(() =>
       [...roots, ...stamps].forEach((path) => rmSync(path, { recursive: true, force: true })),
@@ -224,7 +224,11 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         },
         meta: { watchMode: watches(name) },
         warn: (message: string) => warnings.push(message),
-        addWatchFile: (file: string) => watched.push(file),
+        addWatchFile: (file: string) => {
+          watched.push(file)
+          // The plugin removes its dir only on a normal process exit.
+          stamps.push(dirname(file))
+        },
       })
       return {
         plugin,
@@ -235,6 +239,8 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         clientBundle: (bundle: Record<string, unknown>, name = 'client') =>
           plugin.generateBundle.handler.call(context(name), {}, bundle),
         clientEnd: (error?: Error) => plugin.buildEnd.call(context('client'), error),
+        serverEnd: (error?: Error) => plugin.buildEnd.call(context('ssr'), error),
+        serverBundle: () => plugin.generateBundle.handler.call(context('ssr'), {}, {}),
         clientRenderError: () => plugin.renderError.call(context('client'), new Error('client')),
         /** The server's buildStart, then a transform of each module. */
         async server(...modules: string[]): Promise<(string | undefined)[]> {
@@ -493,9 +499,10 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         const [code] = await build.server(ENGINE)
         expect(build.watched).toHaveLength(1)
         const [stamp] = build.watched
-        stamps.push(stamp)
-        expect(stamp.endsWith('.stamp')).toBe(true)
         expect(readFileSync(stamp, 'utf-8')).toBe('')
+        // A new private dir, so no other user can plant a link there or make it read-only.
+        expect(basename(dirname(stamp))).toMatch(/^oxc-angular-ssr-.{6}$/)
+        expect(statSync(dirname(stamp)).mode & 0o777).toBe(0o700)
         const rendered = build.render(code!)
         build.clientEnd(new Error('client'))
         expect(await rendered).toContain('/src/main.ts')
@@ -518,6 +525,55 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         const once = app(tempRoot(), { builder: true })
         await once.server(ENGINE)
         expect(once.watched).toEqual([])
+      })
+
+      it('does not rebuild a server whose build takes the new page by itself', async () => {
+        const build = watchApp()
+        await build.clientStart()
+        const [code] = await build.server(ENGINE)
+        const [stamp] = build.watched
+        const rendered = build.render(code!)
+        await build.clientBundle(page(BUILT))
+        expect(await rendered).toContain(filled(BUILT))
+        await build.serverBundle()
+
+        // A shared change, with a server slower than the client: the client
+        // round ends while the server is still before its renderChunk.
+        await build.clientStart()
+        const [slow] = await build.server(ENGINE)
+        await build.clientBundle(page(NEXT))
+        expect(readFileSync(stamp, 'utf-8')).toBe('')
+        expect(await build.render(slow!)).toContain(filled(NEXT))
+        await build.serverBundle()
+
+        // A server build that fails takes no page, so the next client change rebuilds it.
+        await build.server(ENGINE)
+        build.serverEnd(new Error('server'))
+        await build.clientStart()
+        await build.clientBundle(page(BUILT))
+        expect(readFileSync(stamp, 'utf-8')).not.toBe('')
+        expect(build.warnings).toEqual([])
+      })
+
+      it('warns once when it cannot make the watched file', async () => {
+        const root = tempRoot()
+        const missing = join(root, 'missing')
+        const saved = process.env.TMPDIR
+        // Only the plugin's temp dir is missing: the root is made before.
+        process.env.TMPDIR = missing
+        try {
+          const build = watchApp(root)
+          await build.server(ENGINE)
+          await build.server(ENGINE)
+          expect(build.watched).toEqual([])
+          expect(build.warnings).toHaveLength(1)
+          expect(build.warnings[0]).toContain(
+            `could not make a file in ${missing}, so client-only changes do not rebuild the server: `,
+          )
+        } finally {
+          if (saved === undefined) delete process.env.TMPDIR
+          else process.env.TMPDIR = saved
+        }
       })
 
       it('takes the page only from the environment named client', async () => {
