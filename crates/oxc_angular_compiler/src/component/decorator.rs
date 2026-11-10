@@ -793,9 +793,21 @@ fn extract_host_directives<'a>(
     for entry in entries {
         let has_mapping_keys = entry.has_mapping_keys();
         let mut meta = HostDirectiveMetadata::new(allocator, entry.name);
-        // Look up the source module from the import map
-        if let Some(import_info) = import_map.get(&entry.name) {
+        if let Some(namespace) = entry.namespace {
+            // `ns.X`: the export `X` of the namespace import's module. The
+            // export name is never looked up in the import map, where it may
+            // name an unrelated import.
+            meta.namespace = Some(namespace);
+            meta.source_module = import_map
+                .get(&namespace)
+                .filter(|info| !info.is_named_import)
+                .map(|info| info.source_module);
+        } else if let Some(import_info) = import_map.get(&entry.name) {
+            // An imported class is referenced by its export name: `H` for
+            // `import { H as P }`, `default` for a default import, `s-dir`
+            // for `import { "s-dir" as SDir }`.
             meta.source_module = Some(import_info.source_module);
+            meta.export_name = import_info.string_export_name.or(import_info.imported_name);
         }
         meta.is_forward_reference = entry.is_forward_reference;
         meta.has_mapping_keys = has_mapping_keys;

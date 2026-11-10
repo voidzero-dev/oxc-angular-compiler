@@ -704,44 +704,10 @@ fn generate_host_directives_type_from_component(
         .iter()
         .enumerate()
         .map(|(i, hd)| {
-            let directive_name = types.get(i).map_or(hd.directive.as_str(), String::as_str);
-            let directive = format!("typeof {directive_name}");
-            let inputs = if hd.inputs.is_empty() {
-                "{}".to_string()
-            } else {
-                let input_entries: Vec<String> = hd
-                    .inputs
-                    .iter()
-                    .map(|(public, internal)| {
-                        format!(
-                            "\"{}\": \"{}\"",
-                            escape_dts_string(public.as_str()),
-                            escape_dts_string(internal.as_str())
-                        )
-                    })
-                    .collect();
-                format!("{{ {} }}", input_entries.join("; "))
-            };
-            let outputs = if hd.outputs.is_empty() {
-                "{}".to_string()
-            } else {
-                let output_entries: Vec<String> = hd
-                    .outputs
-                    .iter()
-                    .map(|(public, internal)| {
-                        format!(
-                            "\"{}\": \"{}\"",
-                            escape_dts_string(public.as_str()),
-                            escape_dts_string(internal.as_str())
-                        )
-                    })
-                    .collect();
-                format!("{{ {} }}", output_entries.join("; "))
-            };
-            format!("{{ directive: {directive}; inputs: {inputs}; outputs: {outputs}; }}")
+            let directive = types.get(i).map_or(hd.directive.as_str(), String::as_str);
+            host_directive_type(directive, &hd.inputs, &hd.outputs)
         })
         .collect();
-
     format!("[{}]", entries.join(", "))
 }
 
@@ -756,48 +722,47 @@ fn generate_host_directives_type_from_directive(
         .iter()
         .enumerate()
         .map(|(i, hd)| {
-            let directive_name = types
+            let directive = types
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| extract_directive_name_from_expr(&hd.directive));
-            let directive = format!("typeof {directive_name}");
-            let inputs = if hd.inputs.is_empty() {
-                "{}".to_string()
-            } else {
-                let input_entries: Vec<String> = hd
-                    .inputs
-                    .iter()
-                    .map(|(public, internal)| {
-                        format!(
-                            "\"{}\": \"{}\"",
-                            escape_dts_string(public.as_str()),
-                            escape_dts_string(internal.as_str())
-                        )
-                    })
-                    .collect();
-                format!("{{ {} }}", input_entries.join("; "))
-            };
-            let outputs = if hd.outputs.is_empty() {
-                "{}".to_string()
-            } else {
-                let output_entries: Vec<String> = hd
-                    .outputs
-                    .iter()
-                    .map(|(public, internal)| {
-                        format!(
-                            "\"{}\": \"{}\"",
-                            escape_dts_string(public.as_str()),
-                            escape_dts_string(internal.as_str())
-                        )
-                    })
-                    .collect();
-                format!("{{ {} }}", output_entries.join("; "))
-            };
-            format!("{{ directive: {directive}; inputs: {inputs}; outputs: {outputs}; }}")
+            host_directive_type(&directive, &hd.inputs, &hd.outputs)
         })
         .collect();
-
     format!("[{}]", entries.join(", "))
+}
+
+/// One host directive's type, like ngtsc's `createHostDirectivesType`:
+/// `{ directive: typeof X; inputs: { "field": "alias"; }; outputs: {}; }`.
+/// The mappings are stored as (publicName, internalName) pairs and written
+/// keyed by the host directive's own field, as ngtsc's
+/// `stringMapAsLiteralExpression` writes its `{ field: alias }` map.
+fn host_directive_type(
+    directive: &str,
+    inputs: &[(Ident<'_>, Ident<'_>)],
+    outputs: &[(Ident<'_>, Ident<'_>)],
+) -> String {
+    let map = |pairs: &[(Ident<'_>, Ident<'_>)]| {
+        if pairs.is_empty() {
+            return "{}".to_string();
+        }
+        let entries: String = pairs
+            .iter()
+            .map(|(public, internal)| {
+                format!(
+                    " \"{}\": \"{}\";",
+                    escape_dts_string(internal.as_str()),
+                    escape_dts_string(public.as_str())
+                )
+            })
+            .collect();
+        format!("{{{entries} }}")
+    };
+    format!(
+        "{{ directive: typeof {directive}; inputs: {}; outputs: {}; }}",
+        map(inputs),
+        map(outputs)
+    )
 }
 
 /// Extract a directive name from an `OutputExpression`.
@@ -817,6 +782,18 @@ pub(crate) fn extract_directive_name_from_expr(
             let receiver = extract_directive_name_from_expr(&read_prop.receiver);
             format!("{}.{}", receiver, read_prop.name.as_str())
         }
+        crate::output::ast::OutputExpression::ReadKey(read_key) => {
+            let receiver = extract_directive_name_from_expr(&read_key.receiver);
+            match &*read_key.index {
+                crate::output::ast::OutputExpression::Literal(lit) => match &lit.value {
+                    crate::output::ast::LiteralValue::String(name) => {
+                        export_member(&receiver, name)
+                    }
+                    _ => panic!("Unexpected key in host directive type"),
+                },
+                _ => panic!("Unexpected key in host directive type"),
+            }
+        }
         crate::output::ast::OutputExpression::External(external) => match &external.value.name {
             Some(name) => name.as_str().to_string(),
             None => panic!("ExternalExpr in host directive has no export name"),
@@ -827,6 +804,18 @@ pub(crate) fn extract_directive_name_from_expr(
                 std::mem::discriminant(other)
             )
         }
+    }
+}
+
+/// The type of the export `export` of the namespace `base`: `i1.Dep`, or
+/// `i1["s-dir"]` for an export name that isn't an identifier name (TS reads
+/// `typeof i1["s-dir"]` as `(typeof i1)["s-dir"]`; ngtsc writes
+/// `typeof i1.s-dir`, which does not parse).
+pub(crate) fn export_member(base: &str, export: &str) -> String {
+    if oxc_syntax::identifier::is_identifier_name(export) {
+        format!("{base}.{export}")
+    } else {
+        format!("{base}[{}]", crate::directive::ts_string_literal(export))
     }
 }
 

@@ -1181,6 +1181,10 @@ pub(crate) enum RefKind<'a> {
         /// this file (`ba` for `import { booleanAttribute as ba }`), which is
         /// what ngtsc emits for it (the reference's identity in this file).
         local: Option<&'a str>,
+        /// For `ns.x` itself (not a value computed from it), the local name
+        /// `ns` of the `import * as ns` it is read off; the reference's name
+        /// is then the export name `x`.
+        namespace: Option<&'a str>,
     },
     /// An identifier with no declaration in this file that names a standard
     /// ECMAScript global (see [`ES_GLOBALS`]).
@@ -1215,8 +1219,12 @@ pub(crate) enum Value<'a> {
     Array(Vec<Value<'a>>),
     Object(Vec<Prop<'a>>),
     /// `import * as ns`, with the module specifier it was imported from so
-    /// member access can ask the resolver about `ns`'s exports.
-    Module(&'a str),
+    /// member access can ask the resolver about `ns`'s exports, and the local
+    /// name `ns` of the import.
+    Module {
+        specifier: &'a str,
+        local: &'a str,
+    },
     Reference {
         name: String,
         kind: RefKind<'a>,
@@ -1405,7 +1413,10 @@ impl<'a> Value<'a> {
     fn computed(self) -> Self {
         match self {
             Value::Reference { name, kind: RefKind::Import { namespace_member, .. } } => {
-                Value::Reference { name, kind: RefKind::Import { namespace_member, local: None } }
+                Value::Reference {
+                    name,
+                    kind: RefKind::Import { namespace_member, local: None, namespace: None },
+                }
             }
             value => value,
         }
@@ -1457,7 +1468,7 @@ impl<'a> Value<'a> {
                     .collect::<std::vec::Vec<_>>()
                     .join(", ")
             ),
-            Value::Module(_) => "(module)".into(),
+            Value::Module { .. } => "(module)".into(),
             _ if self.is_dynamic() => "(not statically analyzable)".into(),
             Value::Reference { name, .. } | Value::Enum { name, .. } => name.clone(),
             Value::Builtin(_) => "Function".into(),
@@ -1958,7 +1969,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         // The resolver enumerates them; an export it can't
                         // read stands for ngtsc's `DynamicValue`.
                         #[cfg(feature = "cross_file_elision")]
-                        Value::Module(module) => match self.module_exports(module) {
+                        Value::Module { specifier, .. } => match self.module_exports(specifier) {
                             Some(exports) if self.spend(exports.len() as u32) => {
                                 props.extend(exports);
                             }
@@ -2171,10 +2182,14 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     let declared = if imported == "default" { name } else { imported };
                     Value::Reference {
                         name: declared.into(),
-                        kind: RefKind::Import { namespace_member: false, local: Some(name) },
+                        kind: RefKind::Import {
+                            namespace_member: false,
+                            local: Some(name),
+                            namespace: None,
+                        },
                     }
                 }
-                None => Value::Module(import.module),
+                None => Value::Module { specifier: import.module, local: name },
             };
         }
         match name {
@@ -2486,7 +2501,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     let imported = matches!(left, TSTypeName::IdentifierReference(id)
                         if self.consts.scope().imports.contains_key(id.name.as_str()));
                     let kind = if imported {
-                        RefKind::Import { namespace_member: false, local: None }
+                        RefKind::Import { namespace_member: false, local: None, namespace: None }
                     } else {
                         RefKind::Other
                     };
@@ -2709,18 +2724,22 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             Value::String(s) if matches!(key, Key::Str("concat")) => {
                 Value::Builtin(Builtin::StringConcat(s))
             }
-            Value::Module(_module) => {
+            Value::Module { specifier: _specifier, local } => {
                 // `ns.x`: the resolver answers with `x`'s value in `module`,
                 // like the identifier path does for `import { x }`.
                 #[cfg(feature = "cross_file_elision")]
                 if let Some(resolver) = self.consts.resolver()
-                    && let Some(value) = resolver.resolve(_module, &key_str())
+                    && let Some(value) = resolver.resolve(_specifier, &key_str())
                 {
                     return value.to_value();
                 }
                 Value::Reference {
                     name: key_str(),
-                    kind: RefKind::Import { namespace_member: true, local: None },
+                    kind: RefKind::Import {
+                        namespace_member: true,
+                        local: None,
+                        namespace: Some(local),
+                    },
                 }
             }
             Value::Reference { kind: RefKind::Class(class), .. } => {
@@ -2843,7 +2862,7 @@ pub(crate) fn transform_error<'a>(
         // a value computed from it (`!FLAG`, `make()`), which the caller
         // reports as imported.
         Value::Reference {
-            kind: RefKind::Import { namespace_member: false, local: Some(_) },
+            kind: RefKind::Import { namespace_member: false, local: Some(_), .. },
             ..
         } => {
             return clash();

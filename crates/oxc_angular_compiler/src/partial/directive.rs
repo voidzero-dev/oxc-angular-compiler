@@ -43,7 +43,7 @@ use super::factory::compile_declare_factory_function;
 use super::wrap_forward_ref;
 use crate::directive::{
     QueryPredicate, R3DirectiveMetadata, R3HostDirectiveMetadata, R3HostMetadata, R3InputMetadata,
-    R3QueryMetadata, strip_host_key,
+    R3QueryMetadata, create_host_directive_mappings_array, strip_host_key,
 };
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
@@ -569,14 +569,14 @@ fn create_host_directives_array<'a>(
         if !hd.inputs.is_empty() {
             hd_entries.push(LiteralMapEntry::new(
                 Ident::from("inputs"),
-                host_directives_mapping_array(allocator, &hd.inputs),
+                create_host_directive_mappings_array(allocator, &hd.inputs),
                 false,
             ));
         }
         if !hd.outputs.is_empty() {
             hd_entries.push(LiteralMapEntry::new(
                 Ident::from("outputs"),
-                host_directives_mapping_array(allocator, &hd.outputs),
+                create_host_directive_mappings_array(allocator, &hd.outputs),
                 false,
             ));
         }
@@ -587,24 +587,6 @@ fn create_host_directives_array<'a>(
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        &allocator,
-    ))
-}
-
-/// Mirrors upstream `createHostDirectivesMappingArray` — flat alternating
-/// `[publicName, alias, publicName, alias, ...]` string array.
-fn host_directives_mapping_array<'a>(
-    allocator: &'a Allocator,
-    pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
-) -> OutputExpression<'a> {
-    let mut elements: Vec<'a, OutputExpression<'a>> =
-        Vec::with_capacity_in(pairs.len() * 2, &allocator);
-    for (public_name, alias) in pairs {
-        elements.push(string_literal_owned(allocator, public_name.clone()));
-        elements.push(string_literal_owned(allocator, alias.clone()));
-    }
-    OutputExpression::LiteralArray(Box::new_in(
-        LiteralArrayExpr { entries: elements, source_span: None },
         &allocator,
     ))
 }

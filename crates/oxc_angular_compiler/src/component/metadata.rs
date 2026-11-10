@@ -816,13 +816,24 @@ pub struct ImportRef<'a> {
 /// See: packages/compiler/src/render3/view/compiler.ts:683-723
 #[derive(Debug)]
 pub struct HostDirectiveMetadata<'a> {
-    /// The directive class name.
+    /// The directive class name as written in this file: the class's own
+    /// name, the local name of its import, or for `ns.X` the export name `X`.
     pub directive: Ident<'a>,
 
     /// The source module of the directive (e.g., "@angular/common", "./my-directive").
     /// Used to generate proper namespace aliases for imported host directives.
     /// `None` for local directives defined in the same file.
     pub source_module: Option<Ident<'a>>,
+
+    /// The name `source_module` exports the class under, when it isn't
+    /// `directive`: `H` for `import { H as P }`, `default` for a default
+    /// import, `s-dir` for `import { "s-dir" as SDir }`.
+    pub export_name: Option<Ident<'a>>,
+
+    /// For `ns.X` read off `import * as ns`, the local name `ns`. It is only
+    /// used when the namespace import has no `source_module`, to keep the
+    /// reference as written.
+    pub namespace: Option<Ident<'a>>,
 
     /// Input mappings: (publicName, internalName) pairs.
     /// Empty if no inputs are exposed.
@@ -847,6 +858,8 @@ impl<'a> HostDirectiveMetadata<'a> {
         Self {
             directive,
             source_module: None,
+            export_name: None,
+            namespace: None,
             inputs: Vec::new_in(&allocator),
             outputs: Vec::new_in(&allocator),
             is_forward_reference: false,

@@ -61,7 +61,8 @@ use crate::ng_module::{
 };
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, DeclareFunctionStmt, DeclareVarStmt, FunctionExpr,
-    OutputExpression, OutputStatement, RawSourceExpr, ReadPropExpr, ReadVarExpr, StmtModifier,
+    LiteralValue, OutputAstBuilder, OutputExpression, OutputStatement, RawSourceExpr, ReadPropExpr,
+    ReadVarExpr, StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
 use crate::parser::ParseTemplateOptions;
@@ -937,15 +938,47 @@ fn dts_type_ref<'a>(
 ) -> String {
     match import_map.get(&Ident::from(local)) {
         Some(info) if info.is_named_import => {
-            let namespace = registry.get_or_assign(&info.source_module);
-            if let Some(name) = &info.string_export_name {
-                return format!("{namespace}[{}]", crate::directive::ts_string_literal(name));
-            }
-            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
-            format!("{namespace}.{export}")
+            let export = info
+                .string_export_name
+                .as_ref()
+                .or(info.imported_name.as_ref())
+                .map_or(local, |name| name.as_str());
+            dts_export_ref(&info.source_module, export, registry)
         }
         _ => local.to_string(),
     }
+}
+
+/// The `.d.ts` type reference of the export `export` of `module`: `i1.Dep`,
+/// or `i1["s-dir"]` for an export name that isn't an identifier name.
+fn dts_export_ref<'a>(
+    module: &Ident<'a>,
+    export: &str,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    dts::export_member(registry.get_or_assign(module).as_str(), export)
+}
+
+/// For a host directive `ns.X` / `ns["x"]` read off `import * as ns`, the
+/// namespace's import and the export name.
+fn host_directive_namespace_member<'e, 'a>(
+    expr: &'e OutputExpression<'a>,
+    import_map: &'e ImportMap<'a>,
+) -> Option<(&'e ImportInfo<'a>, Ident<'a>)> {
+    let (receiver, export) = match expr {
+        OutputExpression::ReadProp(prop) => (&prop.receiver, prop.name),
+        OutputExpression::ReadKey(key) => match &*key.index {
+            OutputExpression::Literal(lit) => match &lit.value {
+                LiteralValue::String(name) => (&key.receiver, *name),
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let OutputExpression::ReadVar(namespace) = &**receiver else { return None };
+    let info = import_map.get(&namespace.name).filter(|info| !info.is_named_import)?;
+    Some((info, export))
 }
 
 /// `i1.name` for the export `name` of `specifier` in the `.d.ts`.
@@ -962,7 +995,10 @@ fn dts_module_ref<'a>(
 /// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
 ///
 /// Replaces bare `ReadVar("X")` references with namespace-prefixed `ReadProp(ReadVar("i1"), "X")`
-/// for any host directive that has a corresponding import in the import map.
+/// for any host directive that has a corresponding import in the import map,
+/// and `ns.X` (`import * as ns`) with `i1.X`. Like ngtsc's `toR3Reference`, the
+/// module's export name is used: `i1.Foo` for `import { Foo as Bar }`,
+/// `i1.default` for a default import, `i1["s-dir"]` for a string export name.
 /// This ensures the compiled output works correctly even after import elision.
 fn resolve_host_directive_namespaces<'a>(
     allocator: &'a Allocator,
@@ -971,29 +1007,25 @@ fn resolve_host_directive_namespaces<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) {
     for hd in host_directives.iter_mut() {
-        // Only process bare variable references (ReadVar)
-        let OutputExpression::ReadVar(ref var) = hd.directive else { continue };
-        let name = &var.name;
-        // Look up this identifier in the import map
-        let Some(import_info) = import_map.get(name) else { continue };
-        // Replace with namespace-prefixed reference: i1.BrnTooltipTrigger instead of BrnTooltipTrigger
-        let namespace = namespace_registry.get_or_assign(&import_info.source_module);
-        hd.directive = OutputExpression::ReadProp(oxc_allocator::Box::new_in(
-            ReadPropExpr {
-                receiver: oxc_allocator::Box::new_in(
-                    OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                        ReadVarExpr { name: namespace, source_span: None },
-                        &allocator,
-                    )),
-                    &allocator,
-                ),
-                // Export name when aliased (`Foo as Bar` → `i1.Foo`).
-                name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
+        let (source_module, export) = match &hd.directive {
+            OutputExpression::ReadVar(var) => {
+                let Some(info) = import_map.get(&var.name) else { continue };
+                let export = info.string_export_name.or(info.imported_name).unwrap_or(var.name);
+                (info.source_module, export)
+            }
+            expr => {
+                let Some((info, export)) = host_directive_namespace_member(expr, import_map) else {
+                    continue;
+                };
+                (info.source_module, export)
+            }
+        };
+        let namespace = namespace_registry.get_or_assign(&source_module);
+        hd.directive = OutputAstBuilder::export_read(
+            allocator,
+            OutputAstBuilder::variable(allocator, namespace),
+            export,
+        );
     }
 }
 
@@ -4491,12 +4523,18 @@ pub fn transform_angular_file(
                                 let host_directive_types: Vec<String> = metadata
                                     .host_directives
                                     .iter()
-                                    .map(|hd| {
-                                        dts_type_ref(
-                                            hd.directive.as_str(),
-                                            &import_map,
+                                    .map(|hd| match (&hd.source_module, hd.namespace) {
+                                        // `ns.X`, or an import: the module's export.
+                                        (Some(module), _) => dts_export_ref(
+                                            module,
+                                            hd.export_name.unwrap_or(hd.directive).as_str(),
                                             &mut dts_namespace_registry,
-                                        )
+                                        ),
+                                        // `ns.X` with no module to alias: as written.
+                                        (None, Some(namespace)) => {
+                                            dts::export_member(&namespace, &hd.directive)
+                                        }
+                                        (None, None) => hd.directive.to_string(),
                                     })
                                     .collect();
                                 result.dts_declarations.push(dts_entry(
@@ -4599,7 +4637,14 @@ pub fn transform_angular_file(
                                     &import_map,
                                     &mut dts_namespace_registry,
                                 ),
-                                _ => dts::extract_directive_name_from_expr(&hd.directive),
+                                expr => match host_directive_namespace_member(expr, &import_map) {
+                                    Some((info, export)) => dts_export_ref(
+                                        &info.source_module,
+                                        export.as_str(),
+                                        &mut dts_namespace_registry,
+                                    ),
+                                    None => dts::extract_directive_name_from_expr(expr),
+                                },
                             })
                             .collect()
                     } else {
@@ -6290,6 +6335,21 @@ fn compile_component_partial<'a>(
     pool_starting_index: u32,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> FullCompilationResult<'a> {
+    let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
+    // ngtsc emits `ɵfac` before `ɵcmp`, so the factory's dependencies take
+    // their namespace aliases before the host directives do.
+    let fac_expr = crate::partial::component::compile_declare_factory_for_component(
+        allocator,
+        core_namespace,
+        version,
+        metadata,
+        namespace_registry,
+    );
+    let host_directive_refs: Vec<OutputExpression<'a>> = metadata
+        .host_directives
+        .iter()
+        .map(|hd| crate::component::create_directive_reference(allocator, hd, namespace_registry))
+        .collect();
     let inputs = crate::partial::PartialComponentInputs {
         template,
         is_inline: metadata.template.is_some(),
@@ -6297,21 +6357,14 @@ fn compile_component_partial<'a>(
         view_queries,
         defer_block_dependencies,
         import_scopes,
+        host_directive_refs: &host_directive_refs,
     };
-    let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
     let cmp_expr = crate::partial::compile_declare_component_from_metadata(
         allocator,
         core_namespace,
         version,
         metadata,
         &inputs,
-    );
-    let fac_expr = crate::partial::component::compile_declare_factory_for_component(
-        allocator,
-        core_namespace,
-        version,
-        metadata,
-        namespace_registry,
     );
 
     // Detect `@defer` block presence by a cheap string scan — partial

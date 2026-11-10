@@ -42,7 +42,7 @@ use crate::component::{
     HostMetadata, ImportRef, NamespaceRegistry, TemplateDependency, TemplateDependencyKind,
     ViewEncapsulation,
 };
-use crate::directive::{R3InputMetadata, R3QueryMetadata};
+use crate::directive::{R3InputMetadata, R3QueryMetadata, create_host_directive_mappings_array};
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata,
@@ -78,6 +78,10 @@ pub struct PartialComponentInputs<'a, 'm> {
     /// the directives and pipes it exports, when cross-file analysis read
     /// them (#655).
     pub import_scopes: &'m [(Ident<'a>, Vec<'a, TemplateDependency<'a>>)],
+    /// Each host directive's reference (`i1.H`, by the module's export
+    /// name), in `meta.host_directives` order. A host directive without
+    /// one is written by its name in this file.
+    pub host_directive_refs: &'m [OutputExpression<'a>],
 }
 
 /// Emits the `ɵɵngDeclareComponent` call for a component's `ɵcmp` static.
@@ -214,7 +218,12 @@ pub fn compile_declare_component_from_metadata<'a>(
     if !meta.host_directives.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("hostDirectives"),
-            create_host_directives_array(allocator, core_namespace, &meta.host_directives),
+            create_host_directives_array(
+                allocator,
+                core_namespace,
+                &meta.host_directives,
+                inputs.host_directive_refs,
+            ),
             false,
         ));
     }
@@ -648,15 +657,19 @@ fn create_host_directives_array<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     host_directives: &Vec<'a, HostDirectiveMetadata<'a>>,
+    refs: &[OutputExpression<'a>],
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
         Vec::with_capacity_in(host_directives.len(), &allocator);
-    for hd in host_directives {
+    for (i, hd) in host_directives.iter().enumerate() {
         let mut hd_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
-        let directive_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: hd.directive.clone(), source_span: None },
-            &allocator,
-        ));
+        let directive_expr = match refs.get(i) {
+            Some(reference) => reference.clone_in(allocator),
+            None => OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: hd.directive.clone(), source_span: None },
+                &allocator,
+            )),
+        };
         let directive_expr = if hd.is_forward_reference {
             wrap_forward_ref(allocator, core_namespace, directive_expr)
         } else {
@@ -667,14 +680,14 @@ fn create_host_directives_array<'a>(
         if !hd.inputs.is_empty() {
             hd_entries.push(LiteralMapEntry::new(
                 Ident::from("inputs"),
-                host_directives_mapping_array(allocator, &hd.inputs),
+                create_host_directive_mappings_array(allocator, &hd.inputs),
                 false,
             ));
         }
         if !hd.outputs.is_empty() {
             hd_entries.push(LiteralMapEntry::new(
                 Ident::from("outputs"),
-                host_directives_mapping_array(allocator, &hd.outputs),
+                create_host_directive_mappings_array(allocator, &hd.outputs),
                 false,
             ));
         }
@@ -685,22 +698,6 @@ fn create_host_directives_array<'a>(
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        &allocator,
-    ))
-}
-
-fn host_directives_mapping_array<'a>(
-    allocator: &'a Allocator,
-    pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
-) -> OutputExpression<'a> {
-    let mut elements: Vec<'a, OutputExpression<'a>> =
-        Vec::with_capacity_in(pairs.len() * 2, &allocator);
-    for (public_name, alias) in pairs {
-        elements.push(string_literal_owned(allocator, public_name.clone()));
-        elements.push(string_literal_owned(allocator, alias.clone()));
-    }
-    OutputExpression::LiteralArray(Box::new_in(
-        LiteralArrayExpr { entries: elements, source_span: None },
         &allocator,
     ))
 }

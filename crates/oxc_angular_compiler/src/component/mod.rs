@@ -25,6 +25,7 @@ mod transform;
 pub use cross_file_elision::CrossFileAnalyzer;
 pub use decorator::extract_component_metadata;
 pub(crate) use decorator::find_component_decorator;
+pub(crate) use definition::create_directive_reference;
 pub use definition::{
     ComponentDefinitions, const_value_to_expression, generate_component_definitions,
 };

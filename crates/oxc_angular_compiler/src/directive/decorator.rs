@@ -187,8 +187,18 @@ pub fn extract_directive_metadata<'a>(
                     }
                     "hostDirectives" => {
                         for entry in evaluate_host_directives(allocator, &prop.value, consts) {
+                            // `ns.X` stays a read off the namespace import; the
+                            // transform swaps `ns` for its own namespace alias.
+                            let directive = match entry.namespace {
+                                Some(namespace) => OutputAstBuilder::export_read(
+                                    allocator,
+                                    OutputAstBuilder::variable(allocator, namespace),
+                                    entry.name,
+                                ),
+                                None => OutputAstBuilder::variable(allocator, entry.name),
+                            };
                             builder = builder.add_host_directive(R3HostDirectiveMetadata {
-                                directive: OutputAstBuilder::variable(allocator, entry.name),
+                                directive,
                                 is_forward_reference: entry.is_forward_reference,
                                 has_mapping_keys: entry.has_mapping_keys(),
                                 inputs: entry.inputs.unwrap_or_else(|| Vec::new_in(&allocator)),
@@ -888,7 +898,7 @@ fn imported_transform_error(
 ) -> Option<(String, Span)> {
     let computed = matches!(
         transform.value,
-        Value::Reference { kind: RefKind::Import { namespace_member: false, local: None }, .. }
+        Value::Reference { kind: RefKind::Import { namespace_member: false, local: None, .. }, .. }
     );
     computed.then(|| (value_error(subject, String::new, &transform.value), span))
 }
@@ -915,7 +925,9 @@ fn reference_identity<'p>(transform: &'p Prop<'_>, consts: &StringConsts<'_>) ->
         {
             Some(name)
         }
-        Value::Reference { kind: RefKind::Import { namespace_member: false, local }, .. } => *local,
+        Value::Reference {
+            kind: RefKind::Import { namespace_member: false, local, .. }, ..
+        } => *local,
         Value::Reference { name, kind: RefKind::Global | RefKind::Ambient } => Some(name),
         _ => None,
     }
@@ -2192,8 +2204,11 @@ fn extract_host_metadata<'a>(
 /// One `hostDirectives` entry, as ngtsc's `extractHostDirectives` reads it.
 pub struct HostDirectiveEntry<'a> {
     /// The name the directive class is referenced by in this file: its own
-    /// name, or the local name of its import.
+    /// name, or the local name of its import. For `ns.X` read off
+    /// `import * as ns`, the export name `X`.
     pub name: Ident<'a>,
+    /// For `ns.X`, the local name `ns` of the `import * as ns`.
+    pub namespace: Option<Ident<'a>>,
     /// Written as `forwardRef(() => X)` (ngtsc's synthetic reference).
     pub is_forward_reference: bool,
     /// The `inputs` mappings as (publicName, internalName) pairs, or `None`
@@ -2268,34 +2283,53 @@ pub fn evaluate_host_directives<'a>(
         .filter_map(|(value, written)| {
             if let Value::Object(_) = &value {
                 let reference = value.prop("directive")?;
-                let (name, is_forward_reference) = directive(&reference.value, reference.expr)?;
+                let ((name, namespace), is_forward_reference) =
+                    directive(&reference.value, reference.expr)?;
                 let mappings =
                     |key| value.prop(key).map(|p| host_directive_mappings(allocator, &p.value));
                 Some(HostDirectiveEntry {
                     name,
+                    namespace,
                     is_forward_reference,
                     inputs: mappings("inputs"),
                     outputs: mappings("outputs"),
                 })
             } else {
-                let (name, is_forward_reference) = directive(&value, written)?;
-                Some(HostDirectiveEntry { name, is_forward_reference, inputs: None, outputs: None })
+                let ((name, namespace), is_forward_reference) = directive(&value, written)?;
+                Some(HostDirectiveEntry {
+                    name,
+                    namespace,
+                    is_forward_reference,
+                    inputs: None,
+                    outputs: None,
+                })
             }
         })
         .collect()
 }
 
-/// The name a host directive class reference is written by in this file.
-fn host_directive_name<'a>(allocator: &'a Allocator, value: &Value<'a>) -> Option<Ident<'a>> {
-    let name = match value {
-        Value::Reference { name, kind: RefKind::Class(_) | RefKind::Ambient } => name.as_str(),
+/// The name a host directive class reference is written by in this file,
+/// and for `ns.X` (`import * as ns`) the export name `X` and the namespace's
+/// local name `ns`. A member of anything else (`ns.sub.X`) has no name here.
+fn host_directive_name<'a>(
+    allocator: &'a Allocator,
+    value: &Value<'a>,
+) -> Option<(Ident<'a>, Option<Ident<'a>>)> {
+    let alloc = |s: &str| Ident::from(allocator.alloc_str(s));
+    match value {
+        Value::Reference { name, kind: RefKind::Class(_) | RefKind::Ambient } => {
+            Some((alloc(name), None))
+        }
         Value::Reference {
-            kind: RefKind::Import { namespace_member: false, local: Some(local) },
+            kind: RefKind::Import { namespace_member: false, local: Some(local), .. },
             ..
-        } => local,
-        _ => return None,
-    };
-    Some(Ident::from(allocator.alloc_str(name)))
+        } => Some((alloc(local), None)),
+        Value::Reference {
+            name,
+            kind: RefKind::Import { namespace_member: true, namespace: Some(namespace), .. },
+        } => Some((alloc(name), Some(alloc(namespace)))),
+        _ => None,
+    }
 }
 
 /// A host directive `inputs` / `outputs` array as (publicName, internalName)
