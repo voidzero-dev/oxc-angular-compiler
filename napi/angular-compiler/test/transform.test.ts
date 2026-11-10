@@ -536,9 +536,10 @@ describe('animation host listeners', () => {
     `
     const result = await transformAngularFile(source, 'test.component.ts', {})
     expect(result.errors).toHaveLength(0)
-    // The literal in syntheticHostListener preserves the trigger as-is (Angular
-    // does not sanitize it — the @ + trigger + . + phase string is the runtime key)
-    expect(result.code).toContain('ɵɵsyntheticHostListener("@μAnim.start"')
+    // The literal in syntheticHostListener keeps the trigger (Angular does not
+    // sanitize it — the @ + trigger + . + phase string is the runtime key). Like
+    // ngtsc's printer, the μ is written as an escape.
+    expect(result.code).toContain('ɵɵsyntheticHostListener("@\\u03BCAnim.start"')
     // The handler function name MUST sanitize μ → _ (JS \W matches non-ASCII)
     expect(result.code).toContain('TestComponent_animation__Anim_start_HostBindingHandler')
     expect(result.code).not.toContain('TestComponent_animation_μAnim_start')
