@@ -502,7 +502,8 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         expect(readFileSync(stamp, 'utf-8')).toBe('')
         // A new private dir, so no other user can plant a link there or make it read-only.
         expect(basename(dirname(stamp))).toMatch(/^oxc-angular-ssr-.{6}$/)
-        expect(statSync(dirname(stamp)).mode & 0o777).toBe(0o700)
+        // Windows has no mode bits: a new dir reads as 0o777 there.
+        if (process.platform !== 'win32') expect(statSync(dirname(stamp)).mode & 0o777).toBe(0o700)
         const rendered = build.render(code!)
         build.clientEnd(new Error('client'))
         expect(await rendered).toContain('/src/main.ts')
@@ -558,9 +559,11 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       it('warns once when it cannot make the watched file', async () => {
         const root = tempRoot()
         const missing = join(root, 'missing')
-        const saved = process.env.TMPDIR
+        // os.tmpdir() reads TMPDIR on POSIX, TEMP or TMP on Windows.
+        const names = ['TMPDIR', 'TEMP', 'TMP'] as const
+        const saved = names.map((name) => process.env[name])
         // Only the plugin's temp dir is missing: the root is made before.
-        process.env.TMPDIR = missing
+        for (const name of names) process.env[name] = missing
         try {
           const build = watchApp(root)
           await build.server(ENGINE)
@@ -571,8 +574,10 @@ describe('SSR Manifest Generation (Issue #60)', () => {
             `could not make a file in ${missing}, so client-only changes do not rebuild the server: `,
           )
         } finally {
-          if (saved === undefined) delete process.env.TMPDIR
-          else process.env.TMPDIR = saved
+          for (const [i, name] of names.entries()) {
+            if (saved[i] === undefined) delete process.env[name]
+            else process.env[name] = saved[i]
+          }
         }
       })
 

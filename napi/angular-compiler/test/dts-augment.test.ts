@@ -569,4 +569,19 @@ describe('augmentDeclarations with sources', () => {
     await expect(augmentDeclarations({ sources })).rejects.toThrow(/declarationDir/)
     await expect(augmentDeclarations({})).rejects.toThrow(/tsconfig/)
   })
+
+  it('fails on a declarationDir that is missing or holds no declarations', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dts-augment-dir-'))
+    try {
+      await expect(
+        augmentDeclarations({ declarationDir: 'dist', sources, cwd: dir }),
+      ).rejects.toThrow(/is not a directory/)
+      mkdirSync(join(dir, 'dist'))
+      await expect(
+        augmentDeclarations({ declarationDir: 'dist', sources, cwd: dir }),
+      ).rejects.toThrow(/holds no declaration files/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

@@ -12,7 +12,7 @@
  * meant for plain Node scripts.
  */
 import { readFileSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 
@@ -322,8 +322,16 @@ async function matchedTargets(
   caseSensitive: boolean,
   result: AugmentDeclarationsResult,
 ): Promise<Target[]> {
+  const found = (await stat(dir).catch(() => undefined))?.isDirectory()
+    ? await findDtsFiles(dir)
+    : undefined
+  // A wrong or not yet built dir must not pass as "nothing to do".
+  if (!found) throw new Error(`augmentDeclarations: declarationDir ${dir} is not a directory.`)
+  if (found.length === 0 && sources.length > 0) {
+    throw new Error(`augmentDeclarations: declarationDir ${dir} holds no declaration files.`)
+  }
   const files: Array<{ fileName: string; mapSource?: string }> = []
-  for (const file of await findDtsFiles(dir)) {
+  for (const file of found) {
     const code = await readFile(file, 'utf8')
     const mapSource = dtsMapSource(code, file, (ref) => readTextSync(resolve(dirname(file), ref)))
     files.push({ fileName: file, mapSource })
@@ -457,8 +465,9 @@ async function compile(
     tsconfigPath: context.tsconfigPath,
   }
 
-  // Templates can change the members (`ngContentSelectors`), so they are
-  // read as they are. No member uses style text, so styles stay empty.
+  // Templates are read as they are, so they parse and their `<link>`
+  // stylesheets are found. No member uses style text, so styles stay empty.
+  // Partial mode writes `never` for `ngContentSelectors`, where ngc lists them.
   const { templateUrls, styleUrls } = await extractComponentUrls(code, source, options)
   const templates: Record<string, string> = {}
   for (const url of templateUrls) {

@@ -376,7 +376,8 @@ kept), but members from an earlier run are then kept as they are.
 Without TypeScript, pass the output dir and the library's source files
 instead. Each declaration file is then matched to its source as in the Vite
 build: by its declaration map, else by the one layout of the dir. A file that
-matches no source is left alone and listed in `unmatched`. Pass `tsconfig`
+matches no source is left alone and listed in `unmatched`. A `declarationDir`
+that does not exist, or holds no declaration files, is an error. Pass `tsconfig`
 too when decorator values come through `paths` aliases:
 
 ```js
@@ -398,7 +399,8 @@ dir. `outFile` builds are not supported.
 
 Members are the same text the Vite build writes (the same compiler, in
 partial mode). Templates are read as they are, without the plugin's
-`templateTransform`.
+`templateTransform`. Like the Vite build, a component's `ngContentSelectors`
+is `never`, where ngc lists the selectors.
 
 ## Vite Plugin Architecture
 
