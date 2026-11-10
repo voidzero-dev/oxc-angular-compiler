@@ -326,6 +326,8 @@ fn extract_param_dependency<'a>(
     let mut host = false;
     let mut inject_token: Option<OutputExpression<'a>> = None;
     let mut attribute_name: Option<Ident<'a>> = None;
+    // The attribute name as written, when ngtsc keeps it (see `string_literal_as_written`).
+    let mut attribute_source: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = crate::directive::angular_param_decorator(decorator, consts) {
@@ -350,6 +352,8 @@ fn extract_param_dependency<'a>(
                             && let Some(name) = s.value.as_str()
                         {
                             attribute_name = Some(name.into());
+                            attribute_source =
+                                crate::output::oxc_converter::string_literal_as_written(s);
                         }
                     }
                 }
@@ -374,7 +378,10 @@ fn extract_param_dependency<'a>(
         // ngtsc's `attributeNameType` is the attribute name itself (di.ts), so it is
         // set whatever the parameter's type and compiles to `ɵɵinjectAttribute`.
         return R3DependencyMetadata {
-            token: Some(name.clone_in(allocator)),
+            token: Some(match attribute_source {
+                Some(source) => crate::output::oxc_converter::raw_source(allocator, source),
+                None => name.clone_in(allocator),
+            }),
             attribute_name_type: Some(name),
             host,
             optional,

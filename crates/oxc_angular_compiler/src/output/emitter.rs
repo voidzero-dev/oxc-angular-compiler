@@ -377,18 +377,33 @@ pub struct JsEmitter {
     escape_dollar_in_strings: bool,
     /// Name to print instead of `i0` for the `@angular/core` namespace.
     core_namespace: Option<String>,
+    /// How string literals print text outside ASCII.
+    non_ascii: NonAscii,
 }
 
 impl JsEmitter {
-    /// Create a new JavaScript emitter.
+    /// Create a new JavaScript emitter. Strings print like ngtsc prints them: text
+    /// outside ASCII as `\uXXXX` escapes (see [`escape_string`]).
     pub fn new() -> Self {
-        Self { escape_dollar_in_strings: false, core_namespace: None }
+        Self { escape_dollar_in_strings: false, core_namespace: None, non_ascii: NonAscii::Escape }
     }
 
-    /// Print `ns` instead of `i0` for the `@angular/core` namespace. The linker needs this
-    /// because a minified library may import `@angular/core` under any name.
+    /// An emitter for linker output: strings print like the Angular linker's Babel
+    /// generator prints them (see [`escape_string_for_linker`]).
+    pub fn for_linker() -> Self {
+        Self { escape_dollar_in_strings: false, core_namespace: None, non_ascii: NonAscii::Linker }
+    }
+
+    /// A linker emitter (see [`JsEmitter::for_linker`]) that prints `ns` instead of `i0`
+    /// for the `@angular/core` namespace, because a minified library may import
+    /// `@angular/core` under any name.
     pub fn with_core_namespace(ns: &str) -> Self {
-        Self { escape_dollar_in_strings: false, core_namespace: Some(ns.to_string()) }
+        Self { core_namespace: Some(ns.to_string()), ..Self::for_linker() }
+    }
+
+    /// `s` as a quoted string literal, in this emitter's style.
+    fn quote(&self, s: &str) -> String {
+        escape_string_with(s, self.escape_dollar_in_strings, self.non_ascii)
     }
 
     /// Emit an expression to a string.
@@ -672,7 +687,7 @@ impl JsEmitter {
                 // written as a key (ngtsc prints it raw, as U+FFFD).
                 if has_lone_surrogate(&e.name) {
                     ctx.print(if e.optional { "?.[" } else { "[" });
-                    let key = escape_string(&e.name, self.escape_dollar_in_strings);
+                    let key = self.quote(&e.name);
                     ctx.print_with_span(&key, prop_span);
                     ctx.print("]");
                 } else {
@@ -896,7 +911,7 @@ impl JsEmitter {
                 }
                 match &e.url {
                     DynamicImportUrl::String(s) => {
-                        ctx.print(&escape_string(s, self.escape_dollar_in_strings));
+                        ctx.print(&self.quote(s));
                     }
                     DynamicImportUrl::Expression(expr) => {
                         self.visit_expression(expr, ctx);
@@ -956,7 +971,7 @@ impl JsEmitter {
                 ctx.print_with_span(&format_number_like_js(*n), source_span);
             }
             LiteralValue::String(s) => {
-                ctx.print_with_span(&escape_string(s, self.escape_dollar_in_strings), source_span);
+                ctx.print_with_span(&self.quote(s), source_span);
             }
         }
     }
@@ -1013,9 +1028,17 @@ impl JsEmitter {
                 ctx.print("...");
                 self.visit_expression(&entry.value, ctx);
             } else {
-                let key =
-                    escape_identifier(&entry.key, self.escape_dollar_in_strings, entry.quoted);
-                ctx.print(&key);
+                if entry.key_as_written {
+                    ctx.print(&entry.key);
+                } else {
+                    let key = escape_identifier(
+                        &entry.key,
+                        self.escape_dollar_in_strings,
+                        entry.quoted,
+                        self.non_ascii,
+                    );
+                    ctx.print(&key);
+                }
                 ctx.print(":");
                 self.visit_expression(&entry.value, ctx);
             }
@@ -1344,14 +1367,39 @@ fn is_nullish_coalesce(expr: &OutputExpression<'_>) -> bool {
     }
 }
 
-/// Escape a string for JavaScript output.
+/// How a string literal prints text outside ASCII.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonAscii {
+    /// As `\uXXXX` escapes, one per UTF-16 code unit, like the TypeScript printer
+    /// that writes ngtsc's output (`escapeNonAsciiString`).
+    Escape,
+    /// As raw UTF-8, except the Unicode spaces that the Angular linker's Babel 8
+    /// generator escapes (jsesc with `minimal: true`).
+    Linker,
+}
+
+/// Escape a string for JavaScript output, the way ngtsc prints a string literal
+/// it creates.
 ///
 /// Uses double quotes to match Angular's output style.
 /// Escapes `"`, `\`, `\n`, `\r`, `$` (when requested), and ASCII control characters
-/// as `\uNNNN` sequences. Non-ASCII characters (code point > 0x7E) are emitted as
-/// raw UTF-8 to match Angular's TypeScript emitter behavior (see `escapeIdentifier`
-/// in `abstract_emitter.ts`), which only escapes `'`, `\`, `\n`, `\r`, and `$`.
+/// as `\uNNNN` sequences. Text outside ASCII is escaped as `\uXXXX`, one escape per
+/// UTF-16 code unit in upper-case hex (`é` is `é`, `😀` is `😀`),
+/// like the TypeScript printer (`escapeNonAsciiString`) that writes ngtsc's output.
+/// A literal that ngtsc copies from the source keeps the source text instead
+/// (a `RawSource` expression).
 pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
+    escape_string_with(input, escape_dollar, NonAscii::Escape)
+}
+
+/// Escape a string for linker output, the way the Angular linker prints a string
+/// literal it creates: its Babel 8 generator (jsesc with `minimal: true`) keeps text
+/// outside ASCII as raw UTF-8, but escapes the Unicode spaces (`\xA0`, `\u2028`, ...).
+pub(crate) fn escape_string_for_linker(input: &str) -> String {
+    escape_string_with(input, false, NonAscii::Linker)
+}
+
+fn escape_string_with(input: &str, escape_dollar: bool, non_ascii: NonAscii) -> String {
     let mut result = String::with_capacity(input.len() + 2);
     result.push('"');
     for piece in pieces(input) {
@@ -1373,9 +1421,25 @@ pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
             c if (' '..='\x7E').contains(&c) => result.push(c),
             // DEL (0x7F) is an ASCII control character and must be escaped
             '\x7F' => push_unicode_escape(&mut result, 0x7F),
-            // Non-ASCII characters (> 0x7F) are emitted as raw UTF-8 to match
-            // Angular's TypeScript emitter, which does not escape them.
-            c if (c as u32) > 0x7F => result.push(c),
+            c if (c as u32) > 0x7F => match non_ascii {
+                NonAscii::Escape => {
+                    for unit in c.encode_utf16(&mut [0u16; 2]) {
+                        push_unicode_escape(&mut result, u32::from(*unit));
+                    }
+                }
+                // jsesc's `regexWhitespace`; `\xA0` gets the short form.
+                NonAscii::Linker => match c {
+                    '\u{A0}' => result.push_str("\\xA0"),
+                    '\u{1680}'
+                    | '\u{2000}'..='\u{200A}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{202F}'
+                    | '\u{205F}'
+                    | '\u{3000}' => push_unicode_escape(&mut result, c as u32),
+                    c => result.push(c),
+                },
+            },
             // ASCII control characters (0x00-0x1F) are escaped as \uNNNN.
             c => {
                 push_unicode_escape(&mut result, c as u32);
@@ -1384,6 +1448,26 @@ pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
     }
     result.push('"');
     result
+}
+
+/// `s` with each character outside ASCII written as `\uXXXX` escapes, one per
+/// UTF-16 code unit, as the TypeScript printer writes a string ngtsc creates
+/// (for a module specifier in an import line the compiler adds).
+pub(crate) fn escape_non_ascii(s: &str) -> Cow<'_, str> {
+    if s.is_ascii() {
+        return Cow::Borrowed(s);
+    }
+    let mut result = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        if c.is_ascii() {
+            result.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0u16; 2]) {
+                push_unicode_escape(&mut result, u32::from(*unit));
+            }
+        }
+    }
+    Cow::Owned(result)
 }
 
 /// The raw text of a template literal part, printed verbatim like the TypeScript printer
@@ -1415,7 +1499,12 @@ fn push_unicode_escape(buf: &mut String, code: u32) {
 }
 
 /// Escape an identifier for use as a property key.
-fn escape_identifier(input: &Ident<'_>, escape_dollar: bool, always_quote: bool) -> String {
+fn escape_identifier(
+    input: &Ident<'_>,
+    escape_dollar: bool,
+    always_quote: bool,
+    non_ascii: NonAscii,
+) -> String {
     // Check if the identifier is a valid JavaScript identifier
     fn is_legal_identifier(s: &str) -> bool {
         let mut chars = s.chars();
@@ -1430,7 +1519,7 @@ fn escape_identifier(input: &Ident<'_>, escape_dollar: bool, always_quote: bool)
     }
 
     if always_quote || !is_legal_identifier(input) {
-        escape_string(input, escape_dollar)
+        escape_string_with(input, escape_dollar, non_ascii)
     } else {
         input.to_string()
     }
@@ -1702,36 +1791,55 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_string_unicode_literals() {
-        // Non-ASCII characters should be emitted as raw UTF-8 to match
-        // Angular's TypeScript emitter behavior (escapeIdentifier in abstract_emitter.ts).
+    fn test_escape_string_non_ascii_like_typescript_printer() {
+        // ngtsc's output goes through the TypeScript printer, which writes text
+        // outside ASCII in a string literal it creates as `\uXXXX`, one escape per
+        // UTF-16 code unit, upper-case hex (`escapeNonAsciiString`). Expected
+        // strings are what `ts.factory.createStringLiteral(s)` prints.
+        assert_eq!(escape_string("\u{00E9}", false), "\"\\u00E9\""); // é
+        assert_eq!(escape_string("\u{00D7}", false), "\"\\u00D7\""); // &times;
+        assert_eq!(escape_string("\u{00A0}", false), "\"\\u00A0\""); // &nbsp;
+        assert_eq!(escape_string("\u{2013}", false), "\"\\u2013\""); // &ndash;
+        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\\u00D7b\"");
+        // Outside the BMP: a surrogate pair.
+        assert_eq!(escape_string("\u{1F600}", false), "\"\\uD83D\\uDE00\"");
+        assert_eq!(escape_string("\u{10000}", false), "\"\\uD800\\uDC00\"");
+        assert_eq!(escape_string("\u{00E9}\u{1F600}", false), "\"\\u00E9\\uD83D\\uDE00\"");
+        assert_eq!(escape_string("\u{2028}\u{FEFF}", false), "\"\\u2028\\uFEFF\"");
 
-        // &times; (multiplication sign U+00D7) -> raw UTF-8
-        assert_eq!(escape_string("\u{00D7}", false), "\"\u{00D7}\"");
+        // ASCII printable chars (0x20-0x7E) should remain literal
+        assert_eq!(escape_string(" ~", false), "\" ~\"");
+        assert_eq!(escape_string("abc123!@#", false), "\"abc123!@#\"");
+    }
 
-        // &nbsp; (non-breaking space U+00A0) -> raw UTF-8
-        assert_eq!(escape_string("\u{00A0}", false), "\"\u{00A0}\"");
+    #[test]
+    fn test_escape_string_for_linker_like_babel_generator() {
+        // The Angular linker's Babel 8 generator (jsesc, `minimal: true`) keeps text
+        // outside ASCII as raw UTF-8 and escapes only the Unicode spaces. Expected
+        // strings are what `@babel/generator` 8.0.1 prints for `t.stringLiteral(s)`.
+        assert_eq!(escape_string_for_linker("\u{00E9}\u{1F600}"), "\"\u{00E9}\u{1F600}\"");
+        assert_eq!(
+            escape_string_for_linker("\u{00D7}\u{FEFF}\u{0085}"),
+            "\"\u{00D7}\u{FEFF}\u{0085}\""
+        );
+        assert_eq!(escape_string_for_linker("a\u{00A0}b"), "\"a\\xA0b\"");
+        assert_eq!(escape_string_for_linker("a\u{2028}b\u{2029}c"), "\"a\\u2028b\\u2029c\"");
+        assert_eq!(
+            escape_string_for_linker("\u{1680}\u{2000}\u{200A}\u{202F}\u{205F}\u{3000}"),
+            "\"\\u1680\\u2000\\u200A\\u202F\\u205F\\u3000\""
+        );
+    }
 
-        // Mixed ASCII and non-ASCII
-        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\u{00D7}b\"");
-
-        // Multiple non-ASCII characters
-        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\u{00D7}\u{00A0}\"");
-
-        // Characters outside BMP (emoji) -> raw UTF-8
-        assert_eq!(escape_string("\u{1F600}", false), "\"\u{1F600}\"");
-
-        // Common HTML entities -> all emitted as raw UTF-8
-        assert_eq!(escape_string("\u{00A9}", false), "\"\u{00A9}\""); // &copy; ©
-        assert_eq!(escape_string("\u{00AE}", false), "\"\u{00AE}\""); // &reg; ®
-        assert_eq!(escape_string("\u{2014}", false), "\"\u{2014}\""); // &mdash; —
-        assert_eq!(escape_string("\u{2013}", false), "\"\u{2013}\""); // &ndash; –
-
-        // Greek letter alpha
-        assert_eq!(escape_string("\u{03B1}", false), "\"\u{03B1}\""); // α
-
-        // Accented Latin letter
-        assert_eq!(escape_string("\u{00E9}", false), "\"\u{00E9}\""); // é
+    #[test]
+    fn test_emitter_string_style() {
+        let alloc = Allocator::default();
+        let value = OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String("\u{00FC}".into()), source_span: None },
+            &&alloc,
+        ));
+        assert_eq!(JsEmitter::new().emit_expression(&value), "\"\\u00FC\"");
+        assert_eq!(JsEmitter::for_linker().emit_expression(&value), "\"\u{00FC}\"");
+        assert_eq!(JsEmitter::with_core_namespace("ng").emit_expression(&value), "\"\u{00FC}\"");
     }
 
     #[test]
@@ -1747,40 +1855,6 @@ mod tests {
         // \n and \r have their own named escapes
         assert_eq!(escape_string("\n", false), "\"\\n\"");
         assert_eq!(escape_string("\r", false), "\"\\r\"");
-    }
-
-    #[test]
-    fn test_escape_string_non_ascii_as_raw_utf8() {
-        // Non-ASCII characters should be emitted as raw UTF-8 to match
-        // Angular's TypeScript emitter behavior (escapeIdentifier in abstract_emitter.ts).
-
-        // Non-breaking space U+00A0
-        assert_eq!(escape_string("\u{00A0}", false), "\"\u{00A0}\"");
-
-        // En dash U+2013
-        assert_eq!(escape_string("\u{2013}", false), "\"\u{2013}\"");
-
-        // Trademark U+2122
-        assert_eq!(escape_string("\u{2122}", false), "\"\u{2122}\"");
-
-        // Infinity U+221E
-        assert_eq!(escape_string("\u{221E}", false), "\"\u{221E}\"");
-
-        // Mixed ASCII and non-ASCII
-        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\u{00D7}b\"");
-
-        // Multiple non-ASCII characters
-        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\u{00D7}\u{00A0}\"");
-
-        // Characters above BMP (emoji) -> raw UTF-8
-        assert_eq!(escape_string("\u{1F600}", false), "\"\u{1F600}\"");
-
-        // U+10000 (first supplementary char) -> raw UTF-8
-        assert_eq!(escape_string("\u{10000}", false), "\"\u{10000}\"");
-
-        // ASCII printable chars (0x20-0x7E) should remain literal
-        assert_eq!(escape_string(" ~", false), "\" ~\"");
-        assert_eq!(escape_string("abc123!@#", false), "\"abc123!@#\"");
     }
 
     // ========================================================================

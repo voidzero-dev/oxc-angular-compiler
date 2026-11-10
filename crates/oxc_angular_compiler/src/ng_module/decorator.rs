@@ -82,6 +82,10 @@ pub struct NgModuleMetadata<'a> {
     /// Module ID for registration.
     pub id: Option<Ident<'a>>,
 
+    /// The `id` literal as written, when ngtsc keeps it (see
+    /// `string_literal_as_written`).
+    pub id_source: Option<Ident<'a>>,
+
     /// Whether the lists are wrapped in `() => [...]`. The parser sets it
     /// for a `forwardRef`; the transform replaces it with ngtsc's rule (see
     /// `module_with_providers`).
@@ -114,6 +118,7 @@ impl<'a> NgModuleMetadata<'a> {
             bootstrap: Vec::new_in(&allocator),
             schemas: Vec::new_in(&allocator),
             id: None,
+            id_source: None,
             contains_forward_decls: false,
             deps: None,
         }
@@ -192,13 +197,16 @@ impl<'a> NgModuleMetadata<'a> {
 
         // Set module ID if present
         if let Some(id) = &self.id {
-            let id_expr = OutputExpression::Literal(Box::new_in(
-                crate::output::ast::LiteralExpr {
-                    value: crate::output::ast::LiteralValue::String(id.clone()),
-                    source_span: None,
-                },
-                &allocator,
-            ));
+            let id_expr = match self.id_source {
+                Some(source) => crate::output::oxc_converter::raw_source(allocator, source),
+                None => OutputExpression::Literal(Box::new_in(
+                    crate::output::ast::LiteralExpr {
+                        value: crate::output::ast::LiteralValue::String(id.clone()),
+                        source_span: None,
+                    },
+                    &allocator,
+                )),
+            };
             builder = builder.id(id_expr);
         }
 
@@ -339,6 +347,8 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
                 }
                 "id" => {
                     metadata.id = extract_string_value(&prop.value);
+                    metadata.id_source =
+                        crate::output::oxc_converter::literal_as_written(allocator, &prop.value);
                 }
                 _ => {
                     // Unknown property - ignore (e.g., "jit")
@@ -551,6 +561,8 @@ fn extract_param_dependency<'a>(
     let mut host = false;
     let mut inject_token: Option<OutputExpression<'a>> = None;
     let mut attribute_name: Option<Ident<'a>> = None;
+    // The attribute name as written, when ngtsc keeps it (see `string_literal_as_written`).
+    let mut attribute_source: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = crate::directive::angular_param_decorator(decorator, consts) {
@@ -575,6 +587,8 @@ fn extract_param_dependency<'a>(
                             && let Some(name) = s.value.as_str()
                         {
                             attribute_name = Some(name.into());
+                            attribute_source =
+                                crate::output::oxc_converter::string_literal_as_written(s);
                         }
                     }
                 }
@@ -600,7 +614,10 @@ fn extract_param_dependency<'a>(
         // ngtsc's `attributeNameType` is the attribute name itself (di.ts), so it is
         // set whatever the parameter's type and compiles to `ɵɵinjectAttribute`.
         return R3DependencyMetadata {
-            token: Some(name.clone_in(allocator)),
+            token: Some(match attribute_source {
+                Some(source) => crate::output::oxc_converter::raw_source(allocator, source),
+                None => name.clone_in(allocator),
+            }),
             attribute_name_type: Some(name),
             host,
             optional,

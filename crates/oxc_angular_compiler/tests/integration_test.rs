@@ -171,13 +171,12 @@ fn test_multiple_interpolations() {
 
 #[test]
 fn test_html_entity_between_interpolations() {
-    // HTML entity &times; between two interpolations should produce raw × in the output
+    // HTML entity &times; between two interpolations gives × (U+00D7), which
+    // ngtsc's printer writes as `\u00D7`.
     let js = compile_template_to_js("<div>{{ a }}&times;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "×", ctx.b)
-    // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00D7}\",ctx.b)"),
-        "Expected textInterpolate2 with raw times character. Got:\n{js}"
+        js.contains("textInterpolate2(\"\",ctx.a,\"\\u00D7\",ctx.b)"),
+        "Expected textInterpolate2 with an escaped times character. Got:\n{js}"
     );
 }
 
@@ -185,12 +184,10 @@ fn test_html_entity_between_interpolations() {
 fn test_html_entity_at_start_of_interpolation() {
     // Entity at start: &times;{{ a }}
     let js = compile_template_to_js("<div>&times;{{ a }}</div>", "TestComponent");
-    // Should produce: textInterpolate1("×", ctx.a)
-    // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains("textInterpolate1(\"\u{00D7}\",ctx.a)")
-            || js.contains("textInterpolate(\"\u{00D7}\",ctx.a)"),
-        "Expected textInterpolate with raw times character at start. Got:\n{js}"
+        js.contains("textInterpolate1(\"\\u00D7\",ctx.a)")
+            || js.contains("textInterpolate(\"\\u00D7\",ctx.a)"),
+        "Expected textInterpolate with an escaped times character at start. Got:\n{js}"
     );
 }
 
@@ -199,11 +196,10 @@ fn test_multiple_html_entities_between_interpolations() {
     // Multiple entities: {{ a }}&nbsp;&times;&nbsp;{{ b }}
     let js =
         compile_template_to_js("<div>{{ a }}&nbsp;&times;&nbsp;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "\u{00A0}×\u{00A0}", ctx.b)
-    // Note: &nbsp; = U+00A0, &times; = U+00D7, both emitted as raw UTF-8
+    // &nbsp; = U+00A0, &times; = U+00D7, both escaped like ngtsc prints them.
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00A0}\u{00D7}\u{00A0}\",ctx.b)"),
-        "Expected textInterpolate2 with raw Unicode entities. Got:\n{js}"
+        js.contains("textInterpolate2(\"\",ctx.a,\"\\u00A0\\u00D7\\u00A0\",ctx.b)"),
+        "Expected textInterpolate2 with escaped Unicode entities. Got:\n{js}"
     );
 }
 
@@ -6551,16 +6547,16 @@ fn test_i18n_attribute_message_uses_attribute_value() {
 }
 
 /// An interpolated `i18n-<attr>` keeps its text and gets an INTERPOLATION placeholder.
-/// Angular 22.1.5: goog.getMsg("Hi {$interpolation}!", { "interpolation": "�0�" }, ...)
-///                 $localize `:@@hi:Hi ${"�0�"}:INTERPOLATION:!`
+/// Angular 22.1.5: goog.getMsg("Hi {$interpolation}!", { "interpolation": "\uFFFD0\uFFFD" }, ...)
+///                 $localize `:@@hi:Hi ${"\uFFFD0\uFFFD"}:INTERPOLATION:!`
 #[test]
 fn test_i18n_interpolated_attribute_message_uses_attribute_value() {
     let js = compile_i18n_component(r#"<div i18n-title="@@hi" title="Hi {{name}}!"></div>"#);
     assert_contains(
         &js,
-        "goog.getMsg(\"Hi {$interpolation}!\",{\"interpolation\":\"\u{FFFD}0\u{FFFD}\"}",
+        "goog.getMsg(\"Hi {$interpolation}!\",{\"interpolation\":\"\\uFFFD0\\uFFFD\"}",
     );
-    assert_contains(&js, "$localize `:@@hi:Hi ${\"\u{FFFD}0\u{FFFD}\"}:INTERPOLATION:!`");
+    assert_contains(&js, "$localize `:@@hi:Hi ${\"\\uFFFD0\\uFFFD\"}:INTERPOLATION:!`");
 }
 
 /// `i18n-<attr>` alongside an `i18n` element body: both messages keep their text.
@@ -6600,7 +6596,7 @@ fn test_i18n_sole_icu_is_the_message() {
     // Post-processing runs after the Closure/$localize branch, for both modes.
     assert_contains(
         &js,
-        "}(i18n_1 = i0.ɵɵi18nPostprocess(i18n_1,{\"INTERPOLATION\":\"\u{FFFD}1\u{FFFD}\",\"VAR_PLURAL\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "}(i18n_1 = i0.ɵɵi18nPostprocess(i18n_1,{\"INTERPOLATION\":\"\\uFFFD1\\uFFFD\",\"VAR_PLURAL\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(&js, r#"return [i18n_1,["title",i18n_0]]"#);
     assert_contains(&js, "i0.ɵɵi18nExp(ctx.count)(ctx.count);");
@@ -6608,7 +6604,7 @@ fn test_i18n_sole_icu_is_the_message() {
 
 /// A sole `select` ICU. Angular 22.1.5:
 ///   goog.getMsg("{VAR_SELECT, select, male {he} female {she} other {they}}")
-///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "VAR_SELECT": "�0�" });
+///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "VAR_SELECT": "\uFFFD0\uFFFD" });
 #[test]
 fn test_i18n_sole_select_icu_is_the_message() {
     let js = compile_i18n_component(
@@ -6622,13 +6618,13 @@ fn test_i18n_sole_select_icu_is_the_message() {
     assert_contains(&js, "$localize `{VAR_SELECT, select, male {he} female {she} other {they}}`");
     assert_contains(
         &js,
-        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(&js, "return [i18n_0]");
 }
 
 /// A sole ICU with no interpolation still needs its VAR_PLURAL mapped. Angular 22.1.5:
-///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "VAR_PLURAL": "�0�" });
+///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "VAR_PLURAL": "\uFFFD0\uFFFD" });
 #[test]
 fn test_i18n_sole_icu_without_interpolation() {
     let js = compile_i18n_component(
@@ -6641,7 +6637,7 @@ fn test_i18n_sole_icu_without_interpolation() {
     );
     assert_contains(
         &js,
-        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_PLURAL\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_PLURAL\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(&js, "return [i18n_0]");
 }
@@ -6649,8 +6645,8 @@ fn test_i18n_sole_icu_without_interpolation() {
 /// Elements inside a sole ICU become tag placeholders that `ɵɵi18nPostprocess` maps back to
 /// markup. Angular 22.1.5:
 ///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "CLOSE_BOLD_TEXT": "</b>", "CLOSE_ITALIC_TEXT": "</i>",
-///     "INTERPOLATION": "�1�", "START_BOLD_TEXT": "<b>", "START_ITALIC_TEXT": "<i>",
-///     "VAR_PLURAL": "�0�" });
+///     "INTERPOLATION": "\uFFFD1\uFFFD", "START_BOLD_TEXT": "<b>", "START_ITALIC_TEXT": "<i>",
+///     "VAR_PLURAL": "\uFFFD0\uFFFD" });
 #[test]
 fn test_i18n_sole_icu_with_elements() {
     let js = compile_i18n_component(
@@ -6662,7 +6658,7 @@ fn test_i18n_sole_icu_with_elements() {
     );
     assert_contains(
         &js,
-        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"CLOSE_BOLD_TEXT\":\"</b>\",\"CLOSE_ITALIC_TEXT\":\"</i>\",\"INTERPOLATION\":\"\u{FFFD}1\u{FFFD}\",\"START_BOLD_TEXT\":\"<b>\",\"START_ITALIC_TEXT\":\"<i>\",\"VAR_PLURAL\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"CLOSE_BOLD_TEXT\":\"</b>\",\"CLOSE_ITALIC_TEXT\":\"</i>\",\"INTERPOLATION\":\"\\uFFFD1\\uFFFD\",\"START_BOLD_TEXT\":\"<b>\",\"START_ITALIC_TEXT\":\"<i>\",\"VAR_PLURAL\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(&js, "return [i18n_0]");
 }
@@ -6670,9 +6666,9 @@ fn test_i18n_sole_icu_with_elements() {
 /// An ICU next to text and an interpolation is a real sub-message, referenced from the root
 /// message through the `icu` placeholder by variable. Angular 22.1.5:
 ///   i18n_0 = "{VAR_PLURAL, plural, =1 {one item} other {{INTERPOLATION} items}}"
-///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "INTERPOLATION": "�2�", "VAR_PLURAL": "�1�" });
-///   goog.getMsg("Hello {$interpolation}! {$icu}", { "icu": i18n_0, "interpolation": "�0�" }, ...)
-///   $localize `Hello ${"�0�"}:INTERPOLATION:! ${i18n_0}:ICU:`
+///   i18n_0 = i0.ɵɵi18nPostprocess(i18n_0, { "INTERPOLATION": "\uFFFD2\uFFFD", "VAR_PLURAL": "\uFFFD1\uFFFD" });
+///   goog.getMsg("Hello {$interpolation}! {$icu}", { "icu": i18n_0, "interpolation": "\uFFFD0\uFFFD" }, ...)
+///   $localize `Hello ${"\uFFFD0\uFFFD"}:INTERPOLATION:! ${i18n_0}:ICU:`
 ///
 /// The `$localize` ICU placeholders carry the sub-message id (`:ICU@@<id>:`), as Angular emits
 /// when legacy message ids are disabled; oxc emits no legacy ids.
@@ -6691,15 +6687,15 @@ fn test_i18n_icu_with_sibling_content_is_sub_message() {
     );
     assert_contains(
         &js,
-        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"INTERPOLATION\":\"\u{FFFD}2\u{FFFD}\",\"VAR_PLURAL\":\"\u{FFFD}1\u{FFFD}\"}));",
+        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"INTERPOLATION\":\"\\uFFFD2\\uFFFD\",\"VAR_PLURAL\":\"\\uFFFD1\\uFFFD\"}));",
     );
     assert_contains(
         &js,
-        "goog.getMsg(\"Hello {$interpolation}! {$icu}\",{\"icu\":i18n_0,\"interpolation\":\"\u{FFFD}0\u{FFFD}\"}",
+        "goog.getMsg(\"Hello {$interpolation}! {$icu}\",{\"icu\":i18n_0,\"interpolation\":\"\\uFFFD0\\uFFFD\"}",
     );
     assert_contains(
         &js,
-        "$localize `Hello ${\"\u{FFFD}0\u{FFFD}\"}:INTERPOLATION:! ${i18n_0}:ICU@@3633748910064245637:`",
+        "$localize `Hello ${\"\\uFFFD0\\uFFFD\"}:INTERPOLATION:! ${i18n_0}:ICU@@3633748910064245637:`",
     );
     assert_contains(&js, "return [i18n_1]");
     assert_contains(&js, "i0.ɵɵi18nExp(ctx.name)(ctx.count)(ctx.count);");
@@ -6719,11 +6715,11 @@ fn test_i18n_two_icus_in_one_message() {
     );
     assert_contains(
         &js,
-        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "}(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(
         &js,
-        "}(i18n_1 = i0.ɵɵi18nPostprocess(i18n_1,{\"VAR_PLURAL\":\"\u{FFFD}1\u{FFFD}\"}));",
+        "}(i18n_1 = i0.ɵɵi18nPostprocess(i18n_1,{\"VAR_PLURAL\":\"\\uFFFD1\\uFFFD\"}));",
     );
     assert_contains(&js, r#"goog.getMsg("{$icu} and {$icu_1}",{"icu":i18n_0,"icu_1":i18n_1}"#);
     assert_contains(
@@ -6736,7 +6732,7 @@ fn test_i18n_two_icus_in_one_message() {
 
 /// `$localize` placeholder names keep Angular's internal form (`START_BOLD_TEXT`), since they
 /// are part of the message id that `ng extract-i18n` computes. Angular 22.1.5:
-///   $localize `Hello ${"�#2�"}:START_BOLD_TEXT:world${"�/#2�"}:CLOSE_BOLD_TEXT:!`
+///   $localize `Hello ${"\uFFFD#2\uFFFD"}:START_BOLD_TEXT:world${"\uFFFD/#2\uFFFD"}:CLOSE_BOLD_TEXT:!`
 #[test]
 fn test_i18n_localize_placeholder_names_keep_underscores() {
     let js = compile_i18n_component(r#"<span i18n>Hello <b>world</b>!</span>"#);
@@ -6746,7 +6742,7 @@ fn test_i18n_localize_placeholder_names_keep_underscores() {
     );
     assert_contains(
         &js,
-        "$localize `Hello ${\"\u{FFFD}#2\u{FFFD}\"}:START_BOLD_TEXT:world${\"\u{FFFD}/#2\u{FFFD}\"}:CLOSE_BOLD_TEXT:!`",
+        "$localize `Hello ${\"\\uFFFD#2\\uFFFD\"}:START_BOLD_TEXT:world${\"\\uFFFD/#2\\uFFFD\"}:CLOSE_BOLD_TEXT:!`",
     );
 }
 
@@ -6760,13 +6756,13 @@ fn test_i18n_attribute_with_empty_value_has_no_message() {
 }
 
 /// A custom placeholder name from `// i18n(ph="PH")` names the interpolation. Angular 22.1.5:
-///   goog.getMsg("Hello {$ph}", { "ph": "�0�" }, ...)
-///   $localize `Hello ${"�0�"}:PH:`
+///   goog.getMsg("Hello {$ph}", { "ph": "\uFFFD0\uFFFD" }, ...)
+///   $localize `Hello ${"\uFFFD0\uFFFD"}:PH:`
 #[test]
 fn test_i18n_custom_interpolation_placeholder_name() {
     let js = compile_i18n_component(r#"<span i18n>Hello {{ name // i18n(ph="PH") }}</span>"#);
-    assert_contains(&js, "goog.getMsg(\"Hello {$ph}\",{\"ph\":\"\u{FFFD}0\u{FFFD}\"})");
-    assert_contains(&js, "$localize `Hello ${\"\u{FFFD}0\u{FFFD}\"}:PH:`");
+    assert_contains(&js, "goog.getMsg(\"Hello {$ph}\",{\"ph\":\"\\uFFFD0\\uFFFD\"})");
+    assert_contains(&js, "$localize `Hello ${\"\\uFFFD0\\uFFFD\"}:PH:`");
 }
 
 /// Whitespace next to an ICU is part of the message. Angular 22.1.5:
@@ -6782,19 +6778,19 @@ fn test_i18n_keeps_whitespace_next_to_icu() {
     assert_contains(&js, r#"goog.getMsg("{$icu} {$startBoldText}x{$closeBoldText}","#);
     assert_contains(
         &js,
-        "$localize `${i18n_0}:ICU@@8078998681144872872: ${\"\u{FFFD}#2\u{FFFD}\"}:START_BOLD_TEXT:x${\"\u{FFFD}/#2\u{FFFD}\"}:CLOSE_BOLD_TEXT:`",
+        "$localize `${i18n_0}:ICU@@8078998681144872872: ${\"\\uFFFD#2\\uFFFD\"}:START_BOLD_TEXT:x${\"\\uFFFD/#2\\uFFFD\"}:CLOSE_BOLD_TEXT:`",
     );
 }
 
 /// An element with a structural directive inside an i18n block gets one combined value per
 /// tag placeholder, and needs no post-processing. Angular 22.1.5:
-///   { "closeTagSpan": "�/#1:1��/*2:1�", "startTagSpan": "�*2:1��#1:1�" }
+///   { "closeTagSpan": "\uFFFD/#1:1\uFFFD\uFFFD/*2:1\uFFFD", "startTagSpan": "\uFFFD*2:1\uFFFD\uFFFD#1:1\uFFFD" }
 #[test]
 fn test_i18n_structural_directive_element_placeholders() {
     let js = compile_i18n_component(r#"<div i18n><span *ngIf="count">x</span></div>"#);
     assert_contains(
         &js,
-        "goog.getMsg(\"{$startTagSpan}x{$closeTagSpan}\",{\"closeTagSpan\":\"\u{FFFD}/#1:1\u{FFFD}\u{FFFD}/*2:1\u{FFFD}\",\"startTagSpan\":\"\u{FFFD}*2:1\u{FFFD}\u{FFFD}#1:1\u{FFFD}\"})",
+        "goog.getMsg(\"{$startTagSpan}x{$closeTagSpan}\",{\"closeTagSpan\":\"\\uFFFD/#1:1\\uFFFD\\uFFFD/*2:1\\uFFFD\",\"startTagSpan\":\"\\uFFFD*2:1\\uFFFD\\uFFFD#1:1\\uFFFD\"})",
     );
     assert!(!js.contains("i18nPostprocess"), "No post-processing expected:\n{js}");
 }
@@ -6806,24 +6802,24 @@ fn test_i18n_void_name_in_svg_has_a_close_placeholder() {
     let js = compile_i18n_component(r#"<svg><g i18n>a<area>b</area>c</g></svg>"#);
     assert_contains(
         &js,
-        "a${\"\u{FFFD}#3\u{FFFD}\"}:START_TAG__SVG_AREA:b${\"\u{FFFD}/#3\u{FFFD}\"}:CLOSE_TAG__SVG_AREA:c`",
+        "a${\"\\uFFFD#3\\uFFFD\"}:START_TAG__SVG_AREA:b${\"\\uFFFD/#3\\uFFFD\"}:CLOSE_TAG__SVG_AREA:c`",
     );
 }
 
 /// `@if`/`@else` inside an i18n block: each block gets its own start/close placeholder values.
 /// Angular 22.1.5:
-///   { "closeBlockElse": "�/*3:2�", "closeBlockIf": "�/*2:1�", "closeTagSpan": "�/#1:1�",
-///     "startBlockElse": "�*3:2�", "startBlockIf": "�*2:1�", "startTagSpan": "�#1:1�" }
+///   { "closeBlockElse": "\uFFFD/*3:2\uFFFD", "closeBlockIf": "\uFFFD/*2:1\uFFFD", "closeTagSpan": "\uFFFD/#1:1\uFFFD",
+///     "startBlockElse": "\uFFFD*3:2\uFFFD", "startBlockIf": "\uFFFD*2:1\uFFFD", "startTagSpan": "\uFFFD#1:1\uFFFD" }
 #[test]
 fn test_i18n_if_else_block_placeholders() {
     let js = compile_i18n_component(r#"<div i18n>@if (count) {<span>yes</span>} @else {no}</div>"#);
     assert_contains(
         &js,
-        "{\"closeBlockElse\":\"\u{FFFD}/*3:2\u{FFFD}\",\"closeBlockIf\":\"\u{FFFD}/*2:1\u{FFFD}\",\"closeTagSpan\":\"\u{FFFD}/#1:1\u{FFFD}\",\"startBlockElse\":\"\u{FFFD}*3:2\u{FFFD}\",\"startBlockIf\":\"\u{FFFD}*2:1\u{FFFD}\",\"startTagSpan\":\"\u{FFFD}#1:1\u{FFFD}\"}",
+        "{\"closeBlockElse\":\"\\uFFFD/*3:2\\uFFFD\",\"closeBlockIf\":\"\\uFFFD/*2:1\\uFFFD\",\"closeTagSpan\":\"\\uFFFD/#1:1\\uFFFD\",\"startBlockElse\":\"\\uFFFD*3:2\\uFFFD\",\"startBlockIf\":\"\\uFFFD*2:1\\uFFFD\",\"startTagSpan\":\"\\uFFFD#1:1\\uFFFD\"}",
     );
     assert_contains(
         &js,
-        "`${\"\u{FFFD}*2:1\u{FFFD}\"}:START_BLOCK_IF:${\"\u{FFFD}#1:1\u{FFFD}\"}:START_TAG_SPAN:yes${\"\u{FFFD}/#1:1\u{FFFD}\"}:CLOSE_TAG_SPAN:${\"\u{FFFD}/*2:1\u{FFFD}\"}:CLOSE_BLOCK_IF:${\"\u{FFFD}*3:2\u{FFFD}\"}:START_BLOCK_ELSE:no${\"\u{FFFD}/*3:2\u{FFFD}\"}:CLOSE_BLOCK_ELSE:`",
+        "`${\"\\uFFFD*2:1\\uFFFD\"}:START_BLOCK_IF:${\"\\uFFFD#1:1\\uFFFD\"}:START_TAG_SPAN:yes${\"\\uFFFD/#1:1\\uFFFD\"}:CLOSE_TAG_SPAN:${\"\\uFFFD/*2:1\\uFFFD\"}:CLOSE_BLOCK_IF:${\"\\uFFFD*3:2\\uFFFD\"}:START_BLOCK_ELSE:no${\"\\uFFFD/*3:2\\uFFFD\"}:CLOSE_BLOCK_ELSE:`",
     );
     assert!(!js.contains("i18nPostprocess"), "No post-processing expected:\n{js}");
 }
@@ -6854,7 +6850,7 @@ fn test_i18n_icu_outside_i18n_block() {
     );
     assert_contains(
         &js,
-        "(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\"}));",
     );
     assert_contains(&js, "i0.ɵɵi18n(1,0);");
     assert_contains(&js, "i0.ɵɵi18nExp(ctx.gender);");
@@ -6874,7 +6870,7 @@ fn test_i18n_nested_icu_placeholder_order() {
     );
     assert_contains(
         &js,
-        "{\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\",\"VAR_SELECT_1\":\"\u{FFFD}1\u{FFFD}\",\"VAR_SELECT_2\":\"\u{FFFD}2\u{FFFD}\"}",
+        "{\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\",\"VAR_SELECT_1\":\"\\uFFFD1\\uFFFD\",\"VAR_SELECT_2\":\"\\uFFFD2\\uFFFD\"}",
     );
     assert_contains(&js, "i0.ɵɵi18nExp(ctx.count)(ctx.count)(ctx.gender);");
 }
@@ -6889,7 +6885,7 @@ fn test_i18n_icu_element_with_interpolated_attribute() {
     );
     assert_contains(
         &js,
-        "{\"CLOSE_TAG_SPAN\":\"</span>\",\"START_TAG_SPAN\":\"<span title=\\\"\u{FFFD}1\u{FFFD}-\u{FFFD}2\u{FFFD}\\\">\",\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\"}",
+        "{\"CLOSE_TAG_SPAN\":\"</span>\",\"START_TAG_SPAN\":\"<span title=\\\"\\uFFFD1\\uFFFD-\\uFFFD2\\uFFFD\\\">\",\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\"}",
     );
     assert_contains(&js, "i0.ɵɵi18nExp(ctx.gender)(ctx.name)(ctx.name);");
 }
@@ -6902,7 +6898,7 @@ fn test_i18n_icu_with_spaces_around_keywords() {
     assert_contains(&js, "goog.getMsg(\"{VAR_SELECT , select , 3 {three} other {more}}\")");
     assert_contains(
         &js,
-        "(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\u{FFFD}0\u{FFFD}\"}));",
+        "(i18n_0 = i0.ɵɵi18nPostprocess(i18n_0,{\"VAR_SELECT\":\"\\uFFFD0\\uFFFD\"}));",
     );
 }
 
@@ -6913,7 +6909,7 @@ fn test_i18n_void_element_placeholder() {
     let js = compile_i18n_component(r#"<div i18n><img src="a.png"> is my logo</div>"#);
     assert_contains(
         &js,
-        "goog.getMsg(\"{$tagImg} is my logo\",{\"tagImg\":\"\u{FFFD}#2\u{FFFD}\u{FFFD}/#2\u{FFFD}\"})",
+        "goog.getMsg(\"{$tagImg} is my logo\",{\"tagImg\":\"\\uFFFD#2\\uFFFD\\uFFFD/#2\\uFFFD\"})",
     );
 }
 
@@ -6925,7 +6921,7 @@ fn test_i18n_nested_tag_placeholder_names() {
         compile_i18n_component(r#"<div i18n><span title="x">a<span>inner</span></span></div>"#);
     assert_contains(
         &js,
-        "goog.getMsg(\"{$startTagSpan_1}a{$startTagSpan}inner{$closeTagSpan}{$closeTagSpan}\",{\"closeTagSpan\":\"[\u{FFFD}/#3\u{FFFD}|\u{FFFD}/#2\u{FFFD}]\",\"startTagSpan\":\"\u{FFFD}#3\u{FFFD}\",\"startTagSpan_1\":\"\u{FFFD}#2\u{FFFD}\"})",
+        "goog.getMsg(\"{$startTagSpan_1}a{$startTagSpan}inner{$closeTagSpan}{$closeTagSpan}\",{\"closeTagSpan\":\"[\\uFFFD/#3\\uFFFD|\\uFFFD/#2\\uFFFD]\",\"startTagSpan\":\"\\uFFFD#3\\uFFFD\",\"startTagSpan_1\":\"\\uFFFD#2\\uFFFD\"})",
     );
 }
 
@@ -6936,7 +6932,7 @@ fn test_i18n_ng_content_placeholder_values() {
     let js = compile_i18n_component(r#"<div i18n><ng-content select="x"></ng-content>tail</div>"#);
     assert_contains(
         &js,
-        "{\"closeTagNgContent\":\"\u{FFFD}/#2\u{FFFD}\",\"startTagNgContent\":\"\u{FFFD}#2\u{FFFD}\"}",
+        "{\"closeTagNgContent\":\"\\uFFFD/#2\\uFFFD\",\"startTagNgContent\":\"\\uFFFD#2\\uFFFD\"}",
     );
 }
 
@@ -6945,8 +6941,8 @@ fn test_i18n_ng_content_placeholder_values() {
 #[test]
 fn test_i18n_custom_placeholder_name_with_spaces() {
     let js = compile_i18n_component(r#"<div i18n>Hi {{ name // i18n(ph = "who") }}</div>"#);
-    assert_contains(&js, "goog.getMsg(\"Hi {$who}\",{\"who\":\"\u{FFFD}0\u{FFFD}\"})");
-    assert_contains(&js, "$localize `Hi ${\"\u{FFFD}0\u{FFFD}\"}:WHO:`");
+    assert_contains(&js, "goog.getMsg(\"Hi {$who}\",{\"who\":\"\\uFFFD0\\uFFFD\"})");
+    assert_contains(&js, "$localize `Hi ${\"\\uFFFD0\\uFFFD\"}:WHO:`");
 }
 
 /// An i18n element with a structural directive keeps its interpolation value. Angular 22.1.5:
@@ -6957,7 +6953,7 @@ fn test_i18n_block_on_element_with_structural_directive() {
         compile_i18n_component(r#"<div i18n *ngIf="visible">Some <span>{{ name }}</span></div>"#);
     assert_contains(
         &js,
-        "goog.getMsg(\"Some {$startTagSpan}{$interpolation}{$closeTagSpan}\",{\"closeTagSpan\":\"\u{FFFD}/#2\u{FFFD}\",\"interpolation\":\"\u{FFFD}0\u{FFFD}\",\"startTagSpan\":\"\u{FFFD}#2\u{FFFD}\"})",
+        "goog.getMsg(\"Some {$startTagSpan}{$interpolation}{$closeTagSpan}\",{\"closeTagSpan\":\"\\uFFFD/#2\\uFFFD\",\"interpolation\":\"\\uFFFD0\\uFFFD\",\"startTagSpan\":\"\\uFFFD#2\\uFFFD\"})",
     );
 }
 
@@ -6970,11 +6966,11 @@ fn test_i18n_text_interpolation_next_to_i18n_attribute() {
     );
     assert_contains(
         &js,
-        "goog.getMsg(\"{$interpolation}\",{\"interpolation\":\"\u{FFFD}0\u{FFFD}\"})",
+        "goog.getMsg(\"{$interpolation}\",{\"interpolation\":\"\\uFFFD0\\uFFFD\"})",
     );
     assert_contains(
         &js,
-        "goog.getMsg(\"{$interpolation}{$startHeadingLevel1}{$closeHeadingLevel1}\",{\"closeHeadingLevel1\":\"\u{FFFD}/#2\u{FFFD}\",\"interpolation\":\"\u{FFFD}0\u{FFFD}\",\"startHeadingLevel1\":\"\u{FFFD}#2\u{FFFD}\"})",
+        "goog.getMsg(\"{$interpolation}{$startHeadingLevel1}{$closeHeadingLevel1}\",{\"closeHeadingLevel1\":\"\\uFFFD/#2\\uFFFD\",\"interpolation\":\"\\uFFFD0\\uFFFD\",\"startHeadingLevel1\":\"\\uFFFD#2\\uFFFD\"})",
     );
 }
 
@@ -6997,7 +6993,7 @@ fn test_i18n_svg_element_placeholders() {
         compile_i18n_component(r#"<div i18n>Save <svg><circle r="1"></circle></svg> now</div>"#);
     assert_contains(
         &js,
-        "$localize `Save ${\"\u{FFFD}#2\u{FFFD}\"}:START_TAG__SVG_SVG:${\"\u{FFFD}#3\u{FFFD}\"}:START_TAG__SVG_CIRCLE:${\"\u{FFFD}/#3\u{FFFD}\"}:CLOSE_TAG__SVG_CIRCLE:${\"\u{FFFD}/#2\u{FFFD}\"}:CLOSE_TAG__SVG_SVG: now`",
+        "$localize `Save ${\"\\uFFFD#2\\uFFFD\"}:START_TAG__SVG_SVG:${\"\\uFFFD#3\\uFFFD\"}:START_TAG__SVG_CIRCLE:${\"\\uFFFD/#3\\uFFFD\"}:CLOSE_TAG__SVG_CIRCLE:${\"\\uFFFD/#2\\uFFFD\"}:CLOSE_TAG__SVG_SVG: now`",
     );
 }
 
@@ -7017,7 +7013,7 @@ fn test_i18n_root_icu_template_drops_surrounding_whitespace() {
 #[test]
 fn test_i18n_message_keeps_ngsp() {
     let js = compile_i18n_component("<div i18n>a&ngsp;b</div>");
-    assert_contains(&js, "goog.getMsg(\"a\u{E500}b\")");
+    assert_contains(&js, "goog.getMsg(\"a\\uE500b\")");
 }
 
 /// An ICU placeholder in `$localize` carries the id of its sub-message (Angular's
@@ -7065,9 +7061,9 @@ fn test_i18n_literal_placeholder_like_text() {
     let js = compile_i18n_component(r"<div i18n>&#123;\\path and &#123;$x&#125; {{ name }}</div>");
     assert_contains(
         &js,
-        "goog.getMsg(\"{\\\\path and {$x} {$interpolation}\",{\"interpolation\":\"\u{FFFD}0\u{FFFD}\"})",
+        "goog.getMsg(\"{\\\\path and {$x} {$interpolation}\",{\"interpolation\":\"\\uFFFD0\\uFFFD\"})",
     );
-    assert_contains(&js, "$localize `{\\\\path and {$x} ${\"\u{FFFD}0\u{FFFD}\"}:INTERPOLATION:`");
+    assert_contains(&js, "$localize `{\\\\path and {$x} ${\"\\uFFFD0\\uFFFD\"}:INTERPOLATION:`");
 }
 
 #[test]
@@ -8246,7 +8242,7 @@ export class A {
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     assert!(result.code.contains("const _c0 = [\"x\"];"), "{}", result.code);
-    assert!(result.code.contains("const _c1 = [\"y\u{85}\"];"), "{}", result.code);
+    assert!(result.code.contains("const _c1 = [\"y\\u0085\"];"), "{}", result.code);
 }
 
 /// Compatibility guard. Two contracts at once:
@@ -8657,9 +8653,9 @@ export class TestComponent {
 // ============================================================================
 
 #[test]
-fn test_unicode_text_not_escaped() {
-    // Unicode characters like en-dash should be emitted as raw UTF-8, not escaped.
-    // Angular's TypeScript emitter does NOT escape non-ASCII printable characters.
+fn test_unicode_text_escaped_like_ngtsc() {
+    // ngtsc's TypeScript printer writes text outside ASCII in a string it creates
+    // as `\uXXXX`, and keeps a literal copied from the source as written.
     let allocator = Allocator::default();
     let source = r"
 import { Component } from '@angular/core';
@@ -8677,16 +8673,12 @@ export class TestComponent {}
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let code = &result.code;
-    // Should contain raw en-dash, not escaped
-    assert!(
-        code.contains("\u{2013}") && !code.contains("\\u2013"),
-        "En-dash should be emitted as raw UTF-8, not as \\u2013. Got:\n{code}"
-    );
+    assert!(code.contains(r#"i0.ɵɵtext(1,"Hello \u2013 World")"#), "Got:\n{code}");
+    assert!(code.contains(r"template:'<span>Hello \u{2013} World</span>'"), "Got:\n{code}");
 }
 
 #[test]
-fn test_unicode_non_breaking_space_not_escaped() {
-    // Non-breaking space (U+00A0) should also be emitted as raw UTF-8
+fn test_unicode_non_breaking_space_escaped_like_ngtsc() {
     let allocator = Allocator::default();
     let source = "
 import { Component } from '@angular/core';
@@ -8704,11 +8696,8 @@ export class TestComponent {}
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let code = &result.code;
-    // Should contain raw non-breaking space, not escaped
-    assert!(
-        code.contains("\u{00A0}") && !code.contains("\\u00A0"),
-        "Non-breaking space should be emitted as raw UTF-8, not as \\u00A0. Got:\n{code}"
-    );
+    assert!(code.contains(r#"i0.ɵɵtext(1,"Hello\u00A0World")"#), "Got:\n{code}");
+    assert!(code.contains("template:'<span>Hello\u{00A0}World</span>'"), "Got:\n{code}");
 }
 
 /// Test that variable naming in embedded view listeners matches Angular TS output.

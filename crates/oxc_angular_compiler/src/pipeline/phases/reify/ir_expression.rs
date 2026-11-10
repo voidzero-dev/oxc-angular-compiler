@@ -1004,7 +1004,13 @@ pub fn convert_ir_expression<'a>(
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, core_namespace, value, expressions, root_xref);
-                entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
+                entries.push(LiteralMapEntry {
+                    key,
+                    value: converted_value,
+                    quoted,
+                    is_spread,
+                    key_as_written: false,
+                });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },
@@ -1043,7 +1049,13 @@ pub fn convert_ir_expression<'a>(
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, core_namespace, value, expressions, root_xref);
-                entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
+                entries.push(LiteralMapEntry {
+                    key,
+                    value: converted_value,
+                    quoted,
+                    is_spread,
+                    key_as_written: false,
+                });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },

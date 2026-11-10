@@ -33,6 +33,71 @@ use crate::directive::quote_string_literal;
 // Main Conversion Function
 // ============================================================================
 
+/// A string literal from the source as an output expression.
+///
+/// ngtsc copies such a literal as written (a `WrappedNodeExpr`), and the
+/// TypeScript printer keeps its source text, while it escapes text outside
+/// ASCII in a literal the compiler creates. So a literal with text outside ASCII
+/// keeps its source text here; any other becomes a plain string literal.
+pub fn string_literal_expr<'a>(
+    allocator: &'a Allocator,
+    lit: &oxc_ast::ast::StringLiteral<'a>,
+) -> OutputExpression<'a> {
+    if let Some(source) = string_literal_as_written(lit) {
+        return raw_source(allocator, source);
+    }
+    match lit.value.as_str() {
+        Some(value) => OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(value.into()), source_span: None },
+            &allocator,
+        )),
+        // A lone surrogate (`'\uD800'`) has no `&str`; with no source text,
+        // print its exact UTF-16 escapes.
+        None => OutputExpression::RawSource(Box::new_in(
+            RawSourceExpr {
+                source: Ident::from(allocator.alloc_str(&quote_string_literal(lit))),
+                source_span: None,
+            },
+            &allocator,
+        )),
+    }
+}
+
+/// Source text printed as is.
+pub fn raw_source<'a>(allocator: &'a Allocator, source: Ident<'a>) -> OutputExpression<'a> {
+    OutputExpression::RawSource(Box::new_in(
+        RawSourceExpr { source, source_span: None },
+        &allocator,
+    ))
+}
+
+/// The source text, quotes included, of a string literal that holds text
+/// outside ASCII (or a lone surrogate, which has no `&str`), for output that
+/// keeps it as written like ngtsc does (see [`string_literal_expr`]).
+pub fn string_literal_as_written<'a>(lit: &oxc_ast::ast::StringLiteral<'a>) -> Option<Ident<'a>> {
+    let raw = lit.raw?;
+    lit.value.as_str().is_none_or(|value| !value.is_ascii()).then(|| raw.into())
+}
+
+/// [`string_literal_as_written`] for a string literal or a template literal
+/// with no expressions (`` `é` ``).
+pub fn literal_as_written<'a>(
+    allocator: &'a Allocator,
+    expr: &Expression<'a>,
+) -> Option<Ident<'a>> {
+    match expr {
+        Expression::StringLiteral(lit) => string_literal_as_written(lit),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            let quasi = tpl.quasis.first()?;
+            let cooked = quasi.value.cooked?;
+            cooked.as_str().is_none_or(|value| !value.is_ascii()).then(|| {
+                Ident::from(allocator.alloc_str(&format!("`{}`", quasi.value.raw.as_str())))
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Convert an OXC Expression to an OutputExpression.
 ///
 /// This handles common expression types used in Angular decorator properties.
@@ -69,24 +134,7 @@ pub fn convert_oxc_expression<'a>(
             &allocator,
         ))),
 
-        Expression::StringLiteral(lit) => match lit.value.as_str() {
-            Some(value) => Some(OutputExpression::Literal(Box::new_in(
-                LiteralExpr { value: LiteralValue::String(value.into()), source_span: None },
-                &allocator,
-            ))),
-            // A lone surrogate (`'\uD800'`) has no `&str`: keep the literal as
-            // written, or (no source text) print its exact UTF-16 escapes.
-            None => {
-                let source = match lit.raw {
-                    Some(raw) => raw.into(),
-                    None => Ident::from(allocator.alloc_str(&quote_string_literal(lit))),
-                };
-                Some(OutputExpression::RawSource(Box::new_in(
-                    RawSourceExpr { source, source_span: None },
-                    &allocator,
-                )))
-            }
-        },
+        Expression::StringLiteral(lit) => Some(string_literal_expr(allocator, lit)),
 
         // Identifiers
         Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
@@ -357,6 +405,16 @@ pub fn convert_plain_properties<'a>(
         match prop {
             ObjectPropertyKind::ObjectProperty(p) => {
                 if !is_plain_property(p) {
+                    continue;
+                }
+                // A quoted key with text outside ASCII keeps its source text,
+                // as ngtsc copies the object as written.
+                if let PropertyKey::StringLiteral(lit) = &p.key
+                    && let Some(key) = string_literal_as_written(lit)
+                    && lit.value.as_str().is_some()
+                {
+                    let value = convert_oxc_expression(allocator, &p.value, source_text)?;
+                    entries.push(LiteralMapEntry::with_key_as_written(key, value));
                     continue;
                 }
                 let (key, quoted) = match &p.key {

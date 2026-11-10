@@ -58,7 +58,7 @@ use crate::output::ast::{
     StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
-use crate::output::emitter::escape_string;
+use crate::output::emitter::escape_string_for_linker;
 use crate::output::emitter::is_left_hand_side_source;
 use crate::pipeline::constant_pool::{ConstantPool, SharedPool};
 use crate::pipeline::emit::declare_pooled_constants_from;
@@ -75,7 +75,7 @@ fn needs_object_key_quoting(key: &str) -> bool {
 
 /// Quote a property key if it contains unsafe characters (dots or hyphens).
 fn quote_key(key: &str) -> String {
-    if needs_object_key_quoting(key) { escape_string(key, false) } else { key.to_string() }
+    if needs_object_key_quoting(key) { escape_string_for_linker(key) } else { key.to_string() }
 }
 
 /// Partial declaration function names to link.
@@ -574,7 +574,7 @@ fn as_static_string<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 /// (`'\uD800'`), which has no `&str`, the literal as written.
 fn static_string_literal<'a>(expr: &'a Expression<'a>, source: &str) -> Option<String> {
     if let Some(value) = as_static_string(expr) {
-        return Some(crate::output::emitter::escape_string(value, false));
+        return Some(escape_string_for_linker(value));
     }
     let has_lone_surrogate = match expr {
         Expression::StringLiteral(lit) => lit.value.has_lone_surrogate(),
@@ -994,7 +994,7 @@ fn parse_selector(selector: &str) -> String {
             let parts: Vec<String> = elements
                 .iter()
                 .map(|el| match el {
-                    R3SelectorElement::String(s) => escape_string(s, false),
+                    R3SelectorElement::String(s) => escape_string_for_linker(s),
                     R3SelectorElement::Flag(f) => f.to_string(),
                 })
                 .collect();
@@ -1035,25 +1035,25 @@ fn build_host_attrs(
                     PropertyKey::StringLiteral(s) if s.value.as_str() == Some("__proto__") => {
                         continue;
                     }
-                    PropertyKey::StaticIdentifier(ident) => {
-                        crate::output::emitter::escape_string(&ident.name, false)
-                    }
+                    PropertyKey::StaticIdentifier(ident) => escape_string_for_linker(&ident.name),
                     // A lone surrogate (`'\uD800'`) has no `&str`: keep the key
                     // as written.
                     PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                        Some(key) => crate::output::emitter::escape_string(key, false),
+                        Some(key) => escape_string_for_linker(key),
                         None => source[s.span.start as usize..s.span.end as usize].to_string(),
                     },
                     _ => continue,
                 };
                 // Static strings (including template literals a bundler may have
                 // emitted) are emitted cooked and quoted like Angular's output.
-                let value = as_static_string(&p.value).map_or_else(
+                // Angular's linker copies the value node as is (`getOpaque()`),
+                // so a value with text outside ASCII keeps its source text.
+                let value = as_static_string(&p.value).filter(|s| s.is_ascii()).map_or_else(
                     || {
                         let span = p.value.span();
                         source[span.start as usize..span.end as usize].to_string()
                     },
-                    |s| crate::output::emitter::escape_string(s, false),
+                    escape_string_for_linker,
                 );
                 attrs.push(key);
                 attrs.push(value);
@@ -1067,7 +1067,7 @@ fn build_host_attrs(
         // Split classes and add each separately
         attrs.push("1".to_string()); // AttributeMarker.Classes
         for class in class_attr.split_whitespace() {
-            attrs.push(escape_string(class, false));
+            attrs.push(escape_string_for_linker(class));
         }
     }
 
@@ -1078,8 +1078,8 @@ fn build_host_attrs(
         // Parse like the template pipeline's `parse_extracted_styles` phase, which
         // skips `;` and `:` inside quotes and parentheses (`url('a;b')`).
         for (prop, val) in parse_style_string(style_attr) {
-            attrs.push(crate::output::emitter::escape_string(&prop, false));
-            attrs.push(crate::output::emitter::escape_string(&val, false));
+            attrs.push(escape_string_for_linker(&prop));
+            attrs.push(escape_string_for_linker(&val));
         }
     }
 
@@ -1441,7 +1441,7 @@ fn link_pipe(
     ns: &str,
     type_name: &str,
 ) -> Option<String> {
-    let pipe_name = escape_string(get_string_property(meta, "name")?, false);
+    let pipe_name = escape_string_for_linker(get_string_property(meta, "name")?);
     let pure = get_property_source(meta, "pure", source).unwrap_or("true");
     let standalone = get_bool_property(meta, "isStandalone")
         .unwrap_or_else(|| get_default_standalone_value(meta));
@@ -1562,10 +1562,10 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
         // public and declared name when the object form leaves them out).
         let (quoted_key, key_literal) = match &p.key {
             PropertyKey::StaticIdentifier(ident) => {
-                (quote_key(&ident.name), crate::output::emitter::escape_string(&ident.name, false))
+                (quote_key(&ident.name), escape_string_for_linker(&ident.name))
             }
             PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                Some(key) => (quote_key(key), crate::output::emitter::escape_string(key, false)),
+                Some(key) => (quote_key(key), escape_string_for_linker(key)),
                 // A lone surrogate (`'\uD800'`) has no `&str`: use the key as written.
                 None => {
                     let key = source[s.span.start as usize..s.span.end as usize].to_string();
@@ -1606,14 +1606,36 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
                 }
 
                 let arr_source = &source[arr.span.start as usize + 1..arr.span.end as usize - 1];
+                // The names as new literals, like the Angular linker reads them
+                // (`getString()`), so an escape comes out as raw text; the
+                // transform function stays as written.
+                let names = || -> Option<String> {
+                    let mut parts = Vec::with_capacity(arr.elements.len());
+                    for (i, element) in arr.elements.iter().enumerate() {
+                        let element = element.as_expression()?;
+                        parts.push(if i < 2 {
+                            static_string_literal(element, source)?
+                        } else {
+                            let span = element.span();
+                            source[span.start as usize..span.end as usize].to_string()
+                        });
+                    }
+                    Some(parts.join(", "))
+                };
                 match arr.elements.len() {
                     // Declaration format: ["publicName", "classPropertyName"]
                     // Convert to: [0, "publicName", "classPropertyName"]
-                    2 => entries.push(format!("{quoted_key}: [0, {arr_source}]")),
+                    2 => entries.push(format!(
+                        "{quoted_key}: [0, {}]",
+                        names().as_deref().unwrap_or(arr_source)
+                    )),
                     // Since Angular 16.1, support multi-directive inputs, so we need to convert to the definition format.
                     // Declaration format: ["publicName", "classPropertyName", transformFn]
                     // Convert to: [2, "publicName", "classPropertyName", transformFn]
-                    3 => entries.push(format!("{quoted_key}: [2, {arr_source}]")),
+                    3 => entries.push(format!(
+                        "{quoted_key}: [2, {}]",
+                        names().as_deref().unwrap_or(arr_source)
+                    )),
                     // 4+ elements likely already in definition format, keep as is.
                     _ => entries.push(format!("{quoted_key}: {val}")),
                 }
@@ -1675,6 +1697,56 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
     format!("{{ {} }}", entries.join(", "))
 }
 
+/// A directive's `outputs` for the definition. The Angular linker reads each
+/// public name as a string (`toLiteral(value => value.getString())`) and
+/// prints it as a new literal, so an escape in the declaration (`"öut"`)
+/// comes out as raw text (`"öut"`). An entry that isn't a key with a static
+/// string keeps the whole object as written.
+fn link_outputs(meta: &ObjectExpression<'_>, source: &str) -> Option<String> {
+    let as_written = get_property_source(meta, "outputs", source)?;
+    let Some(outputs) = get_object_property(meta, "outputs") else {
+        return Some(as_written.to_string());
+    };
+    if outputs.properties.is_empty() {
+        return Some(as_written.to_string());
+    }
+    let mut entries = Vec::with_capacity(outputs.properties.len());
+    for prop in &outputs.properties {
+        let ObjectPropertyKind::ObjectProperty(p) = prop else {
+            return Some(as_written.to_string());
+        };
+        let key = match &p.key {
+            PropertyKey::StaticIdentifier(ident) => quote_key(&ident.name),
+            PropertyKey::StringLiteral(s) => match s.value.as_str() {
+                Some(key) => quote_key(key),
+                None => return Some(as_written.to_string()),
+            },
+            _ => return Some(as_written.to_string()),
+        };
+        let Some(value) = static_string_literal(&p.value, source) else {
+            return Some(as_written.to_string());
+        };
+        entries.push(format!("{key}: {value}"));
+    }
+    Some(format!("{{ {} }}", entries.join(", ")))
+}
+
+/// A directive's `exportAs` for the definition: each name read as a string and
+/// printed as a new literal, as the Angular linker does
+/// (`getArray('exportAs').map(entry => entry.getString())`).
+fn link_export_as(meta: &ObjectExpression<'_>, source: &str) -> Option<String> {
+    let as_written = get_property_source(meta, "exportAs", source)?;
+    let Some(names) = get_array_property(meta, "exportAs") else {
+        return Some(as_written.to_string());
+    };
+    let names: Option<Vec<String>> = names
+        .elements
+        .iter()
+        .map(|element| static_string_literal(element.as_expression()?, source))
+        .collect();
+    Some(names.map_or_else(|| as_written.to_string(), |names| format!("[{}]", names.join(", "))))
+}
+
 /// Link ɵɵngDeclareDirective → ɵɵdefineDirective.
 fn link_directive<'a>(
     meta: &ObjectExpression<'_>,
@@ -1705,10 +1777,10 @@ fn link_directive<'a>(
         let converted = convert_inputs_to_definition_format(inputs_obj, source);
         parts.push(format!("inputs: {converted}"));
     }
-    if let Some(outputs) = get_property_source(meta, "outputs", source) {
+    if let Some(outputs) = link_outputs(meta, source) {
         parts.push(format!("outputs: {outputs}"));
     }
-    if let Some(export_as) = get_property_source(meta, "exportAs", source) {
+    if let Some(export_as) = link_export_as(meta, source) {
         parts.push(format!("exportAs: {export_as}"));
     }
     let standalone = get_bool_property(meta, "isStandalone")
@@ -1951,7 +2023,8 @@ fn build_queries(
                 query_selectors(selectors).map_or_else(
                     || source[expr.span().start as usize..expr.span().end as usize].to_string(),
                     |selectors| {
-                        JsEmitter::new().emit_expression(&pool_string_array(pool, &selectors))
+                        JsEmitter::for_linker()
+                            .emit_expression(&pool_string_array(pool, &selectors))
                     },
                 )
             } else {
@@ -2200,7 +2273,7 @@ fn build_features(
     //    emits `ɵɵControlFeature("formField")` or `ɵɵControlFeature(null)`
     if let Some(control_create) = get_object_property(meta, "controlCreate") {
         let pass_through = match get_string_property(control_create, "passThroughInput") {
-            Some(s) => escape_string(s, false),
+            Some(s) => escape_string_for_linker(s),
             None => "null".to_string(),
         };
         features.push(format!("{ns}.\u{0275}\u{0275}ControlFeature({pass_through})"));
@@ -2256,7 +2329,7 @@ fn host_directives_feature_arg(expr: &Expression<'_>, source: &str) -> Option<St
                 let pairs: Vec<String> = mapping
                     .iter()
                     .flat_map(|(field, alias)| {
-                        [escape_string(field, false), escape_string(alias, false)]
+                        [escape_string_for_linker(field), escape_string_for_linker(alias)]
                     })
                     .collect();
                 mappings.push(format!("{key}: [{}]", pairs.join(", ")));
@@ -2431,7 +2504,7 @@ fn link_component<'a>(
         .filter(|attrs| !attrs.is_empty())
         .map(|attrs| {
             let attrs: Vec<&str> = attrs.iter().map(String::as_str).collect();
-            JsEmitter::new().emit_expression(&pool_string_array(&mut attrs_pool, &attrs))
+            JsEmitter::for_linker().emit_expression(&pool_string_array(&mut attrs_pool, &attrs))
         });
     let attrs_declarations_js = declare_pooled_constants_js(&mut attrs_pool, ns);
     pool.close(&mut attrs_pool);
@@ -2502,12 +2575,12 @@ fn link_component<'a>(
     }
 
     // 9. outputs
-    if let Some(outputs) = get_property_source(meta, "outputs", source) {
+    if let Some(outputs) = link_outputs(meta, source) {
         parts.push(format!("outputs: {outputs}"));
     }
 
     // 10. exportAs
-    if let Some(export_as) = get_property_source(meta, "exportAs", source) {
+    if let Some(export_as) = link_export_as(meta, source) {
         parts.push(format!("exportAs: {export_as}"));
     }
 
@@ -2766,9 +2839,18 @@ fn link_component<'a>(
     // 22. changeDetection — resolve the enum member to its numeric value.
     // Angular v22: OnPush = 0, Eager = 1 (Default is a deprecated alias for
     // Eager). The runtime computes `onPush = changeDetection !== Eager`.
+    //
+    // A linker before v22 (when the app's version is known) defaults to
+    // `Default` and leaves that out, like its compiler, which only writes a
+    // strategy other than `Default` (`compileComponentFromMetadata`). So there
+    // only an explicit OnPush gives a field.
+    let pre_v22_linker =
+        options.angular_version.is_some_and(|v| !v.change_detection_default_is_on_push());
     if let Some(cd) = get_property_source(meta, "changeDetection", source) {
         if cd.contains("Eager") || cd.contains("Default") {
-            parts.push("changeDetection: 1".to_string());
+            if !pre_v22_linker {
+                parts.push("changeDetection: 1".to_string());
+            }
         } else if cd.contains("OnPush") {
             // Emitted explicitly rather than left to the runtime default. The TS
             // compiler omits OnPush here, but it ships with the runtime it targets;
@@ -2779,7 +2861,7 @@ fn link_component<'a>(
             // silently lose OnPush. `0` is correct on both.
             parts.push("changeDetection: 0".to_string());
         }
-    } else if !has_on_push_by_default(meta) {
+    } else if !pre_v22_linker && !has_on_push_by_default(meta) {
         // Omitted. Which strategy that meant depends on the version the library
         // was compiled against, and the runtime reads an absent field as OnPush,
         // so a pre-v22 declaration has to say Eager out loud. Without this a
