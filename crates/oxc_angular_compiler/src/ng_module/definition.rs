@@ -199,6 +199,28 @@ pub fn generate_full_ng_module_definition<'a>(
 ) -> Option<FullNgModuleDefinition<'a>> {
     let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
     let mut r3_metadata = metadata.to_r3_metadata(allocator)?;
+    // Like ngtsc's `resolveTypeList`, the partial declaration and the
+    // full-mode scope list what the transform read: lists flattened, and
+    // the NgModule of each `ModuleWithProviders`.
+    {
+        let resolved = |list: &OxcVec<'a, OutputExpression<'a>>| {
+            OxcVec::from_iter_in(
+                list.iter().map(|item| {
+                    crate::ng_module::R3Reference::value_only(item.clone_in(allocator))
+                }),
+                &allocator,
+            )
+        };
+        if let Some(list) = &metadata.partial_declarations {
+            r3_metadata.declarations = resolved(list);
+        }
+        if let Some(list) = &metadata.partial_imports {
+            r3_metadata.imports = resolved(list);
+        }
+        if let Some(list) = &metadata.partial_exports {
+            r3_metadata.exports = resolved(list);
+        }
+    }
 
     // IMPORTANT: Generate ɵfac BEFORE ɵmod and ɵinj to match Angular's namespace index assignment order.
     // Angular processes results in order [fac, mod, inj, ...] during the transform phase
@@ -223,28 +245,6 @@ pub fn generate_full_ng_module_definition<'a>(
             // statement upstream-mandated; the linker re-creates remote
             // scoping at link time if needed. See
             // `compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts:971`.
-            //
-            // Like ngtsc's `resolveTypeList`, the declaration lists what
-            // the transform read: lists flattened, and the NgModule of each
-            // `ModuleWithProviders`. Only here: the full-mode scope keeps
-            // the raw lists.
-            let resolved = |list: &OxcVec<'a, OutputExpression<'a>>| {
-                OxcVec::from_iter_in(
-                    list.iter().map(|item| {
-                        crate::ng_module::R3Reference::value_only(item.clone_in(allocator))
-                    }),
-                    &allocator,
-                )
-            };
-            if let Some(list) = &metadata.partial_declarations {
-                r3_metadata.declarations = resolved(list);
-            }
-            if let Some(list) = &metadata.partial_imports {
-                r3_metadata.imports = resolved(list);
-            }
-            if let Some(list) = &metadata.partial_exports {
-                r3_metadata.exports = resolved(list);
-            }
             let fac_definition = compile_declare_factory_for_ng_module(
                 allocator,
                 core_namespace,

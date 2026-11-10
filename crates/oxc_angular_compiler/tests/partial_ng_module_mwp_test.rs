@@ -1,10 +1,11 @@
 //! The lists of a partial `ɵɵngDeclareNgModule` (#623). ngtsc lists what
 //! each entry gives (`resolveTypeList`): `imports: [mwp, Holder.forRoot()]`
 //! becomes `imports: [DepModule, DepModule]`, and spreads, nested arrays,
-//! `const` lists and namespace members are flattened. The injector and the
-//! full-mode `ɵɵsetNgModuleScope` keep the entries as written. In both
-//! modes the lists are wrapped in `() => [...]` when one names a class this
-//! file declares after the NgModule.
+//! `const` lists and namespace members are flattened. The full-mode
+//! `ɵɵsetNgModuleScope` lists the same when every entry of a list was read
+//! (#703); the injector keeps the entries as written. In both modes the
+//! lists are wrapped in `() => [...]` when one names a class this file
+//! declares after the NgModule.
 //!
 //! Each expected list below was checked against ngtsc 22.2.3 on the same
 //! input. An entry oxc can't settle keeps its old output.
@@ -57,15 +58,17 @@ fn same_file_method_and_constant_list_the_module() {
 }
 
 #[test]
-fn full_mode_scope_keeps_the_entries_as_written() {
-    // ngtsc's full output reads `[DepModule, DepModule]` here, but the
-    // runtime unwraps the raw list (`convertToTypeArray`), like ngtsc's
-    // local compilation. Full output doesn't change.
+fn full_mode_scope_lists_what_was_read() {
+    // ngtsc 22.2.4 full: `ɵɵsetNgModuleScope(AppModule, { imports: [DepModule, DepModule] })`.
     let options = TransformOptions::default();
     let code = compile_in("app.ts", SAME_FILE, &options);
     assert!(
-        code.contains("ɵɵsetNgModuleScope(AppModule,{imports:[mwp,Holder.forRoot()]})"),
-        "full-mode scope should be raw:\n{code}"
+        code.contains("ɵɵsetNgModuleScope(AppModule,{imports:[DepModule,DepModule]})"),
+        "full-mode scope should list the modules:\n{code}"
+    );
+    assert!(
+        code.contains("ɵɵdefineInjector({imports:[mwp,Holder.forRoot()]})"),
+        "ɵinj should keep the entries as written:\n{code}"
     );
 }
 
@@ -317,16 +320,41 @@ export class LaterModule {}
 }
 
 #[test]
-fn full_mode_wraps_lists_like_ngtsc_and_keeps_raw_ones() {
+fn full_mode_wraps_lists_like_ngtsc() {
     // ngtsc full: `bootstrap: () => [AppCmp]` and
     // `{ declarations: () => [AppCmp], imports: () => [EarlyModule, LaterModule], exports: () => [AppCmp] }`.
-    // The raw `imports` stays as written and unwrapped: the runtime only
-    // flattens and unwraps a list that is an array (`convertToTypeArray`).
     let code = full(LATER);
     assert!(code.contains("ɵɵdefineNgModule({type:AppModule,bootstrap:()=>[AppCmp]})"), "{code}");
     assert!(
         code.contains(
-            "ɵɵsetNgModuleScope(AppModule,{declarations:()=>[AppCmp],imports:[EarlyModule,Holder.forRoot()],exports:()=>[AppCmp]})"
+            "ɵɵsetNgModuleScope(AppModule,{declarations:()=>[AppCmp],imports:()=>[EarlyModule,LaterModule],exports:()=>[AppCmp]})"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn full_mode_keeps_a_list_with_an_unread_entry_as_written() {
+    // `imports` names an import Oxc can't read without cross-file
+    // analysis, so it stays as written and unwrapped (the runtime only
+    // flattens and unwraps a list that is an array, `convertToTypeArray`),
+    // next to the lists that were read and wrapped.
+    let code = full(
+        r"
+import { NgModule, Directive } from '@angular/core';
+import { DepModule } from './dep';
+@Directive({ selector: '[a]', standalone: false })
+export class A {}
+const MODS = [DepModule];
+@NgModule({ declarations: [A, B], imports: [...MODS], exports: [...[A, B]] })
+export class M {}
+@Directive({ selector: '[b]', standalone: false })
+export class B {}
+",
+    );
+    assert!(
+        code.contains(
+            "ɵɵsetNgModuleScope(M,{declarations:()=>[A,B],imports:[...MODS],exports:()=>[A,B]})"
         ),
         "{code}"
     );
@@ -550,8 +578,8 @@ fn lists_oxc_cant_read_keep_their_old_output() {
     //   cross-file analysis (ngtsc: `[DepModule, i1.DepModule]`);
     // - a spread of a value that is no array, and `satisfies`, which ngtsc
     //   rejects (error -991010);
-    // - a `let` list, a function call and a condition, which ngtsc reads
-    //   (`[AModule, AModule, AModule]`).
+    // - a function call and a condition, which ngtsc reads
+    //   (`[AModule, AModule]`).
     let code = partial(
         r"
 import { NgModule, ModuleWithProviders } from '@angular/core';
@@ -563,7 +591,6 @@ export class AModule {
 }
 const LOCAL = [DepModule];
 const ONE = AModule.forRoot();
-let LET_LIST = [AModule];
 function make() { return AModule; }
 function cond() { return true; }
 @NgModule({ imports: [...LOCAL, ns.DepModule] })
@@ -572,13 +599,39 @@ export class ImportedModule {}
 export class OneModule {}
 @NgModule({ imports: [...([AModule] satisfies any[])] })
 export class SatisfiesModule {}
-@NgModule({ imports: [...LET_LIST, [make()], ...(cond() ? [AModule] : [])] })
+@NgModule({ imports: [[make()], ...(cond() ? [AModule] : [])] })
 export class EvaluatedModule {}
 ",
     );
     for module in ["ImportedModule", "OneModule", "SatisfiesModule", "EvaluatedModule"] {
         assert!(code.contains(&format!("type:{module}}})")), "{module}:\n{code}");
     }
+}
+
+#[test]
+fn let_and_var_lists_are_read() {
+    // ngtsc reads the initializer of any variable. ngtsc 22.2.4: partial
+    // `imports: [AModule, AModule], exports: [AModule]`, and the same full
+    // scope.
+    let source = r"
+import { NgModule, forwardRef } from '@angular/core';
+@NgModule({})
+export class AModule {}
+let LET_LIST = [AModule];
+var VAR_LIST = [AModule];
+const LOCAL = [AModule];
+@NgModule({ imports: [...LET_LIST, forwardRef(function () { return LOCAL; })], exports: VAR_LIST })
+export class LetModule {}
+";
+    let code = partial(source);
+    assert!(code.contains("type:LetModule,imports:[AModule,AModule],exports:[AModule]}"), "{code}");
+    let code = full(source);
+    assert!(
+        code.contains(
+            "ɵɵsetNgModuleScope(LetModule,{imports:[AModule,AModule],exports:[AModule]})"
+        ),
+        "{code}"
+    );
 }
 
 #[test]
@@ -805,13 +858,16 @@ export class M {}
     }
 
     #[test]
-    fn full_mode_scope_stays_raw_with_cross_file_analysis() {
+    fn full_mode_scope_lists_what_was_read_with_cross_file_analysis() {
+        // ngtsc full: `import * as i1 from "./dep"` and
+        // `ɵɵsetNgModuleScope(AppModule, { declarations: [AppCmp], imports: [i1.DepModule, i1.DepModule] })`.
         let dir = TempDir::new().unwrap();
         write(&dir, "dep.ts", DEP);
         let code = compile(&dir, "app.ts", APP, CompilationMode::Full);
+        assert!(code.contains("import*asi1from'./dep';"), "{code}");
         assert!(
             code.contains(
-                "ɵɵsetNgModuleScope(AppModule,{declarations:[AppCmp],imports:[mwp,OtherModuleHolder.forRoot()]})"
+                "ɵɵsetNgModuleScope(AppModule,{declarations:[AppCmp],imports:[i1.DepModule,i1.DepModule]})"
             ),
             "{code}"
         );
@@ -1035,8 +1091,8 @@ export class NsOnly {}
 
     #[test]
     fn values_oxc_does_not_evaluate_keep_their_old_output() {
-        // ngtsc also reads the `let` list and the function call:
-        // `[AModule, i1.OtherModule, i1.OtherModule, AModule, AModule]`, and
+        // ngtsc also reads the function call:
+        // `[AModule, i1.OtherModule, i1.OtherModule, AModule]`, and
         // `[AModule]` for the condition.
         let dir = TempDir::new().unwrap();
         write(
@@ -1060,8 +1116,7 @@ import { NgModule } from '@angular/core';
 import { LIT, LIT_LIST, DepModule } from './dep';
 @NgModule({})
 export class AModule {}
-let LET_LIST = [AModule];
-@NgModule({ imports: [{ ngModule: AModule, providers: [] }, LIT, ...LIT_LIST, ...LET_LIST, [forwardRefLess()]] })
+@NgModule({ imports: [{ ngModule: AModule, providers: [] }, LIT, ...LIT_LIST, [forwardRefLess()]] })
 export class AppModule {}
 function forwardRefLess() { return AModule; }
 @NgModule({ imports: [...(cond() ? [AModule] : [DepModule])] })
@@ -1349,11 +1404,11 @@ export class AppModule {}
     }
 
     #[test]
-    fn a_list_from_a_file_that_loads_this_one_keeps_the_wrap() {
-        // `cyc.ts` loads this file back, so `LIST` may not be defined yet
-        // when the NgModule is: full compilation lists `LIST` as written, so
-        // the wrap a `forwardRef` asked for stays (ngtsc full writes
-        // `[EarlyCmp, i1.OtherCmp]`). Partial keeps it too.
+    fn a_list_from_a_file_that_loads_this_one_is_read_like_ngtsc() {
+        // `cyc.ts` loads this file back, but the list's class is named
+        // through `other.ts`, which doesn't: like ngtsc 22.2.4, full gives
+        // `ɵɵsetNgModuleScope(AppModule, { declarations: [EarlyCmp, i1.OtherCmp] })`
+        // and partial `declarations: [EarlyCmp, i1.OtherCmp]`, no wrap.
         let dir = TempDir::new().unwrap();
         write(
             &dir,
@@ -1375,19 +1430,46 @@ export const TITLE = 'x';
 export class AppModule {}
 ";
         let code = compile(&dir, "app.ts", source, CompilationMode::Full);
+        assert!(code.contains("import*asi1from'./other';"), "{code}");
         assert!(
-            code.contains("ɵɵsetNgModuleScope(AppModule,{declarations:()=>[EarlyCmp,LIST]})"),
+            code.contains("ɵɵsetNgModuleScope(AppModule,{declarations:[EarlyCmp,i1.OtherCmp]})"),
             "{code}"
         );
         let code = compile(&dir, "app.ts", source, CompilationMode::Partial);
-        assert!(code.contains("type:AppModule,declarations:()=>[EarlyCmp,i1.OtherCmp]}"), "{code}");
+        assert!(code.contains("type:AppModule,declarations:[EarlyCmp,i1.OtherCmp]}"), "{code}");
     }
 
     #[test]
-    fn a_declaration_file_list_keeps_its_old_output() {
-        // ngtsc reads the tuple type (`[i1.LibModule, i1.LibDir]`); oxc
-        // doesn't here, so `...WRAPPED` keeps its old output instead of
-        // naming the list as a class.
+    fn a_forward_ref_to_a_class_whose_file_loads_this_one_keeps_the_wrap() {
+        // `cyc.ts` declares `CycModule` and loads this file back. ngtsc
+        // 22.2.4 writes `imports: [i1.CycModule]` (full and partial), which
+        // throws when `cyc.ts` is loaded first: this file then runs before
+        // `CycModule` is defined. Oxc runs the full-mode scope with no
+        // `ngJitMode` guard, so it keeps the lists lazy instead.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "cyc.ts",
+            "import { NgModule } from '@angular/core';\nimport { M } from './app';\n@NgModule({}) export class CycModule { static m = () => M; }\n",
+        );
+        let source = r"
+import { NgModule, forwardRef } from '@angular/core';
+import * as c from './cyc';
+@NgModule({ imports: [forwardRef(() => c.CycModule)] })
+export class M {}
+";
+        let code = compile(&dir, "app.ts", source, CompilationMode::Full);
+        assert!(code.contains("ɵɵsetNgModuleScope(M,{imports:()=>[i1.CycModule]})"), "{code}");
+        let code = compile(&dir, "app.ts", source, CompilationMode::Partial);
+        assert!(code.contains("type:M,imports:()=>[i1.CycModule]}"), "{code}");
+    }
+
+    #[test]
+    fn a_declaration_file_list_is_read_by_its_type() {
+        // ngtsc's evaluator reads a `declare const` by its tuple type, also
+        // through a list of another file and a nested tuple. ngtsc 22.2.4
+        // gives `import * as i1 from "fakelib"` and
+        // `[i1.LibModule, i1.LibDir]`, never `LIB_ALL` as a class.
         let dir = TempDir::new().unwrap();
         write(
             &dir,
@@ -1406,6 +1488,7 @@ export declare class LibDir {
   static ɵdir: i0.ɵɵDirectiveDeclaration<LibDir, "[lib]", never, {}, {}, never, never, true, never>;
 }
 export declare const LIB_ALL: [typeof LibModule, typeof LibDir];
+export declare const LIB_NESTED: readonly [typeof LIB_ALL, typeof LibModule];
 "#,
         );
         write(
@@ -1414,13 +1497,38 @@ export declare const LIB_ALL: [typeof LibModule, typeof LibDir];
             "import { LIB_ALL } from 'fakelib';\nexport const WRAPPED = [...LIB_ALL];\n",
         );
         let source = r"
-import { NgModule } from '@angular/core';
+import { NgModule, forwardRef } from '@angular/core';
 import { WRAPPED } from './lib';
+import * as lib from 'fakelib';
 @NgModule({ imports: [...WRAPPED] })
 export class M2 {}
+@NgModule({ imports: [forwardRef(() => lib.LIB_ALL)], exports: [...lib.LIB_NESTED] })
+export class M3 {}
 ";
-        let code = compile(&dir, "app.ts", source, CompilationMode::Partial);
-        assert!(code.contains("type:M2}"), "{code}");
-        assert!(!code.contains("LIB_ALL"), "{code}");
+        for mode in [CompilationMode::Partial, CompilationMode::Full] {
+            let code = compile(&dir, "app.ts", source, mode);
+            assert!(code.contains("import*asi1from'fakelib';"), "{code}");
+            assert!(!code.contains("i1.LIB_"), "{code}");
+            if matches!(mode, CompilationMode::Partial) {
+                assert!(code.contains("type:M2,imports:[i1.LibModule,i1.LibDir]}"), "{code}");
+                assert!(
+                    code.contains(
+                        "type:M3,imports:[i1.LibModule,i1.LibDir],exports:[i1.LibModule,i1.LibDir,i1.LibModule]}"
+                    ),
+                    "{code}"
+                );
+            } else {
+                assert!(
+                    code.contains("ɵɵsetNgModuleScope(M2,{imports:[i1.LibModule,i1.LibDir]})"),
+                    "{code}"
+                );
+                assert!(
+                    code.contains(
+                        "ɵɵsetNgModuleScope(M3,{imports:[i1.LibModule,i1.LibDir],exports:[i1.LibModule,i1.LibDir,i1.LibModule]})"
+                    ),
+                    "{code}"
+                );
+            }
+        }
     }
 }
