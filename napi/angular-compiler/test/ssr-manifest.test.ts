@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { runInNewContext } from 'node:vm'
 
 import { afterAll, describe, it, expect } from 'vitest'
 /**
@@ -148,7 +149,7 @@ describe('SSR Manifest Generation (Issue #60)', () => {
     it('should do nothing outside Vite (plain rolldown has no environment)', async () => {
       const plugin = ssrManifestPlugin({})
       ;(plugin.configResolved as Function)({ root: '/app', base: '/' })
-      await (plugin.buildStart as Function).call({})
+      await (plugin.buildStart as any).handler.call({})
       expect(
         (plugin.transform as Function).call(
           {},
@@ -166,7 +167,11 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       '<html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><body><app-root></app-root></body></html>'
 
     const roots: string[] = []
-    afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })))
+    // The watched files of watch mode, in the temp dir.
+    const stamps: string[] = []
+    afterAll(() =>
+      [...roots, ...stamps].forEach((path) => rmSync(path, { recursive: true, force: true })),
+    )
 
     /** A root with the source index.html and, when given, a built `dist/client/index.html`. */
     function tempRoot(built?: string): string {
@@ -185,14 +190,17 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       'index.html': { type: 'asset', fileName: 'index.html', source },
     })
 
-    /** One plugin shared by a `client` and an `ssr` environment, listed in `order`. */
+    /**
+     * One plugin shared by a `client` and an `ssr` environment, listed in
+     * `order`. `watch` is true for all environments or names the ones that watch.
+     */
     function app(
       root: string,
       {
         builder,
         watch,
         order = ['client', 'ssr'],
-      }: { builder?: boolean; watch?: boolean; order?: string[] } = {},
+      }: { builder?: boolean; watch?: boolean | string[]; order?: string[] } = {},
     ) {
       const plugin = ssrManifestPlugin({}) as any
       plugin.configResolved({ root, base: '/' })
@@ -200,34 +208,58 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         order.map((name) => [name, name === 'client' ? { build: { outDir: 'dist/client' } } : {}]),
       )
       const warnings: string[] = []
-      const context = (name: string) => ({
+      const watched: string[] = []
+      const watches = (name: string) =>
+        watch === true || (Array.isArray(watch) && watch.includes(name))
+      const context = (name: string, consumer = name === 'ssr' ? 'server' : 'client') => ({
         environment: {
           name,
           config: {
-            consumer: name === 'client' ? 'client' : 'server',
+            consumer,
             root,
-            build: { watch: watch ? {} : null },
+            build: { watch: watches(name) ? {} : null },
             environments,
           },
           getTopLevelConfig: () => ({ builder: builder ? {} : undefined }),
         },
-        meta: { watchMode: !!watch },
+        meta: { watchMode: watches(name) },
         warn: (message: string) => warnings.push(message),
+        addWatchFile: (file: string) => watched.push(file),
       })
       return {
+        plugin,
         warnings,
-        clientStart: () => plugin.buildStart.call(context('client')),
-        clientBundle: (bundle: Record<string, unknown>) =>
-          plugin.generateBundle.handler.call(context('client'), {}, bundle),
+        watched,
+        clientStart: () => plugin.buildStart.handler.call(context('client')),
+        /** The generateBundle of the `client` environment, or of another one (`name`). */
+        clientBundle: (bundle: Record<string, unknown>, name = 'client') =>
+          plugin.generateBundle.handler.call(context(name), {}, bundle),
+        clientEnd: (error?: Error) => plugin.buildEnd.call(context('client'), error),
+        clientRenderError: () => plugin.renderError.call(context('client'), new Error('client')),
         /** The server's buildStart, then a transform of each module. */
         async server(...modules: string[]): Promise<(string | undefined)[]> {
-          await plugin.buildStart.call(context('ssr'))
+          await plugin.buildStart.handler.call(context('ssr'))
           return modules.map(
             (code, i) =>
               plugin.transform.call(context('ssr'), code, join(root, `src/server${i}.ts`))?.code,
           )
         },
+        /** The server's renderChunk of a chunk with `code`. */
+        async render(code: string): Promise<string | undefined> {
+          return (await plugin.renderChunk.call(context('ssr'), code))?.code
+        },
       }
+    }
+
+    /** Whether `promise` settles within a short time. */
+    async function settles(promise: Promise<unknown>): Promise<boolean> {
+      let done = false
+      promise.then(
+        () => (done = true),
+        () => (done = true),
+      )
+      await new Promise((r) => setTimeout(r, 50))
+      return done
     }
 
     /** Runs the client's generateBundle (when given a bundle), then the server build. */
@@ -240,7 +272,7 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       }: { bundle?: Record<string, unknown>; builder?: boolean; order?: string[] } = {},
     ) {
       const build = app(root, { builder, order })
-      if (bundle) build.clientBundle(bundle)
+      if (bundle) await build.clientBundle(bundle)
       const [code] = await build.server(ENGINE)
       return { code: code!, warnings: build.warnings }
     }
@@ -329,40 +361,211 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       expect(build.warnings).toHaveLength(2)
     })
 
-    it('does not silently reuse the previous round in watch mode', async () => {
-      // `vite build --app --watch` builds the environments at the same time.
-      const root = tempRoot()
-      const build = app(root, { builder: true, watch: true })
+    describe('vite build --app --watch (#705)', () => {
+      // The Angular CLI builds index.server.html from the browser index.html of
+      // the same build (@angular/build execute-post-bundle.js), so each server
+      // round must embed the page of the same client round.
       const NEXT = BUILT.replace('index-abc', 'index-def')
+      const filled = (html: string) => 'Promise.resolve(`' + html + '`)'
+      const watchApp = (root = tempRoot()) => app(root, { builder: true, watch: true })
 
-      // Round 1: the server starts before the client has built.
-      await build.clientStart()
-      const [first] = await build.server(ENGINE)
-      build.clientBundle(page(BUILT))
-      expect(first).toContain('/src/main.ts')
-      expect(build.warnings).toHaveLength(1)
-      expect(build.warnings[0]).toContain('In watch mode')
-      expect(build.warnings[0]).not.toContain('List `client` first')
+      /** Runs the plugin's buildApp, then `builder.build` of the client, which returns a watcher. */
+      async function startClientWatcher(build: ReturnType<typeof app>) {
+        const listeners: ((event: { code: string }) => void)[] = []
+        const watcher = {
+          on: (_: string, listener: (event: { code: string }) => void) => listeners.push(listener),
+        }
+        const builder = { environments: { client: { isBuilt: false } }, build: async () => watcher }
+        await build.plugin.buildApp.handler.call({}, builder)
+        // The plugin wraps `build`, which takes the environment.
+        await (builder.build as (environment: { name: string }) => Promise<unknown>)({
+          name: 'client',
+        })
+        return (code: string) => listeners.forEach((listener) => listener({ code }))
+      }
 
-      // Round 2: the client starts first and drops its old page, so the server
-      // reads the client outDir of round 1.
-      mkdirSync(join(root, 'dist/client'), { recursive: true })
-      writeFileSync(join(root, 'dist/client/index.html'), BUILT)
-      await build.clientStart()
-      const [second] = await build.server(ENGINE)
-      build.clientBundle(page(NEXT))
-      expect(second).toContain('/assets/index-abc.js')
-      expect(build.warnings).toHaveLength(2)
-      expect(build.warnings[1]).toContain('may be stale')
-      expect(build.warnings[1]).toContain('In watch mode')
+      it('fills in the page of the same client round', async () => {
+        const build = watchApp()
 
-      // Round 3: the server starts first, with the page of round 2.
-      const [third] = await build.server(ENGINE)
-      await build.clientStart()
-      expect(third).toContain('/assets/index-def.js')
-      expect(build.warnings).toHaveLength(3)
-      expect(build.warnings[2]).toContain('may be stale')
-      expect(build.warnings[2]).toContain('In watch mode')
+        // Round 1: the server renders while the client round runs.
+        await build.clientStart()
+        const [code] = await build.server(ENGINE)
+        expect(code).toContain('size: __oxc_angular_index_server_html_size__,')
+        expect(code).toContain('text: () => Promise.resolve(__oxc_angular_index_server_html__),')
+        expect(code).not.toContain('/src/main.ts')
+        const first = build.render(code!)
+        build.clientEnd()
+        expect(await settles(first)).toBe(false)
+        await build.clientBundle(page(BUILT))
+        const out = await first
+        expect(out).toContain('size: 130,')
+        expect(out).toContain(filled(BUILT))
+        expect(out).not.toContain('__oxc_angular')
+        // The server waited for this page, so the client does not rebuild it.
+        expect(build.watched).toHaveLength(1)
+        expect(readFileSync(build.watched[0], 'utf-8')).toBe('')
+
+        // Round 2: a server-only change takes the latest page at once.
+        const [serverOnly] = await build.server(ENGINE)
+        expect(await build.render(serverOnly!)).toContain(filled(BUILT))
+
+        // Round 3: a shared change waits for the new page.
+        await build.clientStart()
+        const [shared] = await build.server(ENGINE)
+        const third = build.render(shared!)
+        expect(await settles(third)).toBe(false)
+        await build.clientBundle(page(NEXT))
+        expect(await third).toContain(filled(NEXT))
+        expect(build.warnings).toEqual([])
+      })
+
+      it('waits for the first client round once the client watcher exists', async () => {
+        for (const how of ['build', 'isBuilt']) {
+          const build = watchApp()
+          if (how === 'build') {
+            await startClientWatcher(build)
+          } else {
+            await build.plugin.buildApp.handler.call(
+              {},
+              { environments: { client: { isBuilt: true } }, build: async () => ({}) },
+            )
+          }
+          const [code] = await build.server(ENGINE)
+          const rendered = build.render(code!)
+          expect(await settles(rendered)).toBe(false)
+          await build.clientStart()
+          await build.clientBundle(page(NEXT))
+          expect(await rendered).toContain(filled(NEXT))
+          expect(build.warnings).toEqual([])
+        }
+      })
+
+      it('does not wait without a client watcher', async () => {
+        // A custom buildApp that builds only the server.
+        const root = tempRoot()
+        const build = watchApp(root)
+        const [code] = await build.server(ENGINE)
+        expect(await build.render(code!)).toContain('/src/main.ts')
+        expect(build.warnings).toEqual([
+          `built client index.html not found at ${join(root, 'dist/client/index.html')}; ` +
+            `embedding the source ${join(root, 'index.html')}, so SSR pages will load the source entry.`,
+        ])
+
+        const built = tempRoot(BUILT)
+        const earlier = watchApp(built)
+        const [again] = await earlier.server(ENGINE)
+        expect(await earlier.render(again!)).toContain(filled(BUILT))
+        expect(earlier.warnings).toEqual([
+          `${join(built, 'dist/client/index.html')} comes from an earlier client build and may be stale.`,
+        ])
+      })
+
+      it('does not block the server when a client round fails', async () => {
+        // An error in another plugin's generateBundle shows only as the watcher's ERROR event.
+        for (const how of ['buildEnd', 'renderError', 'ERROR event']) {
+          const build = watchApp()
+          const emit = await startClientWatcher(build)
+          await build.clientStart()
+          await build.clientBundle(page(BUILT))
+
+          await build.clientStart()
+          const [code] = await build.server(ENGINE)
+          const rendered = build.render(code!)
+          expect(await settles(rendered)).toBe(false)
+          if (how === 'buildEnd') build.clientEnd(new Error('client'))
+          else if (how === 'renderError') build.clientRenderError()
+          else emit('ERROR')
+          expect(await rendered).toContain(filled(BUILT))
+          expect(build.warnings).toEqual([
+            'the client build failed, so the SSR page comes from its previous build and may be stale.',
+          ])
+        }
+      })
+
+      it('rebuilds the server through a watched file when the client page changes', async () => {
+        // Rolldown never watches a path that is missing when the build ends, so
+        // the client's index.html in a fresh outDir would never rebuild it.
+        const build = watchApp()
+        await startClientWatcher(build)
+
+        // Round 1 of a fresh outDir: the client fails, so the server embeds the source page.
+        await build.clientStart()
+        const [code] = await build.server(ENGINE)
+        expect(build.watched).toHaveLength(1)
+        const [stamp] = build.watched
+        stamps.push(stamp)
+        expect(stamp.endsWith('.stamp')).toBe(true)
+        expect(readFileSync(stamp, 'utf-8')).toBe('')
+        const rendered = build.render(code!)
+        build.clientEnd(new Error('client'))
+        expect(await rendered).toContain('/src/main.ts')
+
+        // A client-only fix: the server embedded another page, so the client writes the file.
+        await build.clientStart()
+        await build.clientBundle(page(BUILT))
+        expect(readFileSync(stamp, 'utf-8')).not.toBe('')
+
+        // The rebuilt server takes the page, and the same page again writes nothing.
+        writeFileSync(stamp, 'seen')
+        const [again] = await build.server(ENGINE)
+        expect(build.watched).toEqual([stamp, stamp])
+        expect(await build.render(again!)).toContain(filled(BUILT))
+        await build.clientStart()
+        await build.clientBundle(page(BUILT))
+        expect(readFileSync(stamp, 'utf-8')).toBe('seen')
+
+        // Outside watch mode nothing is watched.
+        const once = app(tempRoot(), { builder: true })
+        await once.server(ENGINE)
+        expect(once.watched).toEqual([])
+      })
+
+      it('takes the page only from the environment named client', async () => {
+        const build = watchApp()
+        await build.clientStart()
+        const [code] = await build.server(ENGINE)
+        const rendered = build.render(code!)
+        // Another client environment (a worker or a second browser build).
+        await build.clientBundle(page(NEXT), 'legacy')
+        expect(await settles(rendered)).toBe(false)
+        await build.clientBundle(page(BUILT))
+        expect(await rendered).toContain(filled(BUILT))
+      })
+
+      it('takes the page of a client that does not watch', async () => {
+        // Only `environments.ssr.build.watch` is set: the client builds once, first.
+        const build = app(tempRoot(), { builder: true, watch: ['ssr'] })
+        await build.clientStart()
+        await build.clientBundle(page(BUILT))
+        const [code] = await build.server(ENGINE)
+        expect(await build.render(code!)).toContain(filled(BUILT))
+        expect(build.warnings).toEqual([])
+      })
+
+      it('fills in one line with the same text as outside watch mode', async () => {
+        const PAGE = '<html>\r\n<body>`${x}\\</body>\r</html>\n'
+        const build = watchApp()
+        await build.clientStart()
+        const [code] = await build.server(ENGINE)
+        const rendered = build.render(code!)
+        await build.clientBundle(page(PAGE))
+        const out = (await rendered)!
+
+        const literal = (c: string) =>
+          c.slice(
+            c.indexOf('Promise.resolve(') + 'Promise.resolve('.length,
+            c.indexOf('),\n    },\n  },'),
+          )
+        expect(literal(out)).toBe('`<html>\\n<body>\\`\\${x}\\\\</body>\\n</html>\\n`')
+        const outside = generateAppManifestCode({
+          ssrEntryImport: './main.server',
+          baseHref: '/',
+          indexHtmlContent: PAGE,
+        })
+        expect(runInNewContext(literal(out))).toBe(runInNewContext(literal(outside)))
+        expect(out).toContain('size: 36,')
+        expect(outside).toContain('size: 36,')
+      })
     })
 
     it('embeds the page of this round without a warning outside watch mode', async () => {
@@ -371,6 +574,7 @@ describe('SSR Manifest Generation (Issue #60)', () => {
       build.clientBundle(page(BUILT))
       const [code] = await build.server(ENGINE)
       expect(code).toContain('/assets/index-abc.js')
+      expect(code).not.toContain('__oxc_angular')
       expect(build.warnings).toEqual([])
     })
 
