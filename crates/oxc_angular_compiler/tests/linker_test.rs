@@ -1612,6 +1612,12 @@ fn test_link_host_directives_like_angular_linker() {
             r#"[{ directive: L, inputs: ["color", "a", "color", "b", "1", "one", "x"], outputs: ["changed"] }]"#,
             Some(r#"[{ directive: L, inputs: ["1", "one", "color", "b"] }]"#),
         ),
+        // Quoted keys are read like plain names.
+        (r#"[{ "directive": i0.forwardRef(() => L) }]"#, Some("function () { return [L]; }")),
+        (
+            r#"[{ "directive": L, "inputs": ["a", "b"] }]"#,
+            Some(r#"[{ directive: L, inputs: ["a", "b"] }]"#),
+        ),
     ];
     for (host_directives, expected) in cases {
         let code = format!(

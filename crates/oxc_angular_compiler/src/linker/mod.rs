@@ -2314,14 +2314,14 @@ fn host_directives_feature_arg(expr: &Expression<'_>, source: &str) -> Option<St
         let Some(Expression::ObjectExpression(object)) = element.as_expression() else {
             return as_written();
         };
-        let Some(directive) = get_property_expression(object, "directive") else {
+        let Some(directive) = host_directive_entry_property(object, "directive") else {
             return as_written();
         };
         let (directive, is_forward_ref) = extract_forward_ref(directive, source);
         has_forward_ref |= is_forward_ref;
         let mut mappings = Vec::new();
         for key in ["inputs", "outputs"] {
-            let Some(value) = get_property_expression(object, key) else { continue };
+            let Some(value) = host_directive_entry_property(object, key) else { continue };
             let Some(mapping) = host_directive_binding_mapping(value) else {
                 return as_written();
             };
@@ -2343,6 +2343,26 @@ fn host_directives_feature_arg(expr: &Expression<'_>, source: &str) -> Option<St
     }
     let list = format!("[{}]", entries.join(", "));
     Some(if has_forward_ref { format!("function () {{ return {list}; }}") } else { list })
+}
+
+/// A property of a partial host directive entry, read like Angular's linker
+/// reads an object literal: the key may be a name or a quoted string, and when
+/// a key is written twice the last one wins.
+fn host_directive_entry_property<'a>(
+    object: &'a ObjectExpression<'a>,
+    name: &str,
+) -> Option<&'a Expression<'a>> {
+    object.properties.iter().rev().find_map(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(prop) => {
+            let key = match &prop.key {
+                PropertyKey::StaticIdentifier(ident) => ident.name.as_str(),
+                PropertyKey::StringLiteral(s) => s.value.as_str()?,
+                _ => return None,
+            };
+            (key == name).then_some(&prop.value)
+        }
+        ObjectPropertyKind::SpreadProperty(_) => None,
+    })
 }
 
 /// A partial host directive `inputs` / `outputs` array read like Angular's
