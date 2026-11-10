@@ -478,6 +478,20 @@ impl AngularVersion {
             && self.cmp_release(&Self::new(20, 2, 0).with_prerelease(Prerelease::Next(2))).is_ge()
     }
 
+    /// Check if this version reports a `[]` / `()` host key ("Property name
+    /// is missing in binding" / "Event name is missing in binding").
+    ///
+    /// Older versions sort host keys with
+    /// `HOST_REG_EXP = /^(?:\[([^\]]+)\])|(?:\(([^\)]+)\))$/`, which needs a
+    /// name, so `[]` and `()` are plain host attributes there. 21.2.8 and
+    /// 22.0.0-next.7 replaced it with `startsWith` / `endsWith` checks.
+    pub fn reports_empty_host_binding_names(&self) -> bool {
+        self.fixed_since(&[
+            Self::new(21, 2, 8),
+            Self::new(22, 0, 0).with_prerelease(Prerelease::Next(7)),
+        ])
+    }
+
     /// Whether a fix is in this version, given the first fixed release on
     /// each release line, oldest line first.
     ///

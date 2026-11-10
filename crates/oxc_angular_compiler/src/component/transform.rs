@@ -3969,7 +3969,13 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             // `inputs:`/`outputs:` forms ngtsc rejects, rather than dropping them silently.
-            let io_errors = decorator_io_errors(allocator, class, Some(source), &string_consts);
+            let io_errors = decorator_io_errors(
+                allocator,
+                class,
+                Some(source),
+                &string_consts,
+                options.angular_version,
+            );
             result.diagnostics.extend(io_errors.iter().cloned());
             if io_errors.is_empty() {
                 // Constructor parameter decorators: ngtsc's
