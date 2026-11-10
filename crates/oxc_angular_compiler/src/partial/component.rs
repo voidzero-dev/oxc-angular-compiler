@@ -61,6 +61,11 @@ pub struct PartialComponentInputs<'a, 'm> {
     /// content). Partial mode emits this as a string literal — the linker
     /// re-parses it.
     pub template: &'a str,
+    /// The inline template literal as written in the source (quotes or
+    /// backticks included), when it holds text outside ASCII. ngtsc emits an
+    /// inline string or template literal as the source node, so its text is
+    /// kept, not escaped.
+    pub template_source: Option<&'a str>,
     /// Whether the template came from an inline `template: '...'` literal
     /// (`true`) versus an external `templateUrl` (`false`).
     pub is_inline: bool,
@@ -233,7 +238,10 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     entries.push(LiteralMapEntry::new(
         Ident::from("template"),
-        string_literal_str(allocator, inputs.template),
+        match inputs.template_source {
+            Some(source) => crate::output::oxc_converter::raw_source(allocator, source.into()),
+            None => string_literal_str(allocator, inputs.template),
+        },
         false,
     ));
 

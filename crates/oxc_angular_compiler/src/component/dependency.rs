@@ -86,6 +86,11 @@ pub struct R3DependencyMetadata<'a> {
 
     /// The token is a string literal (`@Inject('TOKEN')`), not a reference.
     pub token_is_string: bool,
+
+    /// The string token or attribute name as written in the source, quotes
+    /// included, when it holds text outside ASCII. ngtsc prints such a literal as
+    /// written, not escaped (see `string_literal_as_written`).
+    pub literal_source: Option<Ident<'a>>,
 }
 
 impl<'a> R3DependencyMetadata<'a> {
@@ -105,6 +110,7 @@ impl<'a> R3DependencyMetadata<'a> {
             skip_self: false,
             type_only_invalid: false,
             token_is_string: false,
+            literal_source: None,
         }
     }
 
@@ -124,6 +130,7 @@ impl<'a> R3DependencyMetadata<'a> {
             skip_self: false,
             type_only_invalid: false,
             token_is_string: false,
+            literal_source: None,
         }
     }
 
@@ -146,6 +153,7 @@ impl<'a> R3DependencyMetadata<'a> {
             skip_self: false,
             type_only_invalid: true,
             token_is_string: false,
+            literal_source: None,
         }
     }
 
@@ -200,6 +208,7 @@ impl<'a> R3DependencyMetadata<'a> {
             skip_self: false,
             type_only_invalid: false,
             token_is_string: false,
+            literal_source: None,
         }
     }
 
@@ -347,7 +356,11 @@ fn compile_inject_dependency<'a>(
 
     // Case 2: @Attribute() dependency
     if let Some(ref attr_name) = dep.attribute_name {
-        return create_inject_attribute_call(allocator, core_namespace, attr_name.clone());
+        return create_inject_attribute_call(
+            allocator,
+            core_namespace,
+            string_token_expr(allocator, attr_name, dep.literal_source),
+        );
     }
 
     // Case 3: Regular token injection
@@ -407,12 +420,10 @@ pub fn create_token_expression<'a>(
     token_name: &Ident<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
-    if dep.token_is_string {
-        // `@Inject('TOKEN')` injects the string itself
-        return OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(token_name.clone()), source_span: None },
-            &allocator,
-        ));
+    if dep.token_is_string || dep.attribute_name.is_some() {
+        // `@Inject('TOKEN')` injects the string itself; an `@Attribute('name')`
+        // token is the attribute name (ngtsc: `{ token: 'name', attribute: true }`).
+        return string_token_expr(allocator, token_name, dep.literal_source);
     }
     if let Some(ref source_module) = dep.token_source_module {
         // Check if this token has an existing named import that can be reused
@@ -487,20 +498,33 @@ fn create_invalid_factory_dep_call<'a>(
     ))
 }
 
+/// A string token or attribute name: its source text when ngtsc keeps it as
+/// written (`literal_source`), else a string literal.
+fn string_token_expr<'a>(
+    allocator: &'a Allocator,
+    value: &Ident<'a>,
+    literal_source: Option<Ident<'a>>,
+) -> OutputExpression<'a> {
+    match literal_source {
+        Some(source) => crate::output::oxc_converter::raw_source(allocator, source),
+        None => OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(value.clone()), source_span: None },
+            &allocator,
+        )),
+    }
+}
+
 /// Create an `ns.ɵɵinjectAttribute(attrName)` call.
 fn create_inject_attribute_call<'a>(
     allocator: &'a Allocator,
     core_namespace: Ident<'a>,
-    attr_name: Ident<'a>,
+    attr_name: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     let fn_expr = create_angular_fn_ref(allocator, core_namespace, Identifiers::INJECT_ATTRIBUTE);
 
     let mut args = OxcVec::with_capacity_in(1, &allocator);
     // Attribute name is passed as a string literal
-    args.push(OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(attr_name), source_span: None },
-        &allocator,
-    )));
+    args.push(attr_name);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {

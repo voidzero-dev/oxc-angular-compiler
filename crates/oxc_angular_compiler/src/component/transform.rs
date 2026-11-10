@@ -6281,6 +6281,7 @@ fn compile_component_partial<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     template: &'a str,
+    template_source: Option<&'a str>,
     metadata: &ComponentMetadata<'a>,
     view_queries: &[R3QueryMetadata<'a>],
     content_queries: &[R3QueryMetadata<'a>],
@@ -6292,6 +6293,7 @@ fn compile_component_partial<'a>(
 ) -> FullCompilationResult<'a> {
     let inputs = crate::partial::PartialComponentInputs {
         template,
+        template_source,
         is_inline: metadata.template.is_some(),
         content_queries,
         view_queries,
@@ -7070,10 +7072,22 @@ fn compile_component_full<'a>(
                 Some((import.key, dependencies))
             })
             .collect();
+        // ngtsc emits an inline string or template literal as the source node
+        // (`inlineTemplateLiteralExpression`), so a template with text outside
+        // ASCII keeps its source text rather than being escaped.
+        let template_source = metadata
+            .template_span
+            .filter(|_| {
+                !template.is_ascii()
+                    && metadata.template.as_ref().map(Ident::as_str) == Some(template)
+            })
+            .and_then(|span| source.get(span.start as usize - 1..span.end as usize + 1))
+            .map(|text| &*allocator.alloc_str(text));
         let mut result = compile_component_partial(
             allocator,
             namespace_registry.angular_core_ns().as_str(),
             template,
+            template_source,
             metadata,
             &view_queries,
             &content_queries,

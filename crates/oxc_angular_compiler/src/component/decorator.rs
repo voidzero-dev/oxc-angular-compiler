@@ -925,6 +925,10 @@ fn extract_param_dependency<'a>(
     let mut inject_token: Option<(Ident<'a>, &'a [Ident<'a>])> = None;
     let mut inject_token_is_string = false;
     let mut attribute_name: Option<Ident<'a>> = None;
+    // The string token or attribute name as written, when ngtsc keeps it
+    // (see `string_literal_as_written`).
+    let mut inject_literal_source: Option<Ident<'a>> = None;
+    let mut attribute_source: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = crate::directive::angular_param_decorator(decorator, Some(consts)) {
@@ -938,6 +942,12 @@ fn extract_param_dependency<'a>(
                             let string_token =
                                 arg.as_expression().and_then(extract_string_inject_token);
                             inject_token_is_string = string_token.is_some();
+                            inject_literal_source = arg.as_expression().and_then(|expr| {
+                                crate::output::oxc_converter::literal_as_written(
+                                    allocator,
+                                    expr.get_inner_expression(),
+                                )
+                            });
                             inject_token = string_token
                                 .map(|token| (token, &[][..]))
                                 .or_else(|| extract_inject_token(allocator, arg));
@@ -955,6 +965,8 @@ fn extract_param_dependency<'a>(
                             && let Some(name) = s.value.as_str()
                         {
                             attribute_name = Some(name.into());
+                            attribute_source =
+                                crate::output::oxc_converter::string_literal_as_written(s);
                         }
                     }
                 }
@@ -973,12 +985,15 @@ fn extract_param_dependency<'a>(
 
     // Handle @Attribute decorator
     if let Some(attr_name) = attribute_name {
-        return R3DependencyMetadata::attribute(attr_name);
+        let mut dep = R3DependencyMetadata::attribute(attr_name);
+        dep.literal_source = attribute_source;
+        return dep;
     }
 
     if inject_token_is_string && let Some(value) = token {
         let mut dep = R3DependencyMetadata::new(value);
         dep.token_is_string = true;
+        dep.literal_source = inject_literal_source;
         dep.optional = optional;
         dep.skip_self = skip_self;
         dep.self_ = self_;

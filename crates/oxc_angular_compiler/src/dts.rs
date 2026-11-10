@@ -840,6 +840,13 @@ fn escape_dts_string(s: &str) -> String {
             Piece::Char('\n') => out.push_str("\\n"),
             Piece::Char('\r') => out.push_str("\\r"),
             Piece::Char('\t') => out.push_str("\\t"),
+            // Text outside ASCII is escaped per UTF-16 code unit, as the
+            // TypeScript printer escapes the literal types ngtsc creates.
+            Piece::Char(c) if !c.is_ascii() => {
+                for unit in c.encode_utf16(&mut [0u16; 2]) {
+                    let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{unit:04X}"));
+                }
+            }
             Piece::Char(c) => out.push(c),
             // A stored lone surrogate is printed as its `\uXXXX` escape.
             Piece::Lone(unit) => {
@@ -872,6 +879,9 @@ mod tests {
         assert_eq!(escape_dts_string("line1\nline2"), "line1\\nline2");
         assert_eq!(escape_dts_string("col1\tcol2"), "col1\\tcol2");
         assert_eq!(escape_dts_string("a\r\nb"), "a\\r\\nb");
+        // Text outside ASCII as ngtsc's declaration printer writes it.
+        assert_eq!(escape_dts_string("[x=\u{00E9}]"), "[x=\\u00E9]");
+        assert_eq!(escape_dts_string("\u{1F600}"), "\\uD83D\\uDE00");
     }
 
     #[test]

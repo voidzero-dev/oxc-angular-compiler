@@ -1149,7 +1149,13 @@ fn convert_pure_function_body<'a>(
                 let value = convert_pure_function_body(allocator, &map.values[i], params);
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
-                entries.push(LiteralMapEntry { key, value, quoted, is_spread });
+                entries.push(LiteralMapEntry {
+                    key,
+                    value,
+                    quoted,
+                    is_spread,
+                    key_as_written: false,
+                });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: None },
@@ -1188,7 +1194,13 @@ fn convert_pure_function_body<'a>(
                 let value = convert_pure_function_body(allocator, &map.values[i], params);
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
-                entries.push(LiteralMapEntry { key, value, quoted, is_spread });
+                entries.push(LiteralMapEntry {
+                    key,
+                    value,
+                    quoted,
+                    is_spread,
+                    key_as_written: false,
+                });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: None },

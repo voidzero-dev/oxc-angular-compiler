@@ -193,8 +193,8 @@ MyDir.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "17.0.
 /// literals. For the aliased array form `[publicName, classPropertyName]` this
 /// preserves the declaration-format detection — otherwise the array would be
 /// passed through verbatim and the runtime would read the public name as
-/// `InputFlags`. Array elements keep their original source spelling, so only
-/// the simple and object forms are asserted byte-identical.
+/// `InputFlags`. The names are printed as new string literals, as Angular's
+/// linker reads them (`getString()`), so every form is byte-identical.
 #[test]
 fn test_link_inputs_template_literal_matches_string_literal() {
     // Simple value form: same emitted output either way.
@@ -209,7 +209,7 @@ fn test_link_inputs_template_literal_matches_string_literal() {
     let template =
         link(&allocator, &make_directive_source(r#"prop: [`publicProp`, `prop`]"#), "test.mjs");
     assert!(
-        template.code.contains(r#"prop: [0, `publicProp`, `prop`]"#),
+        template.code.contains(r#"prop: [0, "publicProp", "prop"]"#),
         "aliased input lost its InputFlags element:\n{}",
         template.code
     );
@@ -220,6 +220,7 @@ fn test_link_inputs_template_literal_matches_string_literal() {
         "quoted input changed behaviour:\n{}",
         string.code
     );
+    assert_eq!(template.code, string.code);
 
     // Object format: publicName/classPropertyName may also be template literals.
     let allocator = Allocator::default();

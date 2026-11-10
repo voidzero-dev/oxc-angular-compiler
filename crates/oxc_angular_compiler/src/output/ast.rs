@@ -509,15 +509,24 @@ pub struct LiteralMapEntry<'a> {
     pub value: OutputExpression<'a>,
     pub quoted: bool,
     pub is_spread: bool,
+    /// The key is source text, quotes included, printed as is. ngtsc copies an
+    /// object from the source as written, so a quoted key with text outside ASCII
+    /// (`'é-x'`) keeps its source form instead of being escaped.
+    pub key_as_written: bool,
 }
 
 impl<'a> LiteralMapEntry<'a> {
     pub fn new(key: Ident<'a>, value: OutputExpression<'a>, quoted: bool) -> Self {
-        Self { key, value, quoted, is_spread: false }
+        Self { key, value, quoted, is_spread: false, key_as_written: false }
     }
 
     pub fn spread(value: OutputExpression<'a>) -> Self {
-        Self { key: Ident::from(""), value, quoted: false, is_spread: true }
+        Self { key: Ident::from(""), value, quoted: false, is_spread: true, key_as_written: false }
+    }
+
+    /// An entry whose key is a quoted key as written in the source.
+    pub fn with_key_as_written(key: Ident<'a>, value: OutputExpression<'a>) -> Self {
+        Self { key, value, quoted: true, is_spread: false, key_as_written: true }
     }
 }
 
@@ -1200,6 +1209,7 @@ impl<'a> OutputExpression<'a> {
                         value: entry.value.clone_in(allocator),
                         quoted: entry.quoted,
                         is_spread: entry.is_spread,
+                        key_as_written: entry.key_as_written,
                     });
                 }
                 OutputExpression::LiteralMap(Box::new_in(

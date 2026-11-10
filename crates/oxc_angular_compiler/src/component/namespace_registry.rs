@@ -144,7 +144,7 @@ impl<'a> NamespaceRegistry<'a> {
             result.push_str("import * as ");
             result.push_str(alias.as_str());
             result.push_str(" from '");
-            result.push_str(module_path.as_str());
+            result.push_str(&crate::output::emitter::escape_non_ascii(module_path.as_str()));
             result.push_str("';\n");
         }
 
