@@ -1099,7 +1099,9 @@ impl JsEmitter {
     ) {
         // Emitted natively, as ngtsc does, so the tag receives the same strings array on
         // every call. An optional chain can't be a tag: `(a?.b)\`t\``, as Babel prints it.
-        let parenthesize = is_optional_chain(&expr.tag);
+        // Nor can a unary operator: `(a++)\`t\``, as TypeScript's printer re-inserts it.
+        let parenthesize = is_optional_chain(&expr.tag)
+            || matches!(expr.tag.as_ref(), OutputExpression::UnaryOperator(u) if !u.parens);
         if parenthesize {
             ctx.print("(");
         }

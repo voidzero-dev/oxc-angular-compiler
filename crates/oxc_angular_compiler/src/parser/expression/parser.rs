@@ -1740,7 +1740,7 @@ impl<'a> Parser<'a> {
 
         if let Some(operator) = self.peek_update_operator() {
             self.advance();
-            let expr = self.parse_prefix();
+            let expr = self.parse_update_operand();
             return self.make_update_expression(start, operator, expr, true);
         }
 
@@ -1903,6 +1903,26 @@ impl<'a> Parser<'a> {
             Some(t) if t.is_operator("--") => Some(UnaryOperator::Decrement),
             _ => None,
         }
+    }
+
+    /// Parses the operand of a prefix `++`/`--`.
+    ///
+    /// Angular's `parsePrimary` reports `Unexpected token X` when no expression
+    /// starts at X (`++;`, `foo(++)`). Ours stays silent there and leaves the
+    /// token to its callers, which would turn a bare `++` into `undefined`.
+    fn parse_update_operand(&mut self) -> AngularExpression<'a> {
+        let index = self.index;
+        let errors = self.errors.len();
+        let operand = self.parse_prefix();
+        if matches!(operand, AngularExpression::Empty(_))
+            && self.index == index
+            && self.errors.len() == errors
+            && let Some(token) = self.peek()
+        {
+            let message = format!("Unexpected token {}", token.str_value);
+            self.error(&message);
+        }
+        operand
     }
 
     /// Builds a `++`/`--` expression whose operator has already been consumed,
@@ -3076,14 +3096,19 @@ impl<'a> Parser<'a> {
     /// Parses a pipe expression.
     fn parse_pipe(&mut self) -> AngularExpression<'a> {
         let start = self.peek().map(|t| t.index).unwrap_or(0);
+        let errors = self.errors.len();
         let mut result = self.parse_expression();
 
         // Check if we're about to consume a pipe with an empty left-hand expression
-        // This handles cases like " | a | b" where the expression starts with a pipe
-        if let Some(token) = self.peek() {
-            if token.is_operator("|") && matches!(result, AngularExpression::Empty(_)) {
-                self.error("Unexpected token |");
-            }
+        // This handles cases like " | a | b" where the expression starts with a pipe.
+        // An empty expression that already reported an error (an invalid `a++`) is
+        // not reported again, as Angular reports it only once.
+        if let Some(token) = self.peek()
+            && token.is_operator("|")
+            && matches!(result, AngularExpression::Empty(_))
+            && self.errors.len() == errors
+        {
+            self.error("Unexpected token |");
         }
 
         if !self.optional_operator("|") {
@@ -3129,9 +3154,10 @@ impl<'a> Parser<'a> {
             // Parse pipe arguments
             let mut args = Vec::new_in(&self.allocator);
             while self.optional_character(':') {
+                let errors = self.errors.len();
                 let arg = self.parse_expression();
                 // Check for empty argument followed by | or EOF
-                if matches!(arg, AngularExpression::Empty(_)) {
+                if matches!(arg, AngularExpression::Empty(_)) && self.errors.len() == errors {
                     if let Some(next_token) = self.peek() {
                         if next_token.is_operator("|") {
                             self.error("Unexpected token |");

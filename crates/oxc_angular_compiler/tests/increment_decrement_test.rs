@@ -302,6 +302,78 @@ fn invalid_target_errors() {
     }
 }
 
+#[test]
+fn tagged_template_tag() {
+    // ngc: `return (ctx.count++) `x`;`, its printer keeps the parentheses.
+    listener(r#"<button (click)="(count++)\`x\`"></button>"#, "return (ctx.count++)`x`;");
+    listener(r#"<button (click)="(--count)\`x\`"></button>"#, "return (--ctx.count)`x`;");
+}
+
+/// The diagnostics of compiling `template`, which must hold exactly `expected`
+/// (each followed by Angular's location text).
+fn assert_errors(template: &str, expected: &[&str]) {
+    let errors = diagnostics(&component(template));
+    assert_eq!(errors.len(), expected.len(), "{template}: {errors:?}");
+    for (error, message) in errors.iter().zip(expected) {
+        assert!(error.contains(message), "{template}: expected `{message}` in {errors:?}");
+    }
+}
+
+#[test]
+fn missing_operand_errors() {
+    // ngc 22.3.0-next.4 messages (`Parser Error: ... in [...]`). For `++;` and
+    // `++,a` it also reports `Empty expressions are not allowed`, which this
+    // compiler does not report for any empty action.
+    for (template, expected) in [
+        (r#"<button (click)="++;"></button>"#, &["Unexpected token ; at column 3 in [++;]"][..]),
+        (r#"<button (click)="fn(++)"></button>"#, &["Unexpected token ) at column 6 in [fn(++)]"]),
+        (r#"<button (click)="[++]"></button>"#, &["Unexpected token ] at column 4 in [[++]]"]),
+        (r#"<button (click)="(++)"></button>"#, &["Unexpected token ) at column 4 in [(++)]"]),
+        (r#"<button (click)="++,x"></button>"#, &["Unexpected token , at column 3 in [++,x]"]),
+        (r#"<button (click)="++ ;x"></button>"#, &["Unexpected token ; at column 4 in [++ ;x]"]),
+        (
+            r#"<button (click)="--;++;"></button>"#,
+            &[
+                "Unexpected token ; at column 3 in [--;++;]",
+                "Unexpected token ; at column 6 in [--;++;]",
+            ],
+        ),
+    ] {
+        assert_errors(template, expected);
+    }
+}
+
+#[test]
+fn pipe_binding_errors() {
+    // ngc reports the assignment only, not a second error for the pipe.
+    let source = |template: &str| {
+        format!(
+            "import {{Component, Pipe}} from '@angular/core';
+@Pipe({{name: 'foo'}}) export class FooPipe {{ transform(...a: any[]) {{ return a; }} }}
+@Component({{selector: 'app', imports: [FooPipe], template: `{template}`}})
+export class App {{ count = 0; x = 0; }}"
+        )
+    };
+    for (template, expected) in [
+        (
+            r#"<div [title]="count++ | foo"></div>"#,
+            "Bindings cannot contain assignments at column 9",
+        ),
+        (
+            r#"<div [title]="x | foo:count++"></div>"#,
+            "Bindings cannot contain assignments at the end of the expression",
+        ),
+        (
+            r#"<div [title]="x | foo:count++:x"></div>"#,
+            "Bindings cannot contain assignments at column 16",
+        ),
+    ] {
+        let errors = diagnostics(&source(template));
+        assert_eq!(errors.len(), 1, "{template}: {errors:?}");
+        assert!(errors[0].contains(expected), "{template}: {errors:?}");
+    }
+}
+
 const LINK_SOURCE: &str = "import {Component} from '@angular/core';
 @Component({
   selector: 'app',
