@@ -15,7 +15,7 @@
     "oxlint": "^1.56.0",
     "oxlint-tsgolint": "^7.0.0",
     "pkg-pr-new": "0.0.91",
-    "vite-plus": "https://registry-bridge.viteplus.dev/tarballs/vite-plus/0.0.0-commit.a86fd1603196e23718d16144a472ad91b4ba21be/37360d183b23307c70ce301f0aa25f388dc84c91.tgz"
+    "vite-plus": "^1.6.0"
   },
   "packageManager": "pnpm@11.24.0"
 }
