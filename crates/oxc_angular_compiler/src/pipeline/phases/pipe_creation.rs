@@ -52,17 +52,28 @@ fn process_pipe_bindings_in_view(job: &mut ComponentCompilationJob<'_>, view_xre
         };
 
         let mut bindings = Vec::new();
+        let mut seen_xrefs = HashSet::new();
 
         for op in view.update.iter() {
             // Visit all expressions in this operation to find PipeBinding
-            collect_pipe_bindings(op, &mut bindings);
+            let mut op_bindings = Vec::new();
+            collect_pipe_bindings(op, &mut op_bindings);
+
+            // Deduplicate by xref - the same pipe can appear multiple times
+            // (e.g., in @switch test and processed expressions), but we only
+            // want to create one PipeOp per unique xref.
+            //
+            // Angular visits a `@boundary`'s `when` conditions twice (see
+            // `BoundaryUpdateOp::when_exprs`) and creates their pipes twice; keep that.
+            let keep_repeats = matches!(op, crate::ir::ops::UpdateOp::Boundary(_));
+            for binding in op_bindings {
+                if seen_xrefs.insert(binding.xref) || keep_repeats {
+                    bindings.push(binding);
+                }
+            }
         }
 
-        // Deduplicate by xref - the same pipe can appear multiple times
-        // (e.g., in @switch test and processed expressions), but we only
-        // want to create one PipeOp per unique xref
-        let mut seen_xrefs = HashSet::new();
-        bindings.into_iter().filter(|p| seen_xrefs.insert(p.xref)).collect()
+        bindings
     };
 
     // Create PipeOp for each binding
@@ -414,10 +425,8 @@ fn collect_pipe_bindings<'a>(op: &crate::ir::ops::UpdateOp<'a>, bindings: &mut V
             }
         }
         crate::ir::ops::UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter() {
-                if let Some(ref expr) = condition.expr {
-                    check_expression(expr, target_element, bindings);
-                }
+            for expr in boundary.when_exprs() {
+                check_expression(expr, target_element, bindings);
             }
             if let Some(ref processed) = boundary.processed {
                 check_expression(processed, target_element, bindings);

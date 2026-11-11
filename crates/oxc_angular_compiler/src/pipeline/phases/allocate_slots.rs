@@ -217,6 +217,14 @@ fn allocate_slots_in_view<'a>(
                     listener.target_slot = slot;
                 }
             }
+            // A pipe in a `@boundary`'s `when` condition has two pipe ops (see
+            // `create_pipes`). In Angular they share one slot handle, so both get the
+            // slot allocated last.
+            CreateOp::Pipe(pipe) => {
+                if let Some(&slot) = slot_map.get(&pipe.xref) {
+                    pipe.slot = Some(slot);
+                }
+            }
             _ => {}
         }
     }
@@ -394,6 +402,11 @@ fn propagate_slots_to_expressions(
             IrExpression::BoundaryState(state) => {
                 if let Some(&slot) = slot_map.get(&state.target) {
                     state.target_slot.slot = Some(slot);
+                }
+            }
+            IrExpression::GetBoundary(get) => {
+                if let Some(&slot) = slot_map.get(&get.target) {
+                    get.target_slot.slot = Some(slot);
                 }
             }
             IrExpression::PureFunction(pf) => {
@@ -620,9 +633,6 @@ fn propagate_slots_to_expressions(
                 for condition in boundary.conditions.iter_mut() {
                     if let Some(&slot) = slot_map.get(&condition.target) {
                         condition.target_slot.slot = Some(slot);
-                    }
-                    if let Some(ref mut expr) = condition.expr {
-                        update_expression_slots(expr, slot_map);
                     }
                 }
                 if let Some(ref mut processed) = boundary.processed {

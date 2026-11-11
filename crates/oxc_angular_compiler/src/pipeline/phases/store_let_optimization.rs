@@ -186,15 +186,13 @@ fn transform_store_let_in_update_op<'a>(
             );
         }
         UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter_mut() {
-                if let Some(ref mut expr) = condition.expr {
-                    transform_store_let_in_expr(
-                        &allocator,
-                        expr,
-                        let_used_externally,
-                        declare_lets_to_remove,
-                    );
-                }
+            for expr in boundary.when_exprs_mut() {
+                transform_store_let_in_expr(
+                    &allocator,
+                    expr,
+                    let_used_externally,
+                    declare_lets_to_remove,
+                );
             }
             if let Some(ref mut processed) = boundary.processed {
                 transform_store_let_in_expr(
@@ -626,6 +624,7 @@ fn transform_nested_expressions<'a>(
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1075,6 +1074,7 @@ fn transform_nested_in_expr_value<'a>(
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1231,6 +1231,7 @@ fn has_pipe(expr: &IrExpression<'_>) -> bool {
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1294,10 +1295,8 @@ where
             visitor(&text.interpolation);
         }
         UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter() {
-                if let Some(ref expr) = condition.expr {
-                    visitor(expr);
-                }
+            for expr in boundary.when_exprs() {
+                visitor(expr);
             }
             if let Some(ref processed) = boundary.processed {
                 visitor(processed);
@@ -1456,6 +1455,7 @@ fn collect_context_let_refs_in_expr(expr: &IrExpression<'_>, refs: &mut HashSet<
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)

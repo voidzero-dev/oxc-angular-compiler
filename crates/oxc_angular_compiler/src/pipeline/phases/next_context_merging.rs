@@ -218,12 +218,10 @@ fn visit_expressions_for_merge(op: &mut UpdateOp<'_>, merge_steps: u32) -> Merge
             MergeResult::Continue
         }
         UpdateOp::Boundary(op) => {
-            for c in op.conditions.iter_mut() {
-                if let Some(expr) = c.expr.as_mut() {
-                    let result = visit_ir_expr_for_merge(expr, merge_steps);
-                    if !matches!(result, MergeResult::Continue) {
-                        return result;
-                    }
+            for expr in op.when_exprs_mut() {
+                let result = visit_ir_expr_for_merge(expr, merge_steps);
+                if !matches!(result, MergeResult::Continue) {
+                    return result;
                 }
             }
             if let Some(processed) = op.processed.as_mut() {
@@ -545,6 +543,7 @@ fn visit_nested_exprs_for_merge(expr: &mut IrExpression<'_>, merge_steps: u32) -
         IrExpression::LexicalRead(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::ReadVariable(_)
         | IrExpression::PureFunctionParameter(_)
         | IrExpression::Empty(_)

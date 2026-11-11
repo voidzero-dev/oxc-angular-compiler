@@ -28,7 +28,10 @@ use crate::pipeline::compilation::ComponentCompilationJob;
 /// Sets `processed` on every `BoundaryUpdateOp`.
 ///
 /// Inside a `when` condition, reads of the block's own `$error` aliases are replaced by
-/// `bnd.error`. The conditions are kept on the op, as in Angular.
+/// `bnd.error`. Angular keeps the conditions on the op and shares their nodes with
+/// `processed`; here they are moved into `processed`, and
+/// [`BoundaryUpdateOp::when_exprs`](crate::ir::ops::BoundaryUpdateOp::when_exprs) finds
+/// them there.
 pub fn generate_boundary_conditions(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
 
@@ -54,14 +57,14 @@ pub fn generate_boundary_conditions(job: &mut ComponentCompilationJob<'_>) {
             };
 
             for condition in boundary.conditions.iter_mut().rev() {
-                let Some(expr) = condition.expr.as_mut() else {
+                let Some(mut expr) = condition.expr.take() else {
                     continue;
                 };
                 if let Some(names) = error_names.get(&condition.target)
                     && !names.is_empty()
                 {
                     transform_expressions_in_expression(
-                        expr,
+                        &mut expr,
                         &|e, _| {
                             if let IrExpression::LexicalRead(read) = e
                                 && names.contains(&read.name)
@@ -72,9 +75,7 @@ pub fn generate_boundary_conditions(job: &mut ComponentCompilationJob<'_>) {
                         VisitorContextFlag::NONE,
                     );
                 }
-                let condition_expr = Box::new_in(expr.clone_in(allocator), &allocator);
-                result =
-                    ternary(allocator, condition_expr, slot_literal(allocator, condition), result);
+                result = ternary(allocator, expr, slot_literal(allocator, condition), result);
             }
 
             let no_error = Box::new_in(

@@ -198,6 +198,7 @@ fn collect_fences(expr: &IrExpression<'_>) -> Fence {
         | IrExpression::ReadVariable(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Reference(_)
         | IrExpression::NextContext(_)
         | IrExpression::ContextLetReference(_)
@@ -286,10 +287,8 @@ fn collect_op_fences(op: &UpdateOp<'_>) -> Fence {
         }
         UpdateOp::Boundary(boundary) => {
             let mut fences = Fence::NONE;
-            for condition in boundary.conditions.iter() {
-                if let Some(ref expr) = condition.expr {
-                    fences |= collect_fences(expr);
-                }
+            for expr in boundary.when_exprs() {
+                fences |= collect_fences(expr);
             }
             if let Some(ref processed) = boundary.processed {
                 fences |= collect_fences(processed);
@@ -488,14 +487,21 @@ pub fn optimize_variables(job: &mut ComponentCompilationJob<'_>) {
 /// Angular inlines any single-use variable whose kind passes `allowConservativeInlining`;
 /// boundary state variables do, and their initializer has no fences, so the read is
 /// always replaced by `ɵɵgetBoundary(slot)`.
+///
+/// As in Angular's `optimizeVariablesInOpList(unit.update, skipArrowFunctionOps)`, reads
+/// inside hoisted arrow functions are not counted. They still read the variable: Angular's
+/// `@error` conditions share one `bnd.error` node, so replacing the counted read replaces
+/// them too. Every read in the update list is replaced here for the same reason.
 fn inline_single_use_boundary_states(job: &mut ComponentCompilationJob<'_>) {
+    use std::cell::RefCell;
+
     use crate::ir::enums::SemanticVariableKind;
     use crate::ir::expression::{
-        BoundaryStateExpr, SlotHandle, VisitorContextFlag, transform_expressions_in_update_op,
+        GetBoundaryExpr, SlotHandle, VisitorContextFlag, transform_expressions_in_update_op,
+        visit_expressions_in_update_op,
     };
 
     let allocator = job.allocator;
-    let usage_counts = count_variable_usages(job);
     let mut to_remove: HashSet<XrefId> = HashSet::new();
 
     for view in job.all_views_mut() {
@@ -503,15 +509,36 @@ fn inline_single_use_boundary_states(job: &mut ComponentCompilationJob<'_>) {
         for op in view.update.iter() {
             if let UpdateOp::Variable(var) = op
                 && var.kind == SemanticVariableKind::BoundaryState
-                && usage_counts.get(&var.xref).copied() == Some(1)
-                && let IrExpression::BoundaryState(state) = var.initializer.as_ref()
+                && let IrExpression::GetBoundary(get) = var.initializer.as_ref()
             {
-                targets.insert(var.xref, state.target);
+                targets.insert(var.xref, get.target);
             }
         }
         if targets.is_empty() {
             continue;
         }
+
+        let counts: RefCell<HashMap<XrefId, usize>> = RefCell::new(HashMap::new());
+        for op in view.update.iter() {
+            visit_expressions_in_update_op(
+                op,
+                &|expr, flags| {
+                    if !flags.contains(VisitorContextFlag::IN_ARROW_FUNCTION_OPERATION)
+                        && let IrExpression::ReadVariable(read) = expr
+                        && targets.contains_key(&read.xref)
+                    {
+                        *counts.borrow_mut().entry(read.xref).or_insert(0) += 1;
+                    }
+                },
+                VisitorContextFlag::NONE,
+            );
+        }
+        let counts = counts.into_inner();
+        targets.retain(|xref, _| counts.get(xref).copied() == Some(1));
+        if targets.is_empty() {
+            continue;
+        }
+
         for op in view.update.iter_mut() {
             transform_expressions_in_update_op(
                 op,
@@ -519,8 +546,8 @@ fn inline_single_use_boundary_states(job: &mut ComponentCompilationJob<'_>) {
                     if let IrExpression::ReadVariable(read) = expr
                         && let Some(&target) = targets.get(&read.xref)
                     {
-                        *expr = IrExpression::BoundaryState(OxcBox::new_in(
-                            BoundaryStateExpr { target, target_slot: SlotHandle::new() },
+                        *expr = IrExpression::GetBoundary(OxcBox::new_in(
+                            GetBoundaryExpr { target, target_slot: SlotHandle::new() },
                             &allocator,
                         ));
                     }
@@ -1366,10 +1393,8 @@ where
             }
         }
         UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter() {
-                if let Some(ref expr) = condition.expr {
-                    visit_all_expressions(expr, &mut visitor);
-                }
+            for expr in boundary.when_exprs() {
+                visit_all_expressions(expr, &mut visitor);
             }
             if let Some(ref processed) = boundary.processed {
                 visit_all_expressions(processed, &mut visitor);
@@ -2524,13 +2549,9 @@ fn count_in_update_op(op: &UpdateOp<'_>, counts: &mut HashMap<XrefId, usize>) {
             }
         }
         UpdateOp::Boundary(boundary) => {
-            // Unlike conditionals, Angular keeps the `@error` conditions after building
-            // `processed`, and `processed` shares their nodes, so reads in a `when`
-            // condition are counted twice there. Count both to match.
-            for condition in boundary.conditions.iter() {
-                if let Some(ref expr) = condition.expr {
-                    count_in_expression(expr, counts);
-                }
+            // Angular reaches each `when` condition twice, so reads in it count twice.
+            for expr in boundary.when_exprs() {
+                count_in_expression(expr, counts);
             }
             if let Some(ref processed) = boundary.processed {
                 count_in_expression(processed, counts);
@@ -2777,6 +2798,7 @@ fn collect_variable_xrefs(expr: &IrExpression<'_>, xrefs: &mut Vec<XrefId>) {
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -3039,11 +3061,8 @@ fn transform_expressions_in_update_op<'a, F>(
             }
         }
         UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter_mut() {
-                if let Some(ref expr) = condition.expr {
-                    let new_expr = transform_expression(expr, &allocator, &mut transform);
-                    condition.expr = Some(OxcBox::new_in(new_expr, &allocator));
-                }
+            for expr in boundary.when_exprs_mut() {
+                **expr = transform_expression(expr, &allocator, &mut transform);
             }
             if let Some(ref processed) = boundary.processed {
                 let new_expr = transform_expression(processed, &allocator, &mut transform);
@@ -3330,6 +3349,7 @@ where
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)

@@ -27,9 +27,10 @@ fn compile(source: &str, mode: CompilationMode) -> String {
     result.code
 }
 
-/// From the first template function to the class metadata IIFE.
+/// From the first hoisted arrow function or template function to the class metadata IIFE.
 fn emitted_section(code: &str) -> &str {
     let start = code.find("function ").expect("no template function");
+    let start = code.find("const arrowFn").map_or(start, |arrow| arrow.min(start));
     let end = code[start..].find("(() =>").map_or(code.len(), |i| start + i);
     &code[start..end]
 }
@@ -230,6 +231,8 @@ fn invalid_when_expression() {
 /// op's conditions and the collapsed expression, so it creates the pipe twice in one slot
 /// (`ɵɵpipe(2, "whenPipe")` twice, slot 1 unused). We create it once, after the
 /// boundary, as for any other control-flow condition.
+/// Angular visits a `when` condition twice, so a pipe in it is created twice; both pipe
+/// ops share one slot handle and get the slot allocated last.
 #[test]
 fn pipe_in_when_condition() {
     let source = r#"import { Component, Pipe } from '@angular/core';
@@ -249,17 +252,55 @@ export class WhenPipe {
 export class App {}
 "#;
     let code = strip(&compile(source, CompilationMode::Full));
-    assert!(code.contains("decls:4,vars:5"), "{code}");
+    assert!(code.contains("functionApp_Primary_3_Template(rf,ctx)"), "{code}");
+    assert!(code.contains("functionApp_Error_4_Template(rf,ctx)"), "{code}");
+    assert!(code.contains("decls:5,vars:5"), "{code}");
     assert!(
         code.contains(
-            "i0.ɵɵboundaryCreate(0);i0.ɵɵpipe(1,\"whenPipe\");i0.ɵɵconditionalBranchCreate(2,"
+            "i0.ɵɵboundaryCreate(0);i0.ɵɵpipe(2,\"whenPipe\");i0.ɵɵpipe(2,\"whenPipe\");i0.ɵɵconditionalBranchCreate(3,App_Primary_3_Template,1,0)(4,App_Error_4_Template,1,0);"
         ),
         "{code}"
     );
     assert!(
-        code.contains("i0.ɵɵboundaryUpdate(0,((bnd_r1.error===null)?2:(i0.ɵɵpipeBind1(1,3,bnd_r1.error)?3:-1)),2);"),
+        code.contains("i0.ɵɵboundaryUpdate(0,((bnd_r1.error===null)?3:(i0.ɵɵpipeBind1(2,3,bnd_r1.error)?4:-1)),3);"),
         "{code}"
     );
+    check_linked(source);
+}
+
+/// Two pipes in one `when` condition and one in the primary view.
+#[test]
+fn pipes_in_when_condition_and_primary_view() {
+    let source = r#"import { Component, Pipe } from '@angular/core';
+
+@Pipe({ name: 'ok' })
+export class OkPipe {
+  transform(v: unknown, ...a: unknown[]) {
+    return !!v;
+  }
+}
+
+@Component({
+  selector: 'app',
+  imports: [OkPipe],
+  template: `<p>{{ y | ok }}</p> @boundary { {{ x | ok }} } @error (when ((x | ok) && (y | ok:x))) { b }`,
+})
+export class App {
+  x = 1;
+  y = 2;
+}
+"#;
+    let code = strip(&compile(source, CompilationMode::Full));
+    assert!(code.contains("decls:10,vars:14,"), "{code}");
+    assert!(
+        code.contains("i0.ɵɵboundaryCreate(3);i0.ɵɵpipe(6,\"ok\");i0.ɵɵpipe(7,\"ok\");i0.ɵɵpipe(6,\"ok\");i0.ɵɵpipe(7,\"ok\");i0.ɵɵconditionalBranchCreate(8,App_Primary_8_Template,2,3)(9,App_Error_9_Template,1,0);"),
+        "{code}"
+    );
+    assert!(
+        code.contains("i0.ɵɵboundaryUpdate(3,((i0.ɵɵgetBoundary(3).error===null)?8:((i0.ɵɵpipeBind1(6,9,ctx.x)&&i0.ɵɵpipeBind2(7,11,ctx.y,ctx.x))?9:-1)),8);"),
+        "{code}"
+    );
+    check_linked(source);
 }
 
 // ============================================================================
@@ -1784,4 +1825,370 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]
 }"##,
     );
     check_linked(source);
+}
+
+// ============================================================================
+// Arrow functions next to boundaries (checked against ngc 22.3.0-next.4)
+// ============================================================================
+
+fn app_source(template: &str) -> String {
+    format!(
+        "import {{Component}} from '@angular/core';\n\n@Component({{selector: 'app', template: `{template}`}})\nexport class App {{ items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) {{ return a; }} check(f: any) {{ return true; }} }}\n"
+    )
+}
+
+/// An arrow function in an `@error` view reads `$error` from its own view.
+#[test]
+fn arrow_function_in_error_view() {
+    let source =
+        app_source(r#"@boundary { a } @error (let e) { <p>{{ items.map(y => y + fn(e)) }}</p> }"#);
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(y) =>{
+  const ctx_r0 = i0.ɵɵrestoreView(view);
+  const ctx_r1 = i0.ɵɵnextContext();
+  return i0.ɵɵresetView((y + ctx_r1.fn(ctx_r0.$error)));
+};
+function App_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," a "); }
+}
+function App_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵdomElementStart(0,"p");
+    i0.ɵɵtext(1);
+    i0.ɵɵdomElementEnd();
+  }
+  if ((rf & 2)) {
+    const ctx_r1 = i0.ɵɵnextContext();
+    i0.ɵɵadvance();
+    i0.ɵɵtextInterpolate(ctx_r1.items.map(i0.ɵɵarrowFunction(1,arrowFn0,ctx)));
+  }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:3,vars:1,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_Primary_1_Template,1,0)(2,App_Error_2_Template,
+        2,2);
+  }
+  if ((rf & 2)) { i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: 2),
+      1); }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function in a primary view declares no boundary state variable.
+#[test]
+fn arrow_function_in_primary_view() {
+    let source = app_source(r#"@boundary { <p>{{ fn(x => x) }}</p> } @error { e }"#);
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(x) =>x;
+function App_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵdomElementStart(0,"p");
+    i0.ɵɵtext(1);
+    i0.ɵɵdomElementEnd();
+  }
+  if ((rf & 2)) {
+    const ctx_r0 = i0.ɵɵnextContext();
+    i0.ɵɵadvance();
+    i0.ɵɵtextInterpolate(ctx_r0.fn(i0.ɵɵarrowFunction(1,arrowFn0,ctx)));
+  }
+}
+function App_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," e "); }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:3,vars:1,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_Primary_1_Template,2,2,"p")(2,App_Error_2_Template,
+        1,0);
+  }
+  if ((rf & 2)) { i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: 2),
+      1); }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function in a view nested in a primary view.
+#[test]
+fn arrow_function_in_view_nested_in_primary() {
+    let source =
+        app_source(r#"@boundary { @if (x) { {{ items.map(i => i * x).join() }} } } @error { b }"#);
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(i) =>{
+  i0.ɵɵrestoreView(view);
+  const ctx_r0 = i0.ɵɵnextContext(2);
+  return i0.ɵɵresetView((i * ctx_r0.x));
+};
+function App_Primary_1_Conditional_0_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0); }
+  if ((rf & 2)) {
+    const ctx_r0 = i0.ɵɵnextContext(2);
+    i0.ɵɵtextInterpolate1(" ",ctx_r0.items.map(i0.ɵɵarrowFunction(1,arrowFn0,ctx)).join(),
+        " ");
+  }
+}
+function App_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵconditionalCreate(0,App_Primary_1_Conditional_0_Template,1,
+      2); }
+  if ((rf & 2)) {
+    const ctx_r0 = i0.ɵɵnextContext();
+    i0.ɵɵconditional((ctx_r0.x? 0: -1));
+  }
+}
+function App_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," b "); }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:3,vars:1,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_Primary_1_Template,1,1)(2,App_Error_2_Template,
+        1,0);
+  }
+  if ((rf & 2)) { i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: 2),
+      1); }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function after a `@boundary` whose `@error` view has a listener.
+#[test]
+fn arrow_function_after_boundary() {
+    let source = app_source(
+        r#"@boundary { <span>{{count}}</span> } @error (let e) { {{e}} <button (click)="\$reset()">r</button> }
+<p>{{ fn(x => x + 1) }}</p>"#,
+    );
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(x) =>(x + 1);
+function App_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵdomElementStart(0,"span");
+    i0.ɵɵtext(1);
+    i0.ɵɵdomElementEnd();
+  }
+  if ((rf & 2)) {
+    const ctx_r0 = i0.ɵɵnextContext();
+    i0.ɵɵadvance();
+    i0.ɵɵtextInterpolate(ctx_r0.count);
+  }
+}
+function App_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    const _r2 = i0.ɵɵgetCurrentView();
+    i0.ɵɵtext(0);
+    i0.ɵɵdomElementStart(1,"button",0);
+    i0.ɵɵdomListener("click",function App_Error_2_Template_button_click_1_listener() {
+      const ctx_r2 = i0.ɵɵrestoreView(_r2);
+      return i0.ɵɵresetView(ctx_r2.$reset());
+    });
+    i0.ɵɵtext(2,"r");
+    i0.ɵɵdomElementEnd();
+  }
+  if ((rf & 2)) { i0.ɵɵtextInterpolate1(" ",ctx.$error," "); }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:5,vars:3,consts:[[3,
+    "click"]],template:function App_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_Primary_1_Template,2,1,"span")(2,App_Error_2_Template,
+        3,1);
+    i0.ɵɵdomElementStart(3,"p");
+    i0.ɵɵtext(4);
+    i0.ɵɵdomElementEnd();
+  }
+  if ((rf & 2)) {
+    i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: 2),1);
+    i0.ɵɵadvance(4);
+    i0.ɵɵtextInterpolate(ctx.fn(i0.ɵɵarrowFunction(2,arrowFn0,ctx)));
+  }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function before a `@boundary` in the same view.
+#[test]
+fn arrow_function_before_boundary() {
+    let source = app_source(r#"{{ items.map(i => i + 1).join() }} @boundary { a } @error { b }"#);
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(i) =>(i + 1);
+function App_Primary_2_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," a "); }
+}
+function App_Error_3_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," b "); }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:4,vars:3,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0);
+    i0.ɵɵboundaryCreate(1);
+    i0.ɵɵconditionalBranchCreate(2,App_Primary_2_Template,1,0)(3,App_Error_3_Template,
+        1,0);
+  }
+  if ((rf & 2)) {
+    i0.ɵɵtextInterpolate1("",ctx.items.map(i0.ɵɵarrowFunction(2,arrowFn0,ctx)).join(),
+        " ");
+    i0.ɵɵadvance();
+    i0.ɵɵboundaryUpdate(1,((i0.ɵɵgetBoundary(1).error === null)? 2: 3),2);
+  }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function in a `when` condition: one function, and `bnd` is inlined in it too.
+#[test]
+fn arrow_function_in_when_condition() {
+    let source =
+        app_source(r#"@boundary { a } @error (let e; when items.some(i => i === e)) { b }"#);
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>(i) =>(i === i0.ɵɵgetBoundary(0).error);
+function App_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," a "); }
+}
+function App_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," b "); }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:3,vars:3,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_Primary_1_Template,1,0)(2,App_Error_2_Template,
+        1,0);
+  }
+  if ((rf & 2)) { i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: (ctx.items.some(i0.ɵɵarrowFunction(2,
+      arrowFn0,ctx))? 2: -1)),1); }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+/// An arrow function in a `when` condition inside `@for`.
+#[test]
+fn arrow_function_in_when_condition_inside_for() {
+    let source = app_source(
+        r#"@for (it of list; track \$index) { @boundary { a } @error (let e; when check(() => it === e)) { b } }"#,
+    );
+    check_full(
+        &source,
+        r#"const arrowFn0 = (ctx,view) =>() =>{
+  const it_r1 = i0.ɵɵrestoreView(view).$implicit;
+  return i0.ɵɵresetView((it_r1 === i0.ɵɵgetBoundary(0).error));
+};
+function App_For_1_Primary_1_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," a "); }
+}
+function App_For_1_Error_2_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0," b "); }
+}
+function App_For_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵboundaryCreate(0);
+    i0.ɵɵconditionalBranchCreate(1,App_For_1_Primary_1_Template,1,0)(2,App_For_1_Error_2_Template,
+        1,0);
+  }
+  if ((rf & 2)) {
+    const ctx_r1 = i0.ɵɵnextContext();
+    i0.ɵɵboundaryUpdate(0,((i0.ɵɵgetBoundary(0).error === null)? 1: (ctx_r1.check(i0.ɵɵarrowFunction(2,
+        arrowFn0,ctx))? 2: -1)),1);
+  }
+}
+
+
+export class App { items: any[] = [1]; list: any[] = []; count = 0; x = 1; fn(...a: any[]) { return a; } check(f: any) { return true; } 
+static ɵfac = function App_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || App)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:App,selectors:[["app"]],decls:2,vars:0,template:function App_Template(rf,
+    ctx) {
+  if ((rf & 1)) { i0.ɵɵrepeaterCreate(0,App_For_1_Template,3,3,null,null,i0.ɵɵrepeaterTrackByIndex); }
+  if ((rf & 2)) { i0.ɵɵrepeater(ctx.list); }
+},encapsulation:2});
+}
+"#,
+    );
+    check_linked(&source);
+}
+
+// ============================================================================
+// `@error` parameters use JavaScript's `\s` (U+FEFF but not U+0085)
+// ============================================================================
+
+/// Offsets are in bytes; ngc's are in UTF-16 code units (24-29, 24-38 and 24-30).
+#[test]
+fn error_parameters_use_javascript_whitespace() {
+    assert_eq!(
+        diagnostics("@boundary { a } @error (let\u{85}e) { {{e}} }"),
+        vec![diag("Unrecognized @error block parameter \"let\u{85}e\"", 24, 30)]
+    );
+    assert_eq!(diagnostics("@boundary { a } @error (let\u{FEFF}e) { {{e}} }"), vec![]);
+    assert_eq!(
+        diagnostics("@boundary { a } @error (let e\u{85}= $reset) { b }"),
+        vec![diag("\"let\" parameter must be a valid JavaScript identifier", 24, 39)]
+    );
+    assert_eq!(
+        diagnostics("@boundary { a } @error (when\u{85}x) { b }"),
+        vec![diag("Unrecognized @error block parameter \"when\u{85}x\"", 24, 31)]
+    );
+    assert_eq!(diagnostics("@boundary { a } @error (when\u{FEFF}x) { b }"), vec![]);
 }

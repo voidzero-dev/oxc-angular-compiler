@@ -398,10 +398,8 @@ fn assign_var_offsets_in_op(op: &mut UpdateOp<'_>, var_count: &mut u32, pure_fun
             }
         }
         UpdateOp::Boundary(boundary) => {
-            for condition in boundary.conditions.iter_mut() {
-                if let Some(ref mut expr) = condition.expr {
-                    assign_var_offsets_in_expr(expr, var_count, pure_functions_only);
-                }
+            for expr in boundary.when_exprs_mut() {
+                assign_var_offsets_in_expr(expr, var_count, pure_functions_only);
             }
             if let Some(ref mut processed) = boundary.processed {
                 assign_var_offsets_in_expr(processed, var_count, pure_functions_only);
@@ -624,6 +622,7 @@ fn assign_var_offsets_in_expr(
         | IrExpression::ConstReference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)

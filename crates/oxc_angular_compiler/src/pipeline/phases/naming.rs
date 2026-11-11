@@ -237,8 +237,8 @@ fn make_semantic_key<'a>(
             }
         }
         SemanticVariableKind::BoundaryState => match initializer {
-            IrExpression::BoundaryState(state) => {
-                Some(SemanticVariableKey::BoundaryState { boundary: state.target })
+            IrExpression::GetBoundary(get) => {
+                Some(SemanticVariableKey::BoundaryState { boundary: get.target })
             }
             _ => None,
         },

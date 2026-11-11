@@ -189,10 +189,8 @@ fn visit_update_expressions_for_required_parens(
             }
         }
         UpdateOp::Boundary(b) => {
-            for condition in b.conditions.iter() {
-                if let Some(expr) = &condition.expr {
-                    check_ir_expression_for_required_parens(expr, required);
-                }
+            for expr in b.when_exprs() {
+                check_ir_expression_for_required_parens(expr, required);
             }
             if let Some(processed) = &b.processed {
                 check_ir_expression_for_required_parens(processed, required);
@@ -377,6 +375,7 @@ fn check_ir_expression_for_required_parens(
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::ReadVariable(_)

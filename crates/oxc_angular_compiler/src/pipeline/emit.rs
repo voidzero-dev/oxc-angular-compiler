@@ -1094,6 +1094,7 @@ fn convert_pure_function_body<'a>(
         | IrExpression::ResetView(_)
         | IrExpression::Reference(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::PureFunction(_) => {
             // These are view-context expressions that shouldn't appear in extracted pure function bodies
             // Return undefined as a fallback

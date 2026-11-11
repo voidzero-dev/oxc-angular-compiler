@@ -21,8 +21,8 @@ use oxc_str::Ident;
 
 use crate::ir::enums::{SemanticVariableKind, VariableFlags};
 use crate::ir::expression::{
-    BoundaryStateExpr, ContextExpr, ContextLetReferenceExpr, IrExpression, NextContextExpr,
-    ReferenceExpr, ResolvedPropertyReadExpr, SlotHandle,
+    BoundaryStateExpr, ContextExpr, ContextLetReferenceExpr, GetBoundaryExpr, IrExpression,
+    NextContextExpr, ReferenceExpr, ResolvedPropertyReadExpr, SlotHandle,
 };
 use crate::ir::ops::{CreateOp, SlotId, UpdateOp, UpdateVariableOp, XrefId};
 use crate::pipeline::compilation::ComponentCompilationJob;
@@ -793,16 +793,14 @@ fn boundary_error_expr(allocator: &oxc_allocator::Allocator, boundary: XrefId) -
 }
 
 /// Creates the variable holding a boundary's state (`const bnd_rN = ɵɵgetBoundary(slot)`).
-///
-/// Its initializer is the `BoundaryStateExpr` itself, which reify emits as `ɵɵgetBoundary`.
 fn create_boundary_state_variable(
     allocator: &oxc_allocator::Allocator,
     xref: XrefId,
     view_xref: XrefId,
     boundary: XrefId,
 ) -> UpdateOp<'_> {
-    let initializer = IrExpression::BoundaryState(Box::new_in(
-        BoundaryStateExpr { target: boundary, target_slot: SlotHandle::new() },
+    let initializer = IrExpression::GetBoundary(Box::new_in(
+        GetBoundaryExpr { target: boundary, target_slot: SlotHandle::new() },
         &allocator,
     ));
     UpdateOp::Variable(UpdateVariableOp {

@@ -33,6 +33,27 @@ pub struct BoundaryErrorParams<'a> {
     pub expression_errors: std::vec::Vec<ParseError>,
 }
 
+/// Matches JavaScript's `\s`, which is also what `String.prototype.trim` strips. Unlike
+/// `char::is_whitespace`, it includes U+FEFF and leaves out U+0085.
+fn is_js_whitespace(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
+
+/// `String.prototype.trim`.
+fn js_trim(s: &str) -> &str {
+    s.trim_matches(is_js_whitespace)
+}
+
 /// Matches `IDENTIFIER_PATTERN` (`/^[$A-Z_][0-9A-Z_$]*$/i`).
 fn is_identifier(s: &str) -> bool {
     let mut chars = s.chars();
@@ -44,7 +65,7 @@ fn is_identifier(s: &str) -> bool {
 /// captured group.
 fn match_let(s: &str) -> Option<(usize, &str)> {
     let rest = s.strip_prefix("let")?;
-    let trimmed = rest.trim_start();
+    let trimmed = rest.trim_start_matches(is_js_whitespace);
     if trimmed.len() == rest.len() {
         return None;
     }
@@ -53,7 +74,7 @@ fn match_let(s: &str) -> Option<(usize, &str)> {
 
 /// Matches `/^\s*[$A-Z_][0-9A-Z_$]*\s*=/i`.
 fn is_alias_match(s: &str) -> bool {
-    let s = s.trim_start();
+    let s = s.trim_start_matches(is_js_whitespace);
     let mut chars = s.char_indices();
     if !matches!(chars.next(), Some((_, c)) if c.is_ascii_alphabetic() || c == '_' || c == '$') {
         return false;
@@ -61,13 +82,13 @@ fn is_alias_match(s: &str) -> bool {
     let ident_end = chars
         .find(|&(_, c)| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
         .map_or(s.len(), |(i, _)| i);
-    s[ident_end..].trim_start().starts_with('=')
+    s[ident_end..].trim_start_matches(is_js_whitespace).starts_with('=')
 }
 
 /// Matches `WHEN_PATTERN` (`/^(when\s+)(.*)/`). `.` stops at a line terminator.
 fn match_when(s: &str) -> Option<&str> {
     let rest = s.strip_prefix("when")?;
-    let trimmed = rest.trim_start();
+    let trimmed = rest.trim_start_matches(is_js_whitespace);
     if trimmed.len() == rest.len() {
         return None;
     }
@@ -78,8 +99,8 @@ fn match_when(s: &str) -> Option<&str> {
 /// Matches `/(\s*)(\S+)(\s*)/` and returns the lengths of the leading whitespace and
 /// of the first non-whitespace run.
 fn surrounding_whitespace(s: &str) -> Option<(usize, usize)> {
-    let start = s.find(|c: char| !c.is_whitespace())?;
-    let len = s[start..].find(char::is_whitespace).unwrap_or(s.len() - start);
+    let start = s.find(|c: char| !is_js_whitespace(c))?;
+    let len = s[start..].find(is_js_whitespace).unwrap_or(s.len() - start);
     Some((start, len))
 }
 
@@ -99,9 +120,9 @@ fn parse_let_parameters<'a>(
     let mut start = span_start;
     for part in expression.split(',') {
         let expression_parts: std::vec::Vec<&str> = part.split('=').collect();
-        let name = expression_parts[0].trim();
+        let name = js_trim(expression_parts[0]);
         let variable_name =
-            if expression_parts.len() == 2 { expression_parts[1].trim() } else { "$error" };
+            if expression_parts.len() == 2 { js_trim(expression_parts[1]) } else { "$error" };
 
         if name.is_empty() || variable_name.is_empty() {
             error(
@@ -176,7 +197,7 @@ pub fn parse_boundary_error_params<'a>(
         // the lexer trims here; take the raw text so `when ` and `let ` match as upstream.
         let param_str = source_text
             .get(param.span.start as usize..param.span.end as usize)
-            .filter(|raw| raw.trim() == param.expression.as_str())
+            .filter(|raw| js_trim(raw) == param.expression.as_str())
             .unwrap_or(param.expression.as_str());
         let let_match = match_let(param_str);
         if let_match.is_some() || is_alias_match(param_str) {
@@ -236,5 +257,10 @@ mod tests {
         assert_eq!(match_when("when e.code === 1"), Some("e.code === 1"));
         assert_eq!(match_when("when\n  a\n && b"), Some("a"));
         assert_eq!(match_when("whenever"), None);
+        // JavaScript's `\s` has U+FEFF but not U+0085.
+        assert_eq!(match_let("let\u{FEFF}e"), Some((6, "e")));
+        assert_eq!(match_let("let\u{85}e"), None);
+        assert_eq!(match_when("when\u{FEFF}x"), Some("x"));
+        assert_eq!(match_when("when\u{85}x"), None);
     }
 }

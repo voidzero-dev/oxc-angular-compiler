@@ -282,6 +282,8 @@ pub enum ExpressionKind {
     /// The runtime state (`LBoundary`) of an error boundary, replaced by a read of the
     /// variable holding it in the `resolve_boundaries` phase.
     BoundaryState,
+    /// `ɵɵgetBoundary(slot)`, the initializer of a boundary state variable.
+    GetBoundary,
 }
 
 /// Flags for semantic variables.

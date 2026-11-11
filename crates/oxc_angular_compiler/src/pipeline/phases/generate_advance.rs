@@ -453,6 +453,7 @@ fn get_slot_dependency_from_ir_expr(expr: &IrExpression<'_>) -> Option<XrefId> {
         IrExpression::LexicalRead(_)
         | IrExpression::Context(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::RestoreView(_)

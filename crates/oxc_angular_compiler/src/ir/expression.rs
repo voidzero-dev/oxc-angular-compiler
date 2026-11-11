@@ -205,6 +205,8 @@ pub enum IrExpression<'a> {
     Parenthesized(Box<'a, IrParenthesizedExpr<'a>>),
     /// The runtime state of an error boundary.
     BoundaryState(Box<'a, BoundaryStateExpr>),
+    /// `ɵɵgetBoundary(slot)`: the initializer of a boundary state variable.
+    GetBoundary(Box<'a, GetBoundaryExpr>),
 }
 
 impl<'a> IrExpression<'a> {
@@ -214,6 +216,7 @@ impl<'a> IrExpression<'a> {
             IrExpression::LexicalRead(_) => ExpressionKind::LexicalRead,
             IrExpression::Reference(_) => ExpressionKind::Reference,
             IrExpression::BoundaryState(_) => ExpressionKind::BoundaryState,
+            IrExpression::GetBoundary(_) => ExpressionKind::GetBoundary,
             IrExpression::Context(_) => ExpressionKind::Context,
             IrExpression::NextContext(_) => ExpressionKind::NextContext,
             IrExpression::GetCurrentView(_) => ExpressionKind::GetCurrentView,
@@ -352,6 +355,10 @@ impl<'a> IrExpression<'a> {
             )),
             IrExpression::BoundaryState(e) => IrExpression::BoundaryState(Box::new_in(
                 BoundaryStateExpr { target: e.target, target_slot: e.target_slot },
+                &allocator,
+            )),
+            IrExpression::GetBoundary(e) => IrExpression::GetBoundary(Box::new_in(
+                GetBoundaryExpr { target: e.target, target_slot: e.target_slot },
                 &allocator,
             )),
             IrExpression::NextContext(e) => IrExpression::NextContext(Box::new_in(
@@ -906,13 +913,24 @@ pub struct ReferenceExpr {
 
 /// The runtime state (`LBoundary`) of an error boundary.
 ///
-/// As the initializer of a `BoundaryState` variable it is emitted as
-/// `ɵɵgetBoundary(slot)`; every other occurrence is replaced by a read of that
-/// variable in the `resolve_boundaries` phase.
+/// Every occurrence is replaced by a read of the variable holding that state in the
+/// `resolve_boundaries` phase.
 ///
 /// Ported from Angular's `BoundaryStateExpr` in `expression.ts`.
 #[derive(Debug)]
 pub struct BoundaryStateExpr {
+    /// The `BoundaryCreateOp` whose state is read.
+    pub target: XrefId,
+    /// Slot of the `BoundaryCreateOp`, set by slot allocation.
+    pub target_slot: SlotHandle,
+}
+
+/// `ɵɵgetBoundary(slot)`, the initializer of the variable holding a boundary's state.
+///
+/// Angular builds it as `ng.getBoundary(new ir.SlotLiteralExpr(handle))`, a plain call
+/// that `resolve_boundaries` leaves alone.
+#[derive(Debug)]
+pub struct GetBoundaryExpr {
     /// The `BoundaryCreateOp` whose state is read.
     pub target: XrefId,
     /// Slot of the `BoundaryCreateOp`, set by slot allocation.
@@ -1913,6 +1931,7 @@ pub fn transform_expressions_in_expression<'a, F>(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
@@ -2112,6 +2131,7 @@ pub fn visit_expressions_in_expression<'a, F>(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
@@ -2198,10 +2218,8 @@ pub fn transform_expressions_in_update_op<'a, F>(
             }
         }
         UpdateOp::Boundary(op) => {
-            for cond in op.conditions.iter_mut() {
-                if let Some(ref mut expr) = cond.expr {
-                    transform_expressions_in_expression(expr, transform, flags);
-                }
+            for expr in op.when_exprs_mut() {
+                transform_expressions_in_expression(expr, transform, flags);
             }
             if let Some(ref mut processed) = op.processed {
                 transform_expressions_in_expression(processed, transform, flags);
@@ -2572,10 +2590,8 @@ pub fn visit_expressions_in_update_op<'a, F>(
             }
         }
         UpdateOp::Boundary(op) => {
-            for cond in op.conditions.iter() {
-                if let Some(ref expr) = cond.expr {
-                    visit_expressions_in_expression(expr, visitor, flags);
-                }
+            for expr in op.when_exprs() {
+                visit_expressions_in_expression(expr, visitor, flags);
             }
             if let Some(ref processed) = op.processed {
                 visit_expressions_in_expression(processed, visitor, flags);
@@ -3397,6 +3413,7 @@ pub fn vars_used_by_ir_expression(expr: &IrExpression<'_>) -> u32 {
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)

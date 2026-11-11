@@ -1853,6 +1853,60 @@ pub struct BoundaryUpdateOp<'a> {
     pub processed: Option<Box<'a, IrExpression<'a>>>,
 }
 
+impl<'a> BoundaryUpdateOp<'a> {
+    /// The `when` expressions of the `@error` branches, in source order.
+    ///
+    /// Angular keeps `conditions` after building `processed`, and `processed` holds the
+    /// same `when` nodes, so its visitors reach each of them twice: through `conditions`,
+    /// then through `processed`. Visitors here do the same by visiting these before
+    /// `processed`. The boundary_conditions phase moves them from `conditions` into
+    /// `processed`, so each one still exists once.
+    pub fn when_exprs(&self) -> std::vec::Vec<&IrExpression<'a>> {
+        let Some(processed) = self.processed.as_deref() else {
+            return self.conditions.iter().filter_map(|c| c.expr.as_deref()).collect();
+        };
+        let mut exprs = std::vec::Vec::new();
+        // `bnd.error === null ? primary : <branches>`
+        let IrExpression::Ternary(outer) = processed else { return exprs };
+        // Each branch is `when ? slot : <next branch>`.
+        let targets: std::vec::Vec<XrefId> = self.conditions.iter().map(|c| c.target).collect();
+        let mut node = outer.false_expr.as_ref();
+        while let IrExpression::Ternary(branch) = node
+            && is_slot_of(&branch.true_expr, &targets)
+        {
+            exprs.push(branch.condition.as_ref());
+            node = branch.false_expr.as_ref();
+        }
+        exprs
+    }
+
+    /// Mutable version of [`Self::when_exprs`].
+    pub fn when_exprs_mut(&mut self) -> std::vec::Vec<&mut Box<'a, IrExpression<'a>>> {
+        let Some(processed) = self.processed.as_deref_mut() else {
+            return self.conditions.iter_mut().filter_map(|c| c.expr.as_mut()).collect();
+        };
+        let targets: std::vec::Vec<XrefId> = self.conditions.iter().map(|c| c.target).collect();
+        let mut exprs = std::vec::Vec::new();
+        let IrExpression::Ternary(outer) = processed else { return exprs };
+        let mut node = outer.false_expr.as_mut();
+        while let IrExpression::Ternary(branch) = node {
+            if !is_slot_of(&branch.true_expr, &targets) {
+                break;
+            }
+            let super::expression::TernaryExpr { condition, false_expr, .. } = branch.as_mut();
+            exprs.push(condition);
+            node = false_expr.as_mut();
+        }
+        exprs
+    }
+}
+
+/// Whether `expr` is the slot literal of one of the `targets` views.
+fn is_slot_of(expr: &IrExpression<'_>, targets: &[XrefId]) -> bool {
+    matches!(expr, IrExpression::SlotLiteral(slot)
+        if slot.target_xref.is_some_and(|target| targets.contains(&target)))
+}
+
 /// Update conditional.
 ///
 /// This operation orchestrates the conditional logic for @if/@switch blocks.
