@@ -29,7 +29,10 @@ export interface NgBaselineData {
 /**
  * Save Angular baseline data to a JSON file.
  */
-export async function saveNgBaseline(data: NgBaselineData, outputPath: string): Promise<void> {
+export async function saveNgBaseline<T = NgBaselineData>(
+  data: T,
+  outputPath: string,
+): Promise<void> {
   // No pretty-printing: baseline files are ~60-70MB for large projects.
   // Compact JSON is faster to write/parse and ~10% smaller.
   await writeFile(outputPath, JSON.stringify(data), 'utf-8')
@@ -38,9 +41,9 @@ export async function saveNgBaseline(data: NgBaselineData, outputPath: string): 
 /**
  * Load Angular baseline data from a JSON file.
  */
-export async function loadNgBaseline(baselinePath: string): Promise<NgBaselineData> {
+export async function loadNgBaseline<T = NgBaselineData>(baselinePath: string): Promise<T> {
   const content = await readFile(baselinePath, 'utf-8')
-  return JSON.parse(content) as NgBaselineData
+  return JSON.parse(content) as T
 }
 
 /**
