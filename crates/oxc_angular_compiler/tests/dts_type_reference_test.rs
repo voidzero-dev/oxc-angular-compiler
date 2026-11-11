@@ -132,7 +132,7 @@ export class HostCmp {}
         let (members, imports) = dts(&result, "HostCmp");
         assert!(
             members.contains(
-                "[{ directive: typeof i1.HighlightDirective; inputs: { \"color\": \"color\" }; outputs: {}; }, \
+                "[{ directive: typeof i1.HighlightDirective; inputs: { \"color\": \"color\"; }; outputs: {}; }, \
                  { directive: typeof LocalDir; inputs: {}; outputs: {}; }, \
                  { directive: typeof i2.default; inputs: {}; outputs: {}; }]"
             ),

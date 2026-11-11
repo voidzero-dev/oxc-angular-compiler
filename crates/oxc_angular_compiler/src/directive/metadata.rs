@@ -319,6 +319,53 @@ pub fn has_animate_leave_host_binding<'k>(
         || listeners.into_iter().any(|key| strip_host_key(key, '(', ')') == ANIMATE_LEAVE)
 }
 
+/// Whether an element of the template has an `animate.leave` attribute, input
+/// or output, as Angular's `analyzeTemplateForAnimations` checks for
+/// `ɵɵAnimationsFeature()` (v20.2.0 to v20.3.0). Like Angular it looks at
+/// elements only, in every view (control flow blocks, `@defer`,
+/// `<ng-template>` children), and not at an `<ng-template>`'s own attributes.
+///
+/// The input names follow Angular's, which differ from Oxc's in two cases. A
+/// `[class.x]` input is skipped: Angular names it by the part after `class.`
+/// up to the next dot, so it is never `animate.leave`, while Oxc keeps the rest
+/// of the name. A legacy `[@x]` input is named without its `@`, as in Angular.
+pub fn template_uses_animate_leave(nodes: &[crate::ast::r3::R3Node<'_>]) -> bool {
+    use crate::ast::expression::BindingType;
+    use crate::ast::r3::{R3Element, R3Visitor, visit_all};
+
+    const ANIMATE_LEAVE: &str = "animate.leave";
+
+    struct Finder {
+        found: bool,
+    }
+
+    impl<'a> R3Visitor<'a> for Finder {
+        fn visit_element(&mut self, element: &R3Element<'a>) {
+            if element.attributes.iter().any(|attr| attr.name == ANIMATE_LEAVE)
+                || element.inputs.iter().any(|input| {
+                    let name = input.name.as_str();
+                    match input.binding_type {
+                        BindingType::Class => false,
+                        BindingType::LegacyAnimation => {
+                            name.strip_prefix('@').unwrap_or(name) == ANIMATE_LEAVE
+                        }
+                        _ => name == ANIMATE_LEAVE,
+                    }
+                })
+                || element.outputs.iter().any(|output| output.name == ANIMATE_LEAVE)
+            {
+                self.found = true;
+                return;
+            }
+            self.visit_element_children(element);
+        }
+    }
+
+    let mut finder = Finder { found: false };
+    visit_all(&mut finder, nodes);
+    finder.found
+}
+
 /// `key` without the brackets of a `[property]` / `(event)` host key: the key
 /// ngtsc's `parseHostBindings` stores the binding under.
 pub fn strip_host_key(key: &str, open: char, close: char) -> &str {

@@ -1432,6 +1432,8 @@ fn ingest_static_attributes_with_i18n<'a>(
     use crate::output::ast::{LiteralExpr, LiteralValue, OutputExpression};
 
     let allocator = job.allocator;
+    // Before v20.2 a static `animate.*` is a plain attribute.
+    let animate = job.angular_version.is_none_or(|v| v.supports_animate_instructions());
 
     for attr in attributes {
         let name = attr.name.clone();
@@ -1444,7 +1446,7 @@ fn ingest_static_attributes_with_i18n<'a>(
         );
 
         // ngNonBindable and animate.* require special handling
-        if name.as_str() == "ngNonBindable" || name.as_str().starts_with("animate.") {
+        if name.as_str() == "ngNonBindable" || (animate && name.as_str().starts_with("animate.")) {
             let literal_expr = OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(value), source_span: None },
                 &allocator,
@@ -4592,7 +4594,11 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
     // A LegacyAnimation event with no phase (e.g. `@HostListener('@anim')`) leaves
     // is_animation_listener=false so reify emits a plain ɵɵlistener — matching
     // Angular's `isLegacyAnimationListener=false` path.
-    if event.event_type == ParsedEventType::Animation {
+    //
+    // Before v20.2 an `animate.*` host event is a plain listener.
+    if event.event_type == ParsedEventType::Animation
+        && job.angular_version.is_none_or(|v| v.supports_animate_instructions())
+    {
         let root_xref = job.root.xref;
         let op = create_animation_listener_op(
             allocator,
@@ -4733,11 +4739,13 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
     let allocator = job.allocator;
 
     // Collect static attributes for content projection purposes.
+    // Before v20.2 `animate.*` attributes are plain ones and are copied too.
+    let animate = job.angular_version.is_none_or(|v| v.supports_animate_instructions());
     let attributes = root.attributes();
     for attr in attributes {
         let attr_name = attr.name.as_str();
         // Skip animation attributes
-        if attr_name.starts_with(ANIMATE_PREFIX) {
+        if animate && attr_name.starts_with(ANIMATE_PREFIX) {
             continue;
         }
 

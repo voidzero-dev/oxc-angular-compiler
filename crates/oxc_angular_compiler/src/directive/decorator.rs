@@ -21,6 +21,7 @@ use super::metadata::{
     R3InputMetadata,
 };
 use super::property_decorators::try_unwrap_forward_ref;
+use crate::component::AngularVersion;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression};
 use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
@@ -187,8 +188,18 @@ pub fn extract_directive_metadata<'a>(
                     }
                     "hostDirectives" => {
                         for entry in evaluate_host_directives(allocator, &prop.value, consts) {
+                            // `ns.X` stays a read off the namespace import; the
+                            // transform swaps `ns` for its own namespace alias.
+                            let directive = match entry.namespace {
+                                Some(namespace) => OutputAstBuilder::export_read(
+                                    allocator,
+                                    OutputAstBuilder::variable(allocator, namespace),
+                                    entry.name,
+                                ),
+                                None => OutputAstBuilder::variable(allocator, entry.name),
+                            };
                             builder = builder.add_host_directive(R3HostDirectiveMetadata {
-                                directive: OutputAstBuilder::variable(allocator, entry.name),
+                                directive,
                                 is_forward_reference: entry.is_forward_reference,
                                 has_mapping_keys: entry.has_mapping_keys(),
                                 inputs: entry.inputs.unwrap_or_else(|| Vec::new_in(&allocator)),
@@ -341,6 +352,8 @@ fn extract_param_dependency<'a>(
     let mut host = false;
     let mut inject_token: Option<OutputExpression<'a>> = None;
     let mut attribute_name: Option<Ident<'a>> = None;
+    // The attribute name as written, when ngtsc keeps it (see `string_literal_as_written`).
+    let mut attribute_source: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = super::angular_param_decorator(decorator, Some(consts)) {
@@ -365,6 +378,8 @@ fn extract_param_dependency<'a>(
                             && let Some(name) = s.value.as_str()
                         {
                             attribute_name = Some(name.into());
+                            attribute_source =
+                                crate::output::oxc_converter::string_literal_as_written(s);
                         }
                     }
                 }
@@ -390,7 +405,10 @@ fn extract_param_dependency<'a>(
         // ngtsc's `attributeNameType` is the attribute name itself (di.ts), so it is
         // set whatever the parameter's type and compiles to `ɵɵinjectAttribute`.
         return R3DependencyMetadata {
-            token: Some(name.clone_in(allocator)),
+            token: Some(match attribute_source {
+                Some(source) => crate::output::oxc_converter::raw_source(allocator, source),
+                None => name.clone_in(allocator),
+            }),
             attribute_name_type: Some(name),
             host,
             optional,
@@ -489,7 +507,7 @@ pub struct StringConsts<'a> {
     /// `["k", "KeyCodes"]`), whose import the cross-file analysis followed
     /// to a `const enum` (see [`Self::is_imported_const_enum`]).
     imported_const_enums: rustc_hash::FxHashSet<std::vec::Vec<Ident<'a>>>,
-    /// `host:` expressions already run through [`evaluate_host_metadata`],
+    /// `host:` expressions already run through [`parse_host_metadata`],
     /// keyed by the expression's address and the decorator's name: the
     /// diagnostic pass (`decorator_io_errors`) and the metadata extraction
     /// both evaluate it, and evaluation is deterministic.
@@ -888,7 +906,7 @@ fn imported_transform_error(
 ) -> Option<(String, Span)> {
     let computed = matches!(
         transform.value,
-        Value::Reference { kind: RefKind::Import { namespace_member: false, local: None }, .. }
+        Value::Reference { kind: RefKind::Import { namespace_member: false, local: None, .. }, .. }
     );
     computed.then(|| (value_error(subject, String::new, &transform.value), span))
 }
@@ -915,7 +933,9 @@ fn reference_identity<'p>(transform: &'p Prop<'_>, consts: &StringConsts<'_>) ->
         {
             Some(name)
         }
-        Value::Reference { kind: RefKind::Import { namespace_member: false, local }, .. } => *local,
+        Value::Reference {
+            kind: RefKind::Import { namespace_member: false, local, .. }, ..
+        } => *local,
         Value::Reference { name, kind: RefKind::Global | RefKind::Ambient } => Some(name),
         _ => None,
     }
@@ -1211,6 +1231,7 @@ pub fn decorator_io_errors<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
+    angular_version: Option<AngularVersion>,
 ) -> std::vec::Vec<OxcDiagnostic> {
     use super::property_decorators::{
         IO_ACCESS, decorator_argument, initializer_api_access_error, literal_alias_error,
@@ -1542,7 +1563,8 @@ pub fn decorator_io_errors<'a>(
     // to the member name and `parse_host_listener_config` drops a non-string
     // argument instead of reporting it — except for a string with a lone
     // surrogate, which oxc can't read.
-    let host = || host_metadata_error(allocator, config, decorator_name, consts).map(at);
+    let host =
+        || host_metadata_error(allocator, config, decorator_name, consts, angular_version).map(at);
     let host_members =
         || super::property_decorators::lone_surrogate_host_error(class, consts).map(at);
 
@@ -2007,6 +2029,22 @@ pub(crate) fn evaluate_host_metadata<'a>(
     decorator_name: &str,
     consts: &StringConsts<'a>,
 ) -> Result<std::vec::Vec<(Ident<'a>, HostValue<'a>)>, String> {
+    let entries = parse_host_metadata(allocator, expr, decorator_name, consts)?;
+    match host_binding_errors(&entries, false) {
+        Some(error) => Err(error),
+        None => Ok(entries),
+    }
+}
+
+/// The entries of the `host` metadata `expr` evaluates to, or the error
+/// ngtsc's `parseHostBindings` reports for it. The checks of
+/// `verifyHostBindings` are left to [`host_binding_errors`].
+fn parse_host_metadata<'a>(
+    allocator: &'a Allocator,
+    expr: &'a Expression<'a>,
+    decorator_name: &str,
+    consts: &StringConsts<'a>,
+) -> Result<std::vec::Vec<(Ident<'a>, HostValue<'a>)>, String> {
     // This runs twice per decorated class — the diagnostic checks it and the
     // metadata extraction reads the entries — so each `host:` expression is
     // evaluated once and the result shared (`StringConsts::host_values`).
@@ -2014,12 +2052,12 @@ pub(crate) fn evaluate_host_metadata<'a>(
     if let Some(cached) = consts.host_values.borrow().get(&key) {
         return cached.clone();
     }
-    let result = evaluate_host_metadata_uncached(allocator, expr, decorator_name, consts);
+    let result = parse_host_metadata_uncached(allocator, expr, decorator_name, consts);
     consts.host_values.borrow_mut().insert(key, result.clone());
     result
 }
 
-fn evaluate_host_metadata_uncached<'a>(
+fn parse_host_metadata_uncached<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
     decorator_name: &str,
@@ -2115,11 +2153,40 @@ fn evaluate_host_metadata_uncached<'a>(
     if let Some(error) = parse_error {
         return Err(error);
     }
-    // `verifyHostBindings`' `validateNoEventBindings`: binding a host property
-    // or attribute to an event (`[onclick]`, `[attr.onload]`) is disallowed
-    // (compiler.ts). The other errors it collects come from parsing the
-    // binding expressions, which oxc doesn't do.
-    for (key, _) in &entries {
+    Ok(entries)
+}
+
+/// The error ngtsc's `verifyHostBindings` reports for the parsed `host`
+/// `entries`, if any. The checks for a `[]` / `()` key run only when
+/// `check_empty_names` is set (see
+/// [`AngularVersion::reports_empty_host_binding_names`]).
+fn host_binding_errors(
+    entries: &[(Ident<'_>, HostValue<'_>)],
+    check_empty_names: bool,
+) -> Option<String> {
+    // `verifyHostBindings` (compiler.ts) collects every error, in this order,
+    // and ngtsc joins their messages with "\n" into one NG5001:
+    // 1. `createDirectiveHostEventAsts`: `()` has no event name.
+    // 2. `createBoundHostProperties`: `[]` has no property name.
+    // 3. `validateNoEventBindings`: binding a host property or attribute to an
+    //    event (`[onclick]`, `[attr.onload]`) is disallowed.
+    // The other errors these steps report come from parsing the binding
+    // expressions, which oxc doesn't do. Only the name inside the brackets is
+    // checked, so `[ ]` and `( )` are not errors.
+    let mut errors: std::vec::Vec<String> = std::vec::Vec::new();
+    if check_empty_names {
+        for (key, _) in entries {
+            if matches!(HostKey::of(key.as_str()), HostKey::Listener) && key.len() == 2 {
+                errors.push("Event name is missing in binding".to_string());
+            }
+        }
+        for (key, _) in entries {
+            if matches!(HostKey::of(key.as_str()), HostKey::Property) && key.len() == 2 {
+                errors.push("Property name is missing in binding".to_string());
+            }
+        }
+    }
+    for (key, _) in entries {
         let HostKey::Property = HostKey::of(key.as_str()) else { continue };
         let prop = &key.as_str()[1..key.as_str().len() - 1];
         let is_attr = prop.starts_with("attr.");
@@ -2137,10 +2204,10 @@ fn evaluate_host_metadata_uncached<'a>(
                      by the current module."
                 ));
             }
-            return Err(msg);
+            errors.push(msg);
         }
     }
-    Ok(entries)
+    (!errors.is_empty()).then(|| errors.join("\n"))
 }
 
 /// The error ngtsc reports for the `host` of a `@Component` / `@Directive` whose
@@ -2150,11 +2217,15 @@ fn host_metadata_error<'a>(
     config: Option<&'a ObjectExpression<'a>>,
     decorator_name: &str,
     consts: &StringConsts<'a>,
+    angular_version: Option<AngularVersion>,
 ) -> Option<(String, Span)> {
     let expr = config_property(config?, "host", consts)?;
-    evaluate_host_metadata(allocator, expr, decorator_name, consts)
-        .err()
-        .map(|message| (message, expr.span()))
+    let check_empty_names = angular_version.is_none_or(|v| v.reports_empty_host_binding_names());
+    let error = match parse_host_metadata(allocator, expr, decorator_name, consts) {
+        Ok(entries) => host_binding_errors(&entries, check_empty_names)?,
+        Err(error) => error,
+    };
+    Some((error, expr.span()))
 }
 
 /// Extract host metadata from a host expression.
@@ -2192,8 +2263,11 @@ fn extract_host_metadata<'a>(
 /// One `hostDirectives` entry, as ngtsc's `extractHostDirectives` reads it.
 pub struct HostDirectiveEntry<'a> {
     /// The name the directive class is referenced by in this file: its own
-    /// name, or the local name of its import.
+    /// name, or the local name of its import. For `ns.X` read off
+    /// `import * as ns`, the export name `X`.
     pub name: Ident<'a>,
+    /// For `ns.X`, the local name `ns` of the `import * as ns`.
+    pub namespace: Option<Ident<'a>>,
     /// Written as `forwardRef(() => X)` (ngtsc's synthetic reference).
     pub is_forward_reference: bool,
     /// The `inputs` mappings as (publicName, internalName) pairs, or `None`
@@ -2268,34 +2342,53 @@ pub fn evaluate_host_directives<'a>(
         .filter_map(|(value, written)| {
             if let Value::Object(_) = &value {
                 let reference = value.prop("directive")?;
-                let (name, is_forward_reference) = directive(&reference.value, reference.expr)?;
+                let ((name, namespace), is_forward_reference) =
+                    directive(&reference.value, reference.expr)?;
                 let mappings =
                     |key| value.prop(key).map(|p| host_directive_mappings(allocator, &p.value));
                 Some(HostDirectiveEntry {
                     name,
+                    namespace,
                     is_forward_reference,
                     inputs: mappings("inputs"),
                     outputs: mappings("outputs"),
                 })
             } else {
-                let (name, is_forward_reference) = directive(&value, written)?;
-                Some(HostDirectiveEntry { name, is_forward_reference, inputs: None, outputs: None })
+                let ((name, namespace), is_forward_reference) = directive(&value, written)?;
+                Some(HostDirectiveEntry {
+                    name,
+                    namespace,
+                    is_forward_reference,
+                    inputs: None,
+                    outputs: None,
+                })
             }
         })
         .collect()
 }
 
-/// The name a host directive class reference is written by in this file.
-fn host_directive_name<'a>(allocator: &'a Allocator, value: &Value<'a>) -> Option<Ident<'a>> {
-    let name = match value {
-        Value::Reference { name, kind: RefKind::Class(_) | RefKind::Ambient } => name.as_str(),
+/// The name a host directive class reference is written by in this file,
+/// and for `ns.X` (`import * as ns`) the export name `X` and the namespace's
+/// local name `ns`. A member of anything else (`ns.sub.X`) has no name here.
+fn host_directive_name<'a>(
+    allocator: &'a Allocator,
+    value: &Value<'a>,
+) -> Option<(Ident<'a>, Option<Ident<'a>>)> {
+    let alloc = |s: &str| Ident::from(allocator.alloc_str(s));
+    match value {
+        Value::Reference { name, kind: RefKind::Class(_) | RefKind::Ambient } => {
+            Some((alloc(name), None))
+        }
         Value::Reference {
-            kind: RefKind::Import { namespace_member: false, local: Some(local) },
+            kind: RefKind::Import { namespace_member: false, local: Some(local), .. },
             ..
-        } => local,
-        _ => return None,
-    };
-    Some(Ident::from(allocator.alloc_str(name)))
+        } => Some((alloc(local), None)),
+        Value::Reference {
+            name,
+            kind: RefKind::Import { namespace_member: true, namespace: Some(namespace), .. },
+        } => Some((alloc(name), Some(alloc(namespace)))),
+        _ => None,
+    }
 }
 
 /// A host directive `inputs` / `outputs` array as (publicName, internalName)

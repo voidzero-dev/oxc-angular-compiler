@@ -1029,7 +1029,8 @@ pub fn create_host_directives_feature_arg<'a>(
 /// Format: `['internalName', 'publicName', 'internalName2', 'publicName2']`
 ///
 /// Mirrors Angular's `createHostDirectivesMappingArray` in `view/compiler.ts`.
-fn create_host_directive_mappings_array<'a>(
+/// The partial declarations write the same array.
+pub(crate) fn create_host_directive_mappings_array<'a>(
     allocator: &'a Allocator,
     mappings: &[(Ident<'a>, Ident<'a>)],
 ) -> OutputExpression<'a> {

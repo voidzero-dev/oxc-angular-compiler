@@ -213,7 +213,9 @@ export class K {}
 #[test]
 fn private_use_characters_are_printed_as_themselves() {
     // A real U+10F800 (private use) or U+FDD0 (noncharacter) is not a stored
-    // lone surrogate, alone or next to each other the other way round.
+    // lone surrogate, alone or next to each other the other way round. ngtsc
+    // escapes them like any text outside ASCII (`"a\uDBFE\uDC00"`), and keeps
+    // the decorator's template as written.
     let source = "import { Component, Input } from '@angular/core';
 @Component({ selector: 'p', template: '<i>\u{10F800}\u{FDD0}</i>' })
 export class P {
@@ -226,10 +228,11 @@ export class P {
     assert_has(
         &compact(&result.code),
         &[
-            "\"a\u{10F800}\":\"a\u{10F800}\"",
-            "\"b\u{FDD0}\":\"b\u{FDD0}\"",
-            "\"c\u{10F800}\u{FDD0}\":\"c\u{10F800}\u{FDD0}\"",
-            "\"\u{10F800}\u{FDD0}\"",
+            r#":"a\uDBFE\uDC00""#,
+            r#":"b\uFDD0""#,
+            r#":"c\uDBFE\uDC00\uFDD0""#,
+            r#"i0.ɵɵtext(1,"\uDBFE\uDC00\uFDD0")"#,
+            "template:'<i>\u{10F800}\u{FDD0}</i>'",
         ],
     );
     assert!(!compact(&result.code).contains(r"\uD800"), "{}", result.code);

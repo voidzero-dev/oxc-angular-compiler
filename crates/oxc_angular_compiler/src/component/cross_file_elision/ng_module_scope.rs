@@ -104,7 +104,6 @@ enum Declared {
     /// A `const` list of references, spread or named in a module's lists.
     List(Vec<RawRef>),
     /// A `declare const X: readonly [typeof A, typeof B]` list, by its type.
-    /// Only `ɵinj` reads it.
     TypeList(Vec<RawRef>),
 }
 
@@ -451,20 +450,24 @@ impl CrossFileAnalyzer {
         if let Some(method) = question.method {
             return ng_module(inner.mwp_method_module(&holder, method)?);
         }
+        // A list, flattened. Its classes are named through the files that
+        // declare them, never through the binding, so only their files
+        // count for `unready` (ngtsc writes no wrap for them either).
+        let list = |items: &[RawRef]| {
+            let mut classes = Vec::new();
+            let mut forward_ref = false;
+            inner.flatten_list(&holder, items, &mut classes, &mut forward_ref, 0)?;
+            let unready = classes.iter().any(unready);
+            let classes = classes.iter().map(named).collect::<Option<_>>()?;
+            Some(Answer::Classes { classes, unready, forward_ref })
+        };
         match inner.declared(&holder.decl).as_deref() {
             // A spread must be of an array (`read_declared` also gives a
-            // list for `const X = A` or `const X = A.forRoot()`).
-            Some(Declared::List(items)) if inner.is_const_array(&holder) => {
-                let mut classes = Vec::new();
-                let mut forward_ref = false;
-                inner.flatten_list(&holder, items, &mut classes, &mut forward_ref, 0)?;
-                // Full compilation lists the binding as written, so the file
-                // it is imported from must not load this one back either.
-                let unready = classes.iter().any(unready)
-                    || inner.binding_loads_back(&file, question.namespace.unwrap_or(question.name));
-                let classes = classes.iter().map(named).collect::<Option<_>>()?;
-                Some(Answer::Classes { classes, unready, forward_ref })
-            }
+            // list for `const X = A` or `const X = A.forRoot()`). A
+            // declaration file's `declare const X: [typeof A, typeof B]` is
+            // read by its type, like ngtsc's evaluator does.
+            Some(Declared::List(items)) if inner.is_const_array(&holder) => list(items),
+            Some(Declared::TypeList(items)) => list(items),
             _ if question.spread => None,
             // A constant holding a `ModuleWithProviders`.
             Some(Declared::List(_)) | None => ng_module(inner.mwp_const_module(&holder)?),
@@ -823,14 +826,15 @@ impl Inner {
         let read = items.iter().try_for_each(|raw| {
             let class = self.resolve_ref(raw, list.owner.as_deref(), 0)?;
             match &*self.declared(&class.decl)? {
-                Declared::List(items) if raw.method.is_none() => {
+                // A declaration file writes a list as a tuple type, which
+                // ngtsc's evaluator reads too.
+                Declared::List(items) | Declared::TypeList(items) if raw.method.is_none() => {
                     self.flatten_list(&class, items, out, forward_ref, depth + 1)
                 }
                 Declared::NgModule { .. } => {
                     out.push(class);
                     Some(())
                 }
-                // A declaration file's list type is not read here.
                 Declared::TypeList(_) => None,
                 _ if raw.method.is_some() => None,
                 _ => {
@@ -1339,7 +1343,9 @@ fn read_declared<'a>(
                 ty = &operator.type_annotation;
             }
             let TSType::TSTupleType(_) = ty else { return None };
-            return Some(Declared::TypeList(type_list(ty, &decl.file)?));
+            let mut refs = Vec::new();
+            const_type_list(ty, &decl.file, &mut refs)?;
+            return Some(Declared::TypeList(refs));
         };
         let mut refs = Vec::new();
         collect_refs(init, consts, &decl.file, &mut refs, 0, false, false)?;
@@ -1395,6 +1401,48 @@ fn read_declaration_type(class: &Class<'_>, file: &str) -> Option<Declared> {
             _ => None,
         }
     })
+}
+
+/// The classes a declared `const`'s tuple type names, nested tuples
+/// flattened, read like ngtsc's evaluator (`visitType`): `typeof A`, a
+/// tuple, a `readonly` one, or a named member (`name: typeof A`).
+fn const_type_list(ty: &TSType<'_>, file: &str, out: &mut Vec<RawRef>) -> Option<()> {
+    const MAX_NESTING: u8 = 8;
+    fn read(ty: &TSType<'_>, file: &str, out: &mut Vec<RawRef>, depth: u8) -> Option<()> {
+        if depth > MAX_NESTING {
+            return None;
+        }
+        match ty {
+            TSType::TSTypeQuery(query) => {
+                out.push(type_name_ref(file, query.expr_name.as_ts_type_name()?)?);
+                Some(())
+            }
+            TSType::TSTupleType(tuple) => tuple
+                .element_types
+                .iter()
+                .try_for_each(|element| read_element(element, file, out, depth)),
+            TSType::TSTypeOperatorType(operator)
+                if operator.operator == TSTypeOperatorOperator::Readonly =>
+            {
+                read(&operator.type_annotation, file, out, depth + 1)
+            }
+            _ => None,
+        }
+    }
+    fn read_element(
+        element: &TSTupleElement<'_>,
+        file: &str,
+        out: &mut Vec<RawRef>,
+        depth: u8,
+    ) -> Option<()> {
+        match element {
+            TSTupleElement::TSNamedTupleMember(member) => {
+                read_element(&member.element_type, file, out, depth + 1)
+            }
+            _ => read(element.as_ts_type()?, file, out, depth + 1),
+        }
+    }
+    read(ty, file, out, 0)
 }
 
 /// The classes a `[typeof A, typeof i1.B]` tuple type names; `never` names

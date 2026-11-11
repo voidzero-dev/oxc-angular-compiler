@@ -755,7 +755,10 @@ fn plan_splices(source: &str, declarations: &[DtsInjectDeclaration]) -> Vec<(usi
     import_entries.sort();
     let import_lines: Vec<String> = import_entries
         .iter()
-        .map(|(alias, specifier)| format!("import * as {alias} from \"{specifier}\";"))
+        .map(|(alias, specifier)| {
+            let specifier = crate::output::emitter::escape_non_ascii(specifier);
+            format!("import * as {alias} from \"{specifier}\";")
+        })
         .collect();
 
     if !import_lines.is_empty() {

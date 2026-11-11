@@ -8,7 +8,7 @@
 //! messages are its diagnostics (with the chained line joined by a space, as elsewhere).
 
 use oxc_allocator::Allocator;
-use oxc_angular_compiler::{TransformOptions, transform_angular_file};
+use oxc_angular_compiler::{AngularVersion, TransformOptions, transform_angular_file};
 use oxc_diagnostics::OxcDiagnostic;
 
 const MEMBERS: &str = "go() {} other() {} t = ''; on = true; w = '';";
@@ -698,6 +698,123 @@ fn binding_to_an_event_is_disallowed() {
     // Only property keys are checked: '(onx)' is a listener, 'onx' an attribute.
     let literal = "{ '(onx)': 'go()', onx: 'a' }";
     assert_same_as_literal("Component", "const H = { '(onx)': 'go()', onx: 'a' };", "H", literal);
+}
+
+/// #704: `verifyHostBindings` reports every bad key, and ngtsc 22.2.4 joins
+/// the messages with "\n" in one NG5001.
+#[test]
+fn every_event_binding_is_reported() {
+    assert_error(
+        "",
+        "{ '[onclick]': 't', '[attr.onload]': 't' }",
+        "Binding to event property 'onclick' is disallowed for security reasons, please use \
+         (click)=...\nIf 'onclick' is a directive input, make sure the directive is imported by \
+         the current module.\nBinding to event attribute 'onload' is disallowed for security \
+         reasons, please use (load)=...",
+    );
+}
+
+/// #704: a `()` or `[]` key has no name. ngtsc 22.2.4 reports the listeners
+/// first, then the properties, then the event bindings, whatever the order
+/// of the keys.
+#[test]
+fn empty_binding_name_is_an_error() {
+    const EVENT: &str = "Event name is missing in binding";
+    const PROPERTY: &str = "Property name is missing in binding";
+    const ONCLICK: &str = "Binding to event property 'onclick' is disallowed for security \
+                           reasons, please use (click)=...\nIf 'onclick' is a directive input, \
+                           make sure the directive is imported by the current module.";
+    assert_error("", "{ '()': 'go()' }", EVENT);
+    assert_error("", "{ '[]': 't' }", PROPERTY);
+    assert_error("", "{ '[]': 't', '()': 'go()' }", &format!("{EVENT}\n{PROPERTY}"));
+    assert_error("", "{ '[]': 't', '[onclick]': 't' }", &format!("{PROPERTY}\n{ONCLICK}"));
+    assert_error("", "{ '[onclick]': 't', '[]': 't' }", &format!("{PROPERTY}\n{ONCLICK}"));
+    // An evaluated host: a constant, a spread, a key given twice.
+    assert_error("const H = { '[]': 't' };", "H", PROPERTY);
+    assert_error(
+        "const S = { '()': 'go()' };",
+        "{ ...S, '[]': 't' }",
+        &format!("{EVENT}\n{PROPERTY}"),
+    );
+    assert_error(
+        "const S = { '[]': 't' };",
+        "{ '[]': 'w', ...S, '()': 'go()' }",
+        &format!("{EVENT}\n{PROPERTY}"),
+    );
+}
+
+/// The `[]` / `()` checks came with 21.2.8 and 22.0.0-next.7. Before them
+/// ngtsc's `HOST_REG_EXP` needs a name, `[]` and `()` are plain host
+/// attributes and nothing is reported (ngtsc 19.2.15, 20.1.8, 20.2.0;
+/// `parseHostBindings` + `verifyHostBindings` of 21.2.7 and 22.0.0-next.6).
+/// The event-binding check runs on every version.
+#[test]
+fn empty_binding_name_is_reported_from_21_2_8_and_22_0_0_next_7() {
+    use oxc_angular_compiler::Prerelease;
+    let next = |n| AngularVersion::new(22, 0, 0).with_prerelease(Prerelease::Next(n));
+    let source = source("Directive", "", "{ '[]': 't', '()': 'go()' }");
+    let errors = |version: AngularVersion| -> Vec<String> {
+        let allocator = Allocator::default();
+        let options =
+            TransformOptions { angular_version: Some(version), ..TransformOptions::default() };
+        let result = transform_angular_file(&allocator, "/x/a.ts", &source, Some(&options), None);
+        result.diagnostics.into_iter().map(|d| d.message.to_string()).collect()
+    };
+    let both = vec!["Event name is missing in binding\nProperty name is missing in binding"];
+    for version in [
+        AngularVersion::new(19, 2, 15),
+        AngularVersion::new(20, 3, 35),
+        AngularVersion::new(21, 0, 9),
+        AngularVersion::new(21, 2, 7),
+        next(6),
+    ] {
+        assert!(errors(version).is_empty(), "{version:?}");
+    }
+    for version in [AngularVersion::new(21, 2, 8), next(7), AngularVersion::new(22, 0, 0)] {
+        assert_eq!(errors(version), both, "{version:?}");
+    }
+
+    let source = source.replace("'()': 'go()'", "'[onclick]': 't'");
+    let allocator = Allocator::default();
+    let options = TransformOptions {
+        angular_version: Some(AngularVersion::new(21, 2, 7)),
+        ..TransformOptions::default()
+    };
+    let result = transform_angular_file(&allocator, "/x/a.ts", &source, Some(&options), None);
+    let messages: Vec<String> = result.diagnostics.iter().map(|d| d.message.to_string()).collect();
+    assert_eq!(
+        messages,
+        vec![
+            "Binding to event property 'onclick' is disallowed for security reasons, please use \
+             (click)=...\nIf 'onclick' is a directive input, make sure the directive is imported \
+             by the current module."
+        ]
+    );
+}
+
+/// Only the name inside the brackets is checked, so `[ ]` and `( )` compile
+/// (ngtsc 22.2.4 with `typeCheckHostBindings: false`; its host type-check
+/// reports NG8002 for `' '` otherwise, which oxc doesn't do). The decorators
+/// are not checked by NG5001 either: `@HostListener('')` compiles, and
+/// `@HostBinding('')` only fails ngtsc's type-check.
+#[test]
+fn blank_or_decorator_binding_name_is_not_an_error() {
+    let source = source("Directive", "", "{ '[ ]': 't', '( )': 'go()' }");
+    let (code, diagnostics) = compile(&source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(code.contains(r#"i0.ɵɵlistener(" ",function X___HostBindingHandler()"#), "{code}");
+    assert!(code.contains(r#"i0.ɵɵdomProperty(" ",ctx.t)"#), "{code}");
+
+    let code = host_part(
+        "import { Directive, HostBinding, HostListener } from '@angular/core';
+@Directive({ selector: '[x]' })
+export class X { @HostBinding('') a = 1; @HostListener('') b() {} }",
+    );
+    assert!(
+        code.contains(r#"i0.ɵɵlistener("",functionX__HostBindingHandler(){returnctx.b();})"#),
+        "{code}"
+    );
+    assert!(code.contains(r#"i0.ɵɵdomProperty("",ctx.a)"#), "{code}");
 }
 
 /// A method or accessor called `host` in the decorator object is a class

@@ -57,10 +57,11 @@ const template = compileTemplateSync('<div>{{ title }}</div>', 'AppComponent', '
 
 ### Package Exports
 
-| Export                  | Description   |
-| ----------------------- | ------------- |
-| `@oxc-angular/vite`     | Vite plugin   |
-| `@oxc-angular/vite/api` | Low level API |
+| Export                  | Description                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| `@oxc-angular/vite`     | Vite plugin                                                                                |
+| `@oxc-angular/vite/api` | Low level API                                                                              |
+| `@oxc-angular/vite/dts` | `augmentDeclarations`, for `.d.ts` from a `tsc` run ([more](#declarations-from-a-tsc-run)) |
 
 ### Core Functions
 
@@ -320,8 +321,9 @@ matched, the build prints a warning that names the dir.
 
 Not covered:
 
-- declarations written outside the build, such as a `tsc` run of its own, or
-  `vite-plugin-dts` `outDirs` outside `build.outDir`;
+- declarations written outside the build, such as `vite-plugin-dts` `outDirs`
+  outside `build.outDir`, or a `tsc` run of its own (see
+  [the next section](#declarations-from-a-tsc-run));
 - several layouts in one output dir without declaration maps (for example two
   `vite-plugin-dts` `outDirs` side by side): no layout wins, so turn on
   `declarationMap`;
@@ -337,6 +339,68 @@ Not covered:
 Files written by another generator (`vite-plugin-dts`) are patched after they
 are written, so a tool that reads them earlier in the same build sees them
 without the members.
+
+### Declarations from a `tsc` run
+
+When the declarations come from a plain `tsc -p tsconfig.lib.json` run,
+outside Vite and Rolldown, no plugin hook sees them. Call
+`augmentDeclarations` from `@oxc-angular/vite/dts` after `tsc` to add the
+members. This entry does not load `vite`.
+
+```js
+// scripts/dts.mjs, run as `tsc -p tsconfig.lib.json && node scripts/dts.mjs`
+import { augmentDeclarations } from '@oxc-angular/vite/dts'
+
+const result = await augmentDeclarations({ tsconfig: 'tsconfig.lib.json' })
+for (const { file, message } of result.errors) console.error(`${file}: ${message}`)
+if (result.errors.length > 0 || result.missing.length > 0) process.exitCode = 1
+```
+
+With `tsconfig`, the files and their output paths come from TypeScript itself
+(the `typescript` package installed for the tsconfig's dir), the same way
+`tsc` lays them out. So every file `tsc` wrote is found, also the ones only
+reached through imports of a `"files": ["src/public-api.ts"]` tsconfig, and
+`declarationDir`, `.d.mts`, `newLine: "crlf"` and `mapRoot` are followed.
+Options you gave `tsc` on the command line go in `compilerOptions`, in
+tsconfig form, with paths relative to `cwd`:
+
+```js
+// tsc -p tsconfig.json --declaration --emitDeclarationOnly --outDir types
+await augmentDeclarations({ tsconfig: 'tsconfig.json', compilerOptions: { outDir: 'types' } })
+```
+
+When such an option is left out but the file is still found, it is patched
+as `tsc` wrote it (its line breaks and the map its comment points at are
+kept), but members from an earlier run are then kept as they are.
+
+Without TypeScript, pass the output dir and the library's source files
+instead. Each declaration file is then matched to its source as in the Vite
+build: by its declaration map, else by the one layout of the dir. A file that
+matches no source is left alone and listed in `unmatched`. A `declarationDir`
+that does not exist, or holds no declaration files, is an error. Pass `tsconfig`
+too when decorator values come through `paths` aliases:
+
+```js
+await augmentDeclarations({
+  declarationDir: 'dist',
+  sources: ['src/public-api.ts', 'src/lib/foo.component.ts' /* every .ts file */],
+  tsconfig: 'tsconfig.lib.json',
+})
+```
+
+The result lists the files it changed (`written`), the ones it paired with a
+source (`matched`), and the compiler errors (`errors`); the declaration file
+of a source with errors is left as it was. A second run changes nothing. With
+`tsconfig` and no `sources`, a file that an incremental `tsc` run did not
+write again gets fresh members (a selector held in another file, say), and
+`missing` lists the files `tsc` would write that are not there. With
+`sources`, members already in a file are kept, so start from a clean output
+dir. `outFile` builds are not supported.
+
+Members are the same text the Vite build writes (the same compiler, in
+partial mode). Templates are read as they are, without the plugin's
+`templateTransform`. Like the Vite build, a component's `ngContentSelectors`
+is `never`, where ngc lists the selectors.
 
 ## Vite Plugin Architecture
 

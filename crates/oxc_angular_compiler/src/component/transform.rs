@@ -61,7 +61,8 @@ use crate::ng_module::{
 };
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, DeclareFunctionStmt, DeclareVarStmt, FunctionExpr,
-    OutputExpression, OutputStatement, RawSourceExpr, ReadPropExpr, ReadVarExpr, StmtModifier,
+    LiteralValue, OutputAstBuilder, OutputExpression, OutputStatement, RawSourceExpr, ReadPropExpr,
+    ReadVarExpr, StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
 use crate::parser::ParseTemplateOptions;
@@ -528,6 +529,11 @@ pub struct HmrTemplateCompileOutput {
     /// content. It refers to a constant declared in `declarations_js`.
     pub ng_content_selectors_js: Option<String>,
 
+    /// Whether the template needs `ɵɵAnimationsFeature()`: it uses
+    /// `animate.leave` and the version is v20.2.0 to v20.3.0 (see
+    /// [`crate::hmr::HmrTemplateFields::animations_feature`]).
+    pub animations_feature: bool,
+
     /// Non-fatal diagnostics the pipeline reported while compiling (warnings,
     /// advice). Error-severity diagnostics are returned as `Err` instead, since
     /// the emitted code cannot be trusted.
@@ -937,32 +943,67 @@ fn dts_type_ref<'a>(
 ) -> String {
     match import_map.get(&Ident::from(local)) {
         Some(info) if info.is_named_import => {
-            let namespace = registry.get_or_assign(&info.source_module);
-            if let Some(name) = &info.string_export_name {
-                return format!("{namespace}[{}]", crate::directive::ts_string_literal(name));
-            }
-            let export = info.imported_name.as_ref().map_or(local, |name| name.as_str());
-            format!("{namespace}.{export}")
+            let export = info
+                .string_export_name
+                .as_ref()
+                .or(info.imported_name.as_ref())
+                .map_or(local, |name| name.as_str());
+            dts_export_ref(&info.source_module, export, registry)
         }
         _ => local.to_string(),
     }
 }
 
-/// `i1.name` for the export `name` of `specifier` in the `.d.ts`.
+/// The `.d.ts` type reference of the export `export` of `module`: `i1.Dep`,
+/// or `i1["s-dir"]` for an export name that isn't an identifier name.
+fn dts_export_ref<'a>(
+    module: &Ident<'a>,
+    export: &str,
+    registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    dts::export_member(registry.get_or_assign(module).as_str(), export)
+}
+
+/// For a host directive `ns.X` / `ns["x"]` read off `import * as ns`, the
+/// namespace's import and the export name.
+fn host_directive_namespace_member<'e, 'a>(
+    expr: &'e OutputExpression<'a>,
+    import_map: &'e ImportMap<'a>,
+) -> Option<(&'e ImportInfo<'a>, Ident<'a>)> {
+    let (receiver, export) = match expr {
+        OutputExpression::ReadProp(prop) => (&prop.receiver, prop.name),
+        OutputExpression::ReadKey(key) => match &*key.index {
+            OutputExpression::Literal(lit) => match &lit.value {
+                LiteralValue::String(name) => (&key.receiver, *name),
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let OutputExpression::ReadVar(namespace) = &**receiver else { return None };
+    let info = import_map.get(&namespace.name).filter(|info| !info.is_named_import)?;
+    Some((info, export))
+}
+
+/// `i1.name` for the export `name` of `specifier` in the `.d.ts`, or
+/// `i1["h-dir"]` for an export named by a string.
 fn dts_module_ref<'a>(
     allocator: &'a Allocator,
     specifier: &str,
     name: &str,
     registry: &mut NamespaceRegistry<'a>,
 ) -> String {
-    let namespace = registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
-    format!("{namespace}.{name}")
+    dts_export_ref(&Ident::from(allocator.alloc_str(specifier)), name, registry)
 }
 
 /// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
 ///
 /// Replaces bare `ReadVar("X")` references with namespace-prefixed `ReadProp(ReadVar("i1"), "X")`
-/// for any host directive that has a corresponding import in the import map.
+/// for any host directive that has a corresponding import in the import map,
+/// and `ns.X` (`import * as ns`) with `i1.X`. Like ngtsc's `toR3Reference`, the
+/// module's export name is used: `i1.Foo` for `import { Foo as Bar }`,
+/// `i1.default` for a default import, `i1["s-dir"]` for a string export name.
 /// This ensures the compiled output works correctly even after import elision.
 fn resolve_host_directive_namespaces<'a>(
     allocator: &'a Allocator,
@@ -971,29 +1012,25 @@ fn resolve_host_directive_namespaces<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) {
     for hd in host_directives.iter_mut() {
-        // Only process bare variable references (ReadVar)
-        let OutputExpression::ReadVar(ref var) = hd.directive else { continue };
-        let name = &var.name;
-        // Look up this identifier in the import map
-        let Some(import_info) = import_map.get(name) else { continue };
-        // Replace with namespace-prefixed reference: i1.BrnTooltipTrigger instead of BrnTooltipTrigger
-        let namespace = namespace_registry.get_or_assign(&import_info.source_module);
-        hd.directive = OutputExpression::ReadProp(oxc_allocator::Box::new_in(
-            ReadPropExpr {
-                receiver: oxc_allocator::Box::new_in(
-                    OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                        ReadVarExpr { name: namespace, source_span: None },
-                        &allocator,
-                    )),
-                    &allocator,
-                ),
-                // Export name when aliased (`Foo as Bar` → `i1.Foo`).
-                name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
-                optional: false,
-                source_span: None,
-            },
-            &allocator,
-        ));
+        let (source_module, export) = match &hd.directive {
+            OutputExpression::ReadVar(var) => {
+                let Some(info) = import_map.get(&var.name) else { continue };
+                let export = info.string_export_name.or(info.imported_name).unwrap_or(var.name);
+                (info.source_module, export)
+            }
+            expr => {
+                let Some((info, export)) = host_directive_namespace_member(expr, import_map) else {
+                    continue;
+                };
+                (info.source_module, export)
+            }
+        };
+        let namespace = namespace_registry.get_or_assign(&source_module);
+        hd.directive = OutputAstBuilder::export_read(
+            allocator,
+            OutputAstBuilder::variable(allocator, namespace),
+            export,
+        );
     }
 }
 
@@ -2456,6 +2493,16 @@ fn build_jit_decorator_text<'a>(
     apply_jit_decorator_text_edits(expr_text, edits)
 }
 
+/// The import line for a JIT resource (`angular:jit:template:file;./a.html`).
+/// The Angular CLI builds the specifier with `factory.createStringLiteral`, so
+/// the TypeScript printer escapes text outside ASCII (`./t\u00E9.html`).
+fn jit_resource_import(import_name: &str, specifier: &str) -> String {
+    format!(
+        "import {import_name} from {};\n",
+        crate::output::emitter::escape_string(specifier, false)
+    )
+}
+
 /// `text` with `edits` (offsets into it) applied.
 fn apply_jit_decorator_text_edits(
     text: &str,
@@ -3292,7 +3339,7 @@ fn transform_angular_file_jit(
             .push_str(&format!("import * as {core_namespace} from \"@angular/core\";\n"));
     }
     for (import_name, specifier) in &resource_imports {
-        additional_imports.push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
+        additional_imports.push_str(&jit_resource_import(import_name, specifier));
     }
 
     // Insert additional imports after the last existing import
@@ -3361,6 +3408,21 @@ fn transform_angular_file_jit(
 
     // 5. Strip TypeScript syntax from JIT output
     result.code = strip_typescript(allocator, path, &result.code);
+
+    // The printer above writes the resource specifiers as raw text; the Angular
+    // CLI's TypeScript printer escapes text outside ASCII in them.
+    for (import_name, specifier) in &resource_imports {
+        if specifier.is_ascii() {
+            continue;
+        }
+        let printed = format!("import {import_name} from \"{specifier}\";\n");
+        if let Some(start) = result.code.find(&printed) {
+            result.code.replace_range(
+                start..start + printed.len(),
+                &jit_resource_import(import_name, specifier),
+            );
+        }
+    }
 
     result
 }
@@ -3969,7 +4031,13 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             // `inputs:`/`outputs:` forms ngtsc rejects, rather than dropping them silently.
-            let io_errors = decorator_io_errors(allocator, class, Some(source), &string_consts);
+            let io_errors = decorator_io_errors(
+                allocator,
+                class,
+                Some(source),
+                &string_consts,
+                options.angular_version,
+            );
             result.diagnostics.extend(io_errors.iter().cloned());
             if io_errors.is_empty() {
                 // Constructor parameter decorators: ngtsc's
@@ -4491,12 +4559,18 @@ pub fn transform_angular_file(
                                 let host_directive_types: Vec<String> = metadata
                                     .host_directives
                                     .iter()
-                                    .map(|hd| {
-                                        dts_type_ref(
-                                            hd.directive.as_str(),
-                                            &import_map,
+                                    .map(|hd| match (&hd.source_module, hd.namespace) {
+                                        // `ns.X`, or an import: the module's export.
+                                        (Some(module), _) => dts_export_ref(
+                                            module,
+                                            hd.export_name.unwrap_or(hd.directive).as_str(),
                                             &mut dts_namespace_registry,
-                                        )
+                                        ),
+                                        // `ns.X` with no module to alias: as written.
+                                        (None, Some(namespace)) => {
+                                            dts::export_member(&namespace, &hd.directive)
+                                        }
+                                        (None, None) => hd.directive.to_string(),
                                     })
                                     .collect();
                                 result.dts_declarations.push(dts_entry(
@@ -4599,7 +4673,14 @@ pub fn transform_angular_file(
                                     &import_map,
                                     &mut dts_namespace_registry,
                                 ),
-                                _ => dts::extract_directive_name_from_expr(&hd.directive),
+                                expr => match host_directive_namespace_member(expr, &import_map) {
+                                    Some((info, export)) => dts_export_ref(
+                                        &info.source_module,
+                                        export.as_str(),
+                                        &mut dts_namespace_registry,
+                                    ),
+                                    None => dts::extract_directive_name_from_expr(expr),
+                                },
                             })
                             .collect()
                     } else {
@@ -4875,11 +4956,11 @@ pub fn transform_angular_file(
                         );
                     }
 
-                    // Read the lists like ngtsc: in partial mode the
-                    // declaration lists what they give, and in both modes
-                    // they are wrapped when one names a class declared
-                    // later. A class in a function may see local bindings:
-                    // it stays as before.
+                    // Read the lists like ngtsc: the partial declaration
+                    // and the full-mode scope list what they give, and in
+                    // both modes they are wrapped when one names a class
+                    // declared later. A class in a function may see local
+                    // bindings: it stays as before.
                     let module_lists = if site.nested {
                         None
                     } else {
@@ -4896,8 +4977,8 @@ pub fn transform_angular_file(
                                 .as_ref()
                                 .filter(|_| options.resolve_imported_values)
                                 .map(|analyzer| (analyzer, path, source)),
-                            matches!(options.compilation_mode, crate::CompilationMode::Partial)
-                                .then_some(&mut file_namespace_registry),
+                            &mut file_namespace_registry,
+                            matches!(options.compilation_mode, crate::CompilationMode::Partial),
                         )
                     };
 
@@ -5376,8 +5457,7 @@ pub fn transform_angular_file(
         // registry below under whatever alias the file allows (`i0` or a
         // uniquified `i0_1`, ...), for every alias shape.
         for (import_name, specifier) in &jit_resource_imports {
-            additional_imports
-                .push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
+            additional_imports.push_str(&jit_resource_import(import_name, specifier));
         }
     }
 
@@ -5690,6 +5770,8 @@ struct HmrUpdateParts {
     ng_content_selectors_js: Option<String>,
     /// The ɵcmp's `styles`.
     styles: Vec<String>,
+    /// Whether the template adds `ɵɵAnimationsFeature()` to the ɵcmp.
+    animations_feature: bool,
 }
 
 /// The `dependencies` entries of the directives and pipes of `entries`,
@@ -5737,12 +5819,14 @@ fn scope_dependencies<'a>(
 
 /// Read the `declarations`, `imports` and `exports` of the NgModule
 /// `class` like ngtsc (see `ng_module::module_with_providers`), and set
-/// whether its lists are wrapped in `() => [...]`. With a `registry`
-/// (partial mode), the declaration lists what they give. With cross-file
+/// whether its lists are wrapped in `() => [...]`. In `partial` mode, the
+/// declaration lists what they give. In full mode, so does
+/// `ɵɵsetNgModuleScope`, for each list whose entries were all read; any
+/// other list stays as written (the runtime flattens it). With cross-file
 /// analysis, a name of another file is read too, and a class found there
-/// is named through a namespace import, like `ɵɵsetComponentScope` names
-/// classes. Anything unread keeps its old output. Gives the lists read,
-/// for the `.d.ts`.
+/// is named through a namespace import of `registry`, like
+/// `ɵɵsetComponentScope` names classes. Anything unread keeps its old
+/// output. Gives the lists read, for the `.d.ts`.
 #[expect(clippy::too_many_arguments)]
 fn resolve_ng_module_lists<'a>(
     allocator: &'a Allocator,
@@ -5753,7 +5837,8 @@ fn resolve_ng_module_lists<'a>(
     import_map: &ImportMap<'_>,
     import_elision: &ImportElisionAnalyzer<'_>,
     #[cfg(feature = "cross_file_elision")] analyzer: Option<(&CrossFileAnalyzer, &str, &str)>,
-    registry: Option<&mut NamespaceRegistry<'a>>,
+    registry: &mut NamespaceRegistry<'a>,
+    partial: bool,
 ) -> Option<crate::ng_module::module_with_providers::ModuleLists> {
     #[cfg(feature = "cross_file_elision")]
     use crate::ng_module::module_with_providers::{Answer, Question, ResolveImported};
@@ -5769,6 +5854,12 @@ fn resolve_ng_module_lists<'a>(
     let binding = |name: &str| match import_map.get(&Ident::from(name)) {
         Some(info) if info.is_type_only => Binding::Other,
         Some(info) if !info.is_named_import => Binding::Namespace,
+        Some(info)
+            if info.source_module == "@angular/core"
+                && info.imported_name.as_ref().is_some_and(|name| name == "forwardRef") =>
+        {
+            Binding::ForwardRef
+        }
         Some(_) => Binding::Import { kept: !import_elision.should_elide(name) },
         None => Binding::Other,
     };
@@ -5798,14 +5889,34 @@ fn resolve_ng_module_lists<'a>(
         resolve_imported,
     )?;
     metadata.contains_forward_decls = lists.wrap;
-    let Some(registry) = registry else { return Some(lists) };
-    // In the order the declaration lists them, so namespaces are numbered
-    // like ngtsc's.
+    // In the order ngtsc lists them (declarations, imports, exports), so
+    // namespaces are numbered like ngtsc's. In full mode this comes after
+    // the factory and before ɵinj, as in ngtsc.
     let mut namespace_of =
         |specifier: &str| registry.get_or_assign(&Ident::from(allocator.alloc_str(specifier)));
-    metadata.partial_declarations = lists.emit(allocator, ListKey::Declarations, &mut namespace_of);
-    metadata.partial_imports = lists.emit(allocator, ListKey::Imports, &mut namespace_of);
-    metadata.partial_exports = lists.emit(allocator, ListKey::Exports, &mut namespace_of);
+    let mut emit = |key: ListKey| {
+        // A full-mode list with an unread entry stays as written, and takes
+        // no namespace.
+        if partial || lists.is_complete(key) {
+            lists.emit(allocator, key, &mut namespace_of)
+        } else {
+            None
+        }
+    };
+    metadata.partial_declarations = emit(ListKey::Declarations);
+    metadata.partial_imports = emit(ListKey::Imports);
+    metadata.partial_exports = emit(ListKey::Exports);
+    if !partial {
+        if metadata.partial_declarations.is_some() {
+            metadata.declarations_scope_expr = None;
+        }
+        if metadata.partial_imports.is_some() {
+            metadata.imports_scope_expr = None;
+        }
+        if metadata.partial_exports.is_some() {
+            metadata.exports_scope_expr = None;
+        }
+    }
     Some(lists)
 }
 
@@ -6256,6 +6367,7 @@ pub fn compile_component_hmr_update(
                 vars: parts.vars,
                 consts_js: parts.consts_js.as_deref(),
                 ng_content_selectors_js: parts.ng_content_selectors_js.as_deref(),
+                animations_feature: parts.animations_feature,
             }),
             styles: update.styles.as_deref(),
             declarations_js: Some(parts.declarations_js.as_str()).filter(|d| !d.is_empty()),
@@ -6281,6 +6393,7 @@ fn compile_component_partial<'a>(
     allocator: &'a Allocator,
     core_namespace: &'a str,
     template: &'a str,
+    template_source: Option<&'a str>,
     metadata: &ComponentMetadata<'a>,
     view_queries: &[R3QueryMetadata<'a>],
     content_queries: &[R3QueryMetadata<'a>],
@@ -6290,28 +6403,37 @@ fn compile_component_partial<'a>(
     pool_starting_index: u32,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> FullCompilationResult<'a> {
-    let inputs = crate::partial::PartialComponentInputs {
-        template,
-        is_inline: metadata.template.is_some(),
-        content_queries,
-        view_queries,
-        defer_block_dependencies,
-        import_scopes,
-    };
     let version = allocator.alloc_str(&crate::partial::declaration_version(angular_version));
-    let cmp_expr = crate::partial::compile_declare_component_from_metadata(
-        allocator,
-        core_namespace,
-        version,
-        metadata,
-        &inputs,
-    );
+    // ngtsc emits `ɵfac` before `ɵcmp`, so the factory's dependencies take
+    // their namespace aliases before the host directives do.
     let fac_expr = crate::partial::component::compile_declare_factory_for_component(
         allocator,
         core_namespace,
         version,
         metadata,
         namespace_registry,
+    );
+    let host_directive_refs: Vec<OutputExpression<'a>> = metadata
+        .host_directives
+        .iter()
+        .map(|hd| crate::component::create_directive_reference(allocator, hd, namespace_registry))
+        .collect();
+    let inputs = crate::partial::PartialComponentInputs {
+        template,
+        template_source,
+        is_inline: metadata.template.is_some(),
+        content_queries,
+        view_queries,
+        defer_block_dependencies,
+        import_scopes,
+        host_directive_refs: &host_directive_refs,
+    };
+    let cmp_expr = crate::partial::compile_declare_component_from_metadata(
+        allocator,
+        core_namespace,
+        version,
+        metadata,
+        &inputs,
     );
 
     // Detect `@defer` block presence by a cheap string scan — partial
@@ -7070,10 +7192,22 @@ fn compile_component_full<'a>(
                 Some((import.key, dependencies))
             })
             .collect();
+        // ngtsc emits an inline string or template literal as the source node
+        // (`inlineTemplateLiteralExpression`), so a template with text outside
+        // ASCII keeps its source text rather than being escaped.
+        let template_source = metadata
+            .template_span
+            .filter(|_| {
+                !template.is_ascii()
+                    && metadata.template.as_ref().map(Ident::as_str) == Some(template)
+            })
+            .and_then(|span| source.get(span.start as usize - 1..span.end as usize + 1))
+            .map(|text| &*allocator.alloc_str(text));
         let mut result = compile_component_partial(
             allocator,
             namespace_registry.angular_core_ns().as_str(),
             template,
+            template_source,
             metadata,
             &view_queries,
             &content_queries,
@@ -7208,6 +7342,11 @@ fn compile_component_full<'a>(
     // `setClassMetadataAsync` gate both depend on whether the template uses
     // `@defer`.
     let has_defer_block = super::defer_resolver::template_has_defer_block(&r3_result.nodes);
+    // ngtsc's `addFeatures` adds `ɵɵAnimationsFeature()` on v20.2.0 to v20.3.0
+    // when the template uses `animate.leave`, and so does an HMR update.
+    let template_animations_feature =
+        options.angular_version.is_some_and(|v| v.needs_animations_feature())
+            && crate::directive::template_uses_animate_leave(&r3_result.nodes);
 
     // An HMR update module cannot carry the resolver: its dynamic `import()`s
     // would resolve against the update module's URL, not the component file.
@@ -7422,6 +7561,7 @@ fn compile_component_full<'a>(
         view_query_fn,
         content_queries_fn,
         namespace_registry,
+        template_animations_feature,
     );
 
     // Emit JavaScript
@@ -7459,6 +7599,7 @@ fn compile_component_full<'a>(
         )
         .map(|selectors| emitter.emit_expression(selectors)),
         styles: cmp_definition_styles(&definitions.cmp_definition, &job.pool),
+        animations_feature: template_animations_feature,
     });
 
     // Emit the long styles this component shared (the pool's last constants)
@@ -8186,6 +8327,9 @@ pub fn compile_template_for_hmr<'a>(
         return Err(diagnostics);
     }
 
+    let animations_feature = options.angular_version.is_some_and(|v| v.needs_animations_feature())
+        && crate::directive::template_uses_animate_leave(&r3_result.nodes);
+
     // Build IngestOptions from TransformOptions
     // OXC is a single-file compiler (local compilation mode): always use Full mode.
     let mode = TemplateCompilationMode::Full;
@@ -8337,6 +8481,7 @@ pub fn compile_template_for_hmr<'a>(
         decls: job.root.decl_count.unwrap_or(0),
         vars: job.root.vars.unwrap_or(0),
         ng_content_selectors_js,
+        animations_feature,
         diagnostics,
     })
 }
@@ -8859,6 +9004,11 @@ pub struct LinkerTemplateOutput {
 
     /// The ngContentSelectors array as a JavaScript expression string, if any.
     pub ng_content_selectors_js: Option<String>,
+
+    /// Whether the template needs `ɵɵAnimationsFeature()`: it uses
+    /// `animate.leave` and the version is v20.2.0 to v20.3.0. Angular's linker
+    /// runs the same `addFeatures` as a full compile.
+    pub animations_feature: bool,
 }
 
 /// Compile a template for the linker, returning all data needed to build a `defineComponent` call.
@@ -8937,6 +9087,9 @@ pub fn compile_template_for_linker<'a>(
         }
         return Err(diagnostics);
     }
+
+    let animations_feature = angular_version.is_some_and(|v| v.needs_animations_feature())
+        && crate::directive::template_uses_animate_leave(&r3_result.nodes);
 
     // Like the TS linker's `createR3ComponentDeferMetadata`: the i-th entry of
     // `deferBlockDependencies` belongs to the i-th `@defer` block, and a block
@@ -9079,6 +9232,7 @@ pub fn compile_template_for_linker<'a>(
         vars,
         consts_js,
         ng_content_selectors_js,
+        animations_feature,
     })
 }
 

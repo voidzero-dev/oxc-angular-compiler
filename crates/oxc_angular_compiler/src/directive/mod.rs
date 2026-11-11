@@ -25,7 +25,10 @@ pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
-pub(crate) use compiler::{create_host_directives_feature_arg, parse_host_property_name};
+pub(crate) use compiler::{
+    create_host_directive_mappings_array, create_host_directives_feature_arg,
+    parse_host_property_name,
+};
 pub(crate) use decorator::evaluate_host_directives;
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{
@@ -48,6 +51,7 @@ pub use evaluator::input_transform_types;
 pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
 pub(crate) use metadata::{
     MemberHostBindings, has_animate_leave_host_binding, merge_host_bindings, strip_host_key,
+    template_uses_animate_leave,
 };
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,

@@ -193,8 +193,8 @@ MyDir.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "17.0.
 /// literals. For the aliased array form `[publicName, classPropertyName]` this
 /// preserves the declaration-format detection — otherwise the array would be
 /// passed through verbatim and the runtime would read the public name as
-/// `InputFlags`. Array elements keep their original source spelling, so only
-/// the simple and object forms are asserted byte-identical.
+/// `InputFlags`. The names are printed as new string literals, as Angular's
+/// linker reads them (`getString()`), so every form is byte-identical.
 #[test]
 fn test_link_inputs_template_literal_matches_string_literal() {
     // Simple value form: same emitted output either way.
@@ -209,7 +209,7 @@ fn test_link_inputs_template_literal_matches_string_literal() {
     let template =
         link(&allocator, &make_directive_source(r#"prop: [`publicProp`, `prop`]"#), "test.mjs");
     assert!(
-        template.code.contains(r#"prop: [0, `publicProp`, `prop`]"#),
+        template.code.contains(r#"prop: [0, "publicProp", "prop"]"#),
         "aliased input lost its InputFlags element:\n{}",
         template.code
     );
@@ -220,6 +220,7 @@ fn test_link_inputs_template_literal_matches_string_literal() {
         "quoted input changed behaviour:\n{}",
         string.code
     );
+    assert_eq!(template.code, string.code);
 
     // Object format: publicName/classPropertyName may also be template literals.
     let allocator = Allocator::default();
@@ -1342,6 +1343,25 @@ D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", t
     assert!(linked.contains("hostVars:7"), "{linked}");
 }
 
+/// #704: Angular's linker never reads the binding parser's errors, so an
+/// empty host property or listener name links (Angular 22.2.4's
+/// `compileDirectiveDeclaration` gives the same output).
+#[test]
+fn test_link_host_empty_binding_names() {
+    let code = r#"
+import * as i0 from "@angular/core";
+class D {
+}
+D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.4", type: D, isStandalone: true, selector: "[d]", host: { properties: { "": "a" }, listeners: { "": "b()" } }, ngImport: i0 });
+"#;
+    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    assert!(
+        linked.contains(r#"i0.ɵɵlistener("",functionD__HostBindingHandler(){returnctx.b();})"#),
+        "{linked}"
+    );
+    assert!(linked.contains(r#"i0.ɵɵdomProperty("",ctx.a)"#), "{linked}");
+}
+
 /// #689: a linked `animate.enter` host property is a create-mode callback.
 #[test]
 fn test_link_host_animate_property() {
@@ -1476,5 +1496,169 @@ fn test_link_host_animate_before_20_2() {
             "{linked}"
         );
         assert!(!linked.contains("hostAttrs"), "{linked}");
+    }
+}
+
+/// #701: the partial declaration ngtsc 20.2.0 emits for the issue's template.
+const ANIMATE_701_COMPONENT: &str = r#"
+import * as i0 from "@angular/core";
+class T_issue {
+}
+T_issue.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.2.0", type: T_issue, isStandalone: true, selector: "t-issue", ngImport: i0, template: "<p animate.leave=\"out\" [animate.enter]=\"e\" (animate.leave)=\"g($event)\"></p>", isInline: true });
+"#;
+
+/// #701: before 20.2 the linker keeps template `animate.*` as a plain
+/// attribute, property and listener, as Angular's 20.1.8 linker does.
+#[test]
+fn test_link_template_animate_before_20_2() {
+    let linked: String =
+        link_for_version(ANIMATE_701_COMPONENT, Some(AngularVersion::new(20, 1, 8)))
+            .split_whitespace()
+            .collect();
+    assert!(
+        linked.contains(r#"decls:1,vars:1,consts:[["animate.leave","out",3,"animate.leave","animate.enter"]],template:functionT_issue_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p",0);i0.ɵɵdomListener("animate.leave",functionT_issue_Template_p_animate_leave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();}if((rf&2)){i0.ɵɵdomProperty("animate.enter",ctx.e);}}"#),
+        "{linked}"
+    );
+    assert!(!linked.contains("ɵɵanimate"), "{linked}");
+}
+
+/// #701: Angular's 20.2.0 to 20.3.0 linker adds `ɵɵAnimationsFeature()` for a
+/// template `animate.leave`, after the host fields and before `decls`, and
+/// orders the animate ops like ngtsc.
+#[test]
+fn test_link_template_animate_leave_feature() {
+    let linked: String =
+        link_for_version(ANIMATE_701_COMPONENT, Some(AngularVersion::new(20, 2, 0)))
+            .split_whitespace()
+            .collect();
+    assert!(
+        linked.contains(r#"selectors:[["t-issue"]],features:[i0.ɵɵAnimationsFeature()],decls:1,vars:0,template:functionT_issue_Template(rf,ctx){if((rf&1)){i0.ɵɵdomElementStart(0,"p");i0.ɵɵanimateEnter(functionT_issue_Template_animateenter_cb(){returnctx.e;});i0.ɵɵanimateLeave("out");i0.ɵɵanimateLeaveListener(functionT_issue_Template_p_animateleave_0_listener($event){returnctx.g($event);});i0.ɵɵdomElementEnd();}}"#),
+        "{linked}"
+    );
+
+    let cases = [
+        (Some(AngularVersion::new(20, 3, 0)), true),
+        (Some(AngularVersion::new(20, 3, 1)), false),
+        (Some(AngularVersion::new(22, 2, 4)), false),
+        (None, false),
+    ];
+    for (version, feature) in cases {
+        let linked = link_for_version(ANIMATE_701_COMPONENT, version);
+        assert_eq!(linked.contains("ɵɵAnimationsFeature()"), feature, "{version:?}\n{linked}");
+    }
+
+    // `animate.enter` alone needs no feature.
+    let enter_only = ANIMATE_701_COMPONENT.replace(
+        r#"template: "<p animate.leave=\"out\" [animate.enter]=\"e\" (animate.leave)=\"g($event)\"></p>""#,
+        r#"template: "<p animate.enter=\"a\"></p>""#,
+    );
+    assert!(enter_only.contains("animate.enter"));
+    let linked = link_for_version(&enter_only, Some(AngularVersion::new(20, 2, 0)));
+    assert!(!linked.contains("AnimationsFeature"), "{linked}");
+}
+
+/// #701: before 20.2 a host `animate.*` listener links to a plain `ɵɵlistener`.
+#[test]
+fn test_link_host_animate_listener_before_20_2() {
+    for code in host_declarations(r#"{ listeners: { "animate.enter": "g($event)" } }"#) {
+        let linked: String = link_for_version(&code, Some(AngularVersion::new(20, 1, 8)))
+            .split_whitespace()
+            .collect();
+        assert!(
+            linked.contains(r#"i0.ɵɵlistener("animate.enter",functionD_animate_enter_HostBindingHandler($event){returnctx.g($event);});"#),
+            "{linked}"
+        );
+        assert!(!linked.contains("ɵɵanimate"), "{linked}");
+
+        let linked: String = link_for_version(&code, Some(AngularVersion::new(20, 2, 0)))
+            .split_whitespace()
+            .collect();
+        assert!(linked.contains("i0.ɵɵanimateEnterListener("), "{linked}");
+    }
+}
+
+/// `hostDirectives` is rebuilt like Angular's linker (`toHostDirectivesMetadata`
+/// then `createHostDirectivesFeatureArg`), not copied: a forward reference is
+/// unwrapped and wraps the whole list in a function, so the classes are read
+/// after they are defined (#702). Expected text is what the
+/// `@angular/compiler-cli` 22.2.4 babel linker writes for the same input; the
+/// first four inputs are ngtsc's own partial output.
+#[test]
+fn test_link_host_directives_like_angular_linker() {
+    let cases = [
+        ("[{ directive: i1.H }, { directive: i1.H }]", Some("[i1.H, i1.H]")),
+        ("[{ directive: i0.forwardRef(() => L) }]", Some("function () { return [L]; }")),
+        (
+            r#"[{ directive: i0.forwardRef(() => L), inputs: ["color", "c"] }]"#,
+            Some(r#"function () { return [{ directive: L, inputs: ["color", "c"] }]; }"#),
+        ),
+        (
+            "[{ directive: i1.H }, { directive: i0.forwardRef(() => L) }]",
+            Some("function () { return [i1.H, L]; }"),
+        ),
+        // Oxc's own partial output.
+        (
+            r#"[{ directive: i0.forwardRef(function () { return L; }), inputs: ["color", "c"], outputs: ["changed", "ch"] }]"#,
+            Some(
+                r#"function () { return [{ directive: L, inputs: ["color", "c"], outputs: ["changed", "ch"] }]; }"#,
+            ),
+        ),
+        // Hand-written: no feature for an empty list, empty mappings give the
+        // bare class, and the pairs are read into an object (a trailing odd
+        // element dropped, the last alias kept, index keys first).
+        ("[]", None),
+        ("[{ directive: L, inputs: [], outputs: [] }]", Some("[L]")),
+        (
+            r#"[{ directive: L, inputs: ["color", "a", "color", "b", "1", "one", "x"], outputs: ["changed"] }]"#,
+            Some(r#"[{ directive: L, inputs: ["1", "one", "color", "b"] }]"#),
+        ),
+        // Quoted keys are read like plain names.
+        (r#"[{ "directive": i0.forwardRef(() => L) }]"#, Some("function () { return [L]; }")),
+        (
+            r#"[{ "directive": L, "inputs": ["a", "b"] }]"#,
+            Some(r#"[{ directive: L, inputs: ["a", "b"] }]"#),
+        ),
+    ];
+    for (host_directives, expected) in cases {
+        let code = format!(
+            r#"import * as i0 from "@angular/core";
+import * as i1 from "./dep";
+export class Dir {{}}
+Dir.ɵdir = i0.ɵɵngDeclareDirective({{ minVersion: "14.0.0", version: "22.2.2", type: Dir, isStandalone: true, selector: "[d]", hostDirectives: {host_directives}, ngImport: i0 }});
+export class L {{}}
+"#
+        );
+        let allocator = Allocator::default();
+        let linked: String = link(&allocator, &code, "test.mjs").code.split_whitespace().collect();
+        match expected {
+            Some(arg) => {
+                let arg: String = arg.split_whitespace().collect();
+                assert!(
+                    linked.contains(&format!("features:[i0.ɵɵHostDirectivesFeature({arg})]")),
+                    "{host_directives}:\n{linked}"
+                );
+            }
+            None => assert!(!linked.contains("HostDirectivesFeature"), "{linked}"),
+        }
+        assert!(!linked.contains("hostDirectives"), "{linked}");
+    }
+}
+
+/// A key that isn't an identifier stays quoted, so the linked code parses.
+#[test]
+fn test_link_keys_that_are_not_identifiers_stay_quoted() {
+    for (code, expected) in [
+        (
+            make_directive_source_with_outputs(r#""some event": "changed""#),
+            r#""some event": "changed""#,
+        ),
+        (make_directive_source(r#""some input": "someInput""#), r#""some input": "someInput""#),
+        (make_directive_source_with_outputs(r#""1": "one""#), r#""1": "one""#),
+    ] {
+        let allocator = Allocator::default();
+        let linked = link(&allocator, &code, "test.mjs").code;
+        assert!(linked.contains(expected), "{expected}:\n{linked}");
+        let parsed = Parser::new(&allocator, &linked, SourceType::mjs()).parse();
+        assert!(parsed.diagnostics.is_empty(), "does not parse:\n{linked}");
     }
 }

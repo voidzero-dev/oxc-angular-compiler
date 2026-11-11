@@ -16,11 +16,14 @@
 //! `ɵɵdefineNgModule`, the runtime gets a class that is no module and a
 //! `ModuleWithProviders` object.
 //!
-//! Only the partial declaration lists change: the injector keeps the raw
-//! entries (it needs their providers), and the full-mode
-//! `ɵɵsetNgModuleScope` keeps the raw list, which the runtime unwraps. In
-//! both modes, the lists are wrapped in `() => [...]` like ngtsc does: when
-//! one names a class this file declares after the NgModule.
+//! The partial declaration lists what is read, and so does the full-mode
+//! `ɵɵsetNgModuleScope` for a list whose entries were all read (ngtsc
+//! lists the classes there too). A full-mode list with an entry Oxc can't
+//! read stays as written: the runtime flattens it. The injector keeps the
+//! raw entries (it needs their providers). In both modes, the lists are
+//! wrapped in `() => [...]` like ngtsc does: when a name they list is
+//! written after the NgModule (a class this file declares later, or an
+//! import listed in a variable written later).
 //!
 //! A top-level entry that can't be read keeps its old output. This file
 //! reads what one file can tell. With cross-file analysis, a name of
@@ -278,20 +281,44 @@ pub fn top_level_const_init<'b, 'a>(
     program: &'b Program<'a>,
     name: &str,
 ) -> Option<&'b Expression<'a>> {
+    top_level_init(program, name, false).map(|(init, _)| init)
+}
+
+/// The initializer of the top-level `const`, `let` or `var` `name` of
+/// `program`, and where its declaration starts. ngtsc's evaluator reads
+/// the initializer of any variable (`getVariableValue`).
+fn top_level_var_init<'b, 'a>(
+    program: &'b Program<'a>,
+    name: &str,
+) -> Option<(&'b Expression<'a>, u32)> {
+    top_level_init(program, name, true)
+}
+
+fn top_level_init<'b, 'a>(
+    program: &'b Program<'a>,
+    name: &str,
+    any_kind: bool,
+) -> Option<(&'b Expression<'a>, u32)> {
+    use oxc_ast::ast::VariableDeclarationKind;
     program.body.iter().find_map(|stmt| {
         let declaration = match stmt {
             Statement::ExportDeclaration(decl) => &decl.declaration,
             _ => stmt.as_declaration()?,
         };
         let Declaration::VariableDeclaration(vars) = declaration else { return None };
-        if !vars.kind.is_const() {
+        let read = match vars.kind {
+            VariableDeclarationKind::Const => true,
+            VariableDeclarationKind::Let | VariableDeclarationKind::Var => any_kind,
+            _ => false,
+        };
+        if !read {
             return None;
         }
-        vars.declarations
+        let var = vars
+            .declarations
             .iter()
-            .find(|var| var.id.get_binding_identifier().is_some_and(|id| id.name == name))?
-            .init
-            .as_ref()
+            .find(|var| var.id.get_binding_identifier().is_some_and(|id| id.name == name))?;
+        Some((var.init.as_ref()?, var.span.start))
     })
 }
 
@@ -360,6 +387,9 @@ pub enum Binding {
     Import { kept: bool },
     /// `import * as ns`.
     Namespace,
+    /// `forwardRef` of `@angular/core` imported under another name
+    /// (`import { forwardRef as fr }`).
+    ForwardRef,
     /// Anything else: a declaration, a type-only import, nothing.
     Other,
 }
@@ -431,9 +461,9 @@ pub enum ListKey {
 pub struct ModuleLists {
     lists: [Vec<Entry>; 3],
     /// Whether the lists must be read lazily (`() => [...]`): one names a
-    /// class of this file declared after the NgModule (ngtsc's
-    /// `isExpressionForwardReference`), or a `forwardRef` target that may
-    /// not be initialized yet.
+    /// class of this file declared after the NgModule, or lists an import
+    /// by a name written after it (ngtsc's `isExpressionForwardReference`),
+    /// or a `forwardRef` target that may not be initialized yet.
     pub wrap: bool,
 }
 
@@ -472,8 +502,15 @@ pub fn read_module_lists(
             (crate::util::is_metadata_property(property) && key == name).then_some(&property.value)
         })
     };
-    let mut walker =
-        Walker { program, module: class, binding, resolve_imported, wrap: false, unsure: false };
+    let mut walker = Walker {
+        program,
+        module: class,
+        binding,
+        resolve_imported,
+        wrap: false,
+        unsure: false,
+        late: false,
+    };
     let mut lists = ["bootstrap", "declarations", "imports", "exports"]
         .into_iter()
         .zip(current)
@@ -500,7 +537,7 @@ impl ModuleLists {
         key: ListKey,
         mut namespace_of: impl FnMut(&str) -> oxc_str::Ident<'a>,
     ) -> Option<oxc_allocator::Vec<'a, crate::output::ast::OutputExpression<'a>>> {
-        use crate::output::ast::{OutputExpression, ReadPropExpr, ReadVarExpr};
+        use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
         use oxc_allocator::Box;
 
         let entries = &self.lists[key as usize];
@@ -523,24 +560,21 @@ impl ModuleLists {
             for class in refs {
                 list.push(match class {
                     Ref::Local(local) => read_var(name(local)),
-                    Ref::Module { specifier, name: export } => {
-                        OutputExpression::ReadProp(Box::new_in(
-                            ReadPropExpr {
-                                receiver: Box::new_in(
-                                    read_var(namespace_of(specifier)),
-                                    &allocator,
-                                ),
-                                name: name(export),
-                                optional: false,
-                                source_span: None,
-                            },
-                            &allocator,
-                        ))
-                    }
+                    // `i1.X`, or `i1["h-dir"]` for an export named by a string.
+                    Ref::Module { specifier, name: export } => OutputAstBuilder::export_read(
+                        allocator,
+                        read_var(namespace_of(specifier)),
+                        name(export),
+                    ),
                 });
             }
         }
         Some(list)
+    }
+
+    /// Whether every entry of the `key` list was read.
+    pub fn is_complete(&self, key: ListKey) -> bool {
+        self.lists[key as usize].iter().all(|entry| entry.refs.is_some())
     }
 
     /// The `.d.ts` type reference of each class of the `key` list, read
@@ -596,6 +630,56 @@ fn fallback_name(element: &ArrayExpressionElement<'_>) -> Option<String> {
     Some(name.to_string())
 }
 
+/// What `forwardRef(fn)` reads, like ngtsc's `expandForwardRef`: `fn`
+/// (parentheses and `as` around it looked through) is an arrow function or
+/// a function expression, whose body is an expression or a block holding
+/// one `return expr;`. `None` otherwise, or with more than one argument.
+fn forward_ref_target<'b, 'a>(
+    call: &'b oxc_ast::ast::CallExpression<'a>,
+) -> Option<&'b Expression<'a>> {
+    let [argument] = call.arguments.as_slice() else { return None };
+    let mut function = argument.as_expression()?;
+    loop {
+        function = match function {
+            Expression::ParenthesizedExpression(e) => &e.expression,
+            Expression::TSAsExpression(e) => &e.expression,
+            _ => break,
+        };
+    }
+    let body = match function {
+        Expression::ArrowFunctionExpression(arrow) => match arrow.get_expression() {
+            Some(expr) => return Some(expr),
+            None => arrow.get_function_body()?,
+        },
+        Expression::FunctionExpression(function) => function.body.as_ref()?,
+        _ => return None,
+    };
+    // A directive is one more statement to TypeScript.
+    if !body.directives.is_empty() {
+        return None;
+    }
+    let [Statement::ReturnStatement(ret)] = body.statements.as_slice() else { return None };
+    ret.argument.as_ref()
+}
+
+/// `(object, name)` of `object.name`, or of `object['name']`, which
+/// ngtsc's evaluator reads the same way.
+fn member_access<'b, 'a>(expr: &'b Expression<'a>) -> Option<(&'b Expression<'a>, &'b str)> {
+    match expr {
+        Expression::StaticMemberExpression(member) => {
+            Some((&member.object, member.property.name.as_str()))
+        }
+        Expression::ComputedMemberExpression(member) => match evaluated(&member.expression) {
+            Expression::StringLiteral(key) => Some((&member.object, key.value.as_str()?)),
+            Expression::TemplateLiteral(key) if key.expressions.is_empty() => {
+                Some((&member.object, key.quasis.first()?.value.cooked.as_ref()?.as_str()?))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Reads list entries in the compiled file.
 struct Walker<'p, 'a, 'r, B> {
     program: &'p Program<'a>,
@@ -607,6 +691,12 @@ struct Walker<'p, 'a, 'r, B> {
     /// decorator parser wraps every list once one writes a `forwardRef`,
     /// so the wrap stays then.
     unsure: bool,
+    /// Set while reading the initializer of a variable (or the method of a
+    /// class) written after the NgModule. A name ngtsc writes as this file
+    /// writes it there comes after the NgModule, so ngtsc wraps the lists
+    /// (`isExpressionForwardReference` looks at where the written name
+    /// sits).
+    late: bool,
 }
 
 impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
@@ -665,18 +755,18 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         }
         match evaluated(expr) {
             Expression::ArrayExpression(array) => self.array(array, depth),
-            Expression::Identifier(id) => match top_level_const_init(self.program, &id.name) {
-                Some(init) => match evaluated(init) {
-                    Expression::ArrayExpression(array) => self.array(array, depth + 1),
+            Expression::Identifier(id) => match top_level_var_init(self.program, &id.name) {
+                Some((init, start)) => self.read_at(start, |this| match evaluated(init) {
+                    Expression::ArrayExpression(array) => this.array(array, depth + 1),
                     _ => None,
-                },
+                }),
                 None => self.ask_import(&id.name, true),
             },
-            Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(ns) = evaluated(&member.object) else { return None };
-                self.ask_namespace(&ns.name, &member.property.name, None, true)
+            expr => {
+                let (object, name) = member_access(expr)?;
+                let Expression::Identifier(ns) = evaluated(object) else { return None };
+                self.ask_namespace(&ns.name, name, None, true)
             }
-            _ => None,
         }
     }
 
@@ -687,12 +777,13 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         match evaluated(expr) {
             Expression::ArrayExpression(array) => self.array(array, depth),
             Expression::Identifier(id) => self.name(&id.name, depth),
-            Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(ns) = evaluated(&member.object) else { return None };
-                self.ask_namespace(&ns.name, &member.property.name, None, false)
-            }
             Expression::CallExpression(call) => match &call.callee {
-                Expression::Identifier(id) if id.name == "forwardRef" => self.forward_ref(call),
+                Expression::Identifier(id)
+                    if id.name == "forwardRef"
+                        || matches!((self.binding)(&id.name), Binding::ForwardRef) =>
+                {
+                    self.forward_ref(call, depth)
+                }
                 _ => {
                     let (namespace, class, method) = static_call(call)?;
                     self.mwp_call(namespace, class, method)
@@ -702,7 +793,11 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
                 ObjectModule::Value(Expression::Identifier(id)) => self.class_name(&id.name),
                 _ => None,
             },
-            _ => None,
+            expr => {
+                let (object, name) = member_access(expr)?;
+                let Expression::Identifier(ns) = evaluated(object) else { return None };
+                self.ask_namespace(&ns.name, name, None, false)
+            }
         }
     }
 
@@ -715,20 +810,29 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         if self.local_class(name) {
             return Some(vec![Ref::Local(name.into())]);
         }
-        let Some(init) = top_level_const_init(self.program, name) else {
+        let Some((init, start)) = top_level_var_init(self.program, name) else {
             return self.ask_import(name, false);
         };
-        match evaluated(init) {
-            Expression::ArrayExpression(array) => self.array(array, depth + 1),
-            Expression::Identifier(alias) => self.name(&alias.name, depth + 1),
+        self.read_at(start, |this| match evaluated(init) {
+            Expression::ArrayExpression(array) => this.array(array, depth + 1),
+            Expression::Identifier(alias) => this.name(&alias.name, depth + 1),
             init => match module_with_providers_init(init)? {
                 MwpInit::Call { namespace, class, method } => {
-                    self.mwp_call(namespace, class, method)
+                    this.mwp_call(namespace, class, method)
                 }
-                MwpInit::Module(Expression::Identifier(id)) => self.class_name(&id.name),
+                MwpInit::Module(Expression::Identifier(id)) => this.class_name(&id.name),
                 MwpInit::Module(_) => None,
             },
-        }
+        })
+    }
+
+    /// Run `read` with [`Self::late`] set by whether `start`, where what it
+    /// reads is written, comes after the NgModule.
+    fn read_at<T>(&mut self, start: u32, read: impl FnOnce(&mut Self) -> T) -> T {
+        let late = std::mem::replace(&mut self.late, start > self.module.span.start);
+        let result = read(self);
+        self.late = late;
+        result
     }
 
     /// `class.method(...)` or `namespace.class.method(...)`.
@@ -739,57 +843,44 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         method: &str,
     ) -> Option<std::vec::Vec<Ref>> {
         let program = self.program;
-        match namespace {
-            None if top_level_class(program, class).is_some() => {
-                self.class_name(method_module(program, class, method)?)
-            }
-            None => {
-                if !matches!((self.binding)(class), Binding::Import { .. }) {
-                    return None;
-                }
-                let question =
-                    Question { namespace: None, name: class, method: Some(method), spread: false };
-                let answer = self.ask(&question)?;
-                self.classes(answer)
-            }
-            Some(namespace) => self.ask_namespace(namespace, class, Some(method), false),
+        if let Some(namespace) = namespace {
+            return self.ask_namespace(namespace, class, Some(method), false);
         }
+        if let Some(declared) = top_level_class(program, class) {
+            // The NgModule is named in the method, where the class is.
+            let module = method_module(program, class, method)?;
+            return self.read_at(declared.span.start, |this| this.class_name(module));
+        }
+        if !matches!((self.binding)(class), Binding::Import { .. }) {
+            return None;
+        }
+        let question =
+            Question { namespace: None, name: class, method: Some(method), spread: false };
+        let answer = self.ask(&question)?;
+        self.classes(answer)
     }
 
-    /// `forwardRef(() => name)`. The wrap stays unless the target is known
-    /// to be initialized when the NgModule is defined.
+    /// `forwardRef(fn)`: what `fn` returns, read like any entry (ngtsc's
+    /// `createForwardRefResolver`). ngtsc wraps the lists only when a name
+    /// it writes sits after the NgModule (see `Walker::local_class` and
+    /// `Walker::late`). Oxc also keeps the wrap
+    /// when the target is unread, or may not be defined yet as the NgModule
+    /// is (its file loads this one back): the full-mode scope runs with no
+    /// `ngJitMode` guard, so reading it early would throw.
     fn forward_ref(
         &mut self,
         call: &oxc_ast::ast::CallExpression<'_>,
+        depth: u8,
     ) -> Option<std::vec::Vec<Ref>> {
-        let target = match call.arguments.first() {
-            Some(oxc_ast::ast::Argument::ArrowFunctionExpression(arrow)) => {
-                arrow.get_expression().map(evaluated)
-            }
-            _ => None,
-        };
-        let Some(Expression::Identifier(id)) = target else {
+        let Some(target) = forward_ref_target(call) else {
             self.wrap = true;
             return None;
         };
-        let name = id.name.as_str();
-        if self.local_class(name) {
-            return Some(vec![Ref::Local(name.into())]);
-        }
-        let Binding::Import { kept } = (self.binding)(name) else {
-            self.wrap = true;
-            return None;
-        };
-        let question = Question { namespace: None, name, method: None, spread: false };
-        match self.ask(&question) {
-            Some(Answer::AsWritten { unready }) => self.wrap |= unready,
-            Some(Answer::Classes { .. }) => {
-                self.wrap = true;
-                return None;
-            }
-            None => self.wrap = true,
-        }
-        kept.then(|| vec![Ref::Local(name.into())])
+        let unsure = std::mem::replace(&mut self.unsure, false);
+        let refs = self.value(target, depth + 1);
+        self.wrap |= refs.is_none() || self.unsure;
+        self.unsure |= unsure;
+        refs
     }
 
     /// A name this file imports.
@@ -799,7 +890,10 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
         match self.ask(&question)? {
             Answer::AsWritten { unready } => {
                 self.unsure |= unready;
-                (kept && !spread).then(|| vec![Ref::Local(name.into())])
+                let listed = kept && !spread;
+                // Listed by the name written here; see `Walker::late`.
+                self.wrap |= listed && self.late;
+                listed.then(|| vec![Ref::Local(name.into())])
             }
             answer @ Answer::Classes { .. } => self.classes(answer),
         }
@@ -842,8 +936,12 @@ impl<B: Fn(&str) -> Binding> Walker<'_, '_, '_, B> {
 
     /// A class this file declares or a kept import, listed by `name`.
     fn class_name(&mut self, name: &str) -> Option<std::vec::Vec<Ref>> {
-        let listed = self.local_class(name)
-            || matches!((self.binding)(name), Binding::Import { kept: true });
+        if self.local_class(name) {
+            return Some(vec![Ref::Local(name.into())]);
+        }
+        let listed = matches!((self.binding)(name), Binding::Import { kept: true });
+        // Listed by the name written here; see `Walker::late`.
+        self.wrap |= listed && self.late;
         listed.then(|| vec![Ref::Local(name.into())])
     }
 
