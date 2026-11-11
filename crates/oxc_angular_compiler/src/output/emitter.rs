@@ -680,7 +680,7 @@ impl JsEmitter {
                 ctx.print_with_span(name, var_span);
             }
             OutputExpression::ReadProp(e) => {
-                self.visit_expression(&e.receiver, ctx);
+                self.visit_receiver(&e.receiver, ctx);
                 // Map the property name to its source location
                 let prop_span = e.source_span.and_then(|span| ctx.span_to_source_span(span));
                 // A name with a stored lone surrogate (`'q\uD800'`) can only be
@@ -696,7 +696,7 @@ impl JsEmitter {
                 }
             }
             OutputExpression::ReadKey(e) => {
-                self.visit_expression(&e.receiver, ctx);
+                self.visit_receiver(&e.receiver, ctx);
                 if e.optional {
                     ctx.print("?.[");
                 } else {
@@ -743,8 +743,18 @@ impl JsEmitter {
                 if e.parens {
                     ctx.print("(");
                 }
-                ctx.print_with_span(unary_operator_to_str(e.operator), source_span);
-                self.visit_expression(&e.expr, ctx);
+                let op = unary_operator_to_str(e.operator);
+                if e.is_prefix {
+                    ctx.print_with_span(op, source_span);
+                    // `- --a` must not print as `---a`, which parses as `--(-a)`.
+                    if starts_with_operator_char(&e.expr, op.as_bytes()[0]) {
+                        ctx.print(" ");
+                    }
+                    self.visit_expression(&e.expr, ctx);
+                } else {
+                    self.visit_expression(&e.expr, ctx);
+                    ctx.print_with_span(op, source_span);
+                }
                 if e.parens {
                     ctx.print(")");
                 }
@@ -865,6 +875,7 @@ impl JsEmitter {
                 // while `makeIt` and `function () {...}` stay bare.
                 let should_parenthesize = match e.fn_expr.as_ref() {
                     OutputExpression::ArrowFunction(_) => true,
+                    OutputExpression::UnaryOperator(u) => !u.parens,
                     OutputExpression::RawSource(raw) => !is_left_hand_side_source(&raw.source),
                     _ => false,
                 };
@@ -1065,6 +1076,20 @@ impl JsEmitter {
             }
         }
         ctx.print("`");
+    }
+
+    /// Visits the receiver of a property or keyed read. A unary operator there
+    /// binds less tightly than the access, so it needs parentheses
+    /// (`(a++).b`, `(-a)[0]`), which TypeScript's printer would re-insert.
+    fn visit_receiver(&self, receiver: &OutputExpression<'_>, ctx: &mut EmitterContext) {
+        let parenthesize = matches!(receiver, OutputExpression::UnaryOperator(u) if !u.parens);
+        if parenthesize {
+            ctx.print("(");
+        }
+        self.visit_expression(receiver, ctx);
+        if parenthesize {
+            ctx.print(")");
+        }
     }
 
     fn visit_tagged_template_literal(
@@ -1342,6 +1367,26 @@ fn unary_operator_to_str(op: UnaryOperator) -> &'static str {
     match op {
         UnaryOperator::Minus => "-",
         UnaryOperator::Plus => "+",
+        UnaryOperator::Increment => "++",
+        UnaryOperator::Decrement => "--",
+    }
+}
+
+/// Whether `expr` is emitted starting with the `+`/`-` character `ch`, so a
+/// prefix operator printed right before it would merge into another token.
+fn starts_with_operator_char(expr: &OutputExpression<'_>, ch: u8) -> bool {
+    match expr {
+        OutputExpression::UnaryOperator(u) if !u.parens => {
+            if u.is_prefix {
+                unary_operator_to_str(u.operator).as_bytes()[0] == ch
+            } else {
+                starts_with_operator_char(&u.expr, ch)
+            }
+        }
+        OutputExpression::Literal(lit) => {
+            ch == b'-' && matches!(lit.value, LiteralValue::Number(n) if n.is_sign_negative())
+        }
+        _ => false,
     }
 }
 

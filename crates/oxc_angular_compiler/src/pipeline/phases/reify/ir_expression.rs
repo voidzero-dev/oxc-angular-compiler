@@ -1108,6 +1108,7 @@ pub fn convert_ir_expression<'a>(
                     expr: Box::new_in(expr, &allocator),
                     parens: false,
                     source_span: unary.source_span,
+                    is_prefix: true,
                 },
                 &allocator,
             ))

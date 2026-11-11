@@ -269,6 +269,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     expr: Box::new_in(operand, &allocator),
                     parens: false,
                     source_span: Some(unary.source_span.to_span()),
+                    is_prefix: true,
                 },
                 &allocator,
             ))

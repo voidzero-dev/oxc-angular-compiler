@@ -573,6 +573,7 @@ pub fn convert_ast<'a>(
                     expr: Box::new_in(expr.to_output(allocator), &allocator),
                     parens: false,
                     source_span: convert_source_span(unary.source_span),
+                    is_prefix: true,
                 },
                 &allocator,
             )))

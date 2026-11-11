@@ -1242,6 +1242,7 @@ fn convert_pure_function_body<'a>(
                     expr: Box::new_in(inner, &allocator),
                     parens: false,
                     source_span: None,
+                    is_prefix: true,
                 },
                 &allocator,
             ))
