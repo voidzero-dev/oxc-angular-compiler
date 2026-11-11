@@ -451,6 +451,9 @@ export interface FixtureRunnerOptions {
 
   /** Output path for the report */
   outputPath?: string
+
+  /** Read the fixtures' ngtsc outputs from this baseline file (see `ng-baseline.ts`) */
+  ngBaselinePath?: string
 }
 
 // =============================================================================

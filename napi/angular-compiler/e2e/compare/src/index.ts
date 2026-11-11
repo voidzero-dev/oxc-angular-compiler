@@ -177,6 +177,9 @@ try {
       categories: values.category,
       verbose: values.verbose,
       parallel: !values['no-parallel'] && values.parallel !== false,
+      // In fixture-only mode, --ng-baseline reads the fixtures' ngtsc outputs.
+      ngBaselinePath:
+        runFixturesOnly && values['ng-baseline'] ? resolve(values['ng-baseline']) : undefined,
     })
 
     printFixtureSummary(fixtureReport)
