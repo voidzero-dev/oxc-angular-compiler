@@ -1226,6 +1226,8 @@ fn convert_pure_function_body<'a>(
             let operator = match unary.operator {
                 crate::ir::expression::IrUnaryOperator::Plus => UnaryOperator::Plus,
                 crate::ir::expression::IrUnaryOperator::Minus => UnaryOperator::Minus,
+                crate::ir::expression::IrUnaryOperator::Increment => UnaryOperator::Increment,
+                crate::ir::expression::IrUnaryOperator::Decrement => UnaryOperator::Decrement,
                 crate::ir::expression::IrUnaryOperator::Spread => {
                     return OutputExpression::SpreadElement(Box::new_in(
                         crate::output::ast::SpreadElementExpr {
@@ -1242,6 +1244,7 @@ fn convert_pure_function_body<'a>(
                     expr: Box::new_in(inner, &allocator),
                     parens: false,
                     source_span: None,
+                    is_prefix: unary.is_prefix,
                 },
                 &allocator,
             ))

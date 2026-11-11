@@ -548,6 +548,12 @@ fn convert_ast_to_ir<'a>(
                 crate::ast::expression::UnaryOperator::Minus => {
                     crate::ir::expression::IrUnaryOperator::Minus
                 }
+                crate::ast::expression::UnaryOperator::Increment => {
+                    crate::ir::expression::IrUnaryOperator::Increment
+                }
+                crate::ast::expression::UnaryOperator::Decrement => {
+                    crate::ir::expression::IrUnaryOperator::Decrement
+                }
             };
             Box::new_in(
                 IrExpression::Unary(oxc_allocator::Box::new_in(
@@ -555,6 +561,7 @@ fn convert_ast_to_ir<'a>(
                         operator,
                         expr,
                         source_span: Some(unary.source_span.to_span()),
+                        is_prefix: unary.is_prefix,
                     },
                     &allocator,
                 )),
@@ -683,6 +690,7 @@ fn convert_ast_to_ir<'a>(
                         operator: crate::ir::expression::IrUnaryOperator::Spread,
                         expr,
                         source_span,
+                        is_prefix: true,
                     },
                     &allocator,
                 )),
@@ -4048,6 +4056,12 @@ fn host_convert_ast_to_ir<'a>(
                 crate::ast::expression::UnaryOperator::Minus => {
                     crate::ir::expression::IrUnaryOperator::Minus
                 }
+                crate::ast::expression::UnaryOperator::Increment => {
+                    crate::ir::expression::IrUnaryOperator::Increment
+                }
+                crate::ast::expression::UnaryOperator::Decrement => {
+                    crate::ir::expression::IrUnaryOperator::Decrement
+                }
             };
             Box::new_in(
                 IrExpression::Unary(oxc_allocator::Box::new_in(
@@ -4055,6 +4069,7 @@ fn host_convert_ast_to_ir<'a>(
                         operator,
                         expr,
                         source_span: Some(unary.source_span.to_span()),
+                        is_prefix: unary.is_prefix,
                     },
                     &allocator,
                 )),
@@ -4252,6 +4267,7 @@ fn host_convert_ast_to_ir<'a>(
                         operator: crate::ir::expression::IrUnaryOperator::Spread,
                         expr,
                         source_span,
+                        is_prefix: true,
                     },
                     &allocator,
                 )),

@@ -178,7 +178,7 @@ pub enum IrExpression<'a> {
     /// Logical NOT expression (!expr).
     /// Used to preserve pipe bindings inside negation expressions during ingest.
     Not(Box<'a, NotExpr<'a>>),
-    /// Unary operator expression (+expr or -expr).
+    /// Unary operator expression (`+expr`, `-expr`, `++expr`, `expr--`, ...).
     /// Used to preserve pipe bindings inside unary expressions during ingest.
     Unary(Box<'a, UnaryExpr<'a>>),
     /// Typeof expression (typeof expr).
@@ -752,6 +752,7 @@ impl<'a> IrExpression<'a> {
                     operator: e.operator,
                     expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
+                    is_prefix: e.is_prefix,
                 },
                 &allocator,
             )),
@@ -1561,6 +1562,10 @@ pub enum IrUnaryOperator {
     Plus,
     /// Unary minus (-)
     Minus,
+    /// Increment (++)
+    Increment,
+    /// Decrement (--)
+    Decrement,
     /// Spread (`...expr`), which only appears as a call argument. It is modelled as a
     /// unary operator so that every phase resolves and rewrites its operand like any
     /// other expression.
@@ -1578,7 +1583,7 @@ pub struct NotExpr<'a> {
     pub source_span: Option<Span>,
 }
 
-/// Unary operator expression (+expr or -expr).
+/// Unary operator expression (`+expr`, `-expr`, `++expr`, `expr--`, ...).
 ///
 /// Used to preserve pipe bindings inside unary expressions like `+(x | pipe)`.
 #[derive(Debug)]
@@ -1589,6 +1594,8 @@ pub struct UnaryExpr<'a> {
     pub expr: Box<'a, IrExpression<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
+    /// Whether the operator precedes the operand. Only `++` and `--` can be postfix.
+    pub is_prefix: bool,
 }
 
 /// Typeof expression (typeof expr).
@@ -3015,6 +3022,7 @@ pub fn clone_angular_expression<'a>(
                 expr: clone_angular_expression(&e.expr, &allocator),
                 span: e.span,
                 source_span: e.source_span,
+                is_prefix: e.is_prefix,
             },
             &allocator,
         )),

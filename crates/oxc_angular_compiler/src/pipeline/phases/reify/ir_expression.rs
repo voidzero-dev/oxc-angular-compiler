@@ -1092,6 +1092,12 @@ pub fn convert_ir_expression<'a>(
                 crate::ir::expression::IrUnaryOperator::Minus => {
                     crate::output::ast::UnaryOperator::Minus
                 }
+                crate::ir::expression::IrUnaryOperator::Increment => {
+                    crate::output::ast::UnaryOperator::Increment
+                }
+                crate::ir::expression::IrUnaryOperator::Decrement => {
+                    crate::output::ast::UnaryOperator::Decrement
+                }
                 crate::ir::expression::IrUnaryOperator::Spread => {
                     return OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
@@ -1108,6 +1114,7 @@ pub fn convert_ir_expression<'a>(
                     expr: Box::new_in(expr, &allocator),
                     parens: false,
                     source_span: unary.source_span,
+                    is_prefix: unary.is_prefix,
                 },
                 &allocator,
             ))

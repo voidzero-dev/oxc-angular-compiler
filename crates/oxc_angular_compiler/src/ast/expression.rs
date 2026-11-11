@@ -188,6 +188,21 @@ impl<'a> AngularExpression<'a> {
         }
     }
 
+    /// Strips the parentheses and non-null assertions around a write target,
+    /// which don't change what is written to (`(a)++`, `a!++`).
+    ///
+    /// Ported from Angular's `unwrapWriteTarget`.
+    pub fn unwrap_write_target(&self) -> &Self {
+        let mut current = self;
+        loop {
+            match current {
+                Self::ParenthesizedExpression(e) => current = &e.expression,
+                Self::NonNullAssert(e) => current = &e.expression,
+                _ => return current,
+            }
+        }
+    }
+
     /// Deep clones this expression into the given allocator.
     pub fn clone_in(&self, alloc: &'a Allocator) -> Self {
         match self {
@@ -358,8 +373,9 @@ impl<'a> AngularExpression<'a> {
                 Unary {
                     span: e.span,
                     source_span: e.source_span,
-                    operator: e.operator.clone(),
+                    operator: e.operator,
                     expr: e.expr.clone_in(alloc),
+                    is_prefix: e.is_prefix,
                 },
                 &alloc,
             )),
@@ -933,7 +949,8 @@ impl BinaryOperator {
     }
 }
 
-/// A unary expression: `-expr` or `+expr`.
+/// A unary expression: `-expr`, `+expr`, or an update expression
+/// (`++expr`, `--expr`, `expr++`, `expr--`).
 #[derive(Debug)]
 pub struct Unary<'a> {
     /// The span of this expression.
@@ -944,6 +961,8 @@ pub struct Unary<'a> {
     pub operator: UnaryOperator,
     /// The operand.
     pub expr: AngularExpression<'a>,
+    /// Whether the operator precedes the operand. Only `++` and `--` can be postfix.
+    pub is_prefix: bool,
 }
 
 /// Unary operators.
@@ -953,6 +972,27 @@ pub enum UnaryOperator {
     Plus,
     /// Unary minus `-`
     Minus,
+    /// Increment `++`
+    Increment,
+    /// Decrement `--`
+    Decrement,
+}
+
+impl UnaryOperator {
+    /// Returns the operator as written in source.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Increment => "++",
+            Self::Decrement => "--",
+        }
+    }
+
+    /// Whether this is `++` or `--` (upstream `Unary.isUpdateOperation`).
+    pub fn is_update(self) -> bool {
+        matches!(self, Self::Increment | Self::Decrement)
+    }
 }
 
 /// A prefix not expression: `!expr`.

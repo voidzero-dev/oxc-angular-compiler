@@ -11,8 +11,7 @@ use oxc_angular_compiler::ast::expression::{
     Conditional, Interpolation, KeyedRead, LiteralArray, LiteralMap, LiteralMapKey,
     LiteralPrimitive, LiteralValue, NonNullAssert, ParenthesizedExpression, PrefixNot,
     PropertyRead, RegularExpressionLiteral, SafeCall, SafeKeyedRead, SafePropertyRead,
-    SpreadElement, TaggedTemplateLiteral, TemplateLiteral, TypeofExpression, Unary, UnaryOperator,
-    VoidExpression,
+    SpreadElement, TaggedTemplateLiteral, TemplateLiteral, TypeofExpression, Unary, VoidExpression,
 };
 
 /// Converts an Angular expression AST back into a string representation.
@@ -84,11 +83,20 @@ fn visit_safe_property_read(prop: &SafePropertyRead<'_>, out: &mut String) {
 }
 
 fn visit_unary(unary: &Unary<'_>, out: &mut String) {
-    match unary.operator {
-        UnaryOperator::Plus => out.push('+'),
-        UnaryOperator::Minus => out.push('-'),
+    let mut inner = String::new();
+    visit_expression(&unary.expr, &mut inner);
+    let op = unary.operator.as_str();
+    if unary.is_prefix {
+        out.push_str(op);
+        // Keep adjacent operators apart, e.g. `- -foo`.
+        if inner.starts_with(&op[..1]) {
+            out.push(' ');
+        }
+        out.push_str(&inner);
+    } else {
+        out.push_str(&inner);
+        out.push_str(op);
     }
-    visit_expression(&unary.expr, out);
 }
 
 fn visit_binary(bin: &Binary<'_>, out: &mut String) {
