@@ -426,3 +426,25 @@ fn link_own_partial_output() {
     assert_contains(&strip(&partial), r#"host:{listeners:{"click":"count++"}}"#);
     assert_link_source_output(&link(&partial));
 }
+
+/// With legacy safe navigation, `(count++)?.x` must store the update in a temporary.
+/// Otherwise the null check and the read would each run `count++`. ngc 22.3.0-next.4
+/// with `legacyOptionalChaining: true` emits it twice
+/// (`ctx.count++ == null ? null : (ctx.count++).toString()`); we don't copy that.
+#[test]
+fn legacy_safe_read_of_update_uses_a_temporary() {
+    let allocator = Allocator::default();
+    let options = TransformOptions {
+        angular_version: Some(version()),
+        legacy_optional_chaining: Some(true),
+        ..Default::default()
+    };
+    let source =
+        component(r#"<button (click)="(count++)?.toString(); (--other.n)?.toFixed()">x</button>"#);
+    let result = transform_angular_file(&allocator, "app.ts", &source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = strip(&result.code);
+    assert_contains(&code, "(((tmp_0_0=ctx.count++)==null)?null:tmp_0_0.toString());");
+    assert_contains(&code, "(((tmp_1_0=--ctx.other.n)==null)?null:tmp_1_0.toFixed());");
+    assert_eq!(code.matches("ctx.count++").count(), 1, "{code}");
+}

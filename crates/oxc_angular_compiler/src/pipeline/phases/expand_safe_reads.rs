@@ -75,8 +75,8 @@ use oxc_span::Span;
 use oxc_str::Ident;
 
 use crate::ir::expression::{
-    AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
-    ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
+    AssignTemporaryExpr, IrExpression, IrUnaryOperator, ReadTemporaryExpr, ResolvedCallExpr,
+    ResolvedKeyedReadExpr, ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
     transform_expressions_in_create_op, transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
@@ -261,8 +261,12 @@ fn needs_temporary_in_safe_access(expr: &IrExpression<'_>) -> bool {
         // Array and object literals need temporaries
         IrExpression::LiteralArray(_) | IrExpression::DerivedLiteralArray(_) => true,
         IrExpression::LiteralMap(_) | IrExpression::DerivedLiteralMap(_) => true,
-        // Unary operators need to check their operand
-        IrExpression::Unary(u) => needs_temporary_in_safe_access(&u.expr),
+        // `++`/`--` change state, so they must not be evaluated twice. Upstream only
+        // checks the operand, which runs `(count++)?.x` twice in legacy mode.
+        IrExpression::Unary(u) => {
+            matches!(u.operator, IrUnaryOperator::Increment | IrUnaryOperator::Decrement)
+                || needs_temporary_in_safe_access(&u.expr)
+        }
         IrExpression::Not(n) => needs_temporary_in_safe_access(&n.expr),
         // Binary operators need to check both operands
         IrExpression::Binary(binary) => {
@@ -319,7 +323,9 @@ fn needs_temporary_in_ast_expression(expr: &crate::ast::expression::AngularExpre
             needs_temporary_in_ast_expression(&paren.expression)
         }
         // Unary and binary operators need to check operands
-        AngularExpression::Unary(unary) => needs_temporary_in_ast_expression(&unary.expr),
+        AngularExpression::Unary(unary) => {
+            unary.operator.is_update() || needs_temporary_in_ast_expression(&unary.expr)
+        }
         AngularExpression::Binary(binary) => {
             needs_temporary_in_ast_expression(&binary.left)
                 || needs_temporary_in_ast_expression(&binary.right)
