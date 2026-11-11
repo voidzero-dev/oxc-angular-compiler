@@ -114,6 +114,15 @@ enum R3NodeRef {
         name: String,
         value: String,
     },
+    BoundaryBlock {
+        children: Vec<R3NodeRef>,
+        error_blocks: Vec<R3NodeRef>,
+    },
+    BoundaryErrorBlock {
+        expression: Option<String>,
+        context_variables: Vec<(String, String)>,
+        children: Vec<R3NodeRef>,
+    },
     UnknownBlock {
         name: String,
     },
@@ -309,6 +318,11 @@ fn convert_node(node: &R3Node<'_>) -> R3NodeRef {
         R3Node::LetDeclaration(d) => {
             R3NodeRef::LetDeclaration { name: d.name.to_string(), value: unparse(&d.value) }
         }
+        R3Node::BoundaryBlock(b) => R3NodeRef::BoundaryBlock {
+            children: b.children.iter().map(convert_node).collect(),
+            error_blocks: b.error_blocks.iter().map(convert_boundary_error_block).collect(),
+        },
+        R3Node::BoundaryErrorBlock(e) => convert_boundary_error_block(e),
         R3Node::UnknownBlock(b) => R3NodeRef::UnknownBlock { name: b.name.to_string() },
         R3Node::Variable(v) => {
             R3NodeRef::Variable { name: v.name.to_string(), value: v.value.to_string() }
@@ -349,6 +363,20 @@ fn convert_node(node: &R3Node<'_>) -> R3NodeRef {
         R3Node::HostElement(h) => R3NodeRef::HostElement {
             tag_names: h.tag_names.iter().map(std::string::ToString::to_string).collect(),
         },
+    }
+}
+
+fn convert_boundary_error_block(
+    block: &oxc_angular_compiler::ast::r3::R3BoundaryErrorBlock<'_>,
+) -> R3NodeRef {
+    R3NodeRef::BoundaryErrorBlock {
+        expression: block.expression.as_ref().map(|e| unparse(e)),
+        context_variables: block
+            .context_variables
+            .iter()
+            .map(|v| (v.name.to_string(), v.value.to_string()))
+            .collect(),
+        children: block.children.iter().map(convert_node).collect(),
     }
 }
 
@@ -650,6 +678,22 @@ impl R3AstHumanizer {
             }
             R3NodeRef::LetDeclaration { name, value } => {
                 self.result.push(h!["LetDeclaration", name.as_str(), value.as_str()]);
+            }
+            R3NodeRef::BoundaryBlock { children, error_blocks } => {
+                self.result.push(h!["BoundaryBlock"]);
+                for child in children.iter().chain(error_blocks) {
+                    self.visit_node(child);
+                }
+            }
+            R3NodeRef::BoundaryErrorBlock { expression, context_variables, children } => {
+                let expression = expression.as_deref().map_or(HumanValue::Null, HumanValue::from);
+                self.result.push(vec![HumanValue::from("BoundaryErrorBlock"), expression]);
+                for (name, value) in context_variables {
+                    self.result.push(h!["Variable", name.as_str(), value.as_str()]);
+                }
+                for child in children {
+                    self.visit_node(child);
+                }
             }
             R3NodeRef::UnknownBlock { name } => {
                 self.result.push(h!["UnknownBlock", name.as_str()]);
@@ -2756,6 +2800,53 @@ mod for_track_expression_parsing {
         assert!(
             errors.iter().any(|e| e.contains("\"track\" expression")),
             "Expected missing track expression error, got: {errors:?}"
+        );
+    }
+}
+
+// ============================================================================
+// Tests: @boundary blocks
+// ============================================================================
+
+mod boundary_blocks {
+    use super::*;
+
+    #[test]
+    fn should_parse_boundary_blocks_with_multiple_error_blocks() {
+        // Reference: r3_template_transform_spec.ts "Boundary blocks". Upstream drops the
+        // whitespace-only text; this helper keeps it, so the template has none.
+        let result = humanize(concat!(
+            "@boundary {<div>Content</div>}",
+            "@error (when err instanceof SpecificError) {<div>Specific Error</div>}",
+            "@error (let err) {<div>General Error {{ err }}</div>}",
+        ));
+        assert_eq!(
+            result,
+            vec![
+                h!["BoundaryBlock"],
+                h!["Element", "div"],
+                h!["Text", "Content"],
+                h!["BoundaryErrorBlock", "err instanceof SpecificError"],
+                h!["Variable", "$error", "$error"],
+                h!["Variable", "$reset", "$reset"],
+                h!["Element", "div"],
+                h!["Text", "Specific Error"],
+                vec![HumanValue::from("BoundaryErrorBlock"), HumanValue::Null],
+                h!["Variable", "$error", "$error"],
+                h!["Variable", "$reset", "$reset"],
+                h!["Variable", "err", "$error"],
+                h!["Element", "div"],
+                h!["BoundText", "General Error {{ err }}"],
+            ]
+        );
+    }
+
+    #[test]
+    fn should_report_error_block_without_boundary() {
+        let errors = get_transform_errors("@error {error}");
+        assert_eq!(
+            errors,
+            vec!["@error block can only be used after an @defer or @boundary block.".to_string()]
         );
     }
 }

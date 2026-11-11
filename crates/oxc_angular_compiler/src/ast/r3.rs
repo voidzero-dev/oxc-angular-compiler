@@ -388,6 +388,10 @@ pub enum R3Node<'a> {
     IfBlock(Box<'a, R3IfBlock<'a>>),
     /// An if block branch (`@if`, `@else if`, `@else`).
     IfBlockBranch(Box<'a, R3IfBlockBranch<'a>>),
+    /// An error boundary block (`@boundary`).
+    BoundaryBlock(Box<'a, R3BoundaryBlock<'a>>),
+    /// An error block of a boundary (`@error` after `@boundary`).
+    BoundaryErrorBlock(Box<'a, R3BoundaryErrorBlock<'a>>),
     /// An unknown block (for error recovery).
     UnknownBlock(Box<'a, R3UnknownBlock<'a>>),
     /// A let declaration (`@let`).
@@ -423,6 +427,8 @@ impl<'a> R3Node<'a> {
             Self::ForLoopBlockEmpty(n) => n.source_span,
             Self::IfBlock(n) => n.source_span,
             Self::IfBlockBranch(n) => n.source_span,
+            Self::BoundaryBlock(n) => n.source_span,
+            Self::BoundaryErrorBlock(n) => n.source_span,
             Self::UnknownBlock(n) => n.source_span,
             Self::LetDeclaration(n) => n.source_span,
             Self::Component(n) => n.source_span,
@@ -453,6 +459,8 @@ impl<'a> R3Node<'a> {
             Self::ForLoopBlockEmpty(n) => visitor.visit_for_loop_block_empty(n),
             Self::IfBlock(n) => visitor.visit_if_block(n),
             Self::IfBlockBranch(n) => visitor.visit_if_block_branch(n),
+            Self::BoundaryBlock(n) => visitor.visit_boundary_block(n),
+            Self::BoundaryErrorBlock(n) => visitor.visit_boundary_error_block(n),
             Self::UnknownBlock(n) => visitor.visit_unknown_block(n),
             Self::LetDeclaration(n) => visitor.visit_let_declaration(n),
             Self::Component(n) => visitor.visit_component(n),
@@ -891,6 +899,48 @@ pub struct R3SwitchBlockCaseGroup<'a> {
     pub end_source_span: Option<Span>,
     /// Name span.
     pub name_span: Span,
+    /// i18n metadata.
+    pub i18n: Option<I18nMeta<'a>>,
+}
+
+/// An error boundary block (`@boundary`).
+#[derive(Debug)]
+pub struct R3BoundaryBlock<'a> {
+    /// Child nodes (main content).
+    pub children: Vec<'a, R3Node<'a>>,
+    /// The connected `@error` blocks.
+    pub error_blocks: Vec<'a, R3BoundaryErrorBlock<'a>>,
+    /// Source span, covering the `@error` blocks too.
+    pub source_span: Span,
+    /// Span of the `@boundary` block alone.
+    pub main_block_span: Span,
+    /// Name span.
+    pub name_span: Span,
+    /// Start span.
+    pub start_source_span: Span,
+    /// End span (of the last `@error` block, if any).
+    pub end_source_span: Option<Span>,
+    /// i18n metadata.
+    pub i18n: Option<I18nMeta<'a>>,
+}
+
+/// An error block of a boundary (`@error`).
+#[derive(Debug)]
+pub struct R3BoundaryErrorBlock<'a> {
+    /// Child nodes.
+    pub children: Vec<'a, R3Node<'a>>,
+    /// Context variables (`$error`, `$reset` and their aliases).
+    pub context_variables: Vec<'a, R3Variable<'a>>,
+    /// The `when` condition, if any.
+    pub expression: Option<AngularExpression<'a>>,
+    /// Source span.
+    pub source_span: Span,
+    /// Name span.
+    pub name_span: Span,
+    /// Start span.
+    pub start_source_span: Span,
+    /// End span.
+    pub end_source_span: Option<Span>,
     /// i18n metadata.
     pub i18n: Option<I18nMeta<'a>>,
 }
@@ -1493,6 +1543,23 @@ pub trait R3Visitor<'a> {
     /// Visit an if block branch.
     fn visit_if_block_branch(&mut self, branch: &R3IfBlockBranch<'a>) {
         for child in &branch.children {
+            child.visit(self);
+        }
+    }
+
+    /// Visit a boundary block.
+    fn visit_boundary_block(&mut self, block: &R3BoundaryBlock<'a>) {
+        for child in &block.children {
+            child.visit(self);
+        }
+        for error_block in &block.error_blocks {
+            self.visit_boundary_error_block(error_block);
+        }
+    }
+
+    /// Visit a boundary error block.
+    fn visit_boundary_error_block(&mut self, block: &R3BoundaryErrorBlock<'a>) {
+        for child in &block.children {
             child.visit(self);
         }
     }

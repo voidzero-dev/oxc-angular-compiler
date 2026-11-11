@@ -217,6 +217,7 @@ fn get_update_op_target(op: &UpdateOp<'_>) -> Option<XrefId> {
         UpdateOp::TwoWayProperty(o) => Some(o.target),
         UpdateOp::StoreLet(o) => Some(o.target),
         UpdateOp::Conditional(o) => Some(o.target),
+        UpdateOp::Boundary(o) => Some(o.target),
         UpdateOp::I18nExpression(o) => Some(o.target),
         // These ops don't have the DependsOnSlotContextTrait
         UpdateOp::ListEnd(_)
@@ -247,6 +248,8 @@ fn has_consumes_slot_trait(op: &CreateOp<'_>) -> bool {
             | CreateOp::DeclareLet(_)
             | CreateOp::Conditional(_)
             | CreateOp::ConditionalBranch(_)
+            | CreateOp::BoundaryCreate(_)
+            | CreateOp::BoundaryErrorCreate(_)
             | CreateOp::I18nAttributes(_)
     )
 }
@@ -266,6 +269,8 @@ fn get_op_xref(op: &CreateOp<'_>) -> Option<XrefId> {
         CreateOp::DeclareLet(l) => Some(l.xref),
         CreateOp::Conditional(c) => Some(c.xref),
         CreateOp::ConditionalBranch(c) => Some(c.xref),
+        CreateOp::BoundaryCreate(b) => Some(b.xref),
+        CreateOp::BoundaryErrorCreate(b) => Some(b.xref),
         CreateOp::I18nAttributes(i) => Some(i.xref),
         _ => None,
     }

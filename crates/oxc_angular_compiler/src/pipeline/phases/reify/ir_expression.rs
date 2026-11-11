@@ -363,6 +363,21 @@ pub fn convert_ir_expression<'a>(
             )
         }
 
+        IrExpression::BoundaryState(state) => {
+            // i0.ɵɵgetBoundary(slot)
+            let mut args = OxcVec::new_in(&allocator);
+            if let Some(slot) = state.target_slot.slot {
+                args.push(OutputExpression::Literal(Box::new_in(
+                    LiteralExpr {
+                        value: LiteralValue::Number(f64::from(slot.0)),
+                        source_span: None,
+                    },
+                    &allocator,
+                )));
+            }
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::GET_BOUNDARY, args)
+        }
+
         IrExpression::TrackContext(_) => {
             // Reference to `this` for track functions
             OutputExpression::ReadVar(Box::new_in(

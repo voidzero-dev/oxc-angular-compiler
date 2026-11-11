@@ -1653,6 +1653,7 @@ impl<'a> HtmlParser<'a> {
             "defer" => BlockType::Defer,
             "placeholder" => BlockType::Placeholder,
             "loading" => BlockType::Loading,
+            "boundary" => BlockType::Boundary,
             "error" => BlockType::Error,
             _ => BlockType::If, // Default
         };

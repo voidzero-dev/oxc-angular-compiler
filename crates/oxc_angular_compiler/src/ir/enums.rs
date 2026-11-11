@@ -44,6 +44,12 @@ pub enum OpKind {
     ConditionalBranchCreate,
     /// Conditionally render a template.
     Conditional,
+    /// Create an error boundary (`ɵɵboundaryCreate`).
+    BoundaryCreate,
+    /// Create an `@error` branch of a boundary.
+    BoundaryErrorCreate,
+    /// Pick the boundary branch to render (`ɵɵboundaryUpdate`).
+    Boundary,
 
     // Text operations
     /// Render a text node.
@@ -273,6 +279,9 @@ pub enum ExpressionKind {
     /// `$safeNavigationMigration(...)` wrapper marking its subtree for legacy
     /// safe-read semantics (removed by `expandSafeReads`).
     SafeNavigationMigration,
+    /// The runtime state (`LBoundary`) of an error boundary, replaced by a read of the
+    /// variable holding it in the `resolve_boundaries` phase.
+    BoundaryState,
 }
 
 /// Flags for semantic variables.
@@ -302,6 +311,8 @@ pub enum SemanticVariableKind {
     SavedView,
     /// Alias from embedded view (e.g., @for).
     Alias,
+    /// The runtime state of an error boundary, read with `ɵɵgetBoundary()`.
+    BoundaryState,
 }
 
 /// Compatibility mode for template compilation.

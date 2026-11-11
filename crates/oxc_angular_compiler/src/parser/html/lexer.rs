@@ -21,6 +21,7 @@ const SUPPORTED_BLOCKS: &[&str] = &[
     "defer",
     "placeholder",
     "loading",
+    "boundary",
     "error",
 ];
 

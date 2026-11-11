@@ -16,6 +16,7 @@ mod assign_i18n_slot_dependencies;
 pub(crate) mod attach_source_locations;
 mod attribute_extraction;
 mod binding_specialization;
+mod boundary_conditions;
 mod chaining;
 mod collapse_singleton_interpolations;
 mod conditionals;
@@ -61,6 +62,7 @@ mod remove_i18n_contexts;
 mod remove_illegal_let_references;
 mod remove_safe_navigation_migration;
 mod remove_unused_i18n_attrs;
+mod resolve_boundaries;
 mod resolve_contexts;
 mod resolve_defer_deps_fns;
 mod resolve_dollar_event;
@@ -242,6 +244,13 @@ pub static PHASES: &[Phase] = &[
         run_host: None,
         name: "generateConditionalExpressions",
     },
+    // Phase 17b: generateBoundaryConditions (Template only)
+    Phase {
+        kind: CompilationJobKind::Template,
+        run: boundary_conditions::generate_boundary_conditions,
+        run_host: None,
+        name: "generateBoundaryConditions",
+    },
     // Phase 18: createPipes (Template only)
     Phase {
         kind: CompilationJobKind::Template,
@@ -304,6 +313,13 @@ pub static PHASES: &[Phase] = &[
         run: generate_variables::generate_variables,
         run_host: None,
         name: "generateVariables",
+    },
+    // Phase 25b: resolveBoundaries (Template only)
+    Phase {
+        kind: CompilationJobKind::Template,
+        run: resolve_boundaries::resolve_boundaries,
+        run_host: None,
+        name: "resolveBoundaries",
     },
     // Phase 26: saveAndRestoreView (Template only)
     Phase {

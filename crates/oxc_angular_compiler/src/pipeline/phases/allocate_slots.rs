@@ -142,6 +142,18 @@ fn allocate_slots_in_view<'a>(
                 slot_map.insert(branch.xref, slot);
                 slot_count += num_slots;
             }
+            CreateOp::BoundaryCreate(boundary) => {
+                let slot = SlotId(slot_count);
+                boundary.slot = Some(slot);
+                slot_map.insert(boundary.xref, slot);
+                slot_count += 1;
+            }
+            CreateOp::BoundaryErrorCreate(error) => {
+                let slot = SlotId(slot_count);
+                error.slot = Some(slot);
+                slot_map.insert(error.xref, slot);
+                slot_count += 1;
+            }
             CreateOp::RepeaterCreate(rep) => {
                 // Repeater uses 2 slots normally, or 3 if it has an empty view
                 let num_slots = if rep.empty_view.is_some() { 3 } else { 2 };
@@ -250,6 +262,11 @@ fn propagate_decls_in_ops<'a>(
                 // ConditionalBranch views are their own embedded views
                 if let Some(&decls) = view_decls.get(&branch.xref) {
                     branch.decls = Some(decls);
+                }
+            }
+            CreateOp::BoundaryErrorCreate(error) => {
+                if let Some(&decls) = view_decls.get(&error.xref) {
+                    error.decls = Some(decls);
                 }
             }
             CreateOp::RepeaterCreate(rep) => {
@@ -372,6 +389,11 @@ fn propagate_slots_to_expressions(
             IrExpression::ContextLetReference(ctx_let) => {
                 if let Some(&slot) = slot_map.get(&ctx_let.target) {
                     ctx_let.target_slot.slot = Some(slot);
+                }
+            }
+            IrExpression::BoundaryState(state) => {
+                if let Some(&slot) = slot_map.get(&state.target) {
+                    state.target_slot.slot = Some(slot);
                 }
             }
             IrExpression::PureFunction(pf) => {
@@ -586,6 +608,25 @@ fn propagate_slots_to_expressions(
                 // Update slots in context_value expression
                 if let Some(ref mut context_value) = cond.context_value {
                     update_expression_slots(context_value, slot_map);
+                }
+            }
+            UpdateOp::Boundary(boundary) => {
+                if let Some(&slot) = slot_map.get(&boundary.target) {
+                    boundary.target_slot = Some(slot);
+                }
+                if let Some(&slot) = slot_map.get(&boundary.guarded.target) {
+                    boundary.guarded.target_slot.slot = Some(slot);
+                }
+                for condition in boundary.conditions.iter_mut() {
+                    if let Some(&slot) = slot_map.get(&condition.target) {
+                        condition.target_slot.slot = Some(slot);
+                    }
+                    if let Some(ref mut expr) = condition.expr {
+                        update_expression_slots(expr, slot_map);
+                    }
+                }
+                if let Some(ref mut processed) = boundary.processed {
+                    update_expression_slots(processed, slot_map);
                 }
             }
             UpdateOp::DeferWhen(when) => {

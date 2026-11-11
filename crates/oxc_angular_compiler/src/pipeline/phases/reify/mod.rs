@@ -1065,6 +1065,26 @@ fn reify_create_op<'a>(
                 ))
             }
         }
+        CreateOp::BoundaryCreate(boundary) => {
+            let slot = boundary.slot.map_or(0, |s| s.0);
+            Some(create_boundary_create_stmt(allocator, core_namespace, slot))
+        }
+        CreateOp::BoundaryErrorCreate(error) => {
+            // An @error view is a conditional branch without tag, attributes or refs.
+            let fn_name = ctx.view_fn_names.get(&error.xref).copied();
+            let slot = error.slot.map_or(0, |s| s.0);
+            Some(create_conditional_branch_create_stmt(
+                allocator,
+                core_namespace,
+                slot,
+                fn_name,
+                error.decls,
+                error.vars,
+                None,
+                None,
+                None,
+            ))
+        }
         CreateOp::ControlCreate(_) => {
             // Emit ɵɵcontrolCreate instruction for control binding initialization
             Some(create_control_create_stmt(allocator, core_namespace))
@@ -1379,6 +1399,28 @@ fn reify_update_op<'a>(
                 convert_ir_expression(allocator, core_namespace, cv, expressions, root_xref)
             });
             Some(create_conditional_update_stmt(allocator, core_namespace, expr, context_value))
+        }
+        UpdateOp::Boundary(boundary) => {
+            let Some(ref processed) = boundary.processed else {
+                diagnostics.push(OxcDiagnostic::error("Boundary test was not set."));
+                return None;
+            };
+            let (Some(slot), Some(primary_slot)) =
+                (boundary.target_slot, boundary.guarded.target_slot.slot)
+            else {
+                diagnostics
+                    .push(OxcDiagnostic::error("AssertionError: Boundary target slot not found"));
+                return None;
+            };
+            let expr =
+                convert_ir_expression(allocator, core_namespace, processed, expressions, root_xref);
+            Some(create_boundary_update_stmt(
+                allocator,
+                core_namespace,
+                slot.0,
+                expr,
+                primary_slot.0,
+            ))
         }
         UpdateOp::StyleMap(style) => {
             let is_interpolation = matches!(*style.expression, IrExpression::Interpolation(_));

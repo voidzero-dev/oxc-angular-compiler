@@ -47,10 +47,10 @@ use oxc_ast::ast::{
 use crate::ast::expression::AngularExpression;
 use crate::ast::expression::BindingType;
 use crate::ast::r3::{
-    R3BoundAttribute, R3BoundEvent, R3BoundText, R3Component, R3DeferredBlock, R3Directive,
-    R3Element, R3ForLoopBlock, R3Icu, R3IcuPlaceholder, R3IfBlockBranch, R3LetDeclaration, R3Node,
-    R3SwitchBlock, R3SwitchBlockCase, R3Template, R3TemplateAttr, R3TextAttribute, R3Visitor,
-    visit_all,
+    R3BoundAttribute, R3BoundEvent, R3BoundText, R3BoundaryErrorBlock, R3Component,
+    R3DeferredBlock, R3Directive, R3Element, R3ForLoopBlock, R3Icu, R3IcuPlaceholder,
+    R3IfBlockBranch, R3LetDeclaration, R3Node, R3SwitchBlock, R3SwitchBlockCase, R3Template,
+    R3TemplateAttr, R3TextAttribute, R3Visitor, visit_all,
 };
 use crate::class_metadata::{
     R3DeferPerComponentDependency, compile_component_metadata_async_resolver,
@@ -689,6 +689,13 @@ impl<'a> R3Visitor<'a> for CandidateMatcher<'_, 'a> {
         if let Some(expression) = &case.expression {
             self.record_pipes(expression);
         }
+    }
+
+    fn visit_boundary_error_block(&mut self, block: &R3BoundaryErrorBlock<'a>) {
+        if let Some(expression) = &block.expression {
+            self.record_pipes(expression);
+        }
+        visit_all(self, &block.children);
     }
 
     fn visit_let_declaration(&mut self, decl: &R3LetDeclaration<'a>) {

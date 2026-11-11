@@ -12,10 +12,10 @@
 | html_lexer | 291 | 6 | 0 | 0 | 297 | 98.0% |
 | html_parser | 89 | 1 | 0 | 0 | 90 | 98.9% |
 | html_whitespace | 21 | 0 | 0 | 0 | 21 | 100.0% |
-| r3_transform | 179 | 5 | 0 | 0 | 184 | 97.3% |
+| r3_transform | 180 | 4 | 0 | 0 | 184 | 97.8% |
 | shadow_css | 185 | 2 | 0 | 0 | 187 | 98.9% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1292** | **88** | **76** | **0** | **1456** | **88.7%** |
+| **Total** | **1293** | **87** | **76** | **0** | **1456** | **88.8%** |
 
 ## Failed Tests
 
@@ -1691,51 +1691,6 @@ Path: `HtmlParser/parse/ignored syntax/should ignore processing instruction`
 ```
 
 ### r3_transform
-
-#### should parse @boundary blocks with multiple @error blocks: ExpectFromHtml { input: "\n        @boundary {\n          <div>Content</div>\n        } @error (when err instanceof SpecificError) {\n          <div>Specific Error</div>\n        } @error (let err) {\n          <div>General Error {{ err }}</div>\n        }\n      ", expected: [Array [String("BoundaryBlock")], Array [String("Element"), String("div")], Array [String("Text"), String("Content")], Array [String("BoundaryErrorBlock"), String("err instanceof SpecificError")], Array [String("Variable"), String("$error"), String("$error")], Array [String("Variable"), String("$reset"), String("$reset")], Array [String("Element"), String("div")], Array [String("Text"), String("Specific Error")], Array [String("BoundaryErrorBlock"), Null], Array [String("Variable"), String("$error"), String("$error")], Array [String("Variable"), String("$reset"), String("$reset")], Array [String("Variable"), String("err"), String("$error")], Array [String("Element"), String("div")], Array [String("BoundText"), String("General Error {{ err }}")]], ignore_error: false }
-Path: `R3 template transform/Boundary blocks/should parse @boundary blocks with multiple @error blocks`
-
-**Expected:**
-```
-[BoundaryBlock]
-[Element, div]
-[Text, Content]
-[BoundaryErrorBlock, err instanceof SpecificError]
-[Variable, $error, $error]
-[Variable, $reset, $reset]
-[Element, div]
-[Text, Specific Error]
-[BoundaryErrorBlock, null]
-[Variable, $error, $error]
-[Variable, $reset, $reset]
-[Variable, err, $error]
-[Element, div]
-[BoundText, General Error {{ err }}]
-```
-
-**Actual:**
-```
-
-```
-
-**Diff:**
-```diff
--[BoundaryBlock]
--[Element, div]
--[Text, Content]
--[BoundaryErrorBlock, err instanceof SpecificError]
--[Variable, $error, $error]
--[Variable, $reset, $reset]
--[Element, div]
--[Text, Specific Error]
--[BoundaryErrorBlock, null]
--[Variable, $error, $error]
--[Variable, $reset, $reset]
--[Variable, err, $error]
--[Element, div]
--[BoundText, General Error {{ err }}]
-
-```
 
 #### should ignore <script> elements inherited into custom namespaces: ExpectFromHtml { input: "<xhtml:div xmlns:xhtml=\"http://www.w3.org/1999/xhtml\"><script [textContent]=\"evil\"></script><span>safe</span></xhtml:div>", expected: [Array [String("Element"), String(":xhtml:div")], Array [String("TextAttribute"), String(":xmlns:xhtml"), String("http://www.w3.org/1999/xhtml")], Array [String("Element"), String(":xhtml:span")], Array [String("Text"), String("safe")]], ignore_error: false }
 Path: `R3 template transform/<script> and <style> elements/should ignore <script> elements inherited into custom namespaces`

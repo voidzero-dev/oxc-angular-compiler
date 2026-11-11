@@ -217,6 +217,23 @@ fn visit_expressions_for_merge(op: &mut UpdateOp<'_>, merge_steps: u32) -> Merge
             }
             MergeResult::Continue
         }
+        UpdateOp::Boundary(op) => {
+            for c in op.conditions.iter_mut() {
+                if let Some(expr) = c.expr.as_mut() {
+                    let result = visit_ir_expr_for_merge(expr, merge_steps);
+                    if !matches!(result, MergeResult::Continue) {
+                        return result;
+                    }
+                }
+            }
+            if let Some(processed) = op.processed.as_mut() {
+                let result = visit_ir_expr_for_merge(processed, merge_steps);
+                if !matches!(result, MergeResult::Continue) {
+                    return result;
+                }
+            }
+            MergeResult::Continue
+        }
         UpdateOp::Repeater(rep) => visit_ir_expr_for_merge(&mut rep.collection, merge_steps),
         UpdateOp::DeferWhen(defer) => visit_ir_expr_for_merge(&mut defer.condition, merge_steps),
         UpdateOp::Statement(stmt) => visit_statement_for_merge(&mut stmt.statement, merge_steps),
@@ -527,6 +544,7 @@ fn visit_nested_exprs_for_merge(expr: &mut IrExpression<'_>, merge_steps: u32) -
         // Leaf expressions with no sub-expressions - no need to recurse
         IrExpression::LexicalRead(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
         | IrExpression::ReadVariable(_)
         | IrExpression::PureFunctionParameter(_)
         | IrExpression::Empty(_)

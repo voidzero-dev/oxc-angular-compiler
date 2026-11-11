@@ -493,6 +493,15 @@ impl Identifiers {
     /// Update a conditional.
     pub const CONDITIONAL: &'static str = "ɵɵconditional";
 
+    /// Create an error boundary.
+    pub const BOUNDARY_CREATE: &'static str = "ɵɵboundaryCreate";
+
+    /// Update an error boundary.
+    pub const BOUNDARY_UPDATE: &'static str = "ɵɵboundaryUpdate";
+
+    /// Read the state of an error boundary.
+    pub const GET_BOUNDARY: &'static str = "ɵɵgetBoundary";
+
     /// Update a repeater.
     pub const REPEATER: &'static str = "ɵɵrepeater";
 

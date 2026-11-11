@@ -21,8 +21,8 @@ use oxc_str::Ident;
 
 use crate::ir::enums::{SemanticVariableKind, VariableFlags};
 use crate::ir::expression::{
-    ContextExpr, ContextLetReferenceExpr, IrExpression, NextContextExpr, ReferenceExpr,
-    ResolvedPropertyReadExpr, SlotHandle,
+    BoundaryStateExpr, ContextExpr, ContextLetReferenceExpr, IrExpression, NextContextExpr,
+    ReferenceExpr, ResolvedPropertyReadExpr, SlotHandle,
 };
 use crate::ir::ops::{CreateOp, SlotId, UpdateOp, UpdateVariableOp, XrefId};
 use crate::pipeline::compilation::ComponentCompilationJob;
@@ -66,6 +66,8 @@ struct Scope<'a, 'b> {
     references: Vec<LocalRefInfo<'a>>,
     /// @let declarations collected from the view.
     let_declarations: Vec<LetDeclarationInfo<'a>>,
+    /// `@boundary` blocks declared in the view (their `BoundaryCreateOp` xrefs).
+    boundary_variables: Vec<XrefId>,
     /// Parent scope, if any.
     parent: Option<&'b Scope<'a, 'b>>,
 }
@@ -210,6 +212,11 @@ fn collect_process_actions(
                     actions.push(ProcessAction::RecurseChildView(branch.xref));
                 }
             }
+            CreateOp::BoundaryErrorCreate(error) => {
+                if job.views.contains_key(&error.xref) {
+                    actions.push(ProcessAction::RecurseChildView(error.xref));
+                }
+            }
             CreateOp::Template(tmpl) => {
                 if job.views.contains_key(&tmpl.embedded_view)
                     || tmpl.embedded_view == job.root.xref
@@ -348,14 +355,14 @@ fn get_scope_for_view<'a, 'b>(
     let view =
         if is_root { Some(&job.root) } else { job.views.get(&view_xref).map(|v| v.as_ref()) };
 
-    let (context_variables, alias_variables, references, let_declarations) =
+    let (context_variables, alias_variables, references, let_declarations, boundary_variables) =
         if let Some(view) = view {
             // Collect context variables
             let ctx_vars: Vec<_> =
                 view.context_variables.iter().map(|v| (v.name.clone(), v.value.clone())).collect();
 
             // Collect alias variables
-            let alias_vars: Vec<_> = view
+            let mut alias_vars: Vec<_> = view
                 .aliases
                 .iter()
                 .map(|a| (a.identifier.clone(), a.expression.clone_in(allocator)))
@@ -367,9 +374,26 @@ fn get_scope_for_view<'a, 'b>(
             // Collect @let declarations from create ops
             let let_decls = collect_let_declarations_from_view(view);
 
-            (ctx_vars, alias_vars, refs, let_decls)
+            // Each @boundary gets a state variable. Each `$error` alias of an @error block
+            // also becomes an alias of `bnd.error` in this (the parent) view, as Angular
+            // adds it to `view.aliases` here.
+            let mut boundaries = Vec::new();
+            for op in view.create.iter() {
+                match op {
+                    CreateOp::BoundaryCreate(boundary) => boundaries.push(boundary.xref),
+                    CreateOp::BoundaryErrorCreate(error) => {
+                        for name in &error.error_variable_names {
+                            alias_vars
+                                .push((*name, boundary_error_expr(allocator, error.boundary_xref)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            (ctx_vars, alias_vars, refs, let_decls, boundaries)
         } else {
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
         };
 
     Scope {
@@ -378,6 +402,7 @@ fn get_scope_for_view<'a, 'b>(
         alias_variables,
         references,
         let_declarations,
+        boundary_variables,
         parent,
     }
 }
@@ -502,6 +527,12 @@ fn generate_variables_in_scope_for_view<'a>(
             name.clone(),
             expr.clone_in(allocator),
         ));
+    }
+
+    // Add boundary state variables
+    for &boundary in &scope.boundary_variables {
+        let xref = job.allocate_xref_id();
+        new_ops.push(create_boundary_state_variable(allocator, xref, scope.view, boundary));
     }
 
     // Add local reference variables
@@ -739,6 +770,48 @@ fn create_alias_variable<'a>(
         name,
         initializer: Box::new_in(expression, &allocator),
         flags: VariableFlags::ALWAYS_INLINE,
+        view: Some(view_xref),
+        local: false,
+    })
+}
+
+/// `bnd.error` for the given boundary.
+fn boundary_error_expr(allocator: &oxc_allocator::Allocator, boundary: XrefId) -> IrExpression<'_> {
+    let state = IrExpression::BoundaryState(Box::new_in(
+        BoundaryStateExpr { target: boundary, target_slot: SlotHandle::new() },
+        &allocator,
+    ));
+    IrExpression::ResolvedPropertyRead(Box::new_in(
+        ResolvedPropertyReadExpr {
+            receiver: Box::new_in(state, &allocator),
+            name: Ident::from("error"),
+            optional: false,
+            source_span: None,
+        },
+        &allocator,
+    ))
+}
+
+/// Creates the variable holding a boundary's state (`const bnd_rN = ɵɵgetBoundary(slot)`).
+///
+/// Its initializer is the `BoundaryStateExpr` itself, which reify emits as `ɵɵgetBoundary`.
+fn create_boundary_state_variable(
+    allocator: &oxc_allocator::Allocator,
+    xref: XrefId,
+    view_xref: XrefId,
+    boundary: XrefId,
+) -> UpdateOp<'_> {
+    let initializer = IrExpression::BoundaryState(Box::new_in(
+        BoundaryStateExpr { target: boundary, target_slot: SlotHandle::new() },
+        &allocator,
+    ));
+    UpdateOp::Variable(UpdateVariableOp {
+        base: Default::default(),
+        xref,
+        kind: SemanticVariableKind::BoundaryState,
+        name: Ident::from(""),
+        initializer: Box::new_in(initializer, &allocator),
+        flags: VariableFlags::NONE,
         view: Some(view_xref),
         local: false,
     })

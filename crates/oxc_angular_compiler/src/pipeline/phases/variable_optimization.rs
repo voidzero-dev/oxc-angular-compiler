@@ -197,6 +197,7 @@ fn collect_fences(expr: &IrExpression<'_>) -> Fence {
         IrExpression::LexicalRead(_)
         | IrExpression::ReadVariable(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
         | IrExpression::Reference(_)
         | IrExpression::NextContext(_)
         | IrExpression::ContextLetReference(_)
@@ -280,6 +281,18 @@ fn collect_op_fences(op: &UpdateOp<'_>) -> Fence {
             }
             if let Some(ref ctx_val) = cond.context_value {
                 fences |= collect_fences(ctx_val);
+            }
+            fences
+        }
+        UpdateOp::Boundary(boundary) => {
+            let mut fences = Fence::NONE;
+            for condition in boundary.conditions.iter() {
+                if let Some(ref expr) = condition.expr {
+                    fences |= collect_fences(expr);
+                }
+            }
+            if let Some(ref processed) = boundary.processed {
+                fences |= collect_fences(processed);
             }
             fences
         }
@@ -451,6 +464,9 @@ pub fn optimize_variables(job: &mut ComponentCompilationJob<'_>) {
         }
     }
 
+    // Step 5b: Inline single-use boundary state variables.
+    inline_single_use_boundary_states(job);
+
     // Step 6: Inline Context variables (nextContext()) into other Variable ops.
     // Per TypeScript's allowConservativeInlining (lines 536-538):
     // "Context can only be inlined into other variables."
@@ -464,6 +480,59 @@ pub fn optimize_variables(job: &mut ComponentCompilationJob<'_>) {
         if !removed {
             break;
         }
+    }
+}
+
+/// Inlines `bnd_rN = ɵɵgetBoundary(slot)` variables of the update list that are read once.
+///
+/// Angular inlines any single-use variable whose kind passes `allowConservativeInlining`;
+/// boundary state variables do, and their initializer has no fences, so the read is
+/// always replaced by `ɵɵgetBoundary(slot)`.
+fn inline_single_use_boundary_states(job: &mut ComponentCompilationJob<'_>) {
+    use crate::ir::enums::SemanticVariableKind;
+    use crate::ir::expression::{
+        BoundaryStateExpr, SlotHandle, VisitorContextFlag, transform_expressions_in_update_op,
+    };
+
+    let allocator = job.allocator;
+    let usage_counts = count_variable_usages(job);
+    let mut to_remove: HashSet<XrefId> = HashSet::new();
+
+    for view in job.all_views_mut() {
+        let mut targets: HashMap<XrefId, XrefId> = HashMap::new();
+        for op in view.update.iter() {
+            if let UpdateOp::Variable(var) = op
+                && var.kind == SemanticVariableKind::BoundaryState
+                && usage_counts.get(&var.xref).copied() == Some(1)
+                && let IrExpression::BoundaryState(state) = var.initializer.as_ref()
+            {
+                targets.insert(var.xref, state.target);
+            }
+        }
+        if targets.is_empty() {
+            continue;
+        }
+        for op in view.update.iter_mut() {
+            transform_expressions_in_update_op(
+                op,
+                &|expr, _| {
+                    if let IrExpression::ReadVariable(read) = expr
+                        && let Some(&target) = targets.get(&read.xref)
+                    {
+                        *expr = IrExpression::BoundaryState(OxcBox::new_in(
+                            BoundaryStateExpr { target, target_slot: SlotHandle::new() },
+                            &allocator,
+                        ));
+                    }
+                },
+                VisitorContextFlag::NONE,
+            );
+        }
+        to_remove.extend(targets.keys().copied());
+    }
+
+    if !to_remove.is_empty() {
+        remove_unused_variables(job, &to_remove);
     }
 }
 
@@ -1294,6 +1363,16 @@ where
             }
             if let Some(ref ctx_val) = cond.context_value {
                 visit_all_expressions(ctx_val, &mut visitor);
+            }
+        }
+        UpdateOp::Boundary(boundary) => {
+            for condition in boundary.conditions.iter() {
+                if let Some(ref expr) = condition.expr {
+                    visit_all_expressions(expr, &mut visitor);
+                }
+            }
+            if let Some(ref processed) = boundary.processed {
+                visit_all_expressions(processed, &mut visitor);
             }
         }
         UpdateOp::Repeater(rep) => visit_all_expressions(&rep.collection, &mut visitor),
@@ -2444,6 +2523,19 @@ fn count_in_update_op(op: &UpdateOp<'_>, counts: &mut HashMap<XrefId, usize>) {
                 count_in_expression(ctx_val, counts);
             }
         }
+        UpdateOp::Boundary(boundary) => {
+            // Unlike conditionals, Angular keeps the `@error` conditions after building
+            // `processed`, and `processed` shares their nodes, so reads in a `when`
+            // condition are counted twice there. Count both to match.
+            for condition in boundary.conditions.iter() {
+                if let Some(ref expr) = condition.expr {
+                    count_in_expression(expr, counts);
+                }
+            }
+            if let Some(ref processed) = boundary.processed {
+                count_in_expression(processed, counts);
+            }
+        }
         UpdateOp::Repeater(rep) => count_in_expression(&rep.collection, counts),
         UpdateOp::AnimationBinding(anim) => count_in_expression(&anim.expression, counts),
         UpdateOp::Control(ctrl) => count_in_expression(&ctrl.expression, counts),
@@ -2684,6 +2776,7 @@ fn collect_variable_xrefs(expr: &IrExpression<'_>, xrefs: &mut Vec<XrefId>) {
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -2943,6 +3036,18 @@ fn transform_expressions_in_update_op<'a, F>(
             if let Some(ref ctx_val) = cond.context_value {
                 let new_expr = transform_expression(ctx_val, &allocator, &mut transform);
                 cond.context_value = Some(OxcBox::new_in(new_expr, &allocator));
+            }
+        }
+        UpdateOp::Boundary(boundary) => {
+            for condition in boundary.conditions.iter_mut() {
+                if let Some(ref expr) = condition.expr {
+                    let new_expr = transform_expression(expr, &allocator, &mut transform);
+                    condition.expr = Some(OxcBox::new_in(new_expr, &allocator));
+                }
+            }
+            if let Some(ref processed) = boundary.processed {
+                let new_expr = transform_expression(processed, &allocator, &mut transform);
+                boundary.processed = Some(OxcBox::new_in(new_expr, &allocator));
             }
         }
         UpdateOp::Repeater(rep) => {
@@ -3224,6 +3329,7 @@ where
         | IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
