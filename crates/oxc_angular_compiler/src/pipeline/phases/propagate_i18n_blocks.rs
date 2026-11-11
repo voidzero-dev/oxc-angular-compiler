@@ -58,6 +58,11 @@ fn propagate_i18n_blocks_to_templates(
                     None,
                     None,
                 ),
+                // An @error view has no placeholder, but an i18n block nested in it
+                // still needs its sub-template index. Upstream skips this view.
+                CreateOp::BoundaryErrorCreate(err_op) => {
+                    (OpKind::ConditionalBranchCreate, err_op.xref, Some(false), None, None)
+                }
                 CreateOp::RepeaterCreate(rep_op) => (
                     OpKind::RepeaterCreate,
                     rep_op.body_view,

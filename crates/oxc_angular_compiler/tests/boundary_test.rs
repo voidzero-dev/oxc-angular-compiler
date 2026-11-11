@@ -2192,3 +2192,27 @@ fn error_parameters_use_javascript_whitespace() {
     );
     assert_eq!(diagnostics("@boundary { a } @error (when\u{FEFF}x) { b }"), vec![]);
 }
+
+/// An i18n block inside an @error view gets its element placeholders. ngc 22.3.0-next.4
+/// crashes on this template (its i18n phases skip the @error view); the expected
+/// message is the one ngc gives for the same content in an `@else` view.
+#[test]
+fn i18n_inside_error_block() {
+    let code = compile(
+        "import {Component} from '@angular/core';
+@Component({selector: 'app', template: `@boundary { content } @error { <div i18n>Oops <b>retry</b></div> }`})
+export class App {}",
+        CompilationMode::Full,
+    );
+    let code = strip(&code);
+    assert!(
+        code.contains(r#"goog.getMsg("Oops{$startBoldText}retry{$closeBoldText}",{"closeBoldText":"\uFFFD/#2\uFFFD","startBoldText":"\uFFFD#2\uFFFD"})"#),
+        "{code}"
+    );
+    assert!(
+        code.contains(
+            r#"$localize`Oops${"\uFFFD#2\uFFFD"}:START_BOLD_TEXT:retry${"\uFFFD/#2\uFFFD"}:CLOSE_BOLD_TEXT:`"#
+        ),
+        "{code}"
+    );
+}
