@@ -103,15 +103,18 @@ jobs:
 
   napi:
     name: NAPI Build (Ubuntu E2E)
-    # On pull requests. `napi-main` runs the same steps on pushes to main.
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: napi-smoke
+    permissions:
+      contents: read
+      # Uploads to the remote task cache authenticate with a GitHub Actions OIDC token.
+      # Fork pull requests never receive one.
+      id-token: write
     env:
-      # Pull requests only read the remote task cache, which needs no credentials.
       VP_REMOTE_CACHE_URL: https://voidzero-remote-cache.voidzero-docs.workers.dev/projects/oxc-angular-compiler
-      VP_REMOTE_CACHE: read
-    steps: &napi-steps
+      # Only pushes to main upload. Pull requests only read, which needs no credentials.
+      VP_REMOTE_CACHE: ${{ github.event_name == 'push' && 'read-write' || 'read' }}
+    steps:
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
       - name: Update submodules
@@ -151,18 +154,3 @@ jobs:
       # which is cached, then the comparison with Oxc (see vite.config.ts).
       - name: Compare tests
         run: pnpm exec vp run compare
-
-  napi-main:
-    name: NAPI Build (Ubuntu E2E, main)
-    # The steps of `napi`, on pushes to main, the only runs that upload to the remote task cache.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    needs: napi-smoke
-    permissions:
-      contents: read
-      # Uploads authenticate with a GitHub Actions OIDC token.
-      id-token: write
-    env:
-      VP_REMOTE_CACHE_URL: https://voidzero-remote-cache.voidzero-docs.workers.dev/projects/oxc-angular-compiler
-      VP_REMOTE_CACHE: read-write
-    steps: *napi-steps
