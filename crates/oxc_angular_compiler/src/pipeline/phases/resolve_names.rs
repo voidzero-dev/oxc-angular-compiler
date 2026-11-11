@@ -1510,9 +1510,16 @@ fn resolve_angular_expression_with_params<'a>(
                             crate::ast::expression::UnaryOperator::Minus => {
                                 crate::ir::expression::IrUnaryOperator::Minus
                             }
+                            crate::ast::expression::UnaryOperator::Increment => {
+                                crate::ir::expression::IrUnaryOperator::Increment
+                            }
+                            crate::ast::expression::UnaryOperator::Decrement => {
+                                crate::ir::expression::IrUnaryOperator::Decrement
+                            }
                         },
                         expr: Box::new_in(resolved, &allocator),
                         source_span: Some(unary.source_span.to_span()),
+                        is_prefix: unary.is_prefix,
                     },
                     &allocator,
                 )))

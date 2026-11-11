@@ -3732,6 +3732,7 @@ where
                         &allocator,
                     ),
                     source_span: u.source_span,
+                    is_prefix: u.is_prefix,
                 },
                 &allocator,
             ))

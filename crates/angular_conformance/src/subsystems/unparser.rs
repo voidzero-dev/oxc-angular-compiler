@@ -14,8 +14,7 @@ use oxc_angular_compiler::ast::expression::{
     Conditional, Interpolation, KeyedRead, LiteralArray, LiteralMap, LiteralMapKey,
     LiteralPrimitive, LiteralValue, NonNullAssert, ParenthesizedExpression, PrefixNot,
     PropertyRead, RegularExpressionLiteral, SafeCall, SafeKeyedRead, SafePropertyRead,
-    SpreadElement, TaggedTemplateLiteral, TemplateLiteral, TypeofExpression, Unary, UnaryOperator,
-    VoidExpression,
+    SpreadElement, TaggedTemplateLiteral, TemplateLiteral, TypeofExpression, Unary, VoidExpression,
 };
 
 /// Configuration for expression unparsing behavior
@@ -320,11 +319,20 @@ pub fn binary_op_str(op: BinaryOperator) -> &'static str {
 }
 
 fn visit_unary(unary: &Unary<'_>, out: &mut String, config: &UnparseConfig) {
-    match unary.operator {
-        UnaryOperator::Plus => out.push('+'),
-        UnaryOperator::Minus => out.push('-'),
+    let mut inner = String::new();
+    visit_expression(&unary.expr, &mut inner, config);
+    let op = unary.operator.as_str();
+    if unary.is_prefix {
+        out.push_str(op);
+        // Keep adjacent operators apart, e.g. `- -foo`.
+        if inner.starts_with(&op[..1]) {
+            out.push(' ');
+        }
+        out.push_str(&inner);
+    } else {
+        out.push_str(&inner);
+        out.push_str(op);
     }
-    visit_expression(&unary.expr, out, config);
 }
 
 fn visit_prefix_not(not: &PrefixNot<'_>, out: &mut String, config: &UnparseConfig) {

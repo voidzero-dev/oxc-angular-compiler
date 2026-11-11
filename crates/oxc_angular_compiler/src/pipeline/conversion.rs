@@ -177,6 +177,8 @@ pub fn convert_unary_operator(op: AstUnaryOperator) -> OutputUnaryOperator {
     match op {
         AstUnaryOperator::Plus => OutputUnaryOperator::Plus,
         AstUnaryOperator::Minus => OutputUnaryOperator::Minus,
+        AstUnaryOperator::Increment => OutputUnaryOperator::Increment,
+        AstUnaryOperator::Decrement => OutputUnaryOperator::Decrement,
     }
 }
 
@@ -573,7 +575,7 @@ pub fn convert_ast<'a>(
                     expr: Box::new_in(expr.to_output(allocator), &allocator),
                     parens: false,
                     source_span: convert_source_span(unary.source_span),
-                    is_prefix: true,
+                    is_prefix: unary.is_prefix,
                 },
                 &allocator,
             )))
