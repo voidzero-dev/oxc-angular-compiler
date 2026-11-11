@@ -150,6 +150,10 @@ pub enum CreateOp<'a> {
     ConditionalBranch(ConditionalBranchCreateOp<'a>),
     /// Create a control binding instruction.
     ControlCreate(ControlCreateOp<'a>),
+    /// Create an error boundary.
+    BoundaryCreate(BoundaryCreateOp<'a>),
+    /// Create an `@error` branch of a boundary.
+    BoundaryErrorCreate(BoundaryErrorCreateOp<'a>),
     /// Render a text node.
     Text(TextOp<'a>),
     /// Declare an event listener.
@@ -224,6 +228,8 @@ impl<'a> Op for CreateOp<'a> {
             CreateOp::Conditional(_) => OpKind::ConditionalCreate,
             CreateOp::ConditionalBranch(_) => OpKind::ConditionalBranchCreate,
             CreateOp::ControlCreate(_) => OpKind::ControlCreate,
+            CreateOp::BoundaryCreate(_) => OpKind::BoundaryCreate,
+            CreateOp::BoundaryErrorCreate(_) => OpKind::BoundaryErrorCreate,
             CreateOp::Text(_) => OpKind::Text,
             CreateOp::Listener(_) => OpKind::Listener,
             CreateOp::TwoWayListener(_) => OpKind::TwoWayListener,
@@ -272,6 +278,8 @@ impl<'a> Op for CreateOp<'a> {
             CreateOp::Conditional(op) => op.base.prev,
             CreateOp::ConditionalBranch(op) => op.base.prev,
             CreateOp::ControlCreate(op) => op.base.prev,
+            CreateOp::BoundaryCreate(op) => op.base.prev,
+            CreateOp::BoundaryErrorCreate(op) => op.base.prev,
             CreateOp::Text(op) => op.base.prev,
             CreateOp::Listener(op) => op.base.prev,
             CreateOp::TwoWayListener(op) => op.base.prev,
@@ -318,6 +326,8 @@ impl<'a> Op for CreateOp<'a> {
             CreateOp::Conditional(op) => op.base.next,
             CreateOp::ConditionalBranch(op) => op.base.next,
             CreateOp::ControlCreate(op) => op.base.next,
+            CreateOp::BoundaryCreate(op) => op.base.next,
+            CreateOp::BoundaryErrorCreate(op) => op.base.next,
             CreateOp::Text(op) => op.base.next,
             CreateOp::Listener(op) => op.base.next,
             CreateOp::TwoWayListener(op) => op.base.next,
@@ -364,6 +374,8 @@ impl<'a> Op for CreateOp<'a> {
             CreateOp::Conditional(op) => op.base.prev = prev,
             CreateOp::ConditionalBranch(op) => op.base.prev = prev,
             CreateOp::ControlCreate(op) => op.base.prev = prev,
+            CreateOp::BoundaryCreate(op) => op.base.prev = prev,
+            CreateOp::BoundaryErrorCreate(op) => op.base.prev = prev,
             CreateOp::Text(op) => op.base.prev = prev,
             CreateOp::Listener(op) => op.base.prev = prev,
             CreateOp::TwoWayListener(op) => op.base.prev = prev,
@@ -410,6 +422,8 @@ impl<'a> Op for CreateOp<'a> {
             CreateOp::Conditional(op) => op.base.next = next,
             CreateOp::ConditionalBranch(op) => op.base.next = next,
             CreateOp::ControlCreate(op) => op.base.next = next,
+            CreateOp::BoundaryCreate(op) => op.base.next = next,
+            CreateOp::BoundaryErrorCreate(op) => op.base.next = next,
             CreateOp::Text(op) => op.base.next = next,
             CreateOp::Listener(op) => op.base.next = next,
             CreateOp::TwoWayListener(op) => op.base.next = next,
@@ -494,6 +508,8 @@ pub enum UpdateOp<'a> {
     StoreLet(StoreLetOp<'a>),
     /// Update conditional.
     Conditional(ConditionalUpdateOp<'a>),
+    /// Pick the branch of an error boundary.
+    Boundary(BoundaryUpdateOp<'a>),
     /// An i18n expression.
     I18nExpression(I18nExpressionOp<'a>),
     /// Apply i18n expressions.
@@ -529,6 +545,7 @@ impl<'a> Op for UpdateOp<'a> {
             UpdateOp::TwoWayProperty(_) => OpKind::TwoWayProperty,
             UpdateOp::StoreLet(_) => OpKind::StoreLet,
             UpdateOp::Conditional(_) => OpKind::Conditional,
+            UpdateOp::Boundary(_) => OpKind::Boundary,
             UpdateOp::I18nExpression(_) => OpKind::I18nExpression,
             UpdateOp::I18nApply(_) => OpKind::I18nApply,
             UpdateOp::Binding(_) => OpKind::Binding,
@@ -556,6 +573,7 @@ impl<'a> Op for UpdateOp<'a> {
             UpdateOp::TwoWayProperty(op) => op.base.prev,
             UpdateOp::StoreLet(op) => op.base.prev,
             UpdateOp::Conditional(op) => op.base.prev,
+            UpdateOp::Boundary(op) => op.base.prev,
             UpdateOp::I18nExpression(op) => op.base.prev,
             UpdateOp::I18nApply(op) => op.base.prev,
             UpdateOp::Binding(op) => op.base.prev,
@@ -583,6 +601,7 @@ impl<'a> Op for UpdateOp<'a> {
             UpdateOp::TwoWayProperty(op) => op.base.next,
             UpdateOp::StoreLet(op) => op.base.next,
             UpdateOp::Conditional(op) => op.base.next,
+            UpdateOp::Boundary(op) => op.base.next,
             UpdateOp::I18nExpression(op) => op.base.next,
             UpdateOp::I18nApply(op) => op.base.next,
             UpdateOp::Binding(op) => op.base.next,
@@ -610,6 +629,7 @@ impl<'a> Op for UpdateOp<'a> {
             UpdateOp::TwoWayProperty(op) => op.base.prev = prev,
             UpdateOp::StoreLet(op) => op.base.prev = prev,
             UpdateOp::Conditional(op) => op.base.prev = prev,
+            UpdateOp::Boundary(op) => op.base.prev = prev,
             UpdateOp::I18nExpression(op) => op.base.prev = prev,
             UpdateOp::I18nApply(op) => op.base.prev = prev,
             UpdateOp::Binding(op) => op.base.prev = prev,
@@ -637,6 +657,7 @@ impl<'a> Op for UpdateOp<'a> {
             UpdateOp::TwoWayProperty(op) => op.base.next = next,
             UpdateOp::StoreLet(op) => op.base.next = next,
             UpdateOp::Conditional(op) => op.base.next = next,
+            UpdateOp::Boundary(op) => op.base.next = next,
             UpdateOp::I18nExpression(op) => op.base.next = next,
             UpdateOp::I18nApply(op) => op.base.next = next,
             UpdateOp::Binding(op) => op.base.next = next,
@@ -929,6 +950,47 @@ pub struct ConditionalBranchCreateOp<'a> {
 pub struct ControlCreateOp<'a> {
     /// Common operation metadata.
     pub base: CreateOpBase<'a>,
+}
+
+/// Create an error boundary (`ɵɵboundaryCreate`).
+///
+/// The boundary takes one slot of its own; its primary view is a
+/// `ConditionalBranchCreateOp` and each `@error` view a `BoundaryErrorCreateOp`.
+///
+/// Ported from Angular's `BoundaryCreateOp` in `create.ts`.
+#[derive(Debug)]
+pub struct BoundaryCreateOp<'a> {
+    /// Common operation metadata.
+    pub base: CreateOpBase<'a>,
+    /// Cross-reference ID.
+    pub xref: XrefId,
+    /// Assigned slot.
+    pub slot: Option<SlotId>,
+}
+
+/// Create an `@error` branch of a boundary, emitted as `ɵɵconditionalBranchCreate`.
+///
+/// Unlike a `ConditionalBranchCreateOp`, it never carries a tag, attributes or local refs.
+///
+/// Ported from Angular's `BoundaryErrorCreateOp` in `create.ts`.
+#[derive(Debug)]
+pub struct BoundaryErrorCreateOp<'a> {
+    /// Common operation metadata.
+    pub base: CreateOpBase<'a>,
+    /// Cross-reference ID (the error view).
+    pub xref: XrefId,
+    /// Assigned slot.
+    pub slot: Option<SlotId>,
+    /// Function name suffix.
+    pub fn_name_suffix: Ident<'a>,
+    /// The number of declaration slots used by the error view.
+    pub decls: Option<u32>,
+    /// The number of binding variable slots used by the error view.
+    pub vars: Option<u32>,
+    /// The `BoundaryCreateOp` this error branch belongs to.
+    pub boundary_xref: XrefId,
+    /// Names of the block's context variables that read `$error`.
+    pub error_variable_names: Vec<'a, Ident<'a>>,
 }
 
 /// Render a text node.
@@ -1770,6 +1832,79 @@ pub struct StoreLetOp<'a> {
     pub declared_name: Ident<'a>,
     /// Value expression.
     pub value: Box<'a, IrExpression<'a>>,
+}
+
+/// Pick the branch of an error boundary to render (`ɵɵboundaryUpdate`).
+///
+/// Ported from Angular's `BoundaryOp` (update op) in `update.ts`.
+#[derive(Debug)]
+pub struct BoundaryUpdateOp<'a> {
+    /// Common operation metadata.
+    pub base: UpdateOpBase<'a>,
+    /// The `BoundaryCreateOp` this op updates.
+    pub target: XrefId,
+    /// Slot of the `BoundaryCreateOp`, set by slot allocation.
+    pub target_slot: Option<SlotId>,
+    /// The primary branch, shown while there is no error.
+    pub guarded: ConditionalCaseExpr<'a>,
+    /// The `@error` branches, in source order.
+    pub conditions: Vec<'a, ConditionalCaseExpr<'a>>,
+    /// The collapsed branch-picking expression, set by the boundary_conditions phase.
+    pub processed: Option<Box<'a, IrExpression<'a>>>,
+}
+
+impl<'a> BoundaryUpdateOp<'a> {
+    /// The `when` expressions of the `@error` branches, in source order.
+    ///
+    /// Angular keeps `conditions` after building `processed`, and `processed` holds the
+    /// same `when` nodes, so its visitors reach each of them twice: through `conditions`,
+    /// then through `processed`. Visitors here do the same by visiting these before
+    /// `processed`. The boundary_conditions phase moves them from `conditions` into
+    /// `processed`, so each one still exists once.
+    pub fn when_exprs(&self) -> std::vec::Vec<&IrExpression<'a>> {
+        let Some(processed) = self.processed.as_deref() else {
+            return self.conditions.iter().filter_map(|c| c.expr.as_deref()).collect();
+        };
+        let mut exprs = std::vec::Vec::new();
+        // `bnd.error === null ? primary : <branches>`
+        let IrExpression::Ternary(outer) = processed else { return exprs };
+        // Each branch is `when ? slot : <next branch>`.
+        let targets: std::vec::Vec<XrefId> = self.conditions.iter().map(|c| c.target).collect();
+        let mut node = outer.false_expr.as_ref();
+        while let IrExpression::Ternary(branch) = node
+            && is_slot_of(&branch.true_expr, &targets)
+        {
+            exprs.push(branch.condition.as_ref());
+            node = branch.false_expr.as_ref();
+        }
+        exprs
+    }
+
+    /// Mutable version of [`Self::when_exprs`].
+    pub fn when_exprs_mut(&mut self) -> std::vec::Vec<&mut Box<'a, IrExpression<'a>>> {
+        let Some(processed) = self.processed.as_deref_mut() else {
+            return self.conditions.iter_mut().filter_map(|c| c.expr.as_mut()).collect();
+        };
+        let targets: std::vec::Vec<XrefId> = self.conditions.iter().map(|c| c.target).collect();
+        let mut exprs = std::vec::Vec::new();
+        let IrExpression::Ternary(outer) = processed else { return exprs };
+        let mut node = outer.false_expr.as_mut();
+        while let IrExpression::Ternary(branch) = node {
+            if !is_slot_of(&branch.true_expr, &targets) {
+                break;
+            }
+            let super::expression::TernaryExpr { condition, false_expr, .. } = branch.as_mut();
+            exprs.push(condition);
+            node = false_expr.as_mut();
+        }
+        exprs
+    }
+}
+
+/// Whether `expr` is the slot literal of one of the `targets` views.
+fn is_slot_of(expr: &IrExpression<'_>, targets: &[XrefId]) -> bool {
+    matches!(expr, IrExpression::SlotLiteral(slot)
+        if slot.target_xref.is_some_and(|target| targets.contains(&target)))
 }
 
 /// Update conditional.

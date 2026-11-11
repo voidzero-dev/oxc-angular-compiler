@@ -154,6 +154,43 @@ pub fn create_conditional_update_stmt<'a>(
     create_instruction_call_stmt(allocator, core_namespace, Identifiers::CONDITIONAL, args)
 }
 
+fn number_literal(allocator: &oxc_allocator::Allocator, value: u32) -> OutputExpression<'_> {
+    OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::Number(f64::from(value)), source_span: None },
+        &allocator,
+    ))
+}
+
+/// Creates an ɵɵboundaryCreate(slot) call statement for a @boundary block.
+///
+/// Ported from Angular's `boundaryCreate()` in `instruction.ts`.
+pub fn create_boundary_create_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+    slot: u32,
+) -> OutputStatement<'a> {
+    let mut args = OxcVec::new_in(&allocator);
+    args.push(number_literal(allocator, slot));
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::BOUNDARY_CREATE, args)
+}
+
+/// Creates an ɵɵboundaryUpdate(slot, processed, primarySlot) call statement.
+///
+/// Ported from Angular's `boundary()` in `instruction.ts`.
+pub fn create_boundary_update_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+    slot: u32,
+    processed: OutputExpression<'a>,
+    primary_slot: u32,
+) -> OutputStatement<'a> {
+    let mut args = OxcVec::new_in(&allocator);
+    args.push(number_literal(allocator, slot));
+    args.push(processed);
+    args.push(number_literal(allocator, primary_slot));
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::BOUNDARY_UPDATE, args)
+}
+
 /// Creates an ɵɵconditionalBranchCreate() call statement for branches after the first in @if/@switch.
 ///
 /// The conditionalBranchCreate instruction takes:

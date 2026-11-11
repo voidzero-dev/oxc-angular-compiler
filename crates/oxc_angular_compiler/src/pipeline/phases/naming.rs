@@ -92,6 +92,9 @@ enum SemanticVariableKey<'a> {
         /// The identifier name for the variable (e.g., "breadcrumb").
         identifier: Ident<'a>,
     },
+    /// Boundary state variable (`ɵɵgetBoundary(slot)`) for a specific boundary.
+    /// Child views reading the same boundary share one variable per scope.
+    BoundaryState { boundary: XrefId },
 }
 
 /// Creates a semantic key from variable properties.
@@ -233,6 +236,12 @@ fn make_semantic_key<'a>(
                 None
             }
         }
+        SemanticVariableKind::BoundaryState => match initializer {
+            IrExpression::GetBoundary(get) => {
+                Some(SemanticVariableKey::BoundaryState { boundary: get.target })
+            }
+            _ => None,
+        },
     }
 }
 
@@ -511,6 +520,15 @@ fn collect_child_views_with_indices<'a>(
                 children.push(ChildViewInfo {
                     xref: branch.xref,
                     base_name: child_base,
+                    create_op_index: index,
+                });
+            }
+            CreateOp::BoundaryErrorCreate(error) => {
+                let slot = error.slot.map_or(0, |s| s.0);
+                let suffix = error.fn_name_suffix.as_str();
+                children.push(ChildViewInfo {
+                    xref: error.xref,
+                    base_name: format!("{parent_base_name}_{suffix}_{slot}"),
                     create_op_index: index,
                 });
             }
@@ -1096,6 +1114,10 @@ fn get_variable_name<'a>(
             // SavedView uses pre-increment (starts at 1) with _r suffix
             state.index += 1;
             format!("_r{}", state.index)
+        }
+        SemanticVariableKind::BoundaryState => {
+            state.index += 1;
+            format!("bnd_r{}", state.index)
         }
     };
 

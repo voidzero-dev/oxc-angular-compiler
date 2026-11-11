@@ -60,6 +60,8 @@ fn build_slot_map<'a>(create_ops: &crate::ir::list::CreateOpList<'a>) -> FxHashM
             CreateOp::I18n(i18n) => (Some(i18n.xref), i18n.slot),
             // Angular maps every op that consumes a slot, including these.
             CreateOp::ConditionalBranch(branch) => (Some(branch.xref), branch.slot),
+            CreateOp::BoundaryCreate(op) => (Some(op.xref), op.slot),
+            CreateOp::BoundaryErrorCreate(op) => (Some(op.xref), op.slot),
             CreateOp::I18nAttributes(attrs) => match attrs.handle {
                 I18nSlotHandle::Single(slot) => (Some(attrs.xref), Some(slot)),
                 I18nSlotHandle::Range(start, _) => (Some(attrs.xref), Some(start)),
@@ -141,6 +143,7 @@ fn get_slot_dependency_target(op: &UpdateOp<'_>) -> Option<XrefId> {
         UpdateOp::Control(ctrl) => Some(ctrl.target),
         UpdateOp::Repeater(rep) => Some(rep.target),
         UpdateOp::Conditional(cond) => Some(cond.target),
+        UpdateOp::Boundary(op) => Some(op.target),
         UpdateOp::StoreLet(store_let) => Some(store_let.target),
         UpdateOp::Variable(var) => get_slot_dependency_from_variable(var),
         // Statement ops may contain expressions with slot dependencies (e.g., StoreLet)
@@ -449,6 +452,8 @@ fn get_slot_dependency_from_ir_expr(expr: &IrExpression<'_>) -> Option<XrefId> {
         // Expressions that don't contain slot dependencies
         IrExpression::LexicalRead(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::RestoreView(_)

@@ -6,6 +6,7 @@
 //! [`HtmlToR3Transform`] for converting parsed HTML templates
 //! to the R3 intermediate representation.
 
+pub mod boundaries;
 pub mod control_flow;
 pub mod html_to_r3;
 

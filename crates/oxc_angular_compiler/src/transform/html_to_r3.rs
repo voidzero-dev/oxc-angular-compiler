@@ -2215,13 +2215,36 @@ impl<'a> HtmlToR3Transform<'a> {
                     .collect();
                 self.visit_defer_block(block, &connected)
             }
+            BlockType::Boundary => {
+                let (connected_indices, whitespace_indices) =
+                    Self::find_connected_block_indices(index, siblings, |bt| {
+                        matches!(bt, BlockType::Error)
+                    });
+                for &idx in connected_indices.iter().chain(&whitespace_indices) {
+                    let node_id = &raw const siblings[idx] as usize;
+                    self.processed_nodes.insert(node_id);
+                }
+                let connected: std::vec::Vec<_> = connected_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        if let HtmlNode::Block(b) = &siblings[idx] {
+                            Some(b.as_ref())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                self.visit_boundary_block(block, &connected)
+            }
             BlockType::Placeholder | BlockType::Loading | BlockType::Error => {
                 // Standalone @placeholder/@loading/@error without a preceding @defer - emit error and create UnknownBlock
-                // Reference: r3_template_transform.ts:509-511
-                self.report_error(
-                    &format!("@{} block can only be used after an @defer block.", block.name),
-                    block.span,
-                );
+                // Reference: r3_template_transform.ts:539-544
+                let msg = if block.block_type == BlockType::Error {
+                    "@error block can only be used after an @defer or @boundary block.".to_string()
+                } else {
+                    format!("@{} block can only be used after an @defer block.", block.name)
+                };
+                self.report_error(&msg, block.span);
                 Some(R3Node::UnknownBlock(Box::new_in(
                     crate::ast::r3::R3UnknownBlock {
                         name: block.name,
@@ -3013,6 +3036,110 @@ impl<'a> HtmlToR3Transform<'a> {
     }
 
     /// Visits a @defer block with connected @placeholder, @loading, @error blocks.
+    /// Visits a @boundary block with its connected @error blocks.
+    ///
+    /// Ported from Angular's `createBoundaryBlock` in `r3_boundaries.ts`. Like Angular,
+    /// the @error blocks are visited before the main block's children.
+    fn visit_boundary_block(
+        &mut self,
+        block: &HtmlBlock<'a>,
+        connected_blocks: &[&HtmlBlock<'a>],
+    ) -> Option<R3Node<'a>> {
+        use crate::ast::r3::{R3BoundaryBlock, R3BoundaryErrorBlock};
+        use crate::transform::boundaries::parse_boundary_error_params;
+
+        let mut errors: std::vec::Vec<(String, Span)> = std::vec::Vec::new();
+        if !block.parameters.is_empty() {
+            errors.push(("@boundary block cannot have parameters".to_string(), block.span));
+        }
+
+        let mut error_blocks = Vec::new_in(&self.allocator);
+        for connected in connected_blocks {
+            let params = parse_boundary_error_params(
+                self.allocator,
+                self.source_text,
+                &connected.parameters,
+                &self.binding_parser,
+                connected.start_span,
+            );
+            errors.extend(params.errors.into_iter().map(|e| (e.msg, e.span)));
+            self.errors.extend(params.expression_errors);
+
+            let children = self.visit_children(&connected.children);
+            let i18n = self.create_block_placeholder(
+                "error",
+                &[],
+                connected.span,
+                connected.start_span,
+                connected.end_span,
+            );
+            error_blocks.push(R3BoundaryErrorBlock {
+                children,
+                context_variables: params.context_variables,
+                expression: params.expression,
+                source_span: connected.span,
+                name_span: connected.name_span,
+                start_source_span: connected.start_span,
+                end_source_span: connected.end_span,
+                i18n,
+            });
+        }
+
+        let mut has_unconditional_error_block = false;
+        let last_index = error_blocks.len().saturating_sub(1);
+        for (i, error_block) in error_blocks.iter().enumerate() {
+            if error_block.expression.is_none() {
+                if has_unconditional_error_block {
+                    errors.push((
+                        "@boundary block can only have one unconditional @error block".to_string(),
+                        error_block.source_span,
+                    ));
+                } else if i != last_index {
+                    errors.push((
+                        "Unconditional @error block must be the last @error block in the boundary chain"
+                            .to_string(),
+                        error_block.source_span,
+                    ));
+                }
+                has_unconditional_error_block = true;
+            }
+        }
+
+        let (source_span, end_source_span) = match error_blocks.last() {
+            Some(last) => {
+                (Span::new(block.start_span.start, last.source_span.end), last.end_source_span)
+            }
+            None => (block.span, block.end_span),
+        };
+
+        let children = self.visit_children(&block.children);
+        let i18n = self.create_block_placeholder(
+            "boundary",
+            &[],
+            block.span,
+            block.start_span,
+            block.end_span,
+        );
+
+        for (msg, span) in errors {
+            self.report_error(&msg, span);
+        }
+
+        Some(R3Node::BoundaryBlock(Box::new_in(
+            R3BoundaryBlock {
+                children,
+                error_blocks,
+                source_span,
+                main_block_span: block.span,
+                name_span: block.name_span,
+                start_source_span: block.start_span,
+                end_source_span,
+                i18n,
+            },
+            &self.allocator,
+        )))
+    }
+
     fn visit_defer_block(
         &mut self,
         block: &HtmlBlock<'a>,

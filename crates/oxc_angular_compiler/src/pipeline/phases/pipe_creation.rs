@@ -52,17 +52,28 @@ fn process_pipe_bindings_in_view(job: &mut ComponentCompilationJob<'_>, view_xre
         };
 
         let mut bindings = Vec::new();
+        let mut seen_xrefs = HashSet::new();
 
         for op in view.update.iter() {
             // Visit all expressions in this operation to find PipeBinding
-            collect_pipe_bindings(op, &mut bindings);
+            let mut op_bindings = Vec::new();
+            collect_pipe_bindings(op, &mut op_bindings);
+
+            // Deduplicate by xref - the same pipe can appear multiple times
+            // (e.g., in @switch test and processed expressions), but we only
+            // want to create one PipeOp per unique xref.
+            //
+            // Angular visits a `@boundary`'s `when` conditions twice (see
+            // `BoundaryUpdateOp::when_exprs`) and creates their pipes twice; keep that.
+            let keep_repeats = matches!(op, crate::ir::ops::UpdateOp::Boundary(_));
+            for binding in op_bindings {
+                if seen_xrefs.insert(binding.xref) || keep_repeats {
+                    bindings.push(binding);
+                }
+            }
         }
 
-        // Deduplicate by xref - the same pipe can appear multiple times
-        // (e.g., in @switch test and processed expressions), but we only
-        // want to create one PipeOp per unique xref
-        let mut seen_xrefs = HashSet::new();
-        bindings.into_iter().filter(|p| seen_xrefs.insert(p.xref)).collect()
+        bindings
     };
 
     // Create PipeOp for each binding
@@ -192,6 +203,8 @@ fn get_create_op_xref(op: &CreateOp<'_>) -> Option<XrefId> {
         CreateOp::Defer(d) => Some(d.xref),
         CreateOp::Conditional(c) => Some(c.xref),
         CreateOp::ConditionalBranch(c) => Some(c.xref),
+        CreateOp::BoundaryCreate(b) => Some(b.xref),
+        CreateOp::BoundaryErrorCreate(b) => Some(b.xref),
         CreateOp::I18nStart(i) => Some(i.xref),
         CreateOp::I18n(i) => Some(i.xref),
         CreateOp::DeclareLet(l) => Some(l.xref),
@@ -411,6 +424,14 @@ fn collect_pipe_bindings<'a>(op: &crate::ir::ops::UpdateOp<'a>, bindings: &mut V
                 }
             }
         }
+        crate::ir::ops::UpdateOp::Boundary(boundary) => {
+            for expr in boundary.when_exprs() {
+                check_expression(expr, target_element, bindings);
+            }
+            if let Some(ref processed) = boundary.processed {
+                check_expression(processed, target_element, bindings);
+            }
+        }
         crate::ir::ops::UpdateOp::StoreLet(store_let) => {
             // StoreLet contains a value expression that may contain pipes
             check_expression(&store_let.value, target_element, bindings);
@@ -464,6 +485,7 @@ fn get_update_op_target(op: &crate::ir::ops::UpdateOp<'_>) -> Option<XrefId> {
         crate::ir::ops::UpdateOp::AnimationBinding(anim) => Some(anim.target),
         crate::ir::ops::UpdateOp::Control(ctrl) => Some(ctrl.target),
         crate::ir::ops::UpdateOp::Conditional(cond) => Some(cond.target),
+        crate::ir::ops::UpdateOp::Boundary(boundary) => Some(boundary.target),
         crate::ir::ops::UpdateOp::StoreLet(store_let) => Some(store_let.target),
         crate::ir::ops::UpdateOp::Repeater(repeater) => Some(repeater.target),
         crate::ir::ops::UpdateOp::I18nExpression(i18n) => Some(i18n.target),

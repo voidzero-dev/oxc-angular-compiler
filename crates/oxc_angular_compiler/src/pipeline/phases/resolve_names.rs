@@ -206,7 +206,7 @@ fn process_lexical_scope_create<'a>(
                                 Some(SavedView { view: saved_view_xref, variable: var_op.xref });
                         }
                     }
-                    SemanticVariableKind::Context => {
+                    SemanticVariableKind::Context | SemanticVariableKind::BoundaryState => {
                         // Context variables are handled differently
                     }
                 }
@@ -388,7 +388,7 @@ fn process_lexical_scope_update<'a>(
                             Some(SavedView { view: saved_view_xref, variable: var_op.xref });
                     }
                 }
-                SemanticVariableKind::Context => {}
+                SemanticVariableKind::Context | SemanticVariableKind::BoundaryState => {}
             }
         }
     }

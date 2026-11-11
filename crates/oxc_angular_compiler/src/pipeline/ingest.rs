@@ -26,27 +26,28 @@ use super::conversion::prefix_with_namespace;
 use crate::ast::expression::{AngularExpression, ParsedEventType};
 use crate::ast::r3::{
     I18nIcuPlaceholder, I18nMessage, I18nMeta, I18nNode, R3BoundAttribute, R3BoundEvent,
-    R3BoundText, R3Content, R3DeferredBlock, R3Element, R3ForLoopBlock, R3Icu, R3IcuPlaceholder,
-    R3IfBlock, R3LetDeclaration, R3Node, R3SwitchBlock, R3Template, R3TemplateAttr, R3Text,
-    R3TextAttribute, SecurityContext,
+    R3BoundText, R3BoundaryBlock, R3Content, R3DeferredBlock, R3Element, R3ForLoopBlock, R3Icu,
+    R3IcuPlaceholder, R3IfBlock, R3LetDeclaration, R3Node, R3SwitchBlock, R3Template,
+    R3TemplateAttr, R3Text, R3TextAttribute, SecurityContext,
 };
 use crate::ir::enums::{
     AnimationKind, BindingKind, DeferOpModifierKind, DeferTriggerKind, Namespace,
     TDeferDetailsFlags, TemplateKind,
 };
 use crate::ir::expression::{
-    BinaryExpr, ConditionalCaseExpr, EmptyExpr, IrBinaryOperator, IrExpression, LexicalReadExpr,
-    PipeBindingExpr, ResolvedCallExpr, ResolvedKeyedReadExpr, ResolvedPropertyReadExpr,
-    SafeInvokeFunctionExpr, SafeKeyedReadExpr, SafePropertyReadExpr, SlotHandle,
-    TwoWayBindingSetExpr, VisitorContextFlag, transform_expressions_in_expression,
+    BinaryExpr, ConditionalCaseExpr, ContextExpr, EmptyExpr, IrBinaryOperator, IrExpression,
+    LexicalReadExpr, PipeBindingExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
+    ResolvedPropertyReadExpr, SafeInvokeFunctionExpr, SafeKeyedReadExpr, SafePropertyReadExpr,
+    SlotHandle, TwoWayBindingSetExpr, VisitorContextFlag, transform_expressions_in_expression,
 };
 use crate::ir::ops::{
-    AnimationListenerOp, BindingOp, ConditionalBranchCreateOp, ConditionalOp, ConditionalUpdateOp,
-    CreateOp, CreateOpBase, DeclareLetOp, DeferOnOp, DeferOp, DeferWhenOp, ElementEndOp,
-    ElementStartOp, ExtractedAttributeOp, I18nAttributesOp, I18nEndOp, I18nPlaceholder,
-    I18nSlotHandle, I18nStartOp, IcuEndOp, IcuStartOp, InterpolateTextOp, ListenerOp, LocalRef,
-    ProjectionOp, RepeaterCreateOp, RepeaterOp, RepeaterVarNames, SlotId, StatementOp, StoreLetOp,
-    TemplateOp, TextOp, TwoWayListenerOp, UpdateOp, UpdateOpBase, XrefId,
+    AnimationListenerOp, BindingOp, BoundaryCreateOp, BoundaryErrorCreateOp, BoundaryUpdateOp,
+    ConditionalBranchCreateOp, ConditionalOp, ConditionalUpdateOp, CreateOp, CreateOpBase,
+    DeclareLetOp, DeferOnOp, DeferOp, DeferWhenOp, ElementEndOp, ElementStartOp,
+    ExtractedAttributeOp, I18nAttributesOp, I18nEndOp, I18nPlaceholder, I18nSlotHandle,
+    I18nStartOp, IcuEndOp, IcuStartOp, InterpolateTextOp, ListenerOp, LocalRef, ProjectionOp,
+    RepeaterCreateOp, RepeaterOp, RepeaterVarNames, SlotId, StatementOp, StoreLetOp, TemplateOp,
+    TextOp, TwoWayListenerOp, UpdateOp, UpdateOpBase, XrefId,
 };
 use crate::output::ast::{OutputExpression, ReadVarExpr};
 use crate::pipeline::compilation::{AliasVariable, ContextVariable};
@@ -950,6 +951,9 @@ fn ingest_node<'a>(job: &mut ComponentCompilationJob<'a>, view_xref: XrefId, nod
         R3Node::DeferredBlock(defer_block) => {
             ingest_defer_block(job, view_xref, defer_block.unbox())
         }
+        R3Node::BoundaryBlock(boundary_block) => {
+            ingest_boundary_block(job, view_xref, boundary_block.unbox())
+        }
         R3Node::LetDeclaration(let_decl) => {
             ingest_let_declaration(job, view_xref, let_decl.unbox())
         }
@@ -977,6 +981,9 @@ fn ingest_node<'a>(job: &mut ComponentCompilationJob<'a>, view_xref: XrefId, nod
         }
         R3Node::IfBlockBranch(_) => {
             // If branches are handled by the parent if block
+        }
+        R3Node::BoundaryErrorBlock(_) => {
+            // Error blocks are handled by the parent boundary block
         }
         R3Node::Component(component) => {
             // Only a selectorless parse produces these, and the pipeline cannot compile
@@ -2679,6 +2686,132 @@ fn ingest_if_block<'a>(
         if let Some(view) = job.view_mut(view_xref) {
             view.update.push(update_op);
         }
+    }
+}
+
+/// Ingests a `@boundary` block and its `@error` blocks.
+///
+/// The boundary takes a slot of its own (`ɵɵboundaryCreate`). The main content becomes a
+/// "Primary" conditional branch view and each `@error` block an "Error" branch view, all
+/// chained as `ɵɵconditionalBranchCreate`. A `BoundaryUpdateOp` picks the branch to show.
+///
+/// Ported from Angular's `ingestBoundaryBlock` in `ingest.ts`.
+fn ingest_boundary_block<'a>(
+    job: &mut ComponentCompilationJob<'a>,
+    view_xref: XrefId,
+    boundary_block: R3BoundaryBlock<'a>,
+) {
+    let allocator = job.allocator;
+
+    // The primary view is allocated first, then the boundary op gets its own xref.
+    let primary_xref = job.allocate_view(Some(view_xref));
+    let primary_tag =
+        ingest_control_flow_insertion_point(job, view_xref, primary_xref, &boundary_block.children);
+    let boundary_xref = job.allocate_xref_id();
+
+    let mut create_ops: std::vec::Vec<CreateOp<'a>> = std::vec::Vec::new();
+    create_ops.push(CreateOp::BoundaryCreate(BoundaryCreateOp {
+        base: CreateOpBase { source_span: Some(boundary_block.source_span), ..Default::default() },
+        xref: boundary_xref,
+        slot: None,
+    }));
+    create_ops.push(CreateOp::ConditionalBranch(ConditionalBranchCreateOp {
+        base: CreateOpBase { source_span: Some(boundary_block.source_span), ..Default::default() },
+        xref: primary_xref,
+        slot: None,
+        namespace: Namespace::Html,
+        template_kind: TemplateKind::Block,
+        fn_name_suffix: Ident::from("Primary"),
+        tag: primary_tag,
+        decls: None,
+        vars: None,
+        local_refs: Vec::new_in(&allocator),
+        local_refs_index: None,
+        i18n_placeholder: None,
+        attributes: None,
+        non_bindable: false,
+    }));
+
+    let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(&allocator);
+    for error_block in boundary_block.error_blocks {
+        let error_xref = job.allocate_view(Some(view_xref));
+
+        let mut error_variable_names = Vec::new_in(&allocator);
+        for variable in &error_block.context_variables {
+            if variable.value.as_str() == "$error" {
+                error_variable_names.push(variable.name);
+            }
+        }
+        create_ops.push(CreateOp::BoundaryErrorCreate(BoundaryErrorCreateOp {
+            base: CreateOpBase { source_span: Some(error_block.source_span), ..Default::default() },
+            xref: error_xref,
+            slot: None,
+            fn_name_suffix: Ident::from("Error"),
+            decls: None,
+            vars: None,
+            boundary_xref,
+            error_variable_names,
+        }));
+
+        let case_expr = error_block.expression.map(|expr| convert_ast_to_ir(job, expr));
+        conditions.push(ConditionalCaseExpr {
+            expr: case_expr,
+            target: error_xref,
+            target_slot: SlotHandle::new(),
+            alias: None,
+            source_span: Some(error_block.source_span),
+        });
+
+        // `$error`, `$reset` and their aliases read the error view's context.
+        if let Some(view) = job.view_mut(error_xref) {
+            for variable in &error_block.context_variables {
+                let context = IrExpression::Context(Box::new_in(
+                    ContextExpr { view: error_xref, source_span: None },
+                    &allocator,
+                ));
+                let expression = IrExpression::ResolvedPropertyRead(Box::new_in(
+                    ResolvedPropertyReadExpr {
+                        receiver: Box::new_in(context, &allocator),
+                        name: variable.value,
+                        optional: false,
+                        source_span: None,
+                    },
+                    &allocator,
+                ));
+                view.aliases.push(AliasVariable { identifier: variable.name, expression });
+            }
+        }
+
+        for child in error_block.children {
+            ingest_node(job, error_xref, child);
+        }
+    }
+
+    for child in boundary_block.children {
+        ingest_node(job, primary_xref, child);
+    }
+
+    if let Some(view) = job.view_mut(view_xref) {
+        for op in create_ops {
+            view.create.push(op);
+        }
+        view.update.push(UpdateOp::Boundary(BoundaryUpdateOp {
+            base: UpdateOpBase {
+                source_span: Some(boundary_block.source_span),
+                ..Default::default()
+            },
+            target: boundary_xref,
+            target_slot: None,
+            guarded: ConditionalCaseExpr {
+                expr: None,
+                target: primary_xref,
+                target_slot: SlotHandle::new(),
+                alias: None,
+                source_span: None,
+            },
+            conditions,
+            processed: None,
+        }));
     }
 }
 

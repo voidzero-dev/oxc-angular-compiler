@@ -363,6 +363,15 @@ pub fn convert_ir_expression<'a>(
             )
         }
 
+        IrExpression::GetBoundary(get) => {
+            get_boundary_call(allocator, core_namespace, get.target_slot)
+        }
+
+        // `resolve_boundaries` replaces every `BoundaryStateExpr`; this is only a fallback.
+        IrExpression::BoundaryState(state) => {
+            get_boundary_call(allocator, core_namespace, state.target_slot)
+        }
+
         IrExpression::TrackContext(_) => {
             // Reference to `this` for track functions
             OutputExpression::ReadVar(Box::new_in(
@@ -1508,4 +1517,20 @@ fn convert_ir_binary_operator(op: crate::ir::expression::IrBinaryOperator) -> Bi
         IrBinaryOperator::OrAssignment => BinaryOperator::OrAssignment,
         IrBinaryOperator::NullishCoalesceAssignment => BinaryOperator::NullishCoalesceAssignment,
     }
+}
+
+/// `i0.ɵɵgetBoundary(slot)`.
+fn get_boundary_call<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+    target_slot: crate::ir::expression::SlotHandle,
+) -> OutputExpression<'a> {
+    let mut args = OxcVec::new_in(&allocator);
+    if let Some(slot) = target_slot.slot {
+        args.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Number(f64::from(slot.0)), source_span: None },
+            &allocator,
+        )));
+    }
+    create_instruction_call_expr(allocator, core_namespace, Identifiers::GET_BOUNDARY, args)
 }

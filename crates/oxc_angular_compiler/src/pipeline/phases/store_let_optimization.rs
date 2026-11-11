@@ -185,6 +185,24 @@ fn transform_store_let_in_update_op<'a>(
                 declare_lets_to_remove,
             );
         }
+        UpdateOp::Boundary(boundary) => {
+            for expr in boundary.when_exprs_mut() {
+                transform_store_let_in_expr(
+                    &allocator,
+                    expr,
+                    let_used_externally,
+                    declare_lets_to_remove,
+                );
+            }
+            if let Some(ref mut processed) = boundary.processed {
+                transform_store_let_in_expr(
+                    &allocator,
+                    processed,
+                    let_used_externally,
+                    declare_lets_to_remove,
+                );
+            }
+        }
         UpdateOp::Conditional(cond) => {
             if let Some(ref mut test) = cond.test {
                 transform_store_let_in_expr(
@@ -605,6 +623,8 @@ fn transform_nested_expressions<'a>(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1053,6 +1073,8 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1208,6 +1230,8 @@ fn has_pipe(expr: &IrExpression<'_>) -> bool {
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -1269,6 +1293,14 @@ where
         UpdateOp::Attribute(attr) => visitor(&attr.expression),
         UpdateOp::InterpolateText(text) => {
             visitor(&text.interpolation);
+        }
+        UpdateOp::Boundary(boundary) => {
+            for expr in boundary.when_exprs() {
+                visitor(expr);
+            }
+            if let Some(ref processed) = boundary.processed {
+                visitor(processed);
+            }
         }
         UpdateOp::Conditional(cond) => {
             if let Some(ref test) = cond.test {
@@ -1422,6 +1454,8 @@ fn collect_context_let_refs_in_expr(expr: &IrExpression<'_>, refs: &mut HashSet<
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)

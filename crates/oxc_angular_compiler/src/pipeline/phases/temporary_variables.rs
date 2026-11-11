@@ -558,6 +558,8 @@ fn assign_temp_names<'a>(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::ReadVariable(_)
