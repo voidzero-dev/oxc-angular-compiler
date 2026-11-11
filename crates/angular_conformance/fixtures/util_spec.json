@@ -63,6 +63,48 @@
               "assertions": []
             }
           ]
+        },
+        {
+          "name": "getJitStandaloneDefaultForVersion",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should return true for 0.0.0-PLACEHOLDER (starts with 0.)",
+              "path": "util/getJitStandaloneDefaultForVersion/should return true for 0.0.0-PLACEHOLDER (starts with 0.)",
+              "assertions": []
+            },
+            {
+              "name": "should return false for versions 1 through 18",
+              "path": "util/getJitStandaloneDefaultForVersion/should return false for versions 1 through 18",
+              "assertions": []
+            },
+            {
+              "name": "should return true for versions 19 and above",
+              "path": "util/getJitStandaloneDefaultForVersion/should return true for versions 19 and above",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "getJitChangeDetectionDefaultForVersion",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should return OnPush for 0.0.0-PLACEHOLDER (starts with 0.)",
+              "path": "util/getJitChangeDetectionDefaultForVersion/should return OnPush for 0.0.0-PLACEHOLDER (starts with 0.)",
+              "assertions": []
+            },
+            {
+              "name": "should return Eager for versions 1 through 21",
+              "path": "util/getJitChangeDetectionDefaultForVersion/should return Eager for versions 1 through 21",
+              "assertions": []
+            },
+            {
+              "name": "should return OnPush for versions 22 and above",
+              "path": "util/getJitChangeDetectionDefaultForVersion/should return OnPush for versions 22 and above",
+              "assertions": []
+            }
+          ]
         }
       ],
       "tests": []

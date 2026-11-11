@@ -38,6 +38,133 @@
               "name": "does not escape class (but it probably should)",
               "path": "AbstractEmitter/escapeIdentifier/does not escape class (but it probably should)",
               "assertions": []
+            },
+            {
+              "name": "should escape non-ascii and control characters when escapeNonAscii is true",
+              "path": "AbstractEmitter/escapeIdentifier/should escape non-ascii and control characters when escapeNonAscii is true",
+              "assertions": []
+            },
+            {
+              "name": "should not escape unquoted legal identifiers when escapeNonAscii is true",
+              "path": "AbstractEmitter/escapeIdentifier/should not escape unquoted legal identifiers when escapeNonAscii is true",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "visitLiteralMapExpr",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should emit leading comments on the first property assignment on its own line",
+              "path": "AbstractEmitter/visitLiteralMapExpr/should emit leading comments on the first property assignment on its own line",
+              "assertions": []
+            },
+            {
+              "name": "should emit leading comments on subsequent property assignments after the comma",
+              "path": "AbstractEmitter/visitLiteralMapExpr/should emit leading comments on subsequent property assignments after the comma",
+              "assertions": []
+            },
+            {
+              "name": "should omit leading comments on property assignments when printComments is false",
+              "path": "AbstractEmitter/visitLiteralMapExpr/should omit leading comments on property assignments when printComments is false",
+              "assertions": []
+            },
+            {
+              "name": "should handle spread assignments alongside commented property assignments",
+              "path": "AbstractEmitter/visitLiteralMapExpr/should handle spread assignments alongside commented property assignments",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "visitParenthesizedExpr",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should parenthesize a double negation before a method call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a double negation before a method call",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a negation before a property read",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a negation before a property read",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a negation before a keyed read",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a negation before a keyed read",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a negation before a call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a negation before a call",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a typeof expression before a property read",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a typeof expression before a property read",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a void expression before a property read",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a void expression before a property read",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a negation on the left side of an exponentiation",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a negation on the left side of an exponentiation",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a typeof expression on the left side of an exponentiation",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a typeof expression on the left side of an exponentiation",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a number literal before a method call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a number literal before a method call",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize an arrow function before a property read",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize an arrow function before a property read",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize an arrow function in a binary expression",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize an arrow function in a binary expression",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a call used as the class of an instantiation",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a call used as the class of an instantiation",
+              "assertions": []
+            },
+            {
+              "name": "should not double-parenthesize expressions that parenthesize themselves",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should not double-parenthesize expressions that parenthesize themselves",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a negative number before a method call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a negative number before a method call",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a conditional expression before a method call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a conditional expression before a method call",
+              "assertions": []
+            },
+            {
+              "name": "should parenthesize a binary expression before a method call",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should parenthesize a binary expression before a method call",
+              "assertions": []
+            },
+            {
+              "name": "should not add redundant parentheses around an if statement condition",
+              "path": "AbstractEmitter/visitParenthesizedExpr/should not add redundant parentheses around an if statement condition",
+              "assertions": []
             }
           ]
         }

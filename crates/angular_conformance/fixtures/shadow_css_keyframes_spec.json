@@ -82,6 +82,11 @@
           "assertions": []
         },
         {
+          "name": "should correctly process animations defined in minified rules nested in an at-rule",
+          "path": "ShadowCss, keyframes and animations/should correctly process animations defined in minified rules nested in an at-rule",
+          "assertions": []
+        },
+        {
           "name": "should ignore keywords values when scoping local animations",
           "path": "ShadowCss, keyframes and animations/should ignore keywords values when scoping local animations",
           "assertions": []

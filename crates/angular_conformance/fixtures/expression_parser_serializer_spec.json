@@ -348,6 +348,54 @@
                   "expected": "foo instanceof Bar"
                 }
               ]
+            },
+            {
+              "name": "should serialize prefix increment and decrement",
+              "path": "serializer/serialize/should serialize prefix increment and decrement",
+              "assertions": [
+                {
+                  "type": "SerializeExpression",
+                  "input": " ++ foo ",
+                  "expected": "++foo"
+                },
+                {
+                  "type": "SerializeExpression",
+                  "input": " -- foo ",
+                  "expected": "--foo"
+                }
+              ]
+            },
+            {
+              "name": "should serialize postfix increment and decrement",
+              "path": "serializer/serialize/should serialize postfix increment and decrement",
+              "assertions": [
+                {
+                  "type": "SerializeExpression",
+                  "input": " foo ++ ",
+                  "expected": "foo++"
+                },
+                {
+                  "type": "SerializeExpression",
+                  "input": " foo -- ",
+                  "expected": "foo--"
+                }
+              ]
+            },
+            {
+              "name": "should separate unary operators next to each other",
+              "path": "serializer/serialize/should separate unary operators next to each other",
+              "assertions": [
+                {
+                  "type": "SerializeExpression",
+                  "input": " + ++foo ",
+                  "expected": "+ ++foo"
+                },
+                {
+                  "type": "SerializeExpression",
+                  "input": " - --foo ",
+                  "expected": "- --foo"
+                }
+              ]
             }
           ]
         }

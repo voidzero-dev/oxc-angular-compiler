@@ -1,0 +1,165 @@
+{
+  "name": "nesting_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/nesting_spec.ts",
+  "test_groups": [
+    {
+      "name": "ShadowCss nesting",
+      "groups": [],
+      "tests": [
+        {
+          "name": "should shim simple nested selector",
+          "path": "ShadowCss nesting/should shim simple nested selector",
+          "assertions": []
+        },
+        {
+          "name": "should shim nested selector with ampersand",
+          "path": "ShadowCss nesting/should shim nested selector with ampersand",
+          "assertions": []
+        },
+        {
+          "name": "should shim selector with modifier applying to ampersand",
+          "path": "ShadowCss nesting/should shim selector with modifier applying to ampersand",
+          "assertions": []
+        },
+        {
+          "name": "should shim selector with multiple ampersands",
+          "path": "ShadowCss nesting/should shim selector with multiple ampersands",
+          "assertions": []
+        },
+        {
+          "name": "should shim nested selector with multiple child selectors",
+          "path": "ShadowCss nesting/should shim nested selector with multiple child selectors",
+          "assertions": []
+        },
+        {
+          "name": "should shim nested selector followed by declarations",
+          "path": "ShadowCss nesting/should shim nested selector followed by declarations",
+          "assertions": []
+        },
+        {
+          "name": "should shim nested selector with comma-separated child selectors",
+          "path": "ShadowCss nesting/should shim nested selector with comma-separated child selectors",
+          "assertions": []
+        },
+        {
+          "name": "should shim nested selector targeting a direct descendant",
+          "path": "ShadowCss nesting/should shim nested selector targeting a direct descendant",
+          "assertions": []
+        },
+        {
+          "name": "should shim multiple levels of nested selectors",
+          "path": "ShadowCss nesting/should shim multiple levels of nested selectors",
+          "assertions": []
+        },
+        {
+          "name": "should shim selectors nested in :host",
+          "path": "ShadowCss nesting/should shim selectors nested in :host",
+          "assertions": []
+        },
+        {
+          "name": "should shim selectors nested in :host-context",
+          "path": "ShadowCss nesting/should shim selectors nested in :host-context",
+          "assertions": []
+        },
+        {
+          "name": "should shim a selector with a nested media query",
+          "path": "ShadowCss nesting/should shim a selector with a nested media query",
+          "assertions": []
+        },
+        {
+          "name": "should shim a selector with a nested media query and an ampersand",
+          "path": "ShadowCss nesting/should shim a selector with a nested media query and an ampersand",
+          "assertions": []
+        },
+        {
+          "name": "should disable encapsulation of nested selectors if the parent selector ends with ::ng-deep",
+          "path": "ShadowCss nesting/should disable encapsulation of nested selectors if the parent selector ends with ::ng-deep",
+          "assertions": [
+            {
+              "type": "ShimCss",
+              "input": ".foo ::ng-deep { .bar { color: red; } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] { .bar { color: red; } }",
+              "normalized": true
+            },
+            {
+              "type": "ShimCss",
+              "input": ".foo ::ng-deep { .bar { .baz { color: red; } } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] { .bar { .baz { color: red; } } }",
+              "normalized": true
+            },
+            {
+              "type": "ShimCss",
+              "input": ".foo { .bar ::ng-deep { .baz { color: red; } } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] { .bar[contenta] { .baz { color: red; } } }",
+              "normalized": true
+            }
+          ]
+        },
+        {
+          "name": "should disable encapsulation of nested selectors if the parent selector starts with ::ng-deep",
+          "path": "ShadowCss nesting/should disable encapsulation of nested selectors if the parent selector starts with ::ng-deep",
+          "assertions": [
+            {
+              "type": "ShimCss",
+              "input": "::ng-deep .foo { .bar { color: red; } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo { .bar { color: red; } }",
+              "normalized": true
+            },
+            {
+              "type": "ShimCss",
+              "input": "::ng-deep .foo { .bar { .baz { color: red; } } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo { .bar { .baz { color: red; } } }",
+              "normalized": true
+            },
+            {
+              "type": "ShimCss",
+              "input": ".foo { ::ng-deep .bar { .baz { color: red; } } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] { .bar { .baz { color: red; } } }",
+              "normalized": true
+            }
+          ]
+        },
+        {
+          "name": "should disable encapsulation of nested selectors if the parent selector contains ::ng-deep in the middle of the selector",
+          "path": "ShadowCss nesting/should disable encapsulation of nested selectors if the parent selector contains ::ng-deep in the middle of the selector",
+          "assertions": [
+            {
+              "type": "ShimCss",
+              "input": ".foo ::ng-deep .bar { .baz { color: red; } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] .bar { .baz { color: red; } }",
+              "normalized": true
+            }
+          ]
+        },
+        {
+          "name": "should not let a previous ::ng-deep rule affect the next one",
+          "path": "ShadowCss nesting/should not let a previous ::ng-deep rule affect the next one",
+          "assertions": [
+            {
+              "type": "ShimCss",
+              "input": ".foo ::ng-deep .bar {}\n::ng-deep .baz { .qux { color: red; } }",
+              "content_attr": "contenta",
+              "host_attr": null,
+              "expected": ".foo[contenta] .bar {} .baz { .qux { color: red; } }",
+              "normalized": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

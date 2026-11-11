@@ -86,6 +86,197 @@
                   "normalized": false
                 }
               ]
+            },
+            {
+              "name": "should not scope comments that are placed between a selector and its block",
+              "path": "ShadowCss/comments/should not scope comments that are placed between a selector and its block",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": ".a /* comment */ {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]    {}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should not scope comments that are placed between selectors of a list",
+              "path": "ShadowCss/comments/should not scope comments that are placed between selectors of a list",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": ".a, /* comment */ .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta],    .b[contenta] {}",
+                  "normalized": false
+                },
+                {
+                  "type": "ShimCss",
+                  "input": ".a /* comment */, .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]   , .b[contenta] {}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should not scope comments that are placed between compound selectors",
+              "path": "ShadowCss/comments/should not scope comments that are placed between compound selectors",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": ".a /* comment */ .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]      .b[contenta] {}",
+                  "normalized": false
+                },
+                {
+                  "type": "ShimCss",
+                  "input": ".a > /* comment */ .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]    >    .b[contenta] {}",
+                  "normalized": false
+                },
+                {
+                  "type": "ShimCss",
+                  "input": ".a /* c1 */ /* c2 */ .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]         .b[contenta] {}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should not scope comments inside of :host and pseudo selector functions",
+              "path": "ShadowCss/comments/should not scope comments inside of :host and pseudo selector functions",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": ":host /* comment */ .b {}",
+                  "content_attr": "contenta",
+                  "host_attr": "a-host",
+                  "expected": "[a-host]      .b[contenta] {}",
+                  "normalized": false
+                },
+                {
+                  "type": "ShimCss",
+                  "input": ":is(.a, /* comment */ .b) {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ":is(.a[contenta],    .b[contenta]) {}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should scope compound selectors that contain a comment",
+              "path": "ShadowCss/comments/should scope compound selectors that contain a comment",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": ".a/* comment */.b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a.b[contenta] {}",
+                  "normalized": false
+                },
+                {
+                  "type": "ShimCss",
+                  "input": ".a/* comment */:hover {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": ".a[contenta]:hover {}",
+                  "normalized": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "CSS variable namespacing",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should inject `%NS%` placeholder into CSS variable declarations and usages",
+              "path": "ShadowCss/CSS variable namespacing/should inject `%NS%` placeholder into CSS variable declarations and usages",
+              "assertions": []
+            },
+            {
+              "name": "should not inject `%NS%` when `--global--` prefix is present",
+              "path": "ShadowCss/CSS variable namespacing/should not inject `%NS%` when `--global--` prefix is present",
+              "assertions": []
+            },
+            {
+              "name": "should handle multiple variables with mixed namespacing",
+              "path": "ShadowCss/CSS variable namespacing/should handle multiple variables with mixed namespacing",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in comments",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in comments",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in strings",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in strings",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in the middle of identifiers",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in the middle of identifiers",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in attribute names",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in attribute names",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in unquoted attribute values",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in unquoted attribute values",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify CDO and CDC tokens",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify CDO and CDC tokens",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in URLs",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in URLs",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace or modify -- in custom media queries",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace or modify -- in custom media queries",
+              "assertions": []
+            },
+            {
+              "name": "should handle whitespace in variable declarations and usages",
+              "path": "ShadowCss/CSS variable namespacing/should handle whitespace in variable declarations and usages",
+              "assertions": []
+            },
+            {
+              "name": "should handle non-ascii characters",
+              "path": "ShadowCss/CSS variable namespacing/should handle non-ascii characters",
+              "assertions": []
+            },
+            {
+              "name": "should namespace @property declarations",
+              "path": "ShadowCss/CSS variable namespacing/should namespace @property declarations",
+              "assertions": []
+            },
+            {
+              "name": "should not namespace @property if --global-- is present",
+              "path": "ShadowCss/CSS variable namespacing/should not namespace @property if --global-- is present",
+              "assertions": []
             }
           ]
         }
