@@ -16,12 +16,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "a",
-                  "expected": [
-                    [
-                      "Text",
-                      "a"
-                    ]
-                  ],
+                  "expected": [["Text", "a"]],
                   "ignore_error": false
                 }
               ]
@@ -34,18 +29,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div a=\"b\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div a=\"b\"></div>",
-                      "<div a=\"b\">",
-                      "</div>"
-                    ],
-                    [
-                      "TextAttribute",
-                      "a=\"b\"",
-                      "a",
-                      "b"
-                    ]
+                    ["Element", "<div a=\"b\"></div>", "<div a=\"b\">", "</div>"],
+                    ["TextAttribute", "a=\"b\"", "a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -59,18 +44,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div a></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div a></div>",
-                      "<div a>",
-                      "</div>"
-                    ],
-                    [
-                      "TextAttribute",
-                      "a",
-                      "a",
-                      "<empty>"
-                    ]
+                    ["Element", "<div a></div>", "<div a>", "</div>"],
+                    ["TextAttribute", "a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -84,18 +59,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<input />\n  <span>\n</span>",
                   "expected": [
-                    [
-                      "Element",
-                      "<input />",
-                      "<input />",
-                      "<input />"
-                    ],
-                    [
-                      "Element",
-                      "<span>\n</span>",
-                      "<span>",
-                      "</span>"
-                    ]
+                    ["Element", "<input />", "<input />", "<input />"],
+                    ["Element", "<span>\n</span>", "<span>", "</span>"]
                   ],
                   "ignore_error": false
                 }
@@ -114,12 +79,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "{{a}}",
-                  "expected": [
-                    [
-                      "BoundText",
-                      "{{a}}"
-                    ]
-                  ],
+                  "expected": [["BoundText", "{{a}}"]],
                   "ignore_error": false
                 }
               ]
@@ -138,18 +98,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [someProp]=\"v\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div [someProp]=\"v\"></div>",
-                      "<div [someProp]=\"v\">",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[someProp]=\"v\"",
-                      "someProp",
-                      "v"
-                    ]
+                    ["Element", "<div [someProp]=\"v\"></div>", "<div [someProp]=\"v\">", "</div>"],
+                    ["BoundAttribute", "[someProp]=\"v\"", "someProp", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -163,18 +113,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [someProp]></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div [someProp]></div>",
-                      "<div [someProp]>",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[someProp]",
-                      "someProp",
-                      "<empty>"
-                    ]
+                    ["Element", "<div [someProp]></div>", "<div [someProp]>", "</div>"],
+                    ["BoundAttribute", "[someProp]", "someProp", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -188,18 +128,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div bind-prop=\"v\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div bind-prop=\"v\"></div>",
-                      "<div bind-prop=\"v\">",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "bind-prop=\"v\"",
-                      "prop",
-                      "v"
-                    ]
+                    ["Element", "<div bind-prop=\"v\"></div>", "<div bind-prop=\"v\">", "</div>"],
+                    ["BoundAttribute", "bind-prop=\"v\"", "prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -213,18 +143,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div prop=\"{{v}}\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div prop=\"{{v}}\"></div>",
-                      "<div prop=\"{{v}}\">",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "prop=\"{{v}}\"",
-                      "prop",
-                      "{{v}}"
-                    ]
+                    ["Element", "<div prop=\"{{v}}\"></div>", "<div prop=\"{{v}}\">", "</div>"],
+                    ["BoundAttribute", "prop=\"{{v}}\"", "prop", "{{v}}"]
                   ],
                   "ignore_error": false
                 }
@@ -244,12 +164,7 @@
                       "<div data-prop=\"{{v}}\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "data-prop=\"{{v}}\"",
-                      "data-prop",
-                      "{{v}}"
-                    ]
+                    ["BoundAttribute", "data-prop=\"{{v}}\"", "data-prop", "{{v}}"]
                   ],
                   "ignore_error": false
                 }
@@ -269,12 +184,7 @@
                       "<div bind-@animation=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "bind-@animation=\"v\"",
-                      "animation",
-                      "v"
-                    ]
+                    ["BoundAttribute", "bind-@animation=\"v\"", "animation", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -294,12 +204,7 @@
                       "<div bind-animate-animationName=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "bind-animate-animationName=\"v\"",
-                      "animationName",
-                      "v"
-                    ]
+                    ["BoundAttribute", "bind-animate-animationName=\"v\"", "animationName", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -313,18 +218,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div @animation></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div @animation></div>",
-                      "<div @animation>",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "@animation",
-                      "animation",
-                      "<empty>"
-                    ]
+                    ["Element", "<div @animation></div>", "<div @animation>", "</div>"],
+                    ["BoundAttribute", "@animation", "animation", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -354,24 +249,9 @@
                   "type": "ExpectFromHtml",
                   "input": "<div *ngIf></div>",
                   "expected": [
-                    [
-                      "Template",
-                      "<div *ngIf></div>",
-                      "<div *ngIf>",
-                      "</div>"
-                    ],
-                    [
-                      "TextAttribute",
-                      "ngIf",
-                      "ngIf",
-                      "<empty>"
-                    ],
-                    [
-                      "Element",
-                      "<div *ngIf></div>",
-                      "<div *ngIf>",
-                      "</div>"
-                    ]
+                    ["Template", "<div *ngIf></div>", "<div *ngIf>", "</div>"],
+                    ["TextAttribute", "ngIf", "ngIf", "<empty>"],
+                    ["Element", "<div *ngIf></div>", "<div *ngIf>", "</div>"]
                   ],
                   "ignore_error": false
                 }
@@ -385,12 +265,7 @@
                   "type": "ExpectFromHtml",
                   "input": "<ng-template></ng-template>",
                   "expected": [
-                    [
-                      "Template",
-                      "<ng-template></ng-template>",
-                      "<ng-template>",
-                      "</ng-template>"
-                    ]
+                    ["Template", "<ng-template></ng-template>", "<ng-template>", "</ng-template>"]
                   ],
                   "ignore_error": false
                 }
@@ -410,12 +285,7 @@
                       "<ng-template #a>",
                       "</ng-template>"
                     ],
-                    [
-                      "Reference",
-                      "#a",
-                      "a",
-                      "<empty>"
-                    ]
+                    ["Reference", "#a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -435,12 +305,7 @@
                       "<ng-template #a=\"b\">",
                       "</ng-template>"
                     ],
-                    [
-                      "Reference",
-                      "#a=\"b\"",
-                      "a",
-                      "b"
-                    ]
+                    ["Reference", "#a=\"b\"", "a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -460,12 +325,7 @@
                       "<ng-template ref-a>",
                       "</ng-template>"
                     ],
-                    [
-                      "Reference",
-                      "ref-a",
-                      "a",
-                      "<empty>"
-                    ]
+                    ["Reference", "ref-a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -485,12 +345,7 @@
                       "<ng-template data-ref-a>",
                       "</ng-template>"
                     ],
-                    [
-                      "TextAttribute",
-                      "data-ref-a",
-                      "data-ref-a",
-                      "<empty>"
-                    ]
+                    ["TextAttribute", "data-ref-a", "data-ref-a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -510,12 +365,7 @@
                       "<ng-template let-a=\"b\">",
                       "</ng-template>"
                     ],
-                    [
-                      "Variable",
-                      "let-a=\"b\"",
-                      "a",
-                      "b"
-                    ]
+                    ["Variable", "let-a=\"b\"", "a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -535,12 +385,7 @@
                       "<ng-template data-let-a=\"b\">",
                       "</ng-template>"
                     ],
-                    [
-                      "TextAttribute",
-                      "data-let-a=\"b\"",
-                      "data-let-a",
-                      "b"
-                    ]
+                    ["TextAttribute", "data-let-a=\"b\"", "data-let-a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -560,12 +405,7 @@
                       "<ng-template k1=\"v1\">",
                       "</ng-template>"
                     ],
-                    [
-                      "TextAttribute",
-                      "k1=\"v1\"",
-                      "k1",
-                      "v1"
-                    ]
+                    ["TextAttribute", "k1=\"v1\"", "k1", "v1"]
                   ],
                   "ignore_error": false
                 }
@@ -585,12 +425,7 @@
                       "<ng-template [k1]=\"v1\">",
                       "</ng-template>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "[k1]=\"v1\"",
-                      "k1",
-                      "v1"
-                    ]
+                    ["BoundAttribute", "[k1]=\"v1\"", "k1", "v1"]
                   ],
                   "ignore_error": false
                 }
@@ -616,24 +451,9 @@
                       "<div *ngFor=\"let item of items\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "ngFor",
-                      "ngFor",
-                      "<empty>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "of items",
-                      "of",
-                      "items"
-                    ],
-                    [
-                      "Variable",
-                      "let item ",
-                      "item",
-                      "<empty>"
-                    ],
+                    ["TextAttribute", "ngFor", "ngFor", "<empty>"],
+                    ["BoundAttribute", "of items", "of", "items"],
+                    ["Variable", "let item ", "item", "<empty>"],
                     [
                       "Element",
                       "<div *ngFor=\"let item of items\"></div>",
@@ -653,18 +473,8 @@
                       "<div *ngFor=\"item of items\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "ngFor=\"item ",
-                      "ngFor",
-                      "item"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "of items",
-                      "of",
-                      "items"
-                    ],
+                    ["BoundAttribute", "ngFor=\"item ", "ngFor", "item"],
+                    ["BoundAttribute", "of items", "of", "items"],
                     [
                       "Element",
                       "<div *ngFor=\"item of items\"></div>",
@@ -684,30 +494,10 @@
                       "<div *ngFor=\"let item of items; trackBy: trackByFn\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "ngFor",
-                      "ngFor",
-                      "<empty>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "of items; ",
-                      "of",
-                      "items"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "trackBy: trackByFn",
-                      "trackBy",
-                      "trackByFn"
-                    ],
-                    [
-                      "Variable",
-                      "let item ",
-                      "item",
-                      "<empty>"
-                    ],
+                    ["TextAttribute", "ngFor", "ngFor", "<empty>"],
+                    ["BoundAttribute", "of items; ", "of", "items"],
+                    ["BoundAttribute", "trackBy: trackByFn", "trackBy", "trackByFn"],
+                    ["Variable", "let item ", "item", "<empty>"],
                     [
                       "Element",
                       "<div *ngFor=\"let item of items; trackBy: trackByFn\"></div>",
@@ -733,18 +523,8 @@
                       "<div *ngIf=\"let a=b\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "ngIf",
-                      "ngIf",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "let a=b",
-                      "a",
-                      "b"
-                    ],
+                    ["TextAttribute", "ngIf", "ngIf", "<empty>"],
+                    ["Variable", "let a=b", "a", "b"],
                     [
                       "Element",
                       "<div *ngIf=\"let a=b\"></div>",
@@ -770,18 +550,8 @@
                       "<div *ngIf=\"expr as local\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "ngIf=\"expr ",
-                      "ngIf",
-                      "expr"
-                    ],
-                    [
-                      "Variable",
-                      "ngIf=\"expr as local",
-                      "local",
-                      "ngIf"
-                    ],
+                    ["BoundAttribute", "ngIf=\"expr ", "ngIf", "expr"],
+                    ["Variable", "ngIf=\"expr as local", "local", "ngIf"],
                     [
                       "Element",
                       "<div *ngIf=\"expr as local\"></div>",
@@ -813,12 +583,7 @@
                       "<div (someEvent)=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "BoundEvent",
-                      "(someEvent)=\"v\"",
-                      "someEvent",
-                      "v"
-                    ]
+                    ["BoundEvent", "(someEvent)=\"v\"", "someEvent", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -832,18 +597,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div on-event=\"v\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div on-event=\"v\"></div>",
-                      "<div on-event=\"v\">",
-                      "</div>"
-                    ],
-                    [
-                      "BoundEvent",
-                      "on-event=\"v\"",
-                      "event",
-                      "v"
-                    ]
+                    ["Element", "<div on-event=\"v\"></div>", "<div on-event=\"v\">", "</div>"],
+                    ["BoundEvent", "on-event=\"v\"", "event", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -863,12 +618,7 @@
                       "<div data-on-event=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "data-on-event=\"v\"",
-                      "data-on-event",
-                      "v"
-                    ]
+                    ["TextAttribute", "data-on-event=\"v\"", "data-on-event", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -882,24 +632,9 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"v\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div [(prop)]=\"v\"></div>",
-                      "<div [(prop)]=\"v\">",
-                      "</div>"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[(prop)]=\"v\"",
-                      "prop",
-                      "v"
-                    ],
-                    [
-                      "BoundEvent",
-                      "[(prop)]=\"v\"",
-                      "prop",
-                      "v"
-                    ]
+                    ["Element", "<div [(prop)]=\"v\"></div>", "<div [(prop)]=\"v\">", "</div>"],
+                    ["BoundAttribute", "[(prop)]=\"v\"", "prop", "v"],
+                    ["BoundEvent", "[(prop)]=\"v\"", "prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -919,18 +654,8 @@
                       "<div bindon-prop=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "bindon-prop=\"v\"",
-                      "prop",
-                      "v"
-                    ],
-                    [
-                      "BoundEvent",
-                      "bindon-prop=\"v\"",
-                      "prop",
-                      "v"
-                    ]
+                    ["BoundAttribute", "bindon-prop=\"v\"", "prop", "v"],
+                    ["BoundEvent", "bindon-prop=\"v\"", "prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -950,12 +675,7 @@
                       "<div data-bindon-prop=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "data-bindon-prop=\"v\"",
-                      "data-bindon-prop",
-                      "v"
-                    ]
+                    ["TextAttribute", "data-bindon-prop=\"v\"", "data-bindon-prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -975,12 +695,7 @@
                       "<div (@name.done)=\"v\">",
                       "</div>"
                     ],
-                    [
-                      "BoundEvent",
-                      "(@name.done)=\"v\"",
-                      "name.done",
-                      "v"
-                    ]
+                    ["BoundEvent", "(@name.done)=\"v\"", "name.done", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -1000,18 +715,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div #a></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div #a></div>",
-                      "<div #a>",
-                      "</div>"
-                    ],
-                    [
-                      "Reference",
-                      "#a",
-                      "a",
-                      "<empty>"
-                    ]
+                    ["Element", "<div #a></div>", "<div #a>", "</div>"],
+                    ["Reference", "#a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -1025,18 +730,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div #a=\"b\"></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div #a=\"b\"></div>",
-                      "<div #a=\"b\">",
-                      "</div>"
-                    ],
-                    [
-                      "Reference",
-                      "#a=\"b\"",
-                      "a",
-                      "b"
-                    ]
+                    ["Element", "<div #a=\"b\"></div>", "<div #a=\"b\">", "</div>"],
+                    ["Reference", "#a=\"b\"", "a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -1050,18 +745,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ref-a></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div ref-a></div>",
-                      "<div ref-a>",
-                      "</div>"
-                    ],
-                    [
-                      "Reference",
-                      "ref-a",
-                      "a",
-                      "<empty>"
-                    ]
+                    ["Element", "<div ref-a></div>", "<div ref-a>", "</div>"],
+                    ["Reference", "ref-a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -1087,18 +772,9 @@
                       "<span i18n>",
                       "</span>"
                     ],
-                    [
-                      "Icu",
-                      "{item.var, plural, other { {{item.placeholder}} items } }"
-                    ],
-                    [
-                      "Icu:Var",
-                      "item.var"
-                    ],
-                    [
-                      "Icu:Placeholder",
-                      "{{item.placeholder}}"
-                    ]
+                    ["Icu", "{item.var, plural, other { {{item.placeholder}} items } }"],
+                    ["Icu:Var", "item.var"],
+                    ["Icu:Placeholder", "{{item.placeholder}}"]
                   ],
                   "ignore_error": false
                 }
@@ -1122,22 +798,10 @@
                       "Icu",
                       "{item.var, plural, other { {{item.placeholder}} {nestedVar, plural, other { {{nestedPlaceholder}} }}} }"
                     ],
-                    [
-                      "Icu:Var",
-                      "nestedVar"
-                    ],
-                    [
-                      "Icu:Var",
-                      "item.var"
-                    ],
-                    [
-                      "Icu:Placeholder",
-                      "{{item.placeholder}}"
-                    ],
-                    [
-                      "Icu:Placeholder",
-                      "{{nestedPlaceholder}}"
-                    ]
+                    ["Icu:Var", "nestedVar"],
+                    ["Icu:Var", "item.var"],
+                    ["Icu:Placeholder", "{{item.placeholder}}"],
+                    ["Icu:Placeholder", "{{nestedPlaceholder}}"]
                   ],
                   "ignore_error": false
                 }
@@ -1163,96 +827,41 @@
                       "@defer (when isVisible() && foo; on hover(button), timer(10s), idle, immediate, interaction(button), viewport(container); prefetch on immediate; prefetch when isDataLoaded(); hydrate on interaction; hydrate when isVisible(); hydrate on timer(1200)) {",
                       "}"
                     ],
-                    [
-                      "InteractionDeferredTrigger",
-                      "hydrate on interaction"
-                    ],
-                    [
-                      "BoundDeferredTrigger",
-                      "hydrate when isVisible()"
-                    ],
-                    [
-                      "TimerDeferredTrigger",
-                      "hydrate on timer(1200)"
-                    ],
-                    [
-                      "BoundDeferredTrigger",
-                      "when isVisible() && foo"
-                    ],
-                    [
-                      "HoverDeferredTrigger",
-                      "on hover(button)"
-                    ],
-                    [
-                      "TimerDeferredTrigger",
-                      "timer(10s)"
-                    ],
-                    [
-                      "IdleDeferredTrigger",
-                      "idle"
-                    ],
-                    [
-                      "ImmediateDeferredTrigger",
-                      "immediate"
-                    ],
-                    [
-                      "InteractionDeferredTrigger",
-                      "interaction(button)"
-                    ],
-                    [
-                      "ViewportDeferredTrigger",
-                      "viewport(container)"
-                    ],
-                    [
-                      "ImmediateDeferredTrigger",
-                      "prefetch on immediate"
-                    ],
-                    [
-                      "BoundDeferredTrigger",
-                      "prefetch when isDataLoaded()"
-                    ],
+                    ["InteractionDeferredTrigger", "hydrate on interaction"],
+                    ["BoundDeferredTrigger", "hydrate when isVisible()"],
+                    ["TimerDeferredTrigger", "hydrate on timer(1200)"],
+                    ["BoundDeferredTrigger", "when isVisible() && foo"],
+                    ["HoverDeferredTrigger", "on hover(button)"],
+                    ["TimerDeferredTrigger", "timer(10s)"],
+                    ["IdleDeferredTrigger", "idle"],
+                    ["ImmediateDeferredTrigger", "immediate"],
+                    ["InteractionDeferredTrigger", "interaction(button)"],
+                    ["ViewportDeferredTrigger", "viewport(container)"],
+                    ["ImmediateDeferredTrigger", "prefetch on immediate"],
+                    ["BoundDeferredTrigger", "prefetch when isDataLoaded()"],
                     [
                       "Element",
                       "<calendar-cmp [date]=\"current\"/>",
                       "<calendar-cmp [date]=\"current\"/>",
                       "<calendar-cmp [date]=\"current\"/>"
                     ],
-                    [
-                      "BoundAttribute",
-                      "[date]=\"current\"",
-                      "date",
-                      "current"
-                    ],
+                    ["BoundAttribute", "[date]=\"current\"", "date", "current"],
                     [
                       "DeferredBlockPlaceholder",
                       "@placeholder (minimum 500) {Placeholder content!}",
                       "@placeholder (minimum 500) {",
                       "}"
                     ],
-                    [
-                      "Text",
-                      "Placeholder content!"
-                    ],
+                    ["Text", "Placeholder content!"],
                     [
                       "DeferredBlockLoading",
                       "@loading (minimum 1s; after 100ms) {Loading...}",
                       "@loading (minimum 1s; after 100ms) {",
                       "}"
                     ],
-                    [
-                      "Text",
-                      "Loading..."
-                    ],
-                    [
-                      "DeferredBlockError",
-                      "@error {Loading failed :(}",
-                      "@error {",
-                      "}"
-                    ],
-                    [
-                      "Text",
-                      "Loading failed :("
-                    ]
+                    ["Text", "Loading..."],
+                    ["DeferredBlockError", "@error {Loading failed :(}", "@error {", "}"],
+                    ["Text", "Loading failed :("]
                   ],
                   "ignore_error": false
                 }
@@ -1278,62 +887,18 @@
                       "@switch (cond.kind) {",
                       "}"
                     ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@case (x()) {X case}",
-                      "@case (x()) {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@case (x()) {X case}",
-                      "@case (x()) {"
-                    ],
-                    [
-                      "Text",
-                      "X case"
-                    ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@case ('hello') {Y case}",
-                      "@case ('hello') {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@case ('hello') {Y case}",
-                      "@case ('hello') {"
-                    ],
-                    [
-                      "Text",
-                      "Y case"
-                    ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@case (42) {Z case}",
-                      "@case (42) {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@case (42) {Z case}",
-                      "@case (42) {"
-                    ],
-                    [
-                      "Text",
-                      "Z case"
-                    ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@default {No case matched}",
-                      "@default {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@default {No case matched}",
-                      "@default {"
-                    ],
-                    [
-                      "Text",
-                      "No case matched"
-                    ]
+                    ["SwitchBlockCaseGroup", "@case (x()) {X case}", "@case (x()) {"],
+                    ["SwitchBlockCase", "@case (x()) {X case}", "@case (x()) {"],
+                    ["Text", "X case"],
+                    ["SwitchBlockCaseGroup", "@case ('hello') {Y case}", "@case ('hello') {"],
+                    ["SwitchBlockCase", "@case ('hello') {Y case}", "@case ('hello') {"],
+                    ["Text", "Y case"],
+                    ["SwitchBlockCaseGroup", "@case (42) {Z case}", "@case (42) {"],
+                    ["SwitchBlockCase", "@case (42) {Z case}", "@case (42) {"],
+                    ["Text", "Z case"],
+                    ["SwitchBlockCaseGroup", "@default {No case matched}", "@default {"],
+                    ["SwitchBlockCase", "@default {No case matched}", "@default {"],
+                    ["Text", "No case matched"]
                   ],
                   "ignore_error": false
                 }
@@ -1358,34 +923,12 @@
                       "@case (x()) @case ('hello') {X case}",
                       "@case (x()) @case ('hello') {"
                     ],
-                    [
-                      "SwitchBlockCase",
-                      "@case (x()) ",
-                      "@case (x()) "
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@case ('hello') {X case}",
-                      "@case ('hello') {"
-                    ],
-                    [
-                      "Text",
-                      "X case"
-                    ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@default {No case matched}",
-                      "@default {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@default {No case matched}",
-                      "@default {"
-                    ],
-                    [
-                      "Text",
-                      "No case matched"
-                    ]
+                    ["SwitchBlockCase", "@case (x()) ", "@case (x()) "],
+                    ["SwitchBlockCase", "@case ('hello') {X case}", "@case ('hello') {"],
+                    ["Text", "X case"],
+                    ["SwitchBlockCaseGroup", "@default {No case matched}", "@default {"],
+                    ["SwitchBlockCase", "@default {No case matched}", "@default {"],
+                    ["Text", "No case matched"]
                   ],
                   "ignore_error": false
                 }
@@ -1405,25 +948,10 @@
                       "@switch (cond.kind) {",
                       "}"
                     ],
-                    [
-                      "SwitchBlockCaseGroup",
-                      "@case (x()) {X case}",
-                      "@case (x()) {"
-                    ],
-                    [
-                      "SwitchBlockCase",
-                      "@case (x()) {X case}",
-                      "@case (x()) {"
-                    ],
-                    [
-                      "Text",
-                      "X case"
-                    ],
-                    [
-                      "SwitchExhaustiveCheck",
-                      "@default never;",
-                      "@default never;"
-                    ]
+                    ["SwitchBlockCaseGroup", "@case (x()) {X case}", "@case (x()) {"],
+                    ["SwitchBlockCase", "@case (x()) {X case}", "@case (x()) {"],
+                    ["Text", "X case"],
+                    ["SwitchExhaustiveCheck", "@default never;", "@default never;"]
                   ],
                   "ignore_error": false
                 }
@@ -1449,79 +977,19 @@
                       "@for (item of items.foo.bar; track item.id; let i = $index, _o_d_d_ = $odd) {",
                       "}"
                     ],
-                    [
-                      "Variable",
-                      "item",
-                      "item",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "",
-                      "",
-                      "<empty>"
-                    ],
-                    [
-                      "Variable",
-                      "i = $index",
-                      "i",
-                      "$index"
-                    ],
-                    [
-                      "Variable",
-                      "_o_d_d_ = $odd",
-                      "_o_d_d_",
-                      "$odd"
-                    ],
-                    [
-                      "Element",
-                      "<h1>{{ item }}</h1>",
-                      "<h1>",
-                      "</h1>"
-                    ],
-                    [
-                      "BoundText",
-                      "{{ item }}"
-                    ],
-                    [
-                      "ForLoopBlockEmpty",
-                      "@empty {There were no items in the list.}",
-                      "@empty {"
-                    ],
-                    [
-                      "Text",
-                      "There were no items in the list."
-                    ]
+                    ["Variable", "item", "item", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "", "", "<empty>"],
+                    ["Variable", "i = $index", "i", "$index"],
+                    ["Variable", "_o_d_d_ = $odd", "_o_d_d_", "$odd"],
+                    ["Element", "<h1>{{ item }}</h1>", "<h1>", "</h1>"],
+                    ["BoundText", "{{ item }}"],
+                    ["ForLoopBlockEmpty", "@empty {There were no items in the list.}", "@empty {"],
+                    ["Text", "There were no items in the list."]
                   ],
                   "ignore_error": false
                 }
@@ -1552,34 +1020,16 @@
                       "@if (cond.expr; as foo) {Main case was true!}",
                       "@if (cond.expr; as foo) {"
                     ],
-                    [
-                      "Variable",
-                      "foo",
-                      "foo",
-                      "<empty>"
-                    ],
-                    [
-                      "Text",
-                      "Main case was true!"
-                    ],
+                    ["Variable", "foo", "foo", "<empty>"],
+                    ["Text", "Main case was true!"],
                     [
                       "IfBlockBranch",
                       "@else if (other.expr) {Extra case was true!}",
                       "@else if (other.expr) {"
                     ],
-                    [
-                      "Text",
-                      "Extra case was true!"
-                    ],
-                    [
-                      "IfBlockBranch",
-                      "@else {False case!}",
-                      "@else {"
-                    ],
-                    [
-                      "Text",
-                      "False case!"
-                    ]
+                    ["Text", "Extra case was true!"],
+                    ["IfBlockBranch", "@else {False case!}", "@else {"],
+                    ["Text", "False case!"]
                   ],
                   "ignore_error": false
                 }
@@ -1598,14 +1048,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@let foo = 123;",
-                  "expected": [
-                    [
-                      "LetDeclaration",
-                      "@let foo = 123;",
-                      "foo",
-                      "123"
-                    ]
-                  ],
+                  "expected": [["LetDeclaration", "@let foo = 123;", "foo", "123"]],
                   "ignore_error": false
                 }
               ]
@@ -1623,14 +1066,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<MyComp></MyComp>",
-                  "expected": [
-                    [
-                      "Component",
-                      "<MyComp></MyComp>",
-                      "<MyComp>",
-                      "</MyComp>"
-                    ]
-                  ],
+                  "expected": [["Component", "<MyComp></MyComp>", "<MyComp>", "</MyComp>"]],
                   "ignore_error": true
                 }
               ]
@@ -1642,14 +1078,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<MyComp/>",
-                  "expected": [
-                    [
-                      "Component",
-                      "<MyComp/>",
-                      "<MyComp/>",
-                      "<MyComp/>"
-                    ]
-                  ],
+                  "expected": [["Component", "<MyComp/>", "<MyComp/>", "<MyComp/>"]],
                   "ignore_error": true
                 }
               ]
@@ -1687,52 +1116,14 @@
                       "<MyComp before=\"foo\" @Dir middle @OtherDir([a]=\"a\" (b)=\"b()\") after=\"123\">",
                       "</MyComp>"
                     ],
-                    [
-                      "TextAttribute",
-                      "before=\"foo\"",
-                      "before",
-                      "foo"
-                    ],
-                    [
-                      "TextAttribute",
-                      "middle",
-                      "middle",
-                      "<empty>"
-                    ],
-                    [
-                      "TextAttribute",
-                      "after=\"123\"",
-                      "after",
-                      "123"
-                    ],
-                    [
-                      "Directive",
-                      "@Dir",
-                      "@Dir",
-                      "<empty>"
-                    ],
-                    [
-                      "Directive",
-                      "@OtherDir([a]=\"a\" (b)=\"b()\")",
-                      "@OtherDir(",
-                      ")"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[a]=\"a\"",
-                      "a",
-                      "a"
-                    ],
-                    [
-                      "BoundEvent",
-                      "(b)=\"b()\"",
-                      "b",
-                      "b()"
-                    ],
-                    [
-                      "Text",
-                      "Hello"
-                    ]
+                    ["TextAttribute", "before=\"foo\"", "before", "foo"],
+                    ["TextAttribute", "middle", "middle", "<empty>"],
+                    ["TextAttribute", "after=\"123\"", "after", "123"],
+                    ["Directive", "@Dir", "@Dir", "<empty>"],
+                    ["Directive", "@OtherDir([a]=\"a\" (b)=\"b()\")", "@OtherDir(", ")"],
+                    ["BoundAttribute", "[a]=\"a\"", "a", "a"],
+                    ["BoundEvent", "(b)=\"b()\"", "b", "b()"],
+                    ["Text", "Hello"]
                   ],
                   "ignore_error": true
                 }
@@ -1763,28 +1154,15 @@
                       "<div>",
                       "</div>"
                     ],
-                    [
-                      "Text",
-                      "Hello: "
-                    ],
+                    ["Text", "Hello: "],
                     [
                       "Component",
                       "<MyComp><span><OtherComp/></span></MyComp>",
                       "<MyComp>",
                       "</MyComp>"
                     ],
-                    [
-                      "Element",
-                      "<span><OtherComp/></span>",
-                      "<span>",
-                      "</span>"
-                    ],
-                    [
-                      "Component",
-                      "<OtherComp/>",
-                      "<OtherComp/>",
-                      "<OtherComp/>"
-                    ]
+                    ["Element", "<span><OtherComp/></span>", "<span>", "</span>"],
+                    ["Component", "<OtherComp/>", "<OtherComp/>", "<OtherComp/>"]
                   ],
                   "ignore_error": true
                 }
@@ -1804,18 +1182,8 @@
                   "type": "ExpectFromHtml",
                   "input": "<div @Dir></div>",
                   "expected": [
-                    [
-                      "Element",
-                      "<div @Dir></div>",
-                      "<div @Dir>",
-                      "</div>"
-                    ],
-                    [
-                      "Directive",
-                      "@Dir",
-                      "@Dir",
-                      "<empty>"
-                    ]
+                    ["Element", "<div @Dir></div>", "<div @Dir>", "</div>"],
+                    ["Directive", "@Dir", "@Dir", "<empty>"]
                   ],
                   "ignore_error": true
                 }
@@ -1835,30 +1203,10 @@
                       "<div @Dir(a=\"1\" [b]=\"two\" (c)=\"c()\")>",
                       "</div>"
                     ],
-                    [
-                      "Directive",
-                      "@Dir(a=\"1\" [b]=\"two\" (c)=\"c()\")",
-                      "@Dir(",
-                      ")"
-                    ],
-                    [
-                      "TextAttribute",
-                      "a=\"1\"",
-                      "a",
-                      "1"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[b]=\"two\"",
-                      "b",
-                      "two"
-                    ],
-                    [
-                      "BoundEvent",
-                      "(c)=\"c()\"",
-                      "c",
-                      "c()"
-                    ]
+                    ["Directive", "@Dir(a=\"1\" [b]=\"two\" (c)=\"c()\")", "@Dir(", ")"],
+                    ["TextAttribute", "a=\"1\"", "a", "1"],
+                    ["BoundAttribute", "[b]=\"two\"", "b", "two"],
+                    ["BoundEvent", "(c)=\"c()\"", "c", "c()"]
                   ],
                   "ignore_error": true
                 }
@@ -1878,48 +1226,13 @@
                       "<div before=\"foo\" @Dir middle @OtherDir([a]=\"a\" (b)=\"b()\") after=\"123\">",
                       "</div>"
                     ],
-                    [
-                      "TextAttribute",
-                      "before=\"foo\"",
-                      "before",
-                      "foo"
-                    ],
-                    [
-                      "TextAttribute",
-                      "middle",
-                      "middle",
-                      "<empty>"
-                    ],
-                    [
-                      "TextAttribute",
-                      "after=\"123\"",
-                      "after",
-                      "123"
-                    ],
-                    [
-                      "Directive",
-                      "@Dir",
-                      "@Dir",
-                      "<empty>"
-                    ],
-                    [
-                      "Directive",
-                      "@OtherDir([a]=\"a\" (b)=\"b()\")",
-                      "@OtherDir(",
-                      ")"
-                    ],
-                    [
-                      "BoundAttribute",
-                      "[a]=\"a\"",
-                      "a",
-                      "a"
-                    ],
-                    [
-                      "BoundEvent",
-                      "(b)=\"b()\"",
-                      "b",
-                      "b()"
-                    ]
+                    ["TextAttribute", "before=\"foo\"", "before", "foo"],
+                    ["TextAttribute", "middle", "middle", "<empty>"],
+                    ["TextAttribute", "after=\"123\"", "after", "123"],
+                    ["Directive", "@Dir", "@Dir", "<empty>"],
+                    ["Directive", "@OtherDir([a]=\"a\" (b)=\"b()\")", "@OtherDir(", ")"],
+                    ["BoundAttribute", "[a]=\"a\"", "a", "a"],
+                    ["BoundEvent", "(b)=\"b()\"", "b", "b()"]
                   ],
                   "ignore_error": true
                 }

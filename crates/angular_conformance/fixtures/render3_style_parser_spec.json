@@ -16,10 +16,7 @@
                 {
                   "type": "ParseStyle",
                   "input": "content: \"foo\"",
-                  "expected": [
-                    "content",
-                    "\"foo\""
-                  ]
+                  "expected": ["content", "\"foo\""]
                 }
               ]
             },
@@ -30,10 +27,7 @@
                 {
                   "type": "ParseStyle",
                   "input": "width: \"1px\"",
-                  "expected": [
-                    "width",
-                    "\"1px\""
-                  ]
+                  "expected": ["width", "\"1px\""]
                 }
               ]
             }
@@ -102,14 +96,7 @@
             {
               "type": "ParseStyle",
               "input": "width:100px;height:200px;opacity:0",
-              "expected": [
-                "width",
-                "100px",
-                "height",
-                "200px",
-                "opacity",
-                "0"
-              ]
+              "expected": ["width", "100px", "height", "200px", "opacity", "0"]
             }
           ]
         },
@@ -120,12 +107,7 @@
             {
               "type": "ParseStyle",
               "input": "width:;height:   ;",
-              "expected": [
-                "width",
-                "",
-                "height",
-                ""
-              ]
+              "expected": ["width", "", "height", ""]
             }
           ]
         },
@@ -136,14 +118,7 @@
             {
               "type": "ParseStyle",
               "input": "width :333px ; height:666px    ; opacity: 0.5;",
-              "expected": [
-                "width",
-                "333px",
-                "height",
-                "666px",
-                "opacity",
-                "0.5"
-              ]
+              "expected": ["width", "333px", "height", "666px", "opacity", "0.5"]
             }
           ]
         },
@@ -154,12 +129,7 @@
             {
               "type": "ParseStyle",
               "input": "content: \"foo; man: guy\"; width: 100px",
-              "expected": [
-                "content",
-                "\"foo; man: guy\"",
-                "width",
-                "100px"
-              ]
+              "expected": ["content", "\"foo; man: guy\"", "width", "100px"]
             }
           ]
         },
@@ -175,10 +145,7 @@
             {
               "type": "ParseStyle",
               "input": "background-image: url(\"foo.jpg\")",
-              "expected": [
-                "background-image",
-                "url(\"foo.jpg\")"
-              ]
+              "expected": ["background-image", "url(\"foo.jpg\")"]
             }
           ]
         },
@@ -189,12 +156,7 @@
             {
               "type": "ParseStyle",
               "input": "color: rgba(calc(50 * 4), var(--cool), :5;); height: 100px;",
-              "expected": [
-                "color",
-                "rgba(calc(50 * 4), var(--cool), :5;)",
-                "height",
-                "100px"
-              ]
+              "expected": ["color", "rgba(calc(50 * 4), var(--cool), :5;)", "height", "100px"]
             }
           ]
         },
@@ -205,10 +167,7 @@
             {
               "type": "ParseStyle",
               "input": "borderWidth: 200px",
-              "expected": [
-                "border-width",
-                "200px"
-              ]
+              "expected": ["border-width", "200px"]
             }
           ]
         }
