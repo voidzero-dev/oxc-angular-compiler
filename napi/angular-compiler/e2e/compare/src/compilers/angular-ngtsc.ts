@@ -632,16 +632,19 @@ export function loadTsConfig(tsconfigPath: string): {
   }
 
   const projectRoot = path.dirname(tsconfigPath)
+  // Without listing the project's files: callers use only the options, and NgtscProgram gets its
+  // files explicitly. Finding no files (TS18003) is then expected.
   const parsed = ts.parseJsonConfigFileContent(
     configFile.config,
-    ts.sys,
+    { ...ts.sys, readDirectory: () => [] },
     projectRoot,
     undefined,
     tsconfigPath,
   )
+  const parseErrors = parsed.errors.filter((d) => d.code !== 18003)
 
-  if (parsed.errors.length > 0) {
-    const errors = parsed.errors
+  if (parseErrors.length > 0) {
+    const errors = parseErrors
       .map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'))
       .join('\n')
     throw new Error(`Failed to parse tsconfig: ${errors}`)

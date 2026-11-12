@@ -14,7 +14,8 @@
     "oxfmt": "catalog:",
     "oxlint": "^1.56.0",
     "oxlint-tsgolint": "^7.0.0",
-    "pkg-pr-new": "0.0.91"
+    "pkg-pr-new": "0.0.91",
+    "vite-plus": "^1.6.0"
   },
   "packageManager": "pnpm@11.24.0"
 }

@@ -37,6 +37,7 @@ minimumReleaseAgeExclude:
   - oxfmt
   - oxlint
   - oxlint-tsgolint
+  - vite-plus
 
 catalog:
   '@napi-rs/cli': 3.10.8
