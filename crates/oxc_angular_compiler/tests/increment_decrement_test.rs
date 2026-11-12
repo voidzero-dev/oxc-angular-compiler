@@ -448,3 +448,22 @@ fn legacy_safe_read_of_update_uses_a_temporary() {
     assert_contains(&code, "(((tmp_1_0=--ctx.other.n)==null)?null:tmp_1_0.toFixed());");
     assert_eq!(code.matches("ctx.count++").count(), 1, "{code}");
 }
+
+/// Like ngtsc 22.3.0-next.4, a `/` right after a postfix `++`/`--` starts a regular
+/// expression, so `count++ / 2` is an error there and here. With parentheses, or after
+/// a prefix update, it is a division.
+#[test]
+fn slash_after_postfix_update_matches_ngtsc() {
+    for template in [
+        r#"<button (click)="x = count++ / 2"></button>"#,
+        r#"<button (click)="x = count-- / 2"></button>"#,
+    ] {
+        let errors = diagnostics(&component(template));
+        assert!(
+            errors.iter().any(|e| e.starts_with("Lexer Error: Unterminated regular expression at column 15")),
+            "{template}: {errors:?}"
+        );
+    }
+    listener(r#"<button (click)="x = (count++) / 2"></button>"#, "return(ctx.x=(ctx.count++/2));");
+    listener(r#"<button (click)="x = ++count / 2"></button>"#, "return(ctx.x=(++ctx.count/2));");
+}
