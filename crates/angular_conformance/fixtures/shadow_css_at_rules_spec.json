@@ -148,6 +148,11 @@
               "assertions": []
             },
             {
+              "name": "should pass through @import that contains an unquoted URL with colons and semicolons",
+              "path": "ShadowCss, at-rules/@import/should pass through @import that contains an unquoted URL with colons and semicolons",
+              "assertions": []
+            },
+            {
               "name": "should shim rules after @import with colons and semicolons",
               "path": "ShadowCss, at-rules/@import/should shim rules after @import with colons and semicolons",
               "assertions": []

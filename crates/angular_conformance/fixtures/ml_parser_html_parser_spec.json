@@ -658,6 +658,27 @@
                   ]
                 },
                 {
+                  "name": "should avoid walking the prototype when looking up entity names",
+                  "path": "HtmlParser/parse/attributes/should avoid walking the prototype when looking up entity names",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<p>{{ &constructor; }}</p>",
+                      "expected": [
+                        ["html.Element", "p", 0.0],
+                        [
+                          "html.Text",
+                          "{{ &constructor; }}",
+                          1.0,
+                          [""],
+                          ["{{", " &constructor; ", "}}"],
+                          [""]
+                        ]
+                      ]
+                    }
+                  ]
+                },
+                {
                   "name": "should normalize line endings within attribute values",
                   "path": "HtmlParser/parse/attributes/should normalize line endings within attribute values",
                   "assertions": []
@@ -1315,6 +1336,34 @@
                   "name": "should store the source locations of self-closing components",
                   "path": "HtmlParser/parse/component nodes/should store the source locations of self-closing components",
                   "assertions": []
+                }
+              ]
+            },
+            {
+              "name": "ignored syntax",
+              "groups": [],
+              "tests": [
+                {
+                  "name": "should ignore doctype declaration",
+                  "path": "HtmlParser/parse/ignored syntax/should ignore doctype declaration",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<!DOCTYPE html>hello",
+                      "expected": [["html.Text", "hello", 0.0, ["hello"]]]
+                    }
+                  ]
+                },
+                {
+                  "name": "should ignore processing instruction",
+                  "path": "HtmlParser/parse/ignored syntax/should ignore processing instruction",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>hello",
+                      "expected": [["html.Text", "hello", 0.0, ["hello"]]]
+                    }
+                  ]
                 }
               ]
             },

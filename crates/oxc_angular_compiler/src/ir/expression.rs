@@ -178,7 +178,7 @@ pub enum IrExpression<'a> {
     /// Logical NOT expression (!expr).
     /// Used to preserve pipe bindings inside negation expressions during ingest.
     Not(Box<'a, NotExpr<'a>>),
-    /// Unary operator expression (+expr or -expr).
+    /// Unary operator expression (`+expr`, `-expr`, `++expr`, `expr--`, ...).
     /// Used to preserve pipe bindings inside unary expressions during ingest.
     Unary(Box<'a, UnaryExpr<'a>>),
     /// Typeof expression (typeof expr).
@@ -203,6 +203,10 @@ pub enum IrExpression<'a> {
     /// Parenthesized expression wrapper.
     /// Preserves grouping parentheses from source to affect safe navigation precedence.
     Parenthesized(Box<'a, IrParenthesizedExpr<'a>>),
+    /// The runtime state of an error boundary.
+    BoundaryState(Box<'a, BoundaryStateExpr>),
+    /// `ɵɵgetBoundary(slot)`: the initializer of a boundary state variable.
+    GetBoundary(Box<'a, GetBoundaryExpr>),
 }
 
 impl<'a> IrExpression<'a> {
@@ -211,6 +215,8 @@ impl<'a> IrExpression<'a> {
         match self {
             IrExpression::LexicalRead(_) => ExpressionKind::LexicalRead,
             IrExpression::Reference(_) => ExpressionKind::Reference,
+            IrExpression::BoundaryState(_) => ExpressionKind::BoundaryState,
+            IrExpression::GetBoundary(_) => ExpressionKind::GetBoundary,
             IrExpression::Context(_) => ExpressionKind::Context,
             IrExpression::NextContext(_) => ExpressionKind::NextContext,
             IrExpression::GetCurrentView(_) => ExpressionKind::GetCurrentView,
@@ -345,6 +351,14 @@ impl<'a> IrExpression<'a> {
             )),
             IrExpression::Context(e) => IrExpression::Context(Box::new_in(
                 ContextExpr { view: e.view, source_span: e.source_span },
+                &allocator,
+            )),
+            IrExpression::BoundaryState(e) => IrExpression::BoundaryState(Box::new_in(
+                BoundaryStateExpr { target: e.target, target_slot: e.target_slot },
+                &allocator,
+            )),
+            IrExpression::GetBoundary(e) => IrExpression::GetBoundary(Box::new_in(
+                GetBoundaryExpr { target: e.target, target_slot: e.target_slot },
                 &allocator,
             )),
             IrExpression::NextContext(e) => IrExpression::NextContext(Box::new_in(
@@ -752,6 +766,7 @@ impl<'a> IrExpression<'a> {
                     operator: e.operator,
                     expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
+                    is_prefix: e.is_prefix,
                 },
                 &allocator,
             )),
@@ -895,6 +910,32 @@ pub struct ReferenceExpr {
     pub offset: i32,
     /// Source span.
     pub source_span: Option<Span>,
+}
+
+/// The runtime state (`LBoundary`) of an error boundary.
+///
+/// Every occurrence is replaced by a read of the variable holding that state in the
+/// `resolve_boundaries` phase.
+///
+/// Ported from Angular's `BoundaryStateExpr` in `expression.ts`.
+#[derive(Debug)]
+pub struct BoundaryStateExpr {
+    /// The `BoundaryCreateOp` whose state is read.
+    pub target: XrefId,
+    /// Slot of the `BoundaryCreateOp`, set by slot allocation.
+    pub target_slot: SlotHandle,
+}
+
+/// `ɵɵgetBoundary(slot)`, the initializer of the variable holding a boundary's state.
+///
+/// Angular builds it as `ng.getBoundary(new ir.SlotLiteralExpr(handle))`, a plain call
+/// that `resolve_boundaries` leaves alone.
+#[derive(Debug)]
+pub struct GetBoundaryExpr {
+    /// The `BoundaryCreateOp` whose state is read.
+    pub target: XrefId,
+    /// Slot of the `BoundaryCreateOp`, set by slot allocation.
+    pub target_slot: SlotHandle,
 }
 
 /// Reference to current view context (ctx).
@@ -1561,6 +1602,10 @@ pub enum IrUnaryOperator {
     Plus,
     /// Unary minus (-)
     Minus,
+    /// Increment (++)
+    Increment,
+    /// Decrement (--)
+    Decrement,
     /// Spread (`...expr`), which only appears as a call argument. It is modelled as a
     /// unary operator so that every phase resolves and rewrites its operand like any
     /// other expression.
@@ -1578,7 +1623,7 @@ pub struct NotExpr<'a> {
     pub source_span: Option<Span>,
 }
 
-/// Unary operator expression (+expr or -expr).
+/// Unary operator expression (`+expr`, `-expr`, `++expr`, `expr--`, ...).
 ///
 /// Used to preserve pipe bindings inside unary expressions like `+(x | pipe)`.
 #[derive(Debug)]
@@ -1589,6 +1634,8 @@ pub struct UnaryExpr<'a> {
     pub expr: Box<'a, IrExpression<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
+    /// Whether the operator precedes the operand. Only `++` and `--` can be postfix.
+    pub is_prefix: bool,
 }
 
 /// Typeof expression (typeof expr).
@@ -1890,6 +1937,8 @@ pub fn transform_expressions_in_expression<'a, F>(
         // These expressions have no internal expressions
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
@@ -2088,6 +2137,8 @@ pub fn visit_expressions_in_expression<'a, F>(
         // These expressions have no internal expressions
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
@@ -2171,6 +2222,14 @@ pub fn transform_expressions_in_update_op<'a, F>(
             }
             if let Some(ref mut ctx) = op.context_value {
                 transform_expressions_in_expression(ctx, transform, flags);
+            }
+        }
+        UpdateOp::Boundary(op) => {
+            for expr in op.when_exprs_mut() {
+                transform_expressions_in_expression(expr, transform, flags);
+            }
+            if let Some(ref mut processed) = op.processed {
+                transform_expressions_in_expression(processed, transform, flags);
             }
         }
         UpdateOp::Repeater(op) => {
@@ -2465,6 +2524,8 @@ pub fn transform_expressions_in_create_op<'a, F>(
         | CreateOp::I18nAttributes(_)
         | CreateOp::SourceLocation(_)
         | CreateOp::ConditionalBranch(_)
+        | CreateOp::BoundaryCreate(_)
+        | CreateOp::BoundaryErrorCreate(_)
         | CreateOp::ControlCreate(_) => {}
         CreateOp::Statement(op) => {
             // Statement ops may contain WrappedIrNode which wraps IR expressions,
@@ -2533,6 +2594,14 @@ pub fn visit_expressions_in_update_op<'a, F>(
             }
             if let Some(ref ctx) = op.context_value {
                 visit_expressions_in_expression(ctx, visitor, flags);
+            }
+        }
+        UpdateOp::Boundary(op) => {
+            for expr in op.when_exprs() {
+                visit_expressions_in_expression(expr, visitor, flags);
+            }
+            if let Some(ref processed) = op.processed {
+                visit_expressions_in_expression(processed, visitor, flags);
             }
         }
         UpdateOp::Repeater(op) => {
@@ -2813,6 +2882,8 @@ pub fn visit_expressions_in_create_op<'a, F>(
         | CreateOp::I18nAttributes(_)
         | CreateOp::SourceLocation(_)
         | CreateOp::ConditionalBranch(_)
+        | CreateOp::BoundaryCreate(_)
+        | CreateOp::BoundaryErrorCreate(_)
         | CreateOp::ControlCreate(_) => {}
         CreateOp::Statement(op) => {
             // Same as UpdateOp::Statement: statements may wrap IR expressions.
@@ -3015,6 +3086,7 @@ pub fn clone_angular_expression<'a>(
                 expr: clone_angular_expression(&e.expr, &allocator),
                 span: e.span,
                 source_span: e.source_span,
+                is_prefix: e.is_prefix,
             },
             &allocator,
         )),
@@ -3348,6 +3420,8 @@ pub fn vars_used_by_ir_expression(expr: &IrExpression<'_>) -> u32 {
         // All other expressions don't directly consume variable slots
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::Context(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)

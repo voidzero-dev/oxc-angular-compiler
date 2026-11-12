@@ -525,26 +525,7 @@ impl<'a> Lexer<'a> {
                 self.scan_template_string(start);
             }
             // Operators and punctuation
-            chars::PLUS => {
-                if self.peek() == chars::PLUS {
-                    self.error(start, "++ is not allowed");
-                } else if self.peek() == chars::EQ {
-                    self.advance();
-                    self.scan_operator(start, "+=");
-                } else {
-                    self.scan_operator(start, "+");
-                }
-            }
-            chars::MINUS => {
-                if self.peek() == chars::MINUS {
-                    self.error(start, "-- is not allowed");
-                } else if self.peek() == chars::EQ {
-                    self.advance();
-                    self.scan_operator(start, "-=");
-                } else {
-                    self.scan_operator(start, "-");
-                }
-            }
+            chars::PLUS | chars::MINUS => self.scan_plus_or_minus(start, ch),
             chars::STAR => {
                 if self.peek() == chars::STAR {
                     self.advance();
@@ -718,6 +699,22 @@ impl<'a> Lexer<'a> {
     fn scan_character(&mut self, start: u32, ch: char) {
         let token = Token::new_character(start, self.index, ch, &self.allocator);
         self.tokens.push(token);
+    }
+
+    /// Scans `+`, `-`, `++`, `--`, `+=` or `-=`. `ch` has already been consumed.
+    fn scan_plus_or_minus(&mut self, start: u32, ch: char) {
+        let op = if self.peek() == ch {
+            self.advance();
+            if ch == chars::PLUS { "++" } else { "--" }
+        } else if self.peek() == chars::EQ {
+            self.advance();
+            if ch == chars::PLUS { "+=" } else { "-=" }
+        } else if ch == chars::PLUS {
+            "+"
+        } else {
+            "-"
+        };
+        self.scan_operator(start, op);
     }
 
     /// Scans an operator token.
@@ -1159,20 +1156,7 @@ impl<'a> Lexer<'a> {
                 self.scan_template_string(start);
             }
             // Operators and punctuation - reuse existing scanning logic
-            chars::PLUS => {
-                if self.peek() == chars::PLUS {
-                    self.error(start, "++ is not allowed");
-                } else {
-                    self.scan_operator(start, "+");
-                }
-            }
-            chars::MINUS => {
-                if self.peek() == chars::MINUS {
-                    self.error(start, "-- is not allowed");
-                } else {
-                    self.scan_operator(start, "-");
-                }
-            }
+            chars::PLUS | chars::MINUS => self.scan_plus_or_minus(start, ch),
             chars::STAR => {
                 if self.peek() == chars::STAR {
                     self.advance();

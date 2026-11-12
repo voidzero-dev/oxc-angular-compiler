@@ -733,6 +733,48 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         }
     }
 
+    fn visit_boundary_block(&mut self, block: &oxc_angular_compiler::ast::r3::R3BoundaryBlock<'a>) {
+        let row = if self.mode == HumanizeMode::SourceSpans {
+            let source_span = self.span_text(&block.source_span);
+            let start_span = self.span_text(&block.start_source_span);
+            let end_span =
+                block.end_source_span.map_or_else(|| "<empty>".to_string(), |s| self.span_text(&s));
+            vec!["BoundaryBlock".to_string(), source_span, start_span, end_span]
+        } else {
+            vec!["BoundaryBlock".to_string()]
+        };
+        self.result.push(row);
+        for child in &block.children {
+            child.visit(self);
+        }
+        for error_block in &block.error_blocks {
+            self.visit_boundary_error_block(error_block);
+        }
+    }
+
+    fn visit_boundary_error_block(
+        &mut self,
+        block: &oxc_angular_compiler::ast::r3::R3BoundaryErrorBlock<'a>,
+    ) {
+        if self.mode == HumanizeMode::SourceSpans {
+            let source_span = self.span_text(&block.source_span);
+            let start_span = self.span_text(&block.start_source_span);
+            self.result.push(vec!["BoundaryErrorBlock".to_string(), source_span, start_span]);
+        } else {
+            let expr = block
+                .expression
+                .as_ref()
+                .map_or_else(|| "null".to_string(), |e| unparse_expression_r3(e));
+            self.result.push(vec!["BoundaryErrorBlock".to_string(), expr]);
+            for var in &block.context_variables {
+                self.visit_variable(var);
+            }
+        }
+        for child in &block.children {
+            child.visit(self);
+        }
+    }
+
     fn visit_if_block(&mut self, block: &oxc_angular_compiler::ast::r3::R3IfBlock<'a>) {
         // Output [IfBlock] first, then visit branches
         let row = if self.mode == HumanizeMode::SourceSpans {

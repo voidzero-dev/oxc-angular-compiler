@@ -1370,6 +1370,7 @@ impl<'a> Parser<'a> {
 
         loop {
             // Use parse_pipe to allow pipes at top level
+            let expr_index = self.index;
             let expr = self.parse_pipe();
             expressions.push(expr);
 
@@ -1381,8 +1382,12 @@ impl<'a> Parser<'a> {
                 // There's an unconsumed token that's not a semicolon
                 let error_index = self.index;
                 if let Some(token) = self.peek() {
-                    // Use quotes around identifiers/keywords and assignment operators
-                    if token.is_identifier()
+                    // Angular quotes a token left over after an expression
+                    // (`foo++.bar` -> `Unexpected token '.'`). A token that
+                    // starts nothing is reported by Angular's `parsePrimary`,
+                    // unquoted (`)` -> `Unexpected token )`).
+                    if self.index != expr_index
+                        || token.is_identifier()
                         || token.is_keyword()
                         || self.is_assignment_operator(token)
                     {
@@ -1700,14 +1705,16 @@ impl<'a> Parser<'a> {
         while self.optional_operator("**") {
             // Check if the base is a unary expression that needs parentheses
             // This aligns with JavaScript semantics which require any unary operator
-            // preceding the exponentiation operation to be explicitly grouped
-            if matches!(
-                result,
-                AngularExpression::Unary(_)
-                    | AngularExpression::PrefixNot(_)
-                    | AngularExpression::TypeofExpression(_)
-                    | AngularExpression::VoidExpression(_)
-            ) {
+            // preceding the exponentiation operation to be explicitly grouped.
+            // `++`/`--` are update expressions, which JS allows on the left of `**`.
+            let is_unary = match &result {
+                AngularExpression::Unary(u) => !u.operator.is_update(),
+                AngularExpression::PrefixNot(_)
+                | AngularExpression::TypeofExpression(_)
+                | AngularExpression::VoidExpression(_) => true,
+                _ => false,
+            };
+            if is_unary {
                 self.error(
                     "Unary operator used immediately before exponentiation expression. \
                      Parenthesis must be used to disambiguate operator precedence",
@@ -1731,12 +1738,19 @@ impl<'a> Parser<'a> {
     fn parse_prefix(&mut self) -> AngularExpression<'a> {
         let start = self.peek().map(|t| t.index).unwrap_or(0);
 
+        if let Some(operator) = self.peek_update_operator() {
+            self.advance();
+            let expr = self.parse_update_operand();
+            return self.make_update_expression(start, operator, expr, true);
+        }
+
         if self.optional_operator("+") {
             let expr = self.parse_prefix();
             let end = self.current_end_index();
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
-            let unary = Unary { span, source_span, operator: UnaryOperator::Plus, expr };
+            let unary =
+                Unary { span, source_span, operator: UnaryOperator::Plus, expr, is_prefix: true };
             return AngularExpression::Unary(Box::new_in(unary, &self.allocator));
         }
 
@@ -1745,7 +1759,8 @@ impl<'a> Parser<'a> {
             let end = self.current_end_index();
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
-            let unary = Unary { span, source_span, operator: UnaryOperator::Minus, expr };
+            let unary =
+                Unary { span, source_span, operator: UnaryOperator::Minus, expr, is_prefix: true };
             return AngularExpression::Unary(Box::new_in(unary, &self.allocator));
         }
 
@@ -1825,6 +1840,11 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if let Some(operator) = self.peek_update_operator() {
+            self.advance();
+            return self.make_update_expression(start, operator, result, false);
+        }
+
         // Check for assignment operator on PropertyRead (simple variable assignment like `a = b`)
         // Note: PropertyRead with property access (a.b = c) is handled in parse_access_member
         // and KeyedRead (a[b] = c) is handled in parse_keyed_read
@@ -1874,6 +1894,82 @@ impl<'a> Parser<'a> {
         }
 
         result
+    }
+
+    /// The `++`/`--` operator at the current token, if any.
+    fn peek_update_operator(&self) -> Option<UnaryOperator> {
+        match self.peek() {
+            Some(t) if t.is_operator("++") => Some(UnaryOperator::Increment),
+            Some(t) if t.is_operator("--") => Some(UnaryOperator::Decrement),
+            _ => None,
+        }
+    }
+
+    /// Parses the operand of a prefix `++`/`--`.
+    ///
+    /// Angular's `parsePrimary` reports `Unexpected token X` when no expression
+    /// starts at X (`++;`, `foo(++)`). Ours stays silent there and leaves the
+    /// token to its callers, which would turn a bare `++` into `undefined`.
+    fn parse_update_operand(&mut self) -> AngularExpression<'a> {
+        let index = self.index;
+        let errors = self.errors.len();
+        let operand = self.parse_prefix();
+        if matches!(operand, AngularExpression::Empty(_))
+            && self.index == index
+            && self.errors.len() == errors
+            && let Some(token) = self.peek()
+        {
+            let message = format!("Unexpected token {}", token.str_value);
+            self.error(&message);
+        }
+        operand
+    }
+
+    /// Builds a `++`/`--` expression whose operator has already been consumed,
+    /// or an empty expression when `operand` is not a valid target.
+    fn make_update_expression(
+        &mut self,
+        start: u32,
+        operator: UnaryOperator,
+        expr: AngularExpression<'a>,
+        is_prefix: bool,
+    ) -> AngularExpression<'a> {
+        let valid = self.validate_increment_decrement_target(&expr);
+        let end = self.current_end_index();
+        let span = self.make_span(start, end);
+        let source_span = span.to_absolute(self.absolute_offset);
+        if !valid {
+            return AngularExpression::Empty(Box::new_in(
+                EmptyExpr { span, source_span },
+                &self.allocator,
+            ));
+        }
+        let unary = Unary { span, source_span, operator, expr, is_prefix };
+        AngularExpression::Unary(Box::new_in(unary, &self.allocator))
+    }
+
+    /// Checks that `++`/`--` is used in an action and targets a property or keyed read.
+    ///
+    /// Ported from Angular's `validateIncrementDecrementTarget`.
+    fn validate_increment_decrement_target(&mut self, operand: &AngularExpression<'a>) -> bool {
+        if !self.action_mode {
+            self.error("Bindings cannot contain assignments");
+            return false;
+        }
+
+        match operand.unwrap_write_target() {
+            AngularExpression::PropertyRead(_) | AngularExpression::KeyedRead(_) => true,
+            // The operand already reported its own error.
+            AngularExpression::Empty(_) => false,
+            AngularExpression::SafePropertyRead(_) | AngularExpression::SafeKeyedRead(_) => {
+                self.error("The '?.' operator cannot be used in the assignment");
+                false
+            }
+            _ => {
+                self.error("The expression cannot be used in the assignment");
+                false
+            }
+        }
     }
 
     /// Parses member access.
@@ -3000,14 +3096,19 @@ impl<'a> Parser<'a> {
     /// Parses a pipe expression.
     fn parse_pipe(&mut self) -> AngularExpression<'a> {
         let start = self.peek().map(|t| t.index).unwrap_or(0);
+        let errors = self.errors.len();
         let mut result = self.parse_expression();
 
         // Check if we're about to consume a pipe with an empty left-hand expression
-        // This handles cases like " | a | b" where the expression starts with a pipe
-        if let Some(token) = self.peek() {
-            if token.is_operator("|") && matches!(result, AngularExpression::Empty(_)) {
-                self.error("Unexpected token |");
-            }
+        // This handles cases like " | a | b" where the expression starts with a pipe.
+        // An empty expression that already reported an error (an invalid `a++`) is
+        // not reported again, as Angular reports it only once.
+        if let Some(token) = self.peek()
+            && token.is_operator("|")
+            && matches!(result, AngularExpression::Empty(_))
+            && self.errors.len() == errors
+        {
+            self.error("Unexpected token |");
         }
 
         if !self.optional_operator("|") {
@@ -3053,9 +3154,10 @@ impl<'a> Parser<'a> {
             // Parse pipe arguments
             let mut args = Vec::new_in(&self.allocator);
             while self.optional_character(':') {
+                let errors = self.errors.len();
                 let arg = self.parse_expression();
                 // Check for empty argument followed by | or EOF
-                if matches!(arg, AngularExpression::Empty(_)) {
+                if matches!(arg, AngularExpression::Empty(_)) && self.errors.len() == errors {
                     if let Some(next_token) = self.peek() {
                         if next_token.is_operator("|") {
                             self.error("Unexpected token |");

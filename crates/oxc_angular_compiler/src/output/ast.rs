@@ -22,6 +22,10 @@ pub enum UnaryOperator {
     Minus,
     /// Plus (+)
     Plus,
+    /// Increment (++)
+    Increment,
+    /// Decrement (--)
+    Decrement,
 }
 
 /// Binary operators.
@@ -665,6 +669,8 @@ pub struct UnaryOperatorExpr<'a> {
     pub parens: bool,
     /// Source span.
     pub source_span: Option<Span>,
+    /// Whether the operator precedes the operand. Only `++` and `--` can be postfix.
+    pub is_prefix: bool,
 }
 
 /// Conditional expression.
@@ -1056,7 +1062,10 @@ impl<'a> OutputExpression<'a> {
                     && a.rhs.is_equivalent(&b.rhs)
             }
             (OutputExpression::UnaryOperator(a), OutputExpression::UnaryOperator(b)) => {
-                a.operator == b.operator && a.parens == b.parens && a.expr.is_equivalent(&b.expr)
+                a.operator == b.operator
+                    && a.parens == b.parens
+                    && a.is_prefix == b.is_prefix
+                    && a.expr.is_equivalent(&b.expr)
             }
             (OutputExpression::Conditional(a), OutputExpression::Conditional(b)) => {
                 a.condition.is_equivalent(&b.condition)
@@ -1312,6 +1321,7 @@ impl<'a> OutputExpression<'a> {
                     expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     parens: e.parens,
                     source_span: e.source_span,
+                    is_prefix: e.is_prefix,
                 },
                 &allocator,
             )),

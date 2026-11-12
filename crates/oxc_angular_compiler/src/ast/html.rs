@@ -262,7 +262,9 @@ pub enum BlockType {
     Placeholder,
     /// A @loading block.
     Loading,
-    /// An @error block.
+    /// A @boundary block.
+    Boundary,
+    /// An @error block (inside @defer or @boundary).
     Error,
 }
 

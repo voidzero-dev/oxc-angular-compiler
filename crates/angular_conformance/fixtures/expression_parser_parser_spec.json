@@ -839,6 +839,282 @@
                       "expected": null
                     }
                   ]
+                },
+                {
+                  "name": "should report invalid increment/decrement expressions",
+                  "path": "parser/parseAction/assignment/should report invalid increment/decrement expressions",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "-- foo++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++ foo--",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a?.a++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++a?.a",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a?.[0]++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++a?.[0]",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "5++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++5",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo()++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++foo()",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "---foo",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "+++foo",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "(foo++)++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++(foo++)",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++foo++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "--foo--",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++foo--",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "--foo++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++ ++foo",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "-- --foo",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++foo+++bar",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "(-foo)++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "(foo + bar)++",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++(foo + bar)",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "\"foo\"++",
+                      "error_contains": "cannot be used in the assignment"
+                    }
+                  ]
+                },
+                {
+                  "name": "should report unexpected token for chained postfix operators",
+                  "path": "parser/parseAction/assignment/should report unexpected token for chained postfix operators",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo++ ++",
+                      "error_contains": "Unexpected token '++'"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo-- --",
+                      "error_contains": "Unexpected token '--'"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo+++++bar",
+                      "error_contains": "Unexpected token '++'"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo-----bar",
+                      "error_contains": "Unexpected token '--'"
+                    }
+                  ]
+                },
+                {
+                  "name": "should report a dangling + or - left over after an update operator",
+                  "path": "parser/parseAction/assignment/should report a dangling + or - left over after an update operator",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a+++",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a---",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a++ +",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a++-",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++a+",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "a+++b+",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo.bar+++",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo[0]+++",
+                      "error_contains": "Unexpected end of expression"
+                    }
+                  ]
+                },
+                {
+                  "name": "should report a increment/decrement expression with no target",
+                  "path": "parser/parseAction/assignment/should report a increment/decrement expression with no target",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "--",
+                      "error_contains": "Unexpected end of expression"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "+++",
+                      "error_contains": "Unexpected end of expression"
+                    }
+                  ]
+                },
+                {
+                  "name": "should not allow member access or calls after a postfix update",
+                  "path": "parser/parseAction/assignment/should not allow member access or calls after a postfix update",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo++.bar",
+                      "error_contains": "Unexpected token '.'"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo++[0]",
+                      "error_contains": "Unexpected token '['"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo++()",
+                      "error_contains": "Unexpected token '('"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo--.bar",
+                      "error_contains": "Unexpected token '.'"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo-- bar",
+                      "error_contains": "Unexpected token 'bar'"
+                    }
+                  ]
+                },
+                {
+                  "name": "should not allow assigning to an update expression",
+                  "path": "parser/parseAction/assignment/should not allow assigning to an update expression",
+                  "assertions": [
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo++ = 1",
+                      "error_contains": "Unexpected token '='"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "++foo = 1",
+                      "error_contains": "cannot be used in the assignment"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "foo+++=bar",
+                      "error_contains": "Unexpected token '+='"
+                    }
+                  ]
                 }
               ]
             },
@@ -965,11 +1241,109 @@
                   "path": "parser/parseAction/template literals/should report error if interpolation is empty",
                   "assertions": [
                     {
+                      "type": "CheckBinding",
+                      "input": "`hello ${}`",
+                      "expected": null
+                    },
+                    {
                       "type": "ExpectBindingError",
                       "input": "`hello ${}`",
                       "error_contains": "Template literal interpolation cannot be empty"
                     }
                   ]
+                },
+                {
+                  "name": "should not report errors for valid interpolations",
+                  "path": "parser/parseAction/template literals/should not report errors for valid interpolations",
+                  "assertions": []
+                },
+                {
+                  "name": "should report an error if an interpolation has unexpected tokens after the expression",
+                  "path": "parser/parseAction/template literals/should report an error if an interpolation has unexpected tokens after the expression",
+                  "assertions": [
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a b} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a & b} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a, b} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${`nested ${a b}`} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "{\"a\": `hello ${b c}`}",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "tag`hello ${a b} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a | pipe b} world`",
+                      "error_contains": "Missing expected }"
+                    },
+                    {
+                      "type": "ExpectActionError",
+                      "input": "`hello ${a; b} world`",
+                      "error_contains": "Missing expected }"
+                    }
+                  ]
+                },
+                {
+                  "name": "should report an error if an interpolation is not closed",
+                  "path": "parser/parseAction/template literals/should report an error if an interpolation is not closed",
+                  "assertions": [
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a",
+                      "error_contains": "Missing expected } at the end of the expression"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a ",
+                      "error_contains": "Missing expected } at the end of the expression"
+                    }
+                  ]
+                },
+                {
+                  "name": "should report an error if a template literal with an interpolation is not closed",
+                  "path": "parser/parseAction/template literals/should report an error if a template literal with an interpolation is not closed",
+                  "assertions": [
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a}",
+                      "error_contains": "Unterminated template literal"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a} world",
+                      "error_contains": "Unterminated template literal"
+                    },
+                    {
+                      "type": "ExpectBindingError",
+                      "input": "`hello ${a} and ${b} world",
+                      "error_contains": "Unterminated template literal"
+                    }
+                  ]
+                },
+                {
+                  "name": "should retain all the elements and expressions of a malformed template literal",
+                  "path": "parser/parseAction/template literals/should retain all the elements and expressions of a malformed template literal",
+                  "assertions": []
                 },
                 {
                   "name": "should parse tagged template literals with no interpolations",
@@ -1139,6 +1513,22 @@
                   ]
                 },
                 {
+                  "name": "should parse a regular expression literal that ends with an escaped slash",
+                  "path": "parser/parseAction/regular expression literals/should parse a regular expression literal that ends with an escaped slash",
+                  "assertions": [
+                    {
+                      "type": "CheckBinding",
+                      "input": "/^https?:\\/\\//",
+                      "expected": null
+                    },
+                    {
+                      "type": "CheckBinding",
+                      "input": "url.replace(/^\\//, \"\") //comment",
+                      "expected": "url.replace(/^\\//, \"\")"
+                    }
+                  ]
+                },
+                {
                   "name": "should report invalid regular expression flag",
                   "path": "parser/parseAction/regular expression literals/should report invalid regular expression flag",
                   "assertions": [
@@ -1301,6 +1691,57 @@
                   "expected": "1 * 2 ** 3"
                 }
               ]
+            },
+            {
+              "name": "should allow ++ and -- on the left-hand side of **",
+              "path": "parser/parseAction/should allow ++ and -- on the left-hand side of **",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "a++ ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++a ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a-- ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--a ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a.b++ ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a[0]++ ** 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "2 ** a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a ** b++ ** c",
+                  "expected": null
+                }
+              ]
+            },
+            {
+              "name": "should not allow other unary operators on the left-hand side of **",
+              "path": "parser/parseAction/should not allow other unary operators on the left-hand side of **",
+              "assertions": []
             },
             {
               "name": "should parse multiplicative expressions",
@@ -1660,6 +2101,316 @@
                 {
                   "type": "CheckAction",
                   "input": "a[0] ??= b",
+                  "expected": null
+                }
+              ]
+            },
+            {
+              "name": "should parse prefix ++ and --",
+              "path": "parser/parseAction/should parse prefix ++ and --",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "++a",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--a",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++a.b",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--a.b",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++a[0]",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--a[0]",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++this.a",
+                  "expected": "++a"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--this.a",
+                  "expected": "--a"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++a!",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--a!",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "++(a)",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "--(a)",
+                  "expected": null
+                }
+              ]
+            },
+            {
+              "name": "should parse postfix ++ and --",
+              "path": "parser/parseAction/should parse postfix ++ and --",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a.b++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a.b--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a[0]++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a[0]--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "this.a++",
+                  "expected": "a++"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "this.a--",
+                  "expected": "a--"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a!++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a!--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "(a)++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "(a)--",
+                  "expected": null
+                }
+              ]
+            },
+            {
+              "name": "should parse consecutive unary expressions",
+              "path": "parser/parseAction/should parse consecutive unary expressions",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "- - foo++",
+                  "expected": "- -foo++"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "+ + foo++",
+                  "expected": "+ +foo++"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "- ++foo",
+                  "expected": "-++foo"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "+ --foo",
+                  "expected": "+--foo"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a+++b",
+                  "expected": "a++ + b"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a---b",
+                  "expected": "a-- - b"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a+++b+++c",
+                  "expected": "a++ + b++ + c"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a+++ +b",
+                  "expected": "a++ + +b"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a+ ++b",
+                  "expected": "a + ++b"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a- --b",
+                  "expected": "a - --b"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a - -b",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a + + b",
+                  "expected": "a + +b"
+                }
+              ]
+            },
+            {
+              "name": "should bind ++ and -- tighter than the other unary operators",
+              "path": "parser/parseAction/should bind ++ and -- tighter than the other unary operators",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "-a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "+a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "!a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "-a--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "typeof a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "void a++",
+                  "expected": null
+                }
+              ]
+            },
+            {
+              "name": "should allow ++ and -- expressions as operands of other operators",
+              "path": "parser/parseAction/should allow ++ and -- expressions as operands of other operators",
+              "assertions": [
+                {
+                  "type": "CheckAction",
+                  "input": "a++ instanceof b",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a++ in o",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a++ < 3",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a++ * 2",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a++ ?? b",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a ? b++ : c--",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "o[a++]",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "f(a++)",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "[a++]",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "{x: a++}",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "c = a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "c += a++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a.b[c++].d++",
+                  "expected": null
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "a++ + ++a",
                   "expected": null
                 }
               ]
@@ -2220,6 +2971,37 @@
                   ]
                 },
                 {
+                  "name": "should parse an arrow function containing update operators",
+                  "path": "parser/parseBinding/arrow functions/should parse an arrow function containing update operators",
+                  "assertions": [
+                    {
+                      "type": "CheckBinding",
+                      "input": "a => a++",
+                      "expected": null
+                    },
+                    {
+                      "type": "CheckBinding",
+                      "input": "a => a--",
+                      "expected": null
+                    },
+                    {
+                      "type": "CheckBinding",
+                      "input": "a => ++a",
+                      "expected": null
+                    },
+                    {
+                      "type": "CheckBinding",
+                      "input": "a => --a",
+                      "expected": null
+                    },
+                    {
+                      "type": "CheckBinding",
+                      "input": "(a) => a++",
+                      "expected": "a => a++"
+                    }
+                  ]
+                },
+                {
                   "name": "should be able to pass an arrow function through a pipe",
                   "path": "parser/parseBinding/arrow functions/should be able to pass an arrow function through a pipe",
                   "assertions": [
@@ -2258,6 +3040,11 @@
             {
               "name": "should report assignment",
               "path": "parser/parseBinding/should report assignment",
+              "assertions": []
+            },
+            {
+              "name": "should report update operators in bindings",
+              "path": "parser/parseBinding/should report update operators in bindings",
               "assertions": []
             },
             {
@@ -2521,6 +3308,11 @@
                   "assertions": []
                 },
                 {
+                  "name": "should ignore escaped quotes when looking for comments",
+                  "path": "parser/parseInterpolation/comments/should ignore escaped quotes when looking for comments",
+                  "assertions": []
+                },
+                {
                   "name": "should ignore quotes inside a comment",
                   "path": "parser/parseInterpolation/comments/should ignore quotes inside a comment",
                   "assertions": []
@@ -2638,8 +3430,8 @@
               ]
             },
             {
-              "name": "should report when encountering field write",
-              "path": "parser/parseSimpleBinding/should report when encountering field write",
+              "name": "should report when encountering field write or update operators",
+              "path": "parser/parseSimpleBinding/should report when encountering field write or update operators",
               "assertions": []
             },
             {

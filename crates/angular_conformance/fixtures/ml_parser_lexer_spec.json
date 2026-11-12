@@ -328,6 +328,111 @@
           ]
         },
         {
+          "name": "processing instructions",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should parse a processing instruction",
+              "path": "HtmlLexer/processing instructions/should parse a processing instruction",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.PROCESSING_INSTRUCTION", "xml version=\"1.0\" encoding=\"UTF-8\""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse a processing instruction ending with > instead of ?>",
+              "path": "HtmlLexer/processing instructions/should parse a processing instruction ending with > instead of ?>",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<?xml version=\"1.0\" encoding=\"UTF-8\">",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.PROCESSING_INSTRUCTION", "xml version=\"1.0\" encoding=\"UTF-8\""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse a processing instruction surrounded by other content",
+              "path": "HtmlLexer/processing instructions/should parse a processing instruction surrounded by other content",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<!DOCTYPE html>\n<?xml version=\"1.0\" encoding=\"UTF-8\"?> hello",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.DOC_TYPE", "DOCTYPE html"],
+                    ["TokenType.TEXT", "\n"],
+                    ["TokenType.PROCESSING_INSTRUCTION", "xml version=\"1.0\" encoding=\"UTF-8\""],
+                    ["TokenType.TEXT", " hello"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse a processing instruction that contains question marks inside quoted content",
+              "path": "HtmlLexer/processing instructions/should parse a processing instruction that contains question marks inside quoted content",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<?xml version=\"?\" encoding=\"UTF?>-8\"?>",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.PROCESSING_INSTRUCTION", "xml version=\"?\" encoding=\"UTF?>-8\""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should store the location of a processing instruction",
+              "path": "HtmlLexer/processing instructions/should store the location of a processing instruction",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                  "test_type": "HumanizeSourceSpans",
+                  "expected": [
+                    [
+                      "TokenType.PROCESSING_INSTRUCTION",
+                      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    ],
+                    ["TokenType.EOF", ""]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should report missing end of a processing instruction",
+              "path": "HtmlLexer/processing instructions/should report missing end of a processing instruction",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "<?",
+                  "test_type": "HumanizeErrors",
+                  "expected": [["Unexpected character \"EOF\"", "0:2"]],
+                  "options": null
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "CDATA",
           "groups": [],
           "tests": [
@@ -5043,6 +5148,18 @@
                     ["TokenType.EOF"]
                   ],
                   "options": null
+                },
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "@default                  never;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.BLOCK_OPEN_START", "default never"],
+                    ["TokenType.BLOCK_OPEN_END"],
+                    ["TokenType.BLOCK_CLOSE"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
                 }
               ]
             },
@@ -5148,6 +5265,25 @@
                   "expected": [
                     ["TokenType.BLOCK_OPEN_START", "else if"],
                     ["TokenType.BLOCK_PARAMETER", "foo !== 2"],
+                    ["TokenType.BLOCK_OPEN_END"],
+                    ["TokenType.TEXT", "hello"],
+                    ["TokenType.BLOCK_CLOSE"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should normalize @else if block name with spaces",
+              "path": "HtmlLexer/blocks/should normalize @else if block name with spaces",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "@else            if {hello}",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.BLOCK_OPEN_START", "else if"],
                     ["TokenType.BLOCK_OPEN_END"],
                     ["TokenType.TEXT", "hello"],
                     ["TokenType.BLOCK_CLOSE"],

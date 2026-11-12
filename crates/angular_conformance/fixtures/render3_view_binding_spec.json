@@ -108,6 +108,16 @@
               "assertions": []
             },
             {
+              "name": "should track enclosing defer blocks for pipes",
+              "path": "t2 binding/extracting defer blocks info/should track enclosing defer blocks for pipes",
+              "assertions": []
+            },
+            {
+              "name": "should track enclosing defer blocks for element and template nodes",
+              "path": "t2 binding/extracting defer blocks info/should track enclosing defer blocks for element and template nodes",
+              "assertions": []
+            },
+            {
               "name": "should identify a trigger element that is a parent of the deferred block",
               "path": "t2 binding/extracting defer blocks info/should identify a trigger element that is a parent of the deferred block",
               "assertions": []
@@ -324,6 +334,16 @@
               "name": "should not capture conflicting output bindings if they are equivalent",
               "path": "t2 binding/directive de-duplication/should not capture conflicting output bindings if they are equivalent",
               "assertions": []
+            },
+            {
+              "name": "should match foreign components by tag name",
+              "path": "t2 binding/directive de-duplication/should match foreign components by tag name",
+              "assertions": []
+            },
+            {
+              "name": "should throw an error when tag matches both directive and foreign component",
+              "path": "t2 binding/directive de-duplication/should throw an error when tag matches both directive and foreign component",
+              "assertions": []
             }
           ]
         }
@@ -342,6 +362,11 @@
         {
           "name": "should match directives on namespaced elements",
           "path": "t2 binding/should match directives on namespaced elements",
+          "assertions": []
+        },
+        {
+          "name": "should match directives on ng-template nested in namespaced elements",
+          "path": "t2 binding/should match directives on ng-template nested in namespaced elements",
           "assertions": []
         },
         {

@@ -262,6 +262,8 @@ fn convert_angular_expression_with_ctx<'a>(
             let op = match unary.operator {
                 crate::ast::expression::UnaryOperator::Minus => UnaryOperator::Minus,
                 crate::ast::expression::UnaryOperator::Plus => UnaryOperator::Plus,
+                crate::ast::expression::UnaryOperator::Increment => UnaryOperator::Increment,
+                crate::ast::expression::UnaryOperator::Decrement => UnaryOperator::Decrement,
             };
             OutputExpression::UnaryOperator(Box::new_in(
                 UnaryOperatorExpr {
@@ -269,6 +271,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     expr: Box::new_in(operand, &allocator),
                     parens: false,
                     source_span: Some(unary.source_span.to_span()),
+                    is_prefix: unary.is_prefix,
                 },
                 &allocator,
             ))

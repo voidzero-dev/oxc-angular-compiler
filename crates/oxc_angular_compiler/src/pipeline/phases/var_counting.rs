@@ -236,6 +236,7 @@ fn vars_used_by_update_op(
             0
         }
         UpdateOp::Conditional(_) => 1,
+        UpdateOp::Boundary(_) => 1,
         UpdateOp::StoreLet(_) => 1,
         UpdateOp::I18nExpression(_) => 1,
         UpdateOp::DeferWhen(_) => 1,
@@ -394,6 +395,14 @@ fn assign_var_offsets_in_op(op: &mut UpdateOp<'_>, var_count: &mut u32, pure_fun
             }
             if let Some(ref mut ctx_val) = cond.context_value {
                 assign_var_offsets_in_expr(ctx_val, var_count, pure_functions_only);
+            }
+        }
+        UpdateOp::Boundary(boundary) => {
+            for expr in boundary.when_exprs_mut() {
+                assign_var_offsets_in_expr(expr, var_count, pure_functions_only);
+            }
+            if let Some(ref mut processed) = boundary.processed {
+                assign_var_offsets_in_expr(processed, var_count, pure_functions_only);
             }
         }
         UpdateOp::I18nExpression(i18n) => {
@@ -612,6 +621,8 @@ fn assign_var_offsets_in_expr(
         | IrExpression::Empty(_)
         | IrExpression::ConstReference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::PureFunctionParameter(_)
@@ -916,6 +927,11 @@ fn propagate_vars_in_ops<'a>(
                 // ConditionalBranch views are their own embedded views
                 if let Some(&vars) = view_vars.get(&branch.xref) {
                     branch.vars = Some(vars);
+                }
+            }
+            CreateOp::BoundaryErrorCreate(error) => {
+                if let Some(&vars) = view_vars.get(&error.xref) {
+                    error.vars = Some(vars);
                 }
             }
             _ => {}

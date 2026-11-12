@@ -1215,14 +1215,37 @@ mod errors {
     }
 
     #[test]
-    fn should_error_on_increment_operator() {
-        let tokens = lex("++");
-        assert!(tokens.iter().any(super::TokenInfo::is_error));
+    fn should_tokenize_increment_decrement_operators() {
+        let tokens = lex("++a");
+        expect_operator_token(&tokens[0], 0, 2, "++");
+        expect_identifier_token(&tokens[1], 2, 3, "a");
+
+        let tokens = lex("a--");
+        expect_identifier_token(&tokens[0], 0, 1, "a");
+        expect_operator_token(&tokens[1], 1, 3, "--");
     }
 
     #[test]
-    fn should_error_on_decrement_operator() {
-        let tokens = lex("--");
-        assert!(tokens.iter().any(super::TokenInfo::is_error));
+    fn should_tokenize_increment_decrement_next_to_plus_minus() {
+        // The longest operator wins, so `+++` is `++` then `+`.
+        let tokens = lex("a+++b");
+        assert_eq!(tokens.len(), 4);
+        expect_operator_token(&tokens[1], 1, 3, "++");
+        expect_operator_token(&tokens[2], 3, 4, "+");
+
+        let tokens = lex("a+--b");
+        expect_operator_token(&tokens[1], 1, 2, "+");
+        expect_operator_token(&tokens[2], 2, 4, "--");
+
+        let tokens = lex("a+++=b");
+        expect_operator_token(&tokens[1], 1, 3, "++");
+        expect_operator_token(&tokens[2], 3, 5, "+=");
+    }
+
+    #[test]
+    fn should_tokenize_increment_inside_template_literal_interpolation() {
+        let tokens = lex("`${a++}`");
+        assert!(tokens.iter().all(|t| !t.is_error()));
+        assert!(tokens.iter().any(|t| t.is_operator("++")));
     }
 }

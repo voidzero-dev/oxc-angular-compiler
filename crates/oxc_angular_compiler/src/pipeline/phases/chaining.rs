@@ -607,6 +607,7 @@ fn clone_expression<'a>(
                 ),
                 parens: unary.parens,
                 source_span: unary.source_span,
+                is_prefix: unary.is_prefix,
             },
             &allocator,
         )),

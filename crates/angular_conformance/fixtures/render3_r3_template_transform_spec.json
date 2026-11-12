@@ -17,6 +17,39 @@
           ]
         },
         {
+          "name": "Boundary blocks",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should parse @boundary blocks with multiple @error blocks",
+              "path": "R3 template transform/Boundary blocks/should parse @boundary blocks with multiple @error blocks",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n        @boundary {\n          <div>Content</div>\n        } @error (when err instanceof SpecificError) {\n          <div>Specific Error</div>\n        } @error (let err) {\n          <div>General Error {{ err }}</div>\n        }\n      ",
+                  "expected": [
+                    ["BoundaryBlock"],
+                    ["Element", "div"],
+                    ["Text", "Content"],
+                    ["BoundaryErrorBlock", "err instanceof SpecificError"],
+                    ["Variable", "$error", "$error"],
+                    ["Variable", "$reset", "$reset"],
+                    ["Element", "div"],
+                    ["Text", "Specific Error"],
+                    ["BoundaryErrorBlock", null],
+                    ["Variable", "$error", "$error"],
+                    ["Variable", "$reset", "$reset"],
+                    ["Variable", "err", "$error"],
+                    ["Element", "div"],
+                    ["BoundText", "General Error {{ err }}"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "Nodes without binding",
           "groups": [],
           "tests": [
@@ -280,6 +313,22 @@
               ]
             },
             {
+              "name": "should parse bound classes with dots in the name",
+              "path": "R3 template transform/Bound attributes/should parse bound classes with dots in the name",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "<div [class.px-3.5]=\"v\" [class.a.b.c]=\"w\"></div>",
+                  "expected": [
+                    ["Element", "div"],
+                    ["BoundAttribute", 2, "px-3.5", "v"],
+                    ["BoundAttribute", 2, "a.b.c", "w"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
               "name": "should parse mixed case bound styles",
               "path": "R3 template transform/Bound attributes/should parse mixed case bound styles",
               "assertions": [
@@ -311,6 +360,11 @@
                   "ignore_error": false
                 }
               ]
+            },
+            {
+              "name": "should not attach i18n metadata for bound properties named after Object.prototype members",
+              "path": "R3 template transform/Bound attributes/should not attach i18n metadata for bound properties named after Object.prototype members",
+              "assertions": []
             }
           ]
         },
@@ -959,6 +1013,23 @@
               ]
             },
             {
+              "name": "should ignore <script> elements inherited into custom namespaces",
+              "path": "R3 template transform/<script> and <style> elements/should ignore <script> elements inherited into custom namespaces",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "<xhtml:div xmlns:xhtml=\"http://www.w3.org/1999/xhtml\"><script [textContent]=\"evil\"></script><span>safe</span></xhtml:div>",
+                  "expected": [
+                    ["Element", ":xhtml:div"],
+                    ["TextAttribute", ":xmlns:xhtml", "http://www.w3.org/1999/xhtml"],
+                    ["Element", ":xhtml:span"],
+                    ["Text", "safe"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
               "name": "should ignore <style> elements",
               "path": "R3 template transform/<script> and <style> elements/should ignore <style> elements",
               "assertions": [
@@ -1110,6 +1181,23 @@
                     ["Element", "div"],
                     ["TextAttribute", "ngNonBindable", ""],
                     ["Text", "a"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should ignore custom-namespaced <script> elements inside of elements with ngNonBindable",
+              "path": "R3 template transform/ngNonBindable/should ignore custom-namespaced <script> elements inside of elements with ngNonBindable",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "<foo:div ngNonBindable><script>evil</script><span>safe</span></foo:div>",
+                  "expected": [
+                    ["Element", ":foo:div"],
+                    ["TextAttribute", "ngNonBindable", ""],
+                    ["Element", ":foo:span"],
+                    ["Text", "safe"]
                   ],
                   "ignore_error": false
                 }
@@ -1915,13 +2003,13 @@
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
-                  "input": "@defer (on viewport({trigger: foo, rootMargin: \"123px\", threshold: [1, 2, 3]})){hello}",
+                  "input": "@defer (on viewport({trigger: foo, rootMargin: \"123px\", scrollMargin: \"456px\", threshold: [1, 2, 3]})){hello}",
                   "expected": [
                     ["DeferredBlock"],
                     [
                       "ViewportDeferredTrigger",
                       "foo",
-                      "{rootMargin: \"123px\", threshold: [1, 2, 3]}"
+                      "{rootMargin: \"123px\", scrollMargin: \"456px\", threshold: [1, 2, 3]}"
                     ],
                     ["Text", "hello"]
                   ],
@@ -2071,7 +2159,13 @@
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
-                  "input": "\n          @switch (cond.kind) {\n            @default never;\n          }\n        ",
+                  "input": "\n        @switch (cond.kind) {\n          @default never;\n        }\n      ",
+                  "expected": [["SwitchBlock", "cond.kind"], ["SwitchExhaustiveCheck"]],
+                  "ignore_error": false
+                },
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n        @switch (cond.kind) {\n          @default                              never;\n        }\n      ",
                   "expected": [["SwitchBlock", "cond.kind"], ["SwitchExhaustiveCheck"]],
                   "ignore_error": false
                 }
@@ -2946,6 +3040,71 @@
             {
               "name": "should pick up attributes from selectorless directives when using * syntax",
               "path": "R3 template transform/directives/should pick up attributes from selectorless directives when using * syntax",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "@content blocks",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should parse a valid @content block",
+              "path": "R3 template transform/@content blocks/should parse a valid @content block",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n        @content(icon) {\n          <span>Icon content</span>\n        }\n      ",
+                  "expected": [
+                    ["ContentBlock", "icon"],
+                    ["Element", "span"],
+                    ["Text", "Icon content"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should error on invalid name",
+              "path": "R3 template transform/@content blocks/should error on invalid name",
+              "assertions": []
+            },
+            {
+              "name": "should error if @content block has missing parameter",
+              "path": "R3 template transform/@content blocks/should error if @content block has missing parameter",
+              "assertions": []
+            },
+            {
+              "name": "should error if @content block has multiple parameters",
+              "path": "R3 template transform/@content blocks/should error if @content block has multiple parameters",
+              "assertions": []
+            },
+            {
+              "name": "should parse a valid @content block with variables",
+              "path": "R3 template transform/@content blocks/should parse a valid @content block with variables",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n        @content(icon; let a, b) {\n          <span>Icon content</span>\n        }\n      ",
+                  "expected": [
+                    ["ContentBlock", "icon"],
+                    ["Variable", "a", ""],
+                    ["Variable", "b", ""],
+                    ["Element", "span"],
+                    ["Text", "Icon content"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should error if a variable is assigned a value",
+              "path": "R3 template transform/@content blocks/should error if a variable is assigned a value",
+              "assertions": []
+            },
+            {
+              "name": "should error on invalid variable name",
+              "path": "R3 template transform/@content blocks/should error on invalid variable name",
               "assertions": []
             }
           ]

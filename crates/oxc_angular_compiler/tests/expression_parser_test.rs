@@ -975,6 +975,97 @@ mod assignment {
 }
 
 // ============================================================================
+// Increment / Decrement Tests (Angular 22.3 `++` / `--`)
+// ============================================================================
+
+mod increment_decrement {
+    use oxc_angular_compiler::ast::expression::{AngularExpression, UnaryOperator};
+
+    use super::*;
+
+    #[test]
+    fn should_parse_prefix_and_postfix_updates() {
+        for exp in ["++a", "--a", "++a.b", "--a[0]", "a++", "a--", "a.b++", "a[0]--"] {
+            check_action(exp, None);
+        }
+        check_action("this.a++", Some("a++"));
+        check_action("++this.a", Some("++a"));
+        // Parentheses and `!` around the target don't change what is written.
+        check_action("a!++", None);
+        check_action("(a)--", None);
+        check_action("++(a)", None);
+    }
+
+    #[test]
+    fn should_record_operator_and_position() {
+        let allocator = Allocator::default();
+        let result = Parser::new(&allocator, "a++").parse_action();
+        let AngularExpression::Unary(unary) = &result.ast else {
+            panic!("Expected Unary, got {:?}", result.ast);
+        };
+        assert_eq!(unary.operator, UnaryOperator::Increment);
+        assert!(!unary.is_prefix);
+        assert_eq!((unary.span.start, unary.span.end), (0, 3));
+
+        let result = Parser::new(&allocator, " --b").parse_action();
+        let AngularExpression::Unary(unary) = &result.ast else {
+            panic!("Expected Unary, got {:?}", result.ast);
+        };
+        assert_eq!(unary.operator, UnaryOperator::Decrement);
+        assert!(unary.is_prefix);
+        assert_eq!((unary.span.start, unary.span.end), (1, 4));
+    }
+
+    #[test]
+    fn should_bind_tighter_than_other_unary_operators() {
+        for exp in ["-a++", "!a++", "typeof a++", "void a--", "a++ ** 2", "--a ** 2"] {
+            check_action(exp, None);
+        }
+        check_action("a+++b", Some("a++ + b"));
+        check_action("- - foo++", Some("- -foo++"));
+        check_action("+ ++foo", Some("+ ++foo"));
+        check_action("- ++foo", Some("-++foo"));
+    }
+
+    #[test]
+    fn should_report_invalid_targets() {
+        for exp in ["5++", "++foo()", "(a + b)++", "++foo++", "---foo", "++foo = 1"] {
+            expect_action_error(exp, "The expression cannot be used in the assignment");
+        }
+        for exp in ["a?.b++", "++a?.[0]"] {
+            expect_action_error(exp, "The '?.' operator cannot be used in the assignment");
+        }
+    }
+
+    #[test]
+    fn should_report_tokens_after_a_postfix_update() {
+        expect_action_error("foo++.bar", "Unexpected token '.' at column 6 in [foo++.bar]");
+        expect_action_error("foo++ ++", "Unexpected token '++'");
+        expect_action_error("foo+++=bar", "Unexpected token '+='");
+        expect_action_error("a+++", "Unexpected end of expression");
+    }
+
+    #[test]
+    fn should_not_allow_updates_in_bindings() {
+        // Same text as ngc 22.3: `Bindings cannot contain assignments at the end of the
+        // expression [a++]`.
+        expect_binding_error(
+            "a++",
+            "Bindings cannot contain assignments at the end of the expression",
+        );
+        expect_binding_error("--a", "Bindings cannot contain assignments");
+        expect_binding_error("a + b--", "Bindings cannot contain assignments");
+    }
+
+    #[test]
+    fn should_allow_updates_inside_arrow_functions_in_bindings() {
+        check_binding("a => a++", None);
+        check_binding("(a) => --a.b", Some("a => --a.b"));
+        assert_eq!(parse_binding_errors("() => count++"), Vec::<String>::new());
+    }
+}
+
+// ============================================================================
 // Error Recovery Tests
 // ============================================================================
 

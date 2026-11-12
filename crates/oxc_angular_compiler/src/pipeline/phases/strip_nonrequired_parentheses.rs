@@ -188,6 +188,14 @@ fn visit_update_expressions_for_required_parens(
                 check_ir_expression_for_required_parens(ctx_val, required);
             }
         }
+        UpdateOp::Boundary(b) => {
+            for expr in b.when_exprs() {
+                check_ir_expression_for_required_parens(expr, required);
+            }
+            if let Some(processed) = &b.processed {
+                check_ir_expression_for_required_parens(processed, required);
+            }
+        }
         UpdateOp::Repeater(r) => {
             check_ir_expression_for_required_parens(&r.collection, required);
         }
@@ -366,6 +374,8 @@ fn check_ir_expression_for_required_parens(
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
         | IrExpression::Context(_)
+        | IrExpression::BoundaryState(_)
+        | IrExpression::GetBoundary(_)
         | IrExpression::NextContext(_)
         | IrExpression::GetCurrentView(_)
         | IrExpression::ReadVariable(_)

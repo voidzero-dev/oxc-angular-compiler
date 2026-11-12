@@ -46,7 +46,7 @@ impl ExpressionSerializerRunner {
 /// Matches the output format from angular/src/expression_parser/serializer.ts
 fn serialize_expression(ast: &AngularExpression<'_>) -> String {
     use oxc_angular_compiler::ast::expression::{
-        BinaryOperator, LiteralMapKey, LiteralValue, TemplateLiteral, UnaryOperator,
+        BinaryOperator, LiteralMapKey, LiteralValue, TemplateLiteral,
     };
 
     fn is_implicit_receiver(expr: &AngularExpression<'_>) -> bool {
@@ -182,11 +182,15 @@ fn serialize_expression(ast: &AngularExpression<'_>) -> String {
                 format!("{} {} {}", serialize(&bin.left), op, serialize(&bin.right))
             }
             AngularExpression::Unary(unary) => {
-                let op = match unary.operator {
-                    UnaryOperator::Plus => "+",
-                    UnaryOperator::Minus => "-",
-                };
-                format!("{}{}", op, serialize(&unary.expr))
+                let op = unary.operator.as_str();
+                let inner = serialize(&unary.expr);
+                if unary.is_prefix {
+                    // Keep adjacent operators apart, e.g. `+ ++foo`.
+                    let space = if inner.starts_with(&op[..1]) { " " } else { "" };
+                    format!("{op}{space}{inner}")
+                } else {
+                    format!("{inner}{op}")
+                }
             }
             AngularExpression::PrefixNot(not) => {
                 format!("!{}", serialize(&not.expression))

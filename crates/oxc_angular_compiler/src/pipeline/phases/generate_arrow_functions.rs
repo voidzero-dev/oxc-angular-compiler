@@ -180,7 +180,13 @@ fn collect_hoisted_arrow_functions<'a>(
         if let IrExpression::ArrowFunction(arrow_fn) = expr
             && arrow_fn.hoisted
         {
-            collected.borrow_mut().push(std::ptr::from_mut(arrow_fn.as_mut()));
+            // Angular's `unit.functions` is a set: a `@boundary`'s `when` conditions are
+            // reached twice (see `BoundaryUpdateOp::when_exprs`) but are one function.
+            let ptr = std::ptr::from_mut(arrow_fn.as_mut());
+            let mut collected = collected.borrow_mut();
+            if !collected.contains(&ptr) {
+                collected.push(ptr);
+            }
         }
     };
 

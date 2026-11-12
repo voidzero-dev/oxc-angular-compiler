@@ -3,8 +3,8 @@ use oxc_angular_compiler::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, BinaryOperator,
 };
 use oxc_angular_compiler::ast::r3::{
-    R3BoundText, R3DeferredBlock, R3Element, R3ForLoopBlock, R3IfBlock, R3SwitchBlock, R3Template,
-    R3TemplateAttr, R3Visitor, visit_all,
+    R3BoundText, R3BoundaryErrorBlock, R3DeferredBlock, R3Element, R3ForLoopBlock, R3IfBlock,
+    R3SwitchBlock, R3Template, R3TemplateAttr, R3Visitor, visit_all,
 };
 use oxc_angular_compiler::parser::html::HtmlParser;
 use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
@@ -509,6 +509,13 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
             }
             visit_all(self, &branch.children);
         }
+    }
+
+    fn visit_boundary_error_block(&mut self, block: &R3BoundaryErrorBlock<'b>) {
+        if let Some(ref expr) = block.expression {
+            self.process_expression(expr);
+        }
+        visit_all(self, &block.children);
     }
 
     fn visit_for_loop_block(&mut self, block: &R3ForLoopBlock<'b>) {
