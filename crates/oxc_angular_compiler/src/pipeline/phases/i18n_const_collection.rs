@@ -583,6 +583,7 @@ fn collect_message<'a>(
         msg_info.custom_id.clone(),
         &msg_info.legacy_ids,
         &associated_message_ids,
+        errors,
     );
 
     // Generate dual-mode translation declaration
@@ -715,6 +716,7 @@ fn create_localize_expression<'a>(
     custom_id: Option<String>,
     legacy_ids: &[String],
     associated_message_ids: &FxHashMap<String, String>,
+    errors: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> OutputExpression<'a> {
     // Parse message_string to extract text parts and placeholder names in order
     let (text_parts, placeholder_order) = parse_message_string(message_string);
@@ -748,7 +750,7 @@ fn create_localize_expression<'a>(
         // The params_map is keyed by the original placeholder name, but the message_string
         // uses camelCase (from format_i18n_placeholder_name with use_camel_case=true).
         // We need to find the matching param key.
-        let value = find_param_value(&params_map, placeholder);
+        let value = find_param_value(&params_map, placeholder, errors);
         expressions.push(value.to_expr(allocator));
 
         // Text part after this placeholder
@@ -886,14 +888,21 @@ fn create_cooked_raw_string(meta_block: &str, message_part: &str) -> (String, St
 
 /// Find the parameter value for a placeholder, by its name in the message (Angular:
 /// `params[ph.text]`).
+///
+/// A placeholder with no value is an error. Angular's `params[ph.text]` is then
+/// `undefined` and ngtsc fails to emit the template (this happens for i18n in or around
+/// `@boundary` / `@error` blocks, whose views the i18n phases skip).
 fn find_param_value(
     params_map: &FxHashMap<String, I18nParamExpr>,
     placeholder_name: &str,
+    errors: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> I18nParamExpr {
-    params_map
-        .get(placeholder_name)
-        .cloned()
-        .unwrap_or_else(|| I18nParamExpr::Literal(String::new()))
+    params_map.get(placeholder_name).cloned().unwrap_or_else(|| {
+        errors.push(OxcDiagnostic::error(format!(
+            "The i18n placeholder \"{placeholder_name}\" has no value. Angular's compiler also fails on this template: i18n placeholders in or around @boundary and @error blocks are not supported yet."
+        )));
+        I18nParamExpr::Literal(String::new())
+    })
 }
 
 /// Wrap an i18n expression with i18nPostprocess for ICU message handling.

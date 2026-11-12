@@ -219,13 +219,6 @@ fn resolve_placeholders_for_view<'a>(
                         op.i18n_placeholder.as_ref(),
                         op.template_kind,
                     ),
-                    // An @error view has no placeholder of its own, but an i18n block
-                    // inside it still needs its element placeholders. Upstream skips this
-                    // view.
-                    CreateOp::BoundaryErrorCreate(op) => {
-                        operations
-                            .push(OpInfo::Recurse { view_xref: op.xref, pending_structural: None });
-                    }
                     CreateOp::RepeaterCreate(op) => {
                         // RepeaterCreate has 3 slots: op itself, @for template, @empty template
                         let for_slot = op.slot.map(|s| SlotId(s.0 + 1));

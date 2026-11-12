@@ -2193,26 +2193,67 @@ fn error_parameters_use_javascript_whitespace() {
     assert_eq!(diagnostics("@boundary { a } @error (when\u{FEFF}x) { b }"), vec![]);
 }
 
-/// An i18n block inside an @error view gets its element placeholders. ngc 22.3.0-next.4
-/// crashes on this template (its i18n phases skip the @error view); the expected
-/// message is the one ngc gives for the same content in an `@else` view.
+/// The errors of compiling `template` in a component.
+fn compile_errors(template: &str) -> Vec<String> {
+    let source = format!(
+        "import {{Component}} from '@angular/core';
+@Component({{selector: 'app', template: `{template}`}})
+export class App {{ name = 'x'; ok = true; n = 1; }}"
+    );
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "app.ts",
+        &source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    result.diagnostics.iter().map(ToString::to_string).collect()
+}
+
+/// i18n placeholders in or around @boundary / @error blocks get no value, and ngtsc
+/// 22.3.0-next.4 fails on all of these templates (`TypeError: Cannot read properties of
+/// undefined (reading 'visitExpression')`, or for the last one `i18n tag placeholder
+/// should only occur inside an i18n block`). We fail on the same ones.
 #[test]
-fn i18n_inside_error_block() {
-    let code = compile(
-        "import {Component} from '@angular/core';
-@Component({selector: 'app', template: `@boundary { content } @error { <div i18n>Oops <b>retry</b></div> }`})
-export class App {}",
-        CompilationMode::Full,
-    );
-    let code = strip(&code);
-    assert!(
-        code.contains(r#"goog.getMsg("Oops{$startBoldText}retry{$closeBoldText}",{"closeBoldText":"\uFFFD/#2\uFFFD","startBoldText":"\uFFFD#2\uFFFD"})"#),
-        "{code}"
-    );
-    assert!(
-        code.contains(
-            r#"$localize`Oops${"\uFFFD#2\uFFFD"}:START_BOLD_TEXT:retry${"\uFFFD/#2\uFFFD"}:CLOSE_BOLD_TEXT:`"#
+fn i18n_placeholders_around_boundaries_are_errors() {
+    for (template, placeholder) in [
+        ("<div i18n>@boundary { Hello {{name}} } @error { Oops }</div>", "START_BLOCK_BOUNDARY"),
+        ("<div i18n>@boundary { Hello }</div>", "START_BLOCK_BOUNDARY"),
+        (
+            "<ng-container i18n>@boundary { Hello } @error { Oops }</ng-container>",
+            "START_BLOCK_BOUNDARY",
         ),
-        "{code}"
-    );
+        ("<div i18n>@if (ok) { @boundary { Hello } } </div>", "START_BLOCK_BOUNDARY"),
+        ("@boundary { x } @error { <div i18n>Oops <b>retry</b></div> }", "START_BOLD_TEXT"),
+        ("@boundary { x } @error { <div i18n><span>a</span></div> }", "START_TAG_SPAN"),
+        (
+            "@boundary { x } @error { @if (ok) { <div i18n>Oops <b>retry</b></div> } }",
+            "START_BOLD_TEXT",
+        ),
+        ("@boundary { x } @error (let e) { <div i18n>Oops <b>{{e}}</b></div> }", "START_BOLD_TEXT"),
+        (
+            "<div i18n>before @boundary { <b>Hello</b> } @error { Oops } after</div>",
+            "START_BLOCK_BOUNDARY",
+        ),
+    ] {
+        let errors = compile_errors(template);
+        let expected = format!("The i18n placeholder \"{placeholder}\" has no value.");
+        assert!(errors.iter().any(|e| e.starts_with(&expected)), "{template}: {errors:?}");
+    }
+}
+
+/// i18n with no element or block placeholder in an @error view, and any i18n in the
+/// primary view, compiles in ngtsc 22.3.0-next.4, and here too.
+#[test]
+fn i18n_without_missing_placeholders_compiles() {
+    for template in [
+        "@boundary { x } @error { <div i18n>Oops</div> }",
+        "@boundary { x } @error { <div i18n>Oops {{name}}</div> }",
+        "@boundary { x } @error { <div i18n-title title=\"t\">Oops</div> }",
+        "@boundary { x } @error { <div i18n>{n, plural, =1 {one} other {many}}</div> }",
+        "@boundary { <div i18n>Hi <b>x</b></div> } @error { err }",
+    ] {
+        assert_eq!(compile_errors(template), Vec::<String>::new(), "{template}");
+    }
 }
