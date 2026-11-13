@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.44 - 2026-11-13
+
+- Supported `@boundary` blocks with `@error` (Angular 22.3): `let` aliases, `when` conditions, several `@error` blocks, `$error`/`$reset`, and nesting, in full and linked partial output.
+- Supported `++`/`--` in event listeners and arrow functions (Angular 22.3), with Angular's errors for bad uses such as bindings, `a?.b++` or `5++`.
+- Failed like ngtsc on i18n placeholders in or around `@boundary`/`@error`, and kept the parentheses in `(-count).toFixed()`.
+- Matched ngtsc for `animate.*` and host `[@trigger]` bindings on each Angular version, including `ɵɵAnimationsFeature` for `animate.leave` on 20.2.0–20.3.0 and `[(animate.x)]` two-way bindings.
+- Matched ngtsc host output: quoted keys and stripped brackets in partial host maps, `aria-*` bindings as attributes per version, NG5001 for empty `[]`/`()` keys from 21.2.8, no `__proto__` bindings, and `@HostBinding` reads through `this`.
+- Fixed `hostDirectives`: the linker unwraps `forwardRef` and reads quoted keys, and aliased/namespace imports and string export names match ngtsc in partial output and `.d.ts`.
+- Read more NgModule list entries like ngtsc: `forwardRef`, `dep['X']`, spreads, `let`/`var`/`const` lists, `ModuleWithProviders<T>`, and imports declared after the module.
+- Added Ivy members to more `.d.ts` outputs: rolldown/tsdown chunks, `vite-plugin-dts`, `@rollup/plugin-typescript`, and plain `tsc` through the new `augmentDeclarations` (`@oxc-angular/vite/dts`); classes from other files come through a namespace import, and `.d.ts.map` stays in sync.
+- Fixed SSR: `ngServerMode` per Vite environment (`vite build --app`), the built client `index.html` in the server build, `vite build --app --watch` rebuilds, and linking packages in `optimizeDeps.exclude`.
+- Escaped non-ASCII text in generated strings like ngtsc, and stopped the linker from writing `changeDetection: 1` for Angular 19 to 21.
+- Updated Oxc to 0.158, napi-rs to 3.16.2, and other dependencies.
+
 ## 0.0.43 - 2026-11-03
 
 - Supported named `deferredImports` blocks (Angular 22.2), and kept native `?.` when linking v22 declarations.
