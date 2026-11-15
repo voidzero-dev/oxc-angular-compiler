@@ -1013,6 +1013,80 @@ mod events {
             vec![h!["Element", "div"], h!["BoundEvent", 0, "event", "", "v"]]
         );
     }
+    #[test]
+    fn should_report_an_event_binding_with_no_expression() {
+        // Angular's `_parseAction`: "Empty expressions are not allowed".
+        for html in [
+            r#"<button (click)=""></button>"#,
+            r#"<button (click)="  "></button>"#,
+            r#"<button (click)="// note"></button>"#,
+            r#"<button on-click=""></button>"#,
+            r#"<button (window:click)=""></button>"#,
+            r#"<div (@trigger.done)=""></div>"#,
+            r#"<input [(x)]="">"#,
+            r#"<input [(x)]="  ">"#,
+        ] {
+            assert_eq!(
+                get_transform_errors(html),
+                vec!["Empty expressions are not allowed".to_string()],
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_report_a_two_way_binding_that_cannot_be_written_to() {
+        // Angular's `_isAllowedAssignmentEvent`: the expressions ngc 22.2.2 rejects.
+        for expr in [
+            "a + b",
+            "a?.b",
+            "a?.b.c",
+            "a?.[0]",
+            "(a?.b).c",
+            "a()",
+            "a.b()",
+            "$any(a, b)",
+            "$any(a + b)",
+            "this.$any(a)",
+            "!a",
+            "(a)",
+        ] {
+            for html in
+                [format!(r#"<input [(x)]="{expr}">"#), format!(r#"<input bindon-x="{expr}">"#)]
+            {
+                assert_eq!(
+                    get_transform_errors(&html),
+                    vec!["Unsupported expression in a two-way binding".to_string()],
+                    "{html}"
+                );
+            }
+        }
+        assert_eq!(
+            get_transform_errors(r#"<input [(animate.x)]="a + b">"#),
+            vec!["Unsupported expression in a two-way binding".to_string()],
+            "an animation binding is checked too"
+        );
+    }
+
+    #[test]
+    fn should_accept_a_two_way_binding_that_can_be_written_to() {
+        for expr in ["a", "a.b", "a[0]", "a!", "a.b!", "$any(a)", "$any(a.b)", "(a).b"] {
+            let html = format!(r#"<input [(x)]="{expr}">"#);
+            assert!(
+                get_transform_errors(&html).is_empty(),
+                "{html}: {:?}",
+                get_transform_errors(&html)
+            );
+        }
+    }
+
+    #[test]
+    fn should_report_only_the_parse_error_of_a_two_way_binding_that_fails_to_parse() {
+        // `isValid` in Angular's `_parseEvent`: no second error on top of a parse error.
+        let errors = get_transform_errors(r#"<input [(x)]="a +">"#);
+        assert!(!errors.is_empty());
+        assert!(!errors.iter().any(|e| e.contains("two-way")), "{errors:?}");
+    }
 }
 
 // ============================================================================

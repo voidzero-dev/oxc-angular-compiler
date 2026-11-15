@@ -27,6 +27,20 @@ fn compile_template_to_js_with_version(
     component_name: &str,
     angular_version: Option<AngularVersion>,
 ) -> String {
+    let (js, errors) = compile_template_to_js_and_errors(template, component_name, angular_version);
+    if !errors.is_empty() {
+        panic!("Transform errors: {errors:?}");
+    }
+    js
+}
+
+/// Compiles an Angular template to JavaScript and returns the transform errors with it, for a
+/// template Angular rejects that the compiler still emits code for.
+fn compile_template_to_js_and_errors(
+    template: &str,
+    component_name: &str,
+    angular_version: Option<AngularVersion>,
+) -> (String, Vec<String>) {
     use oxc_angular_compiler::pipeline::ingest::{IngestOptions, ingest_component_with_options};
 
     let allocator = Allocator::default();
@@ -49,11 +63,7 @@ fn compile_template_to_js_with_version(
     );
     let r3_result = transformer.transform(&html_result.nodes);
 
-    // Check for transform errors
-    if !r3_result.errors.is_empty() {
-        let errors: Vec<_> = r3_result.errors.iter().map(|e| e.msg.clone()).collect();
-        panic!("Transform errors: {errors:?}");
-    }
+    let errors: Vec<_> = r3_result.errors.iter().map(|e| e.msg.clone()).collect();
 
     // Stage 3: Ingest R3 AST into IR
     let mut job = if let Some(version) = angular_version {
@@ -83,7 +93,7 @@ fn compile_template_to_js_with_version(
 
     // Emit the main template function
     output.push_str(&emit_function(&emitter, &result.template_fn));
-    output
+    (output, errors)
 }
 
 /// Emit a FunctionExpr to JavaScript.
@@ -2456,12 +2466,14 @@ fn test_two_way_binding_writeback_target_is_never_optional_v22() {
     // write-back assignment target. `a?.b = $event` is a JS SyntaxError (an
     // optional chain is not a legal assignment target), so the LHS of the
     // `|| (target = value)` clause must stay a plain member access even when the
-    // bound expression uses safe navigation under Angular v22.
-    let js = compile_template_to_js_with_version(
+    // bound expression uses safe navigation under Angular v22. Angular rejects such a
+    // target since v20.2, and so does the transform, but code is still emitted for it.
+    let (js, errors) = compile_template_to_js_and_errors(
         r#"<input [(ngModel)]="a?.b">"#,
         "TestComponent",
         Some(AngularVersion::new(22, 0, 0)),
     );
+    assert_eq!(errors, ["Unsupported expression in a two-way binding"]);
     // The twoWayBindingSet argument keeps its `?.` (it is only read, never assigned)...
     assert!(js.contains("ɵɵtwoWayBindingSet(ctx.a?.b"), "read side should keep `?.`, got:\n{js}");
     // ...but the write-back assignment target must be a plain, assignable read.
@@ -2470,6 +2482,24 @@ fn test_two_way_binding_writeback_target_is_never_optional_v22() {
         !js.contains("a?.b = $event"),
         "must not emit an illegal optional-chain LHS, got:\n{js}"
     );
+}
+
+#[test]
+fn test_two_way_binding_with_a_safe_read_in_its_target_before_v20_2() {
+    // Before v20.2 (#62852) Angular only rejects a target that is itself a safe read.
+    let v20_1 = Some(AngularVersion::new(20, 1, 0));
+    let (_, errors) =
+        compile_template_to_js_and_errors(r#"<input [(x)]="a?.b.c">"#, "TestComponent", v20_1);
+    assert!(errors.is_empty(), "{errors:?}");
+    let (_, errors) =
+        compile_template_to_js_and_errors(r#"<input [(x)]="a?.b">"#, "TestComponent", v20_1);
+    assert_eq!(errors, ["Unsupported expression in a two-way binding"]);
+    let (_, errors) = compile_template_to_js_and_errors(
+        r#"<input [(x)]="a?.b.c">"#,
+        "TestComponent",
+        Some(AngularVersion::new(20, 2, 0)),
+    );
+    assert_eq!(errors, ["Unsupported expression in a two-way binding"]);
 }
 
 #[test]

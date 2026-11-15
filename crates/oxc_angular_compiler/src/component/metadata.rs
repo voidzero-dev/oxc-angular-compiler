@@ -113,6 +113,15 @@ impl AngularVersion {
         self.major > 20 || (self.major == 20 && self.minor >= 2)
     }
 
+    /// Check if a two-way binding rejects a `?.` anywhere on its target (v20.2.0+).
+    ///
+    /// Angular v20.2.0-next.3 (#62852) made `hasRecursiveSafeReceiver` part of the check,
+    /// so `[(x)]="a?.b.c"` is an error. Before, only a target that is itself a safe read
+    /// (`a?.b`) was.
+    pub fn rejects_safe_reads_in_two_way_bindings(&self) -> bool {
+        self.major > 20 || (self.major == 20 && self.minor >= 2)
+    }
+
     /// Check if `animate.leave` needs `ɵɵAnimationsFeature()` (v20.2.0 to v20.3.0).
     ///
     /// In those versions only that feature sets up the registry `ɵɵanimateLeave`

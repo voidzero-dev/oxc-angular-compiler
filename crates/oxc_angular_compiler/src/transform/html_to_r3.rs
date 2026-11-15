@@ -90,6 +90,45 @@ fn property_binding_key_span(name: &str, key_span: Span) -> Span {
 /// The key span of an event named `name` (the identifier `parseAttribute` passes to
 /// `parseEvent`): a legacy animation event's `@` is not part of it.
 /// Reference: binding_parser.ts lines 660-667 (`parseEvent`)
+/// Angular's error for an event handler with no expression.
+const EMPTY_EXPRESSION: &str = "Empty expressions are not allowed";
+
+/// Whether a two-way binding can write `$event` back to `ast`: a property or keyed read, also
+/// behind `!` or `$any(...)`, with no `?.` on the way to it when `rejects_safe_reads` (v20.2+).
+/// Angular's `_isAllowedAssignmentEvent` in `binding_parser.ts`; `this.$any(a)` is not allowed.
+fn is_allowed_assignment_event(ast: &AngularExpression<'_>, rejects_safe_reads: bool) -> bool {
+    match ast {
+        AngularExpression::NonNullAssert(e) => {
+            is_allowed_assignment_event(&e.expression, rejects_safe_reads)
+        }
+        AngularExpression::Call(call) if call.args.len() == 1 && is_any(&call.receiver) => {
+            is_allowed_assignment_event(&call.args[0], rejects_safe_reads)
+        }
+        AngularExpression::PropertyRead(_) | AngularExpression::KeyedRead(_) => {
+            !rejects_safe_reads || !has_recursive_safe_receiver(ast)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `ast` is `$any` read from the component, as in `$any(a)`.
+fn is_any(ast: &AngularExpression<'_>) -> bool {
+    matches!(ast, AngularExpression::PropertyRead(read)
+        if read.name == "$any" && matches!(read.receiver, AngularExpression::ImplicitReceiver(_)))
+}
+
+/// Whether a read goes through `?.` anywhere on its receiver chain (`hasRecursiveSafeReceiver`).
+fn has_recursive_safe_receiver(ast: &AngularExpression<'_>) -> bool {
+    match ast {
+        AngularExpression::SafePropertyRead(_) | AngularExpression::SafeKeyedRead(_) => true,
+        AngularExpression::ParenthesizedExpression(e) => has_recursive_safe_receiver(&e.expression),
+        AngularExpression::PropertyRead(e) => has_recursive_safe_receiver(&e.receiver),
+        AngularExpression::KeyedRead(e) => has_recursive_safe_receiver(&e.receiver),
+        AngularExpression::Call(e) => has_recursive_safe_receiver(&e.receiver),
+        _ => false,
+    }
+}
+
 fn event_key_span(name: &str, key_span: Span) -> Span {
     if name.starts_with('@') { Span::new(key_span.start + 1, key_span.end) } else { key_span }
 }
@@ -4073,32 +4112,42 @@ impl<'a> HtmlToR3Transform<'a> {
     ) -> R3BoundEvent<'a> {
         let handler_span = self.calculate_event_handler_span(attr);
         let name_atom = Ident::from(self.allocator.alloc_str(name));
+        let errors_before = self.errors.len();
 
         // From v20.2 `animate.xChange` is an animation event, as Angular's
         // `_parseRegularEvent` gives it that type over two-way. Its handler is
         // the action itself (`return ctx.x`), with no `$event` assignment.
-        if name.starts_with("animate.") && self.supports_animate() {
-            let handler = self.parse_event_expression(&attr.value, handler_span);
-            return R3BoundEvent {
-                name: name_atom,
-                event_type: ParsedEventType::Animation,
-                handler,
-                target: None,
-                phase: None,
-                source_span: attr.span,
-                handler_span,
-                key_span,
-            };
+        let is_animation = name.starts_with("animate.") && self.supports_animate();
+        let handler = if is_animation {
+            self.parse_event_expression(&attr.value, handler_span)
+        } else {
+            // For two-way binding, the handler is just the target expression (e.g., `name`)
+            // NOT the full assignment `name = $event`.
+            // The $event reference and TwoWayBindingSetExpr are created in the ingest phase.
+            let handler = self.parse_binding_expression(&attr.value, handler_span);
+            if self.errors.len() == errors_before && matches!(handler, AngularExpression::Empty(_))
+            {
+                self.report_error(EMPTY_EXPRESSION, handler_span);
+            }
+            handler
+        };
+        // As Angular's `_parseEvent` for an assignment event, an expression `$event` cannot be
+        // written to (`a + b`, `a?.b`) is an error, unless parsing reported one already.
+        let rejects_safe_reads =
+            self.angular_version.is_none_or(|v| v.rejects_safe_reads_in_two_way_bindings());
+        if self.errors.len() == errors_before
+            && !is_allowed_assignment_event(&handler, rejects_safe_reads)
+        {
+            self.report_error("Unsupported expression in a two-way binding", attr.span);
         }
-
-        // For two-way binding, the handler is just the target expression (e.g., `name`)
-        // NOT the full assignment `name = $event`.
-        // The $event reference and TwoWayBindingSetExpr are created in the ingest phase.
-        let handler = self.parse_binding_expression(&attr.value, handler_span);
 
         R3BoundEvent {
             name: name_atom,
-            event_type: ParsedEventType::TwoWay,
+            event_type: if is_animation {
+                ParsedEventType::Animation
+            } else {
+                ParsedEventType::TwoWay
+            },
             handler,
             target: None,
             phase: None,
@@ -4108,18 +4157,25 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// Parses an event handler expression.
+    /// Parses an event handler expression. A handler with no expression is an error, as in
+    /// Angular's `_parseAction`.
     fn parse_event_expression(&mut self, value: &Ident<'a>, span: Span) -> AngularExpression<'a> {
         let value_str = value.as_str();
         if value_str.is_empty() {
+            self.report_error(EMPTY_EXPRESSION, span);
             return self.create_empty_expression(span);
         }
 
         let result = self.binding_parser.parse_event(value_str, span);
+        let is_empty =
+            result.errors.is_empty() && matches!(result.ast, AngularExpression::Empty(_));
 
         // Collect any parse errors
         for error in result.errors {
             self.errors.push(error);
+        }
+        if is_empty {
+            self.report_error(EMPTY_EXPRESSION, span);
         }
 
         result.ast
