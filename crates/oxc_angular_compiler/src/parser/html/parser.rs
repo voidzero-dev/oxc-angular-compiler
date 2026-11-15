@@ -680,11 +680,15 @@ impl<'a> HtmlParser<'a> {
                 self.advance();
 
                 // Validate self-closing: only void, custom, and foreign elements can be self-closed
-                // Foreign elements include those with explicit namespace prefix (e.g., svg:rect)
-                // or those with implicit namespace prefix (e.g., <svg> has implicitNamespacePrefix='svg')
+                // Foreign elements include those with explicit namespace prefix (e.g., svg:rect),
+                // with implicit namespace prefix (e.g., <svg> has implicitNamespacePrefix='svg'),
+                // or one taken from the element they are in (`<div/>` in `<svg>` is `:svg:div`).
+                // Angular checks element tags only: a component tag is never reported.
                 let tag_def = get_html_tag_definition(&local_name);
-                let is_foreign = has_ns_prefix || tag_def.implicit_namespace_prefix.is_some();
-                if !(tag_def.can_self_close || is_foreign || tag_def.is_void) {
+                let is_foreign = has_ns_prefix
+                    || tag_def.implicit_namespace_prefix.is_some()
+                    || self.inherits_namespace();
+                if !is_component && !(tag_def.can_self_close || is_foreign || tag_def.is_void) {
                     let err = self.make_error(
                         start,
                         format!(

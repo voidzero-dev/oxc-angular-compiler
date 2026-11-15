@@ -272,6 +272,21 @@ pub fn get_html_tag_definition(tag_name: &str) -> HtmlTagDefinition {
             ..Default::default()
         },
 
+        // The other elements of Angular's DOM schema (`allKnownElementNames()` without a
+        // namespace), which `html_tags.ts` defines as `canSelfClose: false`: `<div/>` is an error.
+        "a" | "abbr" | "address" | "article" | "aside" | "audio" | "b" | "bdi" | "bdo"
+        | "blockquote" | "body" | "button" | "canvas" | "caption" | "cite" | "code"
+        | "colgroup" | "content" | "data" | "datalist" | "del" | "details" | "dfn" | "dialog"
+        | "dir" | "div" | "dl" | "em" | "fieldset" | "figcaption" | "figure" | "font"
+        | "footer" | "form" | "frame" | "frameset" | "geolocation" | "h1" | "h2" | "h3" | "h4"
+        | "h5" | "h6" | "head" | "header" | "hgroup" | "html" | "i" | "iframe" | "ins" | "kbd"
+        | "keygen" | "label" | "legend" | "main" | "map" | "mark" | "marquee" | "media"
+        | "menu" | "menuitem" | "meter" | "nav" | "noscript" | "object" | "ol" | "output"
+        | "picture" | "progress" | "q" | "ruby" | "s" | "samp" | "search" | "section"
+        | "select" | "selectedcontent" | "slot" | "small" | "span" | "strong" | "sub"
+        | "summary" | "sup" | "table" | "template" | "time" | "u" | "ul" | "unknown" | "var"
+        | "video" => HtmlTagDefinition::default(),
+
         // Default: unknown tags get canSelfClose: true
         _ => default_tag_definition(),
     }
@@ -456,5 +471,12 @@ mod tests {
     fn test_unknown_tags_can_self_close() {
         let custom = get_html_tag_definition("my-custom-element");
         assert!(custom.can_self_close);
+    }
+
+    #[test]
+    fn test_known_dom_elements_cannot_self_close() {
+        for name in ["div", "span", "button", "section", "table", "DIV", "video", "slot"] {
+            assert!(!get_html_tag_definition(name).can_self_close, "{name}");
+        }
     }
 }

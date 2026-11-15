@@ -2933,10 +2933,56 @@ mod more_error_tests {
     fn should_report_self_closing_html_element() {
         // TS: it("should report self closing html element")
         // <p /> is self-closing but p is not a void element, not a custom element
-        let _errors = parse_errors("<p />");
-        // Angular reports: 'Only void, custom and foreign elements can be self closed "p"'
-        // Our parser may or may not report this
-        // For now, just verify parsing doesn't panic
+        assert_eq!(
+            parse_errors("<p />"),
+            vec!["Only void, custom and foreign elements can be self closed \"p\"".to_string()]
+        );
+    }
+
+    #[test]
+    fn should_report_self_closing_known_dom_element() {
+        // Angular defines every element of its DOM schema as `canSelfClose: false`
+        // (`html_tags.ts`), not only the ones with a definition of their own.
+        for (html, name) in [
+            ("<div/>", "div"),
+            ("<span/>x", "span"),
+            ("<DIV/>", "DIV"),
+            ("<template/>", "template"),
+            ("@if (a) {<div/>}", "div"),
+            ("<svg><foreignObject><div/></foreignObject></svg>", "div"),
+        ] {
+            assert_eq!(
+                parse_errors(html),
+                vec![format!(
+                    "Only void, custom and foreign elements can be self closed \"{name}\""
+                )],
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_not_report_self_closing_element_in_a_namespace() {
+        // A known HTML name in svg or math takes its namespace: `:svg:div` is foreign.
+        for html in [
+            "<svg><div/></svg>",
+            "<math><span/></math>",
+            "<svg:div/>",
+            "<svg>@if (a) {<div/>}</svg>",
+            "<ng-container/>",
+            "<ng-template/>",
+            "<ng-content/>",
+        ] {
+            assert!(parse_errors(html).is_empty(), "{html}: {:?}", parse_errors(html));
+        }
+    }
+
+    #[test]
+    fn should_not_report_self_closing_component_named_like_dom_element() {
+        // Angular only checks element tags: `<Button/>` is a component in selectorless mode.
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_selectorless(&allocator, "<Button/>", "TestComp").parse();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
     }
 
     #[test]
