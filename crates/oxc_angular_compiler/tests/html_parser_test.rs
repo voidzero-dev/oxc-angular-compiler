@@ -2969,9 +2969,6 @@ mod more_error_tests {
             "<math><span/></math>",
             "<svg:div/>",
             "<svg>@if (a) {<div/>}</svg>",
-            "<ng-container/>",
-            "<ng-template/>",
-            "<ng-content/>",
         ] {
             assert!(parse_errors(html).is_empty(), "{html}: {:?}", parse_errors(html));
         }
@@ -2990,6 +2987,29 @@ mod more_error_tests {
         // TS: it("should not report self closing custom element")
         let errors = parse_errors("<my-cmp />");
         assert!(errors.is_empty(), "Expected no errors for self-closing custom element");
+    }
+
+    #[test]
+    fn should_not_report_self_closing_angular_element() {
+        // Not in the DOM schema, so they take the unknown-tag definition, which can self close.
+        for html in ["<ng-container/>", "<ng-template/>", "<ng-content/>"] {
+            assert!(parse_errors(html).is_empty(), "{html}: {:?}", parse_errors(html));
+        }
+    }
+
+    #[test]
+    fn should_error_when_invalid_html_in_the_case() {
+        // TS: it("should error when invalid html in the case")
+        // Upstream leaves the ICU open; it is closed here to keep out an older lexer EOF error.
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_expansion_forms(
+            &allocator,
+            "{messages.length, plural, =0 {<b/>}}",
+            "TestComp",
+        )
+        .parse();
+        let errors: Vec<_> = result.errors.iter().map(|e| e.msg.clone()).collect();
+        assert_eq!(errors, ["Only void, custom and foreign elements can be self closed \"b\""]);
     }
 
     #[test]

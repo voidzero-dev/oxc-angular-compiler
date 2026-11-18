@@ -688,7 +688,7 @@ impl<'a> HtmlParser<'a> {
                 let is_foreign = has_ns_prefix
                     || tag_def.implicit_namespace_prefix.is_some()
                     || self.inherits_namespace();
-                if !is_component && !(tag_def.can_self_close || is_foreign || tag_def.is_void) {
+                if !(is_component || tag_def.can_self_close || is_foreign || tag_def.is_void) {
                     let err = self.make_error(
                         start,
                         format!(

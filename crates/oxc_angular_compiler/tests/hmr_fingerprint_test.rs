@@ -623,11 +623,11 @@ fn ignores_decoys_elsewhere_in_the_source() {
     ] {
         assert_eq!(fields(body, &["Foo"]), ["'<real/>'"], "{body}");
     }
-    let body = "@Component({ template: '<a></a>' })
+    let body = "@Component({ template: '<a/>' })
 class First {}
 const helper = () => '@Component({...})'
-@Component({ template: '<b></b>' })
+@Component({ template: '<b/>' })
 class Second {}";
     assert_eq!(components(body, &["First", "Second"]), ["First", "Second"]);
-    assert_eq!(fields(body, &["First", "Second"]), ["'<a></a>'", "'<b></b>'"]);
+    assert_eq!(fields(body, &["First", "Second"]), ["'<a/>'", "'<b/>'"]);
 }

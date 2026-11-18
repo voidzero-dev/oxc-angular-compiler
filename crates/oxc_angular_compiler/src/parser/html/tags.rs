@@ -2,6 +2,8 @@
 //!
 //! Ported from Angular's `ml_parser/html_tags.ts` and `ml_parser/tags.ts`.
 
+use crate::schema::is_known_element;
+
 /// Content type for HTML elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagContentType {
@@ -272,20 +274,10 @@ pub fn get_html_tag_definition(tag_name: &str) -> HtmlTagDefinition {
             ..Default::default()
         },
 
-        // The other elements of Angular's DOM schema (`allKnownElementNames()` without a
-        // namespace), which `html_tags.ts` defines as `canSelfClose: false`: `<div/>` is an error.
-        "a" | "abbr" | "address" | "article" | "aside" | "audio" | "b" | "bdi" | "bdo"
-        | "blockquote" | "body" | "button" | "canvas" | "caption" | "cite" | "code"
-        | "colgroup" | "content" | "data" | "datalist" | "del" | "details" | "dfn" | "dialog"
-        | "dir" | "div" | "dl" | "em" | "fieldset" | "figcaption" | "figure" | "font"
-        | "footer" | "form" | "frame" | "frameset" | "geolocation" | "h1" | "h2" | "h3" | "h4"
-        | "h5" | "h6" | "head" | "header" | "hgroup" | "html" | "i" | "iframe" | "ins" | "kbd"
-        | "keygen" | "label" | "legend" | "main" | "map" | "mark" | "marquee" | "media"
-        | "menu" | "menuitem" | "meter" | "nav" | "noscript" | "object" | "ol" | "output"
-        | "picture" | "progress" | "q" | "ruby" | "s" | "samp" | "search" | "section"
-        | "select" | "selectedcontent" | "slot" | "small" | "span" | "strong" | "sub"
-        | "summary" | "sup" | "table" | "template" | "time" | "u" | "ul" | "unknown" | "var"
-        | "video" => HtmlTagDefinition::default(),
+        // The other elements of Angular's DOM schema. Like `html_tags.ts`, every name of
+        // `allKnownElementNames()` without a namespace gets `canSelfClose: false`, so `<div/>`
+        // is an error.
+        _ if !lower.starts_with(':') && is_known_element(&lower) => HtmlTagDefinition::default(),
 
         // Default: unknown tags get canSelfClose: true
         _ => default_tag_definition(),
