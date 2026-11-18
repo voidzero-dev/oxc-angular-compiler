@@ -3274,6 +3274,10 @@ pub struct LinkResult {
     pub map: Option<String>,
     /// Whether any declarations were linked.
     pub linked: bool,
+    /// The errors of each component whose template has errors. That component
+    /// is left as it is; a build should fail on them, as Angular's linker
+    /// throws for them.
+    pub errors: Vec<OxcError>,
 }
 
 /// Link Angular partial declarations in a JavaScript file (sync).
@@ -3294,7 +3298,9 @@ pub struct LinkResult {
 /// # Returns
 ///
 /// A `LinkResult` containing the linked code. If no partial declarations
-/// were found, the original code is returned with `linked: false`.
+/// were found, the original code is returned with `linked: false`. A
+/// component whose template has errors is left as it is and reported in
+/// `errors`.
 #[napi]
 pub fn link_angular_package_sync(
     code: String,
@@ -3311,7 +3317,8 @@ pub fn link_angular_package_sync(
     };
     let result = link_with_options(&allocator, &code, &filename, &rust_options);
 
-    LinkResult { code: result.code, map: result.map, linked: result.linked }
+    let errors = OxcError::from_diagnostics(&filename, &code, result.errors);
+    LinkResult { code: result.code, map: result.map, linked: result.linked, errors }
 }
 
 /// Options for linking Angular partial declarations.

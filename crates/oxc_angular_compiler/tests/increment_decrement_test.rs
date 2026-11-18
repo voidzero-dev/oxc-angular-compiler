@@ -322,14 +322,20 @@ fn assert_errors(template: &str, expected: &[&str]) {
 #[test]
 fn missing_operand_errors() {
     // ngc 22.3.0-next.4 messages (`Parser Error: ... in [...]`). For `++;` and
-    // `++,a` it also reports `Empty expressions are not allowed`, which this
-    // compiler does not report for any empty action.
+    // `++,a` the action is empty, so `_parseAction` also reports
+    // `Empty expressions are not allowed`.
     for (template, expected) in [
-        (r#"<button (click)="++;"></button>"#, &["Unexpected token ; at column 3 in [++;]"][..]),
+        (
+            r#"<button (click)="++;"></button>"#,
+            &["Unexpected token ; at column 3 in [++;]", "Empty expressions are not allowed"][..],
+        ),
         (r#"<button (click)="fn(++)"></button>"#, &["Unexpected token ) at column 6 in [fn(++)]"]),
         (r#"<button (click)="[++]"></button>"#, &["Unexpected token ] at column 4 in [[++]]"]),
         (r#"<button (click)="(++)"></button>"#, &["Unexpected token ) at column 4 in [(++)]"]),
-        (r#"<button (click)="++,x"></button>"#, &["Unexpected token , at column 3 in [++,x]"]),
+        (
+            r#"<button (click)="++,x"></button>"#,
+            &["Unexpected token , at column 3 in [++,x]", "Empty expressions are not allowed"],
+        ),
         (r#"<button (click)="++ ;x"></button>"#, &["Unexpected token ; at column 4 in [++ ;x]"]),
         (
             r#"<button (click)="--;++;"></button>"#,

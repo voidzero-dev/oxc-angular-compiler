@@ -43,6 +43,7 @@ use oxc_ast::ast::{
     PropertyKind, Statement,
 };
 use oxc_ast_visit::{Visit, walk};
+use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{GetSpan, SourceType, Span};
@@ -104,6 +105,9 @@ pub struct LinkResult {
     pub map: Option<String>,
     /// Whether any declarations were linked.
     pub linked: bool,
+    /// The errors of each component whose template has errors. That component stays as it is;
+    /// a build should fail on them, as Angular's linker throws a `FatalLinkerError`.
+    pub errors: Vec<OxcDiagnostic>,
 }
 
 /// Options for linking Angular partial declarations.
@@ -139,24 +143,33 @@ pub fn link_with_options(
     // Quick check: if no declarations, return early. Match without the `ɵɵ` prefix because
     // minifiers may write it as `\u0275` escapes; the AST below has them decoded.
     if !code.contains("ngDeclare") {
-        return LinkResult { code: code.to_string(), map: None, linked: false };
+        return LinkResult { code: code.to_string(), ..LinkResult::default() };
     }
 
     let source_type = SourceType::from_path(filename).unwrap_or(SourceType::mjs());
     let parser_result = Parser::new(allocator, code, source_type).parse();
 
     if parser_result.fatal_error || !parser_result.diagnostics.is_empty() {
-        return LinkResult { code: code.to_string(), map: None, linked: false };
+        return LinkResult { code: code.to_string(), ..LinkResult::default() };
     }
 
     let program = parser_result.program;
     let mut edits: Vec<Edit> = Vec::new();
+    let mut errors: Vec<OxcDiagnostic> = Vec::new();
 
     // Walk all statements looking for ɵɵngDeclare* calls
-    collect_declaration_edits(allocator, &program, code, filename, options, &mut edits);
+    collect_declaration_edits(
+        allocator,
+        &program,
+        code,
+        filename,
+        options,
+        &mut edits,
+        &mut errors,
+    );
 
     if edits.is_empty() {
-        return LinkResult { code: code.to_string(), map: None, linked: false };
+        return LinkResult { code: code.to_string(), map: None, linked: false, errors };
     }
 
     let (linked_code, map) = if options.sourcemap {
@@ -165,7 +178,7 @@ pub fn link_with_options(
         (crate::optimizer::apply_edits(code, edits), None)
     };
 
-    LinkResult { code: linked_code, map, linked: true }
+    LinkResult { code: linked_code, map, linked: true, errors }
 }
 
 /// Find all ɵɵngDeclare* calls and generate edits.
@@ -179,6 +192,7 @@ fn collect_declaration_edits<'a>(
     filename: &str,
     options: &LinkOptions,
     edits: &mut Vec<Edit>,
+    errors: &mut Vec<OxcDiagnostic>,
 ) {
     let scoping = SemanticBuilder::new().build(program).semantic.into_scoping();
     let mut collector = DeclarationCollector {
@@ -187,6 +201,7 @@ fn collect_declaration_edits<'a>(
         filename,
         options,
         edits,
+        errors,
         statement_start: None,
         decorator: None,
         scoping,
@@ -250,6 +265,8 @@ struct DeclarationCollector<'s, 'a> {
     filename: &'s str,
     options: &'s LinkOptions,
     edits: &'s mut Vec<Edit>,
+    /// Errors of the declarations that do not link (see [`LinkResult::errors`])
+    errors: &'s mut Vec<OxcDiagnostic>,
     /// The expression of the statement being visited, and whether a `;` may go before it: true for a statement in
     /// a statement list, false for `export default` or the bare body of `if`, a loop or a label
     statement_start: Option<(Span, bool)>,
@@ -326,6 +343,7 @@ impl<'a> DeclarationCollector<'_, 'a> {
                 self.options,
                 self.allocator,
                 &mut pool,
+                self.errors,
             )?;
             let replacement = if statements.is_empty() {
                 definition
@@ -353,6 +371,7 @@ impl<'a> DeclarationCollector<'_, 'a> {
             self.options,
             self.allocator,
             &mut emit_scope.pool,
+            self.errors,
         ) else {
             emit_scope.pool = saved;
             return None;
@@ -1109,6 +1128,8 @@ fn get_factory_target(obj: &ObjectExpression<'_>, source: &str) -> &'static str 
 
 /// Link a single ɵɵngDeclare* call, generating the definition and the
 /// statements its constants and child template functions need, with `pool`.
+/// What keeps it from linking and should fail the build goes to `errors`.
+#[expect(clippy::too_many_arguments)]
 fn link_declaration<'a>(
     name: &str,
     call: &CallExpression<'_>,
@@ -1117,6 +1138,7 @@ fn link_declaration<'a>(
     options: &LinkOptions,
     allocator: &'a Allocator,
     pool: &mut LinkPool<'a>,
+    errors: &mut Vec<OxcDiagnostic>,
 ) -> Option<(String, String)> {
     let meta = get_metadata_object(call)?;
     let ns = get_ng_import_namespace(call);
@@ -1135,7 +1157,9 @@ fn link_declaration<'a>(
             return Some(link_directive(meta, source, ns, type_name, options, allocator, pool));
         }
         DECLARE_COMPONENT => {
-            return link_component(meta, source, filename, ns, type_name, options, allocator, pool);
+            return link_component(
+                meta, source, filename, ns, type_name, options, allocator, pool, errors,
+            );
         }
         _ => return None,
     };
@@ -2441,6 +2465,34 @@ fn has_directive_dependencies(meta: &ObjectExpression<'_>) -> bool {
         })
 }
 
+/// The error for a partial component whose template has errors, like the `FatalLinkerError`
+/// Angular's `PartialComponentLinkerVersion1` throws: "Errors found in the template:" and each
+/// error, at the `template` string.
+fn template_errors(
+    diagnostics: &[OxcDiagnostic],
+    template: Option<Span>,
+    source: &str,
+    filename: &str,
+) -> OxcDiagnostic {
+    let mut message = String::from("Errors found in the template:");
+    for diagnostic in diagnostics {
+        message.push('\n');
+        message.push_str(&diagnostic.message);
+        if let Some(help) = &diagnostic.help {
+            message.push_str(" (");
+            message.push_str(help);
+            message.push(')');
+        }
+    }
+    let error = OxcDiagnostic::error(message);
+    let Some(span) = template else { return error };
+    let before = &source[..(span.start as usize).min(source.len())];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let (line, column) =
+        (before.matches('\n').count() + 1, before[line_start..].chars().count() + 1);
+    error.with_label(span).with_help(format!("{filename}:{line}:{column}"))
+}
+
 /// Link ɵɵngDeclareComponent → ɵɵdefineComponent.
 ///
 /// A component extends a directive with template compilation and additional
@@ -2464,6 +2516,7 @@ fn link_component<'a>(
     options: &LinkOptions,
     allocator: &'a Allocator,
     pool: &mut LinkPool<'a>,
+    errors: &mut Vec<OxcDiagnostic>,
 ) -> Option<(String, String)> {
     // Extract template string - required for component linking
     let template = get_string_property(meta, "template")?;
@@ -2547,8 +2600,15 @@ fn link_component<'a>(
         legacy_optional_chaining,
         pool.next_index,
         &mut pool.shared,
-    )
-    .ok()?;
+    );
+    let template_output = match template_output {
+        Ok(output) => output,
+        Err(diagnostics) => {
+            let template = get_property_expression(meta, "template").map(GetSpan::span);
+            errors.push(template_errors(&diagnostics, template, source, filename));
+            return None;
+        }
+    };
     pool.next_index = template_output.next_pool_index;
 
     // Build the defineComponent properties

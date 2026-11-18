@@ -886,7 +886,9 @@ export declare function linkAngularPackage(
  * # Returns
  *
  * A `LinkResult` containing the linked code. If no partial declarations
- * were found, the original code is returned with `linked: false`.
+ * were found, the original code is returned with `linked: false`. A
+ * component whose template has errors is left as it is and reported in
+ * `errors`.
  */
 export declare function linkAngularPackageSync(
   code: string,
@@ -919,6 +921,12 @@ export interface LinkResult {
   map?: string
   /** Whether any declarations were linked. */
   linked: boolean
+  /**
+   * The errors of each component whose template has errors. That component
+   * is left as it is; a build should fail on them, as Angular's linker
+   * throws for them.
+   */
+  errors: Array<OxcError>
 }
 
 /**

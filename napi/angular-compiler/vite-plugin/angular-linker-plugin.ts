@@ -1,7 +1,9 @@
 import { resolve } from 'node:path'
 
-import { linkAngularPackage, type AngularVersion } from '#binding'
+import { linkAngularPackage, type AngularVersion, type LinkResult } from '#binding'
 import type { Plugin, ResolvedConfig } from 'vite'
+
+import { describeDiagnostic } from './utils/diagnostic.js'
 
 /**
  * Angular Linker plugin for Vite.
@@ -93,13 +95,23 @@ async function linkCode(
   id: string,
   angularVersion: AngularVersion | undefined,
   sourcemap: boolean,
-): Promise<{ code: string; map: string | null; linked: boolean }> {
+): Promise<{ code: string; map: string | null; linked: boolean; errors: LinkResult['errors'] }> {
   const result = await linkAngularPackage(code, id, { angularVersion, sourcemap })
   return {
     code: result.linked ? result.code : code,
     map: result.map ?? null,
     linked: result.linked,
+    errors: result.errors,
   }
+}
+
+/**
+ * The message to fail the build with when a declaration cannot be linked, as Angular's linker
+ * throws for a component whose template has errors. `undefined` when there is none.
+ */
+function linkErrorMessage(errors: LinkResult['errors']): string | undefined {
+  if (errors.length === 0) return undefined
+  return errors.map(describeDiagnostic).join('\n\n')
 }
 
 export interface AngularLinkerPluginOptions {
@@ -192,6 +204,9 @@ export function angularLinkerPlugin({
 
                     const result = await linkCode(code, id, angularVersion, sourcemap)
 
+                    const error = linkErrorMessage(result.errors)
+                    if (error) this.error(error)
+
                     if (!result.linked) {
                       return
                     }
@@ -240,6 +255,9 @@ export function angularLinkerPlugin({
         }
 
         const result = await linkCode(code, id, angularVersion, sourcemap)
+
+        const error = linkErrorMessage(result.errors)
+        if (error) this.error(error)
 
         if (!result.linked) {
           return

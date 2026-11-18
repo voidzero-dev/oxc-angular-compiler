@@ -435,6 +435,62 @@ describe('linker: sourcemap', () => {
   })
 })
 
+/**
+ * A template ngc 20.1.3 accepts and 20.1.4 rejects (`?.` in a two-way target). Angular's linker
+ * throws `Errors found in the template:` for it, which fails the build.
+ */
+const TWO_WAY_SAFE_READ_COMPONENT = IMG_SRC_COMPONENT.replace(
+  `'<img [src]="url">'`,
+  `'<input [(x)]="a?.b.c">'`,
+)
+
+describe('linker: template errors', () => {
+  const id = 'node_modules/x-preview/fesm2022/x-preview.mjs'
+  const v20_1_4 = { major: 20, minor: 1, patch: 4 }
+  const message =
+    'Errors found in the template:\nUnsupported expression in a two-way binding (line 1, column 8 of the template)'
+  // A Rollup plugin context whose `error` throws, as Rollup's does.
+  const context = {
+    fs: { readFile: async () => TWO_WAY_SAFE_READ_COMPONENT },
+    error(error: string): never {
+      throw new Error(error)
+    },
+  }
+
+  it('reports the error and leaves the declaration as it is', () => {
+    const result = linkAngularPackageSync(TWO_WAY_SAFE_READ_COMPONENT, id, {
+      angularVersion: v20_1_4,
+    })
+
+    expect(result.linked).toBe(false)
+    expect(result.code).toBe(TWO_WAY_SAFE_READ_COMPONENT)
+    expect(result.errors.map((e) => e.message)).toEqual([message])
+    expect(result.errors[0].helpMessage).toMatch(/^node_modules\/x-preview\/.*\.mjs:\d+:\d+$/)
+    expect(
+      linkAngularPackageSync(TWO_WAY_SAFE_READ_COMPONENT, id, {
+        angularVersion: { major: 20, minor: 1, patch: 3 },
+      }).errors,
+    ).toEqual([])
+  })
+
+  it('fails the Vite transform hook', async () => {
+    const plugin = angularLinkerPlugin({ angularVersion: v20_1_4 }) as any
+
+    await expect(
+      plugin.transform.handler.call(context, TWO_WAY_SAFE_READ_COMPONENT, id),
+    ).rejects.toThrow(message)
+  })
+
+  it('fails the dependency optimizer', async () => {
+    const plugin = angularLinkerPlugin({ angularVersion: v20_1_4 }) as any
+    plugin.configResolved({ optimizeDeps: {} })
+    const [optimizerPlugin] = plugin.config({}, { command: 'serve' }).optimizeDeps.rolldownOptions
+      .plugins
+
+    await expect(optimizerPlugin.load.handler.call(context, id)).rejects.toThrow(message)
+  })
+})
+
 describe('linker: optimizeDeps.exclude (#695)', () => {
   const PLATFORM_SERVER = '/app/node_modules/@angular/platform-server/fesm2022/platform-server.mjs'
   const PRIMENG = '/app/node_modules/primeng/fesm2022/primeng-table.mjs?v=abc'
