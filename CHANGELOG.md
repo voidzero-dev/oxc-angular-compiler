@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.45 - 2026-11-18
+
+- Reported a known HTML element that is self closed, like ngtsc.
+- Reported an empty event handler and a two-way binding that cannot be written to, matching ngtsc on each Angular version.
+- Updated Oxc to 0.159, and other dependencies.
+
 ## 0.0.44 - 2026-11-13
 
 - Supported `@boundary` blocks with `@error` (Angular 22.3): `let` aliases, `when` conditions, several `@error` blocks, `$error`/`$reset`, and nesting, in full and linked partial output.
