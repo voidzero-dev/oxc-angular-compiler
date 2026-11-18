@@ -2933,10 +2933,53 @@ mod more_error_tests {
     fn should_report_self_closing_html_element() {
         // TS: it("should report self closing html element")
         // <p /> is self-closing but p is not a void element, not a custom element
-        let _errors = parse_errors("<p />");
-        // Angular reports: 'Only void, custom and foreign elements can be self closed "p"'
-        // Our parser may or may not report this
-        // For now, just verify parsing doesn't panic
+        assert_eq!(
+            parse_errors("<p />"),
+            vec!["Only void, custom and foreign elements can be self closed \"p\"".to_string()]
+        );
+    }
+
+    #[test]
+    fn should_report_self_closing_known_dom_element() {
+        // Angular defines every element of its DOM schema as `canSelfClose: false`
+        // (`html_tags.ts`), not only the ones with a definition of their own.
+        for (html, name) in [
+            ("<div/>", "div"),
+            ("<span/>x", "span"),
+            ("<DIV/>", "DIV"),
+            ("<template/>", "template"),
+            ("@if (a) {<div/>}", "div"),
+            ("<svg><foreignObject><div/></foreignObject></svg>", "div"),
+        ] {
+            assert_eq!(
+                parse_errors(html),
+                vec![format!(
+                    "Only void, custom and foreign elements can be self closed \"{name}\""
+                )],
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_not_report_self_closing_element_in_a_namespace() {
+        // A known HTML name in svg or math takes its namespace: `:svg:div` is foreign.
+        for html in [
+            "<svg><div/></svg>",
+            "<math><span/></math>",
+            "<svg:div/>",
+            "<svg>@if (a) {<div/>}</svg>",
+        ] {
+            assert!(parse_errors(html).is_empty(), "{html}: {:?}", parse_errors(html));
+        }
+    }
+
+    #[test]
+    fn should_not_report_self_closing_component_named_like_dom_element() {
+        // Angular only checks element tags: `<Button/>` is a component in selectorless mode.
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_selectorless(&allocator, "<Button/>", "TestComp").parse();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
     }
 
     #[test]
@@ -2944,6 +2987,29 @@ mod more_error_tests {
         // TS: it("should not report self closing custom element")
         let errors = parse_errors("<my-cmp />");
         assert!(errors.is_empty(), "Expected no errors for self-closing custom element");
+    }
+
+    #[test]
+    fn should_not_report_self_closing_angular_element() {
+        // Not in the DOM schema, so they take the unknown-tag definition, which can self close.
+        for html in ["<ng-container/>", "<ng-template/>", "<ng-content/>"] {
+            assert!(parse_errors(html).is_empty(), "{html}: {:?}", parse_errors(html));
+        }
+    }
+
+    #[test]
+    fn should_error_when_invalid_html_in_the_case() {
+        // TS: it("should error when invalid html in the case")
+        // Upstream leaves the ICU open; it is closed here to keep out an older lexer EOF error.
+        let allocator = Allocator::default();
+        let result = HtmlParser::with_expansion_forms(
+            &allocator,
+            "{messages.length, plural, =0 {<b/>}}",
+            "TestComp",
+        )
+        .parse();
+        let errors: Vec<_> = result.errors.iter().map(|e| e.msg.clone()).collect();
+        assert_eq!(errors, ["Only void, custom and foreign elements can be self closed \"b\""]);
     }
 
     #[test]

@@ -1277,10 +1277,10 @@ mod void_elements {
 
     #[test]
     fn should_parse_self_closing_element() {
-        // TS: expectFromHtml('<div/>')
-        let result = humanize("<div/>");
+        // A custom element: a known HTML element such as `<div/>` cannot be self closed.
+        let result = humanize("<my-cmp/>");
         assert_eq!(result[0][0], HumanValue::from("Element"));
-        assert_eq!(result[0][1], HumanValue::from("div"));
+        assert_eq!(result[0][1], HumanValue::from("my-cmp"));
     }
 }
 

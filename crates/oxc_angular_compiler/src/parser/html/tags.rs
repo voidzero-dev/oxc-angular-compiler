@@ -2,6 +2,8 @@
 //!
 //! Ported from Angular's `ml_parser/html_tags.ts` and `ml_parser/tags.ts`.
 
+use crate::schema::is_known_element;
+
 /// Content type for HTML elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagContentType {
@@ -272,6 +274,11 @@ pub fn get_html_tag_definition(tag_name: &str) -> HtmlTagDefinition {
             ..Default::default()
         },
 
+        // The other elements of Angular's DOM schema. Like `html_tags.ts`, every name of
+        // `allKnownElementNames()` without a namespace gets `canSelfClose: false`, so `<div/>`
+        // is an error.
+        _ if !lower.starts_with(':') && is_known_element(&lower) => HtmlTagDefinition::default(),
+
         // Default: unknown tags get canSelfClose: true
         _ => default_tag_definition(),
     }
@@ -456,5 +463,12 @@ mod tests {
     fn test_unknown_tags_can_self_close() {
         let custom = get_html_tag_definition("my-custom-element");
         assert!(custom.can_self_close);
+    }
+
+    #[test]
+    fn test_known_dom_elements_cannot_self_close() {
+        for name in ["div", "span", "button", "section", "table", "DIV", "video", "slot"] {
+            assert!(!get_html_tag_definition(name).can_self_close, "{name}");
+        }
     }
 }

@@ -58,9 +58,9 @@ fn same(a: &str, b: &str, classes: &[&str]) -> bool {
 // The HMR decision
 // -----------------------------------------------------------------
 
-const TWO: &str = "@Component({ selector: 'a', template: '<a/>', styles: ['.a{}'] })
+const TWO: &str = "@Component({ selector: 'a', template: '<a></a>', styles: ['.a{}'] })
 export class A { x = 1 }
-@Component({ selector: 'b', template: `<b/>`, styles: '.b{}' })
+@Component({ selector: 'b', template: `<b></b>`, styles: '.b{}' })
 export class B {}
 ";
 
@@ -68,13 +68,13 @@ export class B {}
 fn an_edit_inside_template_or_styles_keeps_the_fingerprint() {
     let classes = &["A", "B"];
     for edited in [
-        TWO.replace("<a/>", "<a>changed</a>"),
+        TWO.replace("<a></a>", "<a>changed</a>"),
         TWO.replace(".a{}", ".a{color:red}"),
-        TWO.replace("`<b/>`", "`<b>${'x'}</b>`"),
+        TWO.replace("`<b></b>`", "`<b>${'x'}</b>`"),
         TWO.replace("'.b{}'", "'.b{} .c{}'"),
         TWO.replace("['.a{}']", "['.a{}', '.more{}']"),
         TWO.replace("['.a{}']", "[]"),
-        TWO.replace("<b/>", "<b>both</b>").replace(".a{}", ""),
+        TWO.replace("<b></b>", "<b>both</b>").replace(".a{}", ""),
     ] {
         assert!(same(TWO, &edited, classes), "{edited}");
     }
@@ -87,11 +87,11 @@ fn an_edit_anywhere_else_changes_the_fingerprint() {
         TWO.replace("x = 1", "x = 2"),
         TWO.replace("selector: 'a'", "selector: 'aa'"),
         TWO.replace("export class B {}", "export class B {}\n// trailing comment"),
-        TWO.replace("template: '<a/>'", "templateUrl: './a.html'"),
+        TWO.replace("template: '<a></a>'", "templateUrl: './a.html'"),
         // The shape of a value is kept: a string and an array are not the same.
         TWO.replace("['.a{}']", "''"),
         // The quote style is kept too.
-        TWO.replace("'<a/>'", "\"<a/>\""),
+        TWO.replace("'<a></a>'", "\"<a></a>\""),
     ] {
         assert!(!same(TWO, &edited, classes), "{edited}");
     }
@@ -114,9 +114,9 @@ fn resource_urls_stay_in_the_fingerprint() {
 #[test]
 fn only_the_named_classes_are_read() {
     assert_eq!(components(TWO, &["A"]), ["A"]);
-    assert!(same(TWO, &TWO.replace("<a/>", "<a>x</a>"), &["A"]));
-    assert!(!same(TWO, &TWO.replace("<b/>", "<b>x</b>"), &["A"]));
-    assert!(!same(TWO, &TWO.replace("<a/>", "<a>x</a>"), &[]));
+    assert!(same(TWO, &TWO.replace("<a></a>", "<a>x</a>"), &["A"]));
+    assert!(!same(TWO, &TWO.replace("<b></b>", "<b>x</b>"), &["A"]));
+    assert!(!same(TWO, &TWO.replace("<a></a>", "<a>x</a>"), &[]));
     assert_eq!(fingerprint(TWO, &["Nope"]).excluded, []);
 }
 
@@ -124,7 +124,7 @@ fn only_the_named_classes_are_read() {
 /// file broken (here an unescaped quote inside the template) reloads.
 #[test]
 fn a_syntax_error_excludes_nothing() {
-    let broken = TWO.replace("<a/>", "<a>it's</a>");
+    let broken = TWO.replace("<a></a>", "<a>it's</a>");
     let result = fingerprint(&broken, &["A", "B"]);
     assert_eq!(result.excluded, []);
     assert_eq!(result.components, NONE);
@@ -155,7 +155,7 @@ fn transform_reports_the_same_fingerprint() {
 #[test]
 fn transform_keeps_a_jit_components_template() {
     let source = format!(
-        "{IMPORT}@Component({{ selector: 'a', template: '<a/>' }})\nexport class A {{}}\n@Component({{ selector: 'b', template: '<b/>', jit: true }})\nexport class B {{}}\n"
+        "{IMPORT}@Component({{ selector: 'a', template: '<a></a>' }})\nexport class A {{}}\n@Component({{ selector: 'b', template: '<b></b>', jit: true }})\nexport class B {{}}\n"
     );
     let allocator = Allocator::default();
     let options = TransformOptions { hmr: true, ..TransformOptions::default() };
@@ -165,7 +165,7 @@ fn transform_keeps_a_jit_components_template() {
         result.hmr_fingerprint.as_deref(),
         Some(fingerprint_raw(&source, &["A"]).fingerprint.as_str())
     );
-    let edited_jit = source.replace("<b/>", "<b>x</b>");
+    let edited_jit = source.replace("<b></b>", "<b>x</b>");
     assert_ne!(
         result.hmr_fingerprint.as_deref(),
         Some(fingerprint_raw(&edited_jit, &["A"]).fingerprint.as_str())
@@ -180,11 +180,11 @@ fn transform_keeps_a_jit_components_template() {
 fn reads_a_nested_component() {
     let source = format!(
         "{IMPORT}export function make() {{
-  @Component({{ selector: 'a', template: '<a/>', styles: ['.a{{}}'] }})
+  @Component({{ selector: 'a', template: '<a></a>', styles: ['.a{{}}'] }})
   class A {{ x = 1 }}
   return A;
 }}
-function one() {{ @Component({{ template: '<b/>' }}) class B {{}} return B; }}
+function one() {{ @Component({{ template: '<b></b>' }}) class B {{}} return B; }}
 function two() {{ @Component({{ template: '<c/>' }}) class B {{}} return B; }}
 "
     );
@@ -206,10 +206,10 @@ function two() {{ @Component({{ template: '<c/>' }}) class B {{}} return B; }}
     assert_eq!(update.fingerprint.as_deref(), Some(fingerprint.as_str()));
 
     let of = |edited: String| fingerprint_raw(&edited, &["A"]).fingerprint;
-    assert_eq!(of(source.replace("<a/>", "<a>x</a>")), fingerprint);
+    assert_eq!(of(source.replace("<a></a>", "<a>x</a>")), fingerprint);
     assert_eq!(of(source.replace(".a{}", ".a{color:red}")), fingerprint);
     assert_ne!(of(source.replace("x = 1", "x = 2")), fingerprint);
-    assert_ne!(of(source.replace("<b/>", "<b>x</b>")), fingerprint);
+    assert_ne!(of(source.replace("<b></b>", "<b>x</b>")), fingerprint);
 }
 
 // -----------------------------------------------------------------
@@ -225,7 +225,7 @@ fn leaves_a_namespace_member_out() {
   @Component({{ selector: 'n', template: '<n/>' }})
   export class App {{}}
 }}
-@Component({{ selector: 'app', template: '<a/>' }})
+@Component({{ selector: 'app', template: '<a></a>' }})
 export class App {{}}
 "
     );
@@ -238,7 +238,7 @@ export class App {{}}
     assert_eq!(fingerprint_raw(&source, &["App"]).fingerprint, fingerprint);
 
     let of = |edited: String| fingerprint_raw(&edited, &["App"]).fingerprint;
-    assert_eq!(of(source.replace("<a/>", "<a>x</a>")), fingerprint);
+    assert_eq!(of(source.replace("<a></a>", "<a>x</a>")), fingerprint);
     assert_ne!(of(source.replace("<n/>", "<n>x</n>")), fingerprint);
 }
 
