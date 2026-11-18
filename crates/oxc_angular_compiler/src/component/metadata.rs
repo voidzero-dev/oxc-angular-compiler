@@ -113,13 +113,34 @@ impl AngularVersion {
         self.major > 20 || (self.major == 20 && self.minor >= 2)
     }
 
-    /// Check if a two-way binding rejects a `?.` anywhere on its target (v20.2.0+).
+    /// Check if a two-way binding rejects a `?.` anywhere on its target
+    /// (v20.1.4+ / v20.2.0-next.3+).
     ///
-    /// Angular v20.2.0-next.3 (#62852) made `hasRecursiveSafeReceiver` part of the check,
-    /// so `[(x)]="a?.b.c"` is an error. Before, only a target that is itself a safe read
-    /// (`a?.b`) was.
+    /// `angular/angular#62852` added `hasRecursiveSafeReceiver` to
+    /// `_isAllowedAssignmentEvent`, so `[(x)]="a?.b.c"` is an error. Before, only
+    /// a target that is itself a safe read (`a?.b`) was. First in 20.1.4 and
+    /// 20.2.0-next.3; the 20.0.x and 19.2.x lines never got it.
     pub fn rejects_safe_reads_in_two_way_bindings(&self) -> bool {
-        self.major > 20 || (self.major == 20 && self.minor >= 2)
+        self.fixed_since(&[
+            Self::new(20, 1, 4),
+            Self::new(20, 2, 0).with_prerelease(Prerelease::Next(3)),
+        ])
+    }
+
+    /// Check if a two-way binding accepts `$any(a)` as its target (v19.1.0-rc.0+).
+    ///
+    /// Before, `_isAllowedAssignmentEvent` had no `$any(...)` case, so the call
+    /// was an error. The 19.0.x line never got it.
+    pub fn allows_any_in_two_way_bindings(&self) -> bool {
+        self.cmp_release(&Self::new(19, 1, 0).with_prerelease(Prerelease::Rc(0))).is_ge()
+    }
+
+    /// Check if the expression parser keeps `(a)` as its own node (v20.0.0-next.2+).
+    ///
+    /// Before, `parsePrimary` returned the inner expression, so a two-way
+    /// target `(a)` was the read `a` and allowed.
+    pub fn keeps_parenthesized_expressions(&self) -> bool {
+        self.cmp_release(&Self::new(20, 0, 0).with_prerelease(Prerelease::Next(2))).is_ge()
     }
 
     /// Check if `animate.leave` needs `ɵɵAnimationsFeature()` (v20.2.0 to v20.3.0).

@@ -11,6 +11,7 @@ use oxc_angular_compiler::ast::expression::BindingType;
 use oxc_angular_compiler::ast::r3::R3Node;
 use oxc_angular_compiler::parser::html::HtmlParser;
 use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+use oxc_angular_compiler::{AngularVersion, Prerelease};
 
 use utils::unparse;
 
@@ -810,6 +811,19 @@ fn get_transform_errors(html: &str) -> Vec<String> {
     r3_result.errors.iter().map(|e| e.msg.clone()).collect()
 }
 
+/// Like `get_transform_errors`, targeting an Angular version.
+fn get_transform_errors_with_version(html: &str, version: AngularVersion) -> Vec<String> {
+    let allocator = Allocator::default();
+    let html_result = HtmlParser::new(&allocator, html, "test.html").parse();
+    let options = TransformOptions {
+        collect_comment_nodes: false,
+        angular_version: Some(version),
+        ..Default::default()
+    };
+    let r3_result = HtmlToR3Transform::new(&allocator, html, options).transform(&html_result.nodes);
+    r3_result.errors.iter().map(|e| e.msg.clone()).collect()
+}
+
 // ============================================================================
 // Tests: Nodes without binding
 // ============================================================================
@@ -1013,12 +1027,14 @@ mod events {
             vec![h!["Element", "div"], h!["BoundEvent", 0, "event", "", "v"]]
         );
     }
+
     #[test]
-    fn should_report_an_event_binding_with_no_expression() {
-        // Angular's `_parseAction`: "Empty expressions are not allowed".
+    fn should_report_an_error_on_empty_expression() {
+        // TS: it("should report an error on empty expression")
+        // Angular's `_parseAction`, which two-way and animation events go through too.
         for html in [
-            r#"<button (click)=""></button>"#,
-            r#"<button (click)="  "></button>"#,
+            r#"<div (event)=""></div>"#,
+            r#"<div (event)="   "></div>"#,
             r#"<button (click)="// note"></button>"#,
             r#"<button on-click=""></button>"#,
             r#"<button (window:click)=""></button>"#,
@@ -1026,66 +1042,133 @@ mod events {
             r#"<input [(x)]="">"#,
             r#"<input [(x)]="  ">"#,
         ] {
-            assert_eq!(
-                get_transform_errors(html),
-                vec!["Empty expressions are not allowed".to_string()],
-                "{html}"
-            );
+            assert_eq!(get_transform_errors(html), ["Empty expressions are not allowed"], "{html}");
         }
+        // Also after a parse error, as `_parseAction` checks the AST.
+        assert_eq!(
+            get_transform_errors(r#"<button (click)=")"></button>"#),
+            ["Unexpected token ) at column 1 in [)]", "Empty expressions are not allowed"]
+        );
     }
 
     #[test]
-    fn should_report_a_two_way_binding_that_cannot_be_written_to() {
-        // Angular's `_isAllowedAssignmentEvent`: the expressions ngc 22.2.2 rejects.
-        for expr in [
-            "a + b",
-            "a?.b",
-            "a?.b.c",
-            "a?.[0]",
-            "(a?.b).c",
-            "a()",
+    fn should_report_pipes_in_two_way_bindings() {
+        // TS: it("should report pipes in two-way bindings")
+        // The event side is parsed as an action, so it is a parse error, not an unsupported target.
+        let errors = get_transform_errors(r#"<div [(prop)]="v | pipe"></div>"#);
+        assert!(
+            errors.iter().any(|e| e.starts_with("Cannot have a pipe in an action expression")),
+            "{errors:?}"
+        );
+        assert!(!errors.iter().any(|e| e.contains("two-way")), "{errors:?}");
+    }
+
+    #[test]
+    fn should_report_unsupported_expressions_in_two_way_bindings() {
+        // TS: it("should report unsupported expressions in two-way bindings")
+        let upstream = [
+            "v + 1",
+            "foo.bar?.baz",
+            "foo.bar?.['baz']",
+            "foo?.bar.baz[0]",
+            "foo?.bar.baz[0].boo[0]",
+            "foo?.bar.baz()",
+            "(foo?.bar).baz",
+            "true",
+            "123",
             "a.b()",
-            "$any(a, b)",
-            "$any(a + b)",
-            "this.$any(a)",
+            "v()",
+            "[1, 2, 3]",
+            "{a: 1, b: 2, c: 3}",
+            "v === 1",
+            "a || b",
+            "a && b",
+            "a ?? b",
             "!a",
-            "(a)",
-        ] {
-            for html in
-                [format!(r#"<input [(x)]="{expr}">"#), format!(r#"<input bindon-x="{expr}">"#)]
-            {
+            "!!a",
+            "a ? b : c",
+            "$any(a || b)",
+            "this.$any(a)",
+            "$any(a, b)",
+        ];
+        // More targets ngc 22.2.2 rejects.
+        let more = ["a?.b", "a?.[0]", "$any(a + b)", "(a)"];
+        for expr in upstream.into_iter().chain(more) {
+            for html in [
+                format!(r#"<div [(prop)]="{expr}"></div>"#),
+                format!(r#"<div bindon-prop="{expr}"></div>"#),
+            ] {
                 assert_eq!(
                     get_transform_errors(&html),
-                    vec!["Unsupported expression in a two-way binding".to_string()],
+                    ["Unsupported expression in a two-way binding"],
                     "{html}"
                 );
             }
         }
         assert_eq!(
             get_transform_errors(r#"<input [(animate.x)]="a + b">"#),
-            vec!["Unsupported expression in a two-way binding".to_string()],
+            ["Unsupported expression in a two-way binding"],
             "an animation binding is checked too"
         );
-    }
+        // An error from the event side comes alone (`isValid` in `_parseRegularEvent`), but one
+        // from the property side does not stop the check.
+        let errors = get_transform_errors(r#"<div [(prop)]="a; b"></div>"#);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].starts_with("Binding expression cannot contain chained expression"));
+        assert_eq!(errors[1], "Unsupported expression in a two-way binding");
+        let errors = get_transform_errors(r#"<div [(prop)]="a +"></div>"#);
+        assert!(!errors.is_empty() && !errors.iter().any(|e| e.contains("two-way")), "{errors:?}");
 
-    #[test]
-    fn should_accept_a_two_way_binding_that_can_be_written_to() {
-        for expr in ["a", "a.b", "a[0]", "a!", "a.b!", "$any(a)", "$any(a.b)", "(a).b"] {
-            let html = format!(r#"<input [(x)]="{expr}">"#);
-            assert!(
-                get_transform_errors(&html).is_empty(),
-                "{html}: {:?}",
-                get_transform_errors(&html)
-            );
+        for expr in [
+            "(foo?.bar ?? bar).baz",
+            "a",
+            "a.b",
+            "a[0]",
+            "a!",
+            "a.b!",
+            "$any(a)",
+            "$any(a.b)",
+            "(a).b",
+        ] {
+            let html = format!(r#"<div [(prop)]="{expr}"></div>"#);
+            let errors = get_transform_errors(&html);
+            assert!(errors.is_empty(), "{html}: {errors:?}");
         }
     }
 
     #[test]
-    fn should_report_only_the_parse_error_of_a_two_way_binding_that_fails_to_parse() {
-        // `isValid` in Angular's `_parseEvent`: no second error on top of a parse error.
-        let errors = get_transform_errors(r#"<input [(x)]="a +">"#);
-        assert!(!errors.is_empty());
-        assert!(!errors.iter().any(|e| e.contains("two-way")), "{errors:?}");
+    fn should_check_a_two_way_target_as_its_angular_version_does() {
+        let errors = |version: AngularVersion, expr: &str| {
+            get_transform_errors_with_version(&format!(r#"<div [(prop)]="{expr}"></div>"#), version)
+        };
+        let unsupported = ["Unsupported expression in a two-way binding"];
+        let next = |major, minor, n| {
+            AngularVersion::new(major, minor, 0).with_prerelease(Prerelease::Next(n))
+        };
+        // `?.` anywhere on the target: from 20.1.4 and 20.2.0-next.3 (angular/angular#62852).
+        for version in
+            [AngularVersion::new(20, 0, 7), AngularVersion::new(20, 1, 3), next(20, 2, 2)]
+        {
+            assert!(errors(version, "a?.b.c").is_empty(), "{version:?}");
+            assert_eq!(errors(version, "a?.b"), unsupported, "{version:?}");
+        }
+        for version in
+            [AngularVersion::new(20, 1, 4), next(20, 2, 3), AngularVersion::new(20, 2, 0)]
+        {
+            assert_eq!(errors(version, "a?.b.c"), unsupported, "{version:?}");
+        }
+        // `$any(a)`: from 19.1.0-rc.0.
+        let rc0 = AngularVersion::new(19, 1, 0).with_prerelease(Prerelease::Rc(0));
+        for version in [AngularVersion::new(19, 0, 7), next(19, 1, 4)] {
+            assert_eq!(errors(version, "$any(a)"), unsupported, "{version:?}");
+        }
+        assert_eq!(errors(rc0, "$any(a)"), Vec::<String>::new());
+        // `(a)` is `a` before the parser kept parentheses (20.0.0-next.2).
+        for expr in ["(a)", "((a))", "(a)!", "$any((a))", "($any)(a)"] {
+            assert!(errors(AngularVersion::new(19, 2, 15), expr).is_empty(), "{expr}");
+            assert_eq!(errors(next(20, 0, 2), expr), unsupported, "{expr}");
+        }
+        assert_eq!(errors(AngularVersion::new(19, 2, 15), "(a + b)"), unsupported);
     }
 }
 

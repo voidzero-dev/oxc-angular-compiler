@@ -28,9 +28,7 @@ fn compile_template_to_js_with_version(
     angular_version: Option<AngularVersion>,
 ) -> String {
     let (js, errors) = compile_template_to_js_and_errors(template, component_name, angular_version);
-    if !errors.is_empty() {
-        panic!("Transform errors: {errors:?}");
-    }
+    assert!(errors.is_empty(), "Transform errors: {errors:?}");
     js
 }
 
@@ -2467,7 +2465,7 @@ fn test_two_way_binding_writeback_target_is_never_optional_v22() {
     // optional chain is not a legal assignment target), so the LHS of the
     // `|| (target = value)` clause must stay a plain member access even when the
     // bound expression uses safe navigation under Angular v22. Angular rejects such a
-    // target since v20.2, and so does the transform, but code is still emitted for it.
+    // target, and so does the transform, but code is still emitted for it.
     let (js, errors) = compile_template_to_js_and_errors(
         r#"<input [(ngModel)]="a?.b">"#,
         "TestComponent",
@@ -2485,9 +2483,10 @@ fn test_two_way_binding_writeback_target_is_never_optional_v22() {
 }
 
 #[test]
-fn test_two_way_binding_with_a_safe_read_in_its_target_before_v20_2() {
-    // Before v20.2 (#62852) Angular only rejects a target that is itself a safe read.
-    let v20_1 = Some(AngularVersion::new(20, 1, 0));
+fn test_two_way_binding_with_a_safe_read_in_its_target_before_v20_1_4() {
+    // Before 20.1.4 / 20.2.0-next.3 (#62852) Angular only rejects a target that is itself a
+    // safe read.
+    let v20_1 = Some(AngularVersion::new(20, 1, 3));
     let (_, errors) =
         compile_template_to_js_and_errors(r#"<input [(x)]="a?.b.c">"#, "TestComponent", v20_1);
     assert!(errors.is_empty(), "{errors:?}");
@@ -2497,7 +2496,7 @@ fn test_two_way_binding_with_a_safe_read_in_its_target_before_v20_2() {
     let (_, errors) = compile_template_to_js_and_errors(
         r#"<input [(x)]="a?.b.c">"#,
         "TestComponent",
-        Some(AngularVersion::new(20, 2, 0)),
+        Some(AngularVersion::new(20, 1, 4)),
     );
     assert_eq!(errors, ["Unsupported expression in a two-way binding"]);
 }
