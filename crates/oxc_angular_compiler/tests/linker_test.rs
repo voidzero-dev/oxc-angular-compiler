@@ -1662,3 +1662,85 @@ fn test_link_keys_that_are_not_identifiers_stay_quoted() {
         assert!(parsed.diagnostics.is_empty(), "does not parse:\n{linked}");
     }
 }
+
+/// A partial component whose template ngc 20.1.3 accepts and 20.1.4 rejects.
+fn two_way_safe_read_component(type_name: &str, template: &str) -> String {
+    format!(
+        r#"{type_name}.ɵcmp = i0.ɵɵngDeclareComponent({{ minVersion: "14.0.0", version: "20.1.3", type: {type_name}, isStandalone: true, selector: "x-{type_name}", ngImport: i0, template: '{template}' }});
+"#
+    )
+}
+
+/// A template error keeps the component from linking and is reported, as Angular's linker
+/// throws `Errors found in the template:` for it.
+#[test]
+fn test_link_reports_a_template_error() {
+    let code = format!(
+        "import * as i0 from \"@angular/core\";\nclass Bad {{\n}}\n{}",
+        two_way_safe_read_component("Bad", r#"<input [(x)]="a?.b.c">"#)
+    );
+    let link_for = |version| {
+        let allocator = Allocator::default();
+        let options = LinkOptions { angular_version: Some(version), ..LinkOptions::default() };
+        let result = link_with_options(&allocator, &code, "lib.mjs", &options);
+        let errors: Vec<_> = result
+            .errors
+            .iter()
+            .map(|e| (e.message.to_string(), e.help.as_deref().map(str::to_string)))
+            .collect();
+        (result.linked, result.code, errors)
+    };
+
+    let (linked, _, errors) = link_for(AngularVersion::new(20, 1, 3));
+    assert!(linked);
+    assert_eq!(errors, []);
+
+    let (linked, linked_code, errors) = link_for(AngularVersion::new(20, 1, 4));
+    assert!(!linked);
+    assert_eq!(linked_code, code, "the declaration stays as it is");
+    // In characters: the line has `ɵ`s before it.
+    let line = code.lines().nth(3).unwrap();
+    let template_column = line[..line.find("'<input").unwrap()].chars().count() + 1;
+    assert_eq!(
+        errors,
+        [(
+            "Errors found in the template:\nUnsupported expression in a two-way binding (line 1, column 8 of the template)".to_string(),
+            Some(format!("lib.mjs:4:{template_column}")),
+        )]
+    );
+}
+
+/// The other declarations of the file still link.
+#[test]
+fn test_link_reports_a_template_error_and_links_the_rest() {
+    let code = format!(
+        "import * as i0 from \"@angular/core\";\nclass Bad {{\n}}\nclass Good {{\n}}\n{}{}",
+        two_way_safe_read_component("Bad", r#"<input [(x)]="a?.b.c">"#),
+        two_way_safe_read_component("Good", r#"<input [(x)]="a.b.c">"#),
+    );
+    let allocator = Allocator::default();
+    let result = link(&allocator, &code, "lib.mjs");
+    assert!(result.linked);
+    assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+    assert!(result.code.contains("Bad.ɵcmp = i0.ɵɵngDeclareComponent("), "{}", result.code);
+    assert!(!result.code.contains("Good.ɵcmp = i0.ɵɵngDeclareComponent("), "{}", result.code);
+    // A template parse error is reported the same way.
+    let code = code.replace(r#"<input [(x)]="a?.b.c">"#, "<div></span>");
+    let result = link(&allocator, &code, "lib.mjs");
+    assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+    assert!(
+        result.errors[0]
+            .message
+            .starts_with("Errors found in the template:\nUnexpected closing tag"),
+        "{:?}",
+        result.errors
+    );
+    // An expression error has no position in the template, so none is made up for it.
+    let code = code.replace("<div></span>", "<p>\\n{{ a + }}</p>");
+    let result = link(&allocator, &code, "lib.mjs");
+    assert!(!result.errors.is_empty(), "{}", result.code);
+    for error in &result.errors {
+        assert!(error.message.contains("[ a + ]"), "{}", error.message);
+        assert!(!error.message.contains("of the template)"), "{}", error.message);
+    }
+}

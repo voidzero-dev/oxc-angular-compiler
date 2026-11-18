@@ -9082,8 +9082,15 @@ pub fn compile_template_for_linker<'a>(
     let r3_result = transformer.transform(nodes);
 
     if !r3_result.errors.is_empty() {
+        let template_origin = TemplateOrigin::Unknown;
         for error in &r3_result.errors {
-            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+            // An expression parser error has no position (an empty default span); its message
+            // quotes the expression instead.
+            diagnostics.push(if error.span.start.file.content.is_empty() {
+                OxcDiagnostic::error(error.msg.clone())
+            } else {
+                html_parse_error_diagnostic(error, &template_origin)
+            });
         }
         return Err(diagnostics);
     }
