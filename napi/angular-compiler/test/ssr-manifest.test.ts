@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
-import { afterAll, describe, it, expect } from 'vitest'
+import { createBuilder } from 'vite'
+import { afterAll, describe, it, expect, onTestFinished } from 'vitest'
 /**
  * Tests for SSR manifest generation.
  *
@@ -20,6 +22,8 @@ import {
   generateAppManifestCode,
   generateAppEngineManifestCode,
 } from '../vite-plugin/angular-ssr-manifest-plugin.js'
+
+const manifestId = 'virtual:oxc-angular/ssr-manifest'
 
 describe('SSR Manifest Generation (Issue #60)', () => {
   describe('generateAppManifestCode', () => {
@@ -128,7 +132,72 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         )
 
       expect(transform('client')).toBeUndefined()
-      expect(transform('server')?.code).toContain('ɵsetAngularAppManifest')
+      expect(transform('server')?.code).toContain(manifestId)
+    })
+
+    it('evaluates entry imports, registers both manifests, then constructs the engine', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'oxc-angular-ssr-order-'))
+      onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+      writeFileSync(join(root, 'trace.mjs'), 'export const events = []')
+      writeFileSync(
+        join(root, 'compiler.mjs'),
+        "import { events } from './trace.mjs'; events.push('compiler')",
+      )
+      writeFileSync(join(root, 'main.server.ts'), 'export default () => {}')
+      writeFileSync(
+        join(root, 'ssr.mjs'),
+        `
+        import { events } from './trace.mjs'
+        events.push('ssr')
+        export function ɵsetAngularAppManifest() { events.push('app manifest') }
+        export function ɵsetAngularAppEngineManifest() { events.push('engine manifest') }
+        export function ɵgetOrCreateAngularServerApp() {}
+        export function ɵdestroyAngularServerApp() {}
+        export function ɵextractRoutesAndCreateRouteTree() {}
+      `,
+      )
+      writeFileSync(
+        join(root, 'server.js'),
+        `
+        import './compiler.mjs'
+        import { events } from './trace.mjs'
+        class AngularNodeAppEngine { constructor() { events.push('engine') } }
+        new AngularNodeAppEngine()
+        export function view() { return <h1 /> }
+        console.log(JSON.stringify(events))
+      `,
+      )
+
+      const builder = await createBuilder({
+        configFile: false,
+        root,
+        logLevel: 'silent',
+        plugins: [ssrManifestPlugin({ ssrEntry: 'main.server.ts' })],
+        resolve: { alias: { '@angular/ssr': join(root, 'ssr.mjs') } },
+        environments: {
+          ssr: {
+            build: {
+              rolldownOptions: {
+                input: join(root, 'server.js'),
+                moduleTypes: { '.js': 'jsx' },
+                transform: { jsx: { runtime: 'classic' } },
+                output: { entryFileNames: 'server.mjs' },
+              },
+            },
+          },
+        },
+      })
+      await builder.build(builder.environments.ssr)
+      const output = execFileSync(process.execPath, [join(root, 'dist/server.mjs')], {
+        encoding: 'utf8',
+      })
+      expect(JSON.parse(output)).toEqual([
+        'compiler',
+        'ssr',
+        'app manifest',
+        'engine manifest',
+        'engine',
+      ])
     })
 
     it('should not inject the manifests twice', () => {
@@ -245,10 +314,13 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         /** The server's buildStart, then a transform of each module. */
         async server(...modules: string[]): Promise<(string | undefined)[]> {
           await plugin.buildStart.handler.call(context('ssr'))
-          return modules.map(
-            (code, i) =>
-              plugin.transform.call(context('ssr'), code, join(root, `src/server${i}.ts`))?.code,
-          )
+          const ctx = context('ssr')
+          return modules.map((code, i) => {
+            const id = join(root, `src/server${i}.ts`)
+            if (!plugin.transform.call(ctx, code, id)) return
+            const manifest = plugin.resolveId.call(ctx, manifestId, id)
+            return plugin.load.call(ctx, manifest.id)
+          })
         },
         /** The server's renderChunk of a chunk with `code`. */
         async render(code: string): Promise<string | undefined> {
