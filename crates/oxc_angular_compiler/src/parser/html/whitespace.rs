@@ -51,47 +51,22 @@ fn has_non_whitespace(s: &str) -> bool {
 /// Single whitespace characters are preserved as-is.
 fn collapse_whitespace(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
-    let mut ws_run_start: Option<usize> = None;
-    let mut ws_run_len = 0;
+    let mut pending_whitespace = None;
 
-    for (i, c) in s.chars().enumerate() {
+    for c in s.chars() {
         if is_ws_char(c) {
-            if ws_run_start.is_none() {
-                ws_run_start = Some(i);
-            }
-            ws_run_len += 1;
+            pending_whitespace = Some(if pending_whitespace.is_some() { ' ' } else { c });
         } else {
-            // End of whitespace run (if any)
-            if let Some(_start) = ws_run_start {
-                if ws_run_len >= 2 {
-                    // Replace 2+ whitespace chars with single space
-                    result.push(' ');
-                } else {
-                    // Keep single whitespace char as-is
-                    // We need to get the original char
-                    if let Some(ws_char) = s.chars().nth(i - 1) {
-                        result.push(ws_char);
-                    }
-                }
-                ws_run_start = None;
-                ws_run_len = 0;
+            if let Some(ws) = pending_whitespace.take() {
+                result.push(ws);
             }
             result.push(c);
         }
     }
 
-    // Handle trailing whitespace
-    if let Some(start) = ws_run_start {
-        if ws_run_len >= 2 {
-            result.push(' ');
-        } else {
-            // Keep single trailing whitespace char as-is
-            if let Some(ws_char) = s.chars().nth(start) {
-                result.push(ws_char);
-            }
-        }
+    if let Some(ws) = pending_whitespace {
+        result.push(ws);
     }
-
     result
 }
 
@@ -774,6 +749,7 @@ mod tests {
         assert_eq!(collapse_whitespace(" "), " ");
         assert_eq!(collapse_whitespace("\t"), "\t");
         assert_eq!(collapse_whitespace("a b"), "a b");
+        assert_eq!(collapse_whitespace("a\t"), "a\t");
     }
 
     #[test]
