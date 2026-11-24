@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
-import { afterAll, describe, it, expect } from 'vitest'
+import { createBuilder, type InlineConfig } from 'vite'
+import { afterAll, describe, it, expect, onTestFinished } from 'vitest'
 /**
  * Tests for SSR manifest generation.
  *
@@ -20,6 +22,69 @@ import {
   generateAppManifestCode,
   generateAppEngineManifestCode,
 } from '../vite-plugin/angular-ssr-manifest-plugin.js'
+
+const manifestQuery = '?oxc-angular-ssr-manifest'
+
+/** A fake `@angular/ssr` that records its manifests and calls as `name`. */
+const fakeSsr = (name: string) => `
+  export const state = {}
+  const record = (event) => (globalThis.events ??= []).push(event)
+  record('${name}')
+  export function ɵsetAngularAppManifest(manifest) { state.app = manifest; record('app manifest') }
+  export function ɵsetAngularAppEngineManifest() { record('engine manifest') }
+  export function ɵgetOrCreateAngularServerApp() {}
+  export function ɵdestroyAngularServerApp() {}
+  export function ɵextractRoutesAndCreateRouteTree() {}
+`
+
+/** `files` for a fake `@angular/ssr` package in `dir` (`node_modules` by default). */
+const fakeSsrPackage = (name: string, dir = 'node_modules') => ({
+  [`${dir}/@angular/ssr/package.json`]:
+    '{ "name": "@angular/ssr", "type": "module", "exports": "./index.mjs" }',
+  [`${dir}/@angular/ssr/index.mjs`]: fakeSsr(name),
+})
+
+/**
+ * Builds the SSR entry `input` of a temp project made of `files`, runs the
+ * output with Node, and returns the JSON it prints.
+ */
+async function buildAndRun(
+  files: Record<string, string>,
+  options: { input: string; ssrEntry: string; config?: (root: string) => InlineConfig },
+): Promise<unknown> {
+  const root = mkdtempSync(join(tmpdir(), 'oxc-angular-ssr-order-'))
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+  for (const [file, code] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, file)), { recursive: true })
+    writeFileSync(join(root, file), code)
+  }
+  const config = options.config?.(root) ?? {}
+  const builder = await createBuilder({
+    configFile: false,
+    root,
+    logLevel: 'silent',
+    plugins: [ssrManifestPlugin({ ssrEntry: options.ssrEntry })],
+    ...config,
+    environments: {
+      ssr: {
+        ...config.environments?.ssr,
+        build: {
+          ...config.environments?.ssr?.build,
+          rolldownOptions: {
+            ...config.environments?.ssr?.build?.rolldownOptions,
+            input: join(root, options.input),
+            output: { entryFileNames: 'server.mjs' },
+          },
+        },
+      },
+    },
+  })
+  await builder.build(builder.environments.ssr)
+  const output = execFileSync(process.execPath, [join(root, 'dist/server.mjs')], {
+    encoding: 'utf8',
+  })
+  return JSON.parse(output)
+}
 
 describe('SSR Manifest Generation (Issue #60)', () => {
   describe('generateAppManifestCode', () => {
@@ -128,7 +193,119 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         )
 
       expect(transform('client')).toBeUndefined()
-      expect(transform('server')?.code).toContain('ɵsetAngularAppManifest')
+      expect(transform('server')?.code).toContain(`import "./server.ts${manifestQuery}";`)
+    })
+
+    it('evaluates entry imports, registers both manifests, then constructs the engine', async () => {
+      const events = await buildAndRun(
+        {
+          'compiler.mjs': "(globalThis.events ??= []).push('compiler')",
+          'ssr.mjs': fakeSsr('ssr'),
+          'main.server.ts': 'export default () => {}',
+          'server.js': `
+            import './compiler.mjs'
+            class AngularNodeAppEngine { constructor() { globalThis.events.push('engine') } }
+            new AngularNodeAppEngine()
+            export function view() { return <h1 /> }
+            console.log(JSON.stringify(globalThis.events))
+          `,
+        },
+        {
+          input: 'server.js',
+          ssrEntry: 'main.server.ts',
+          config: (root) => ({
+            resolve: { alias: { '@angular/ssr': join(root, 'ssr.mjs') } },
+            environments: {
+              ssr: {
+                build: {
+                  rolldownOptions: {
+                    // JSX in a .js entry: appending the import must keep the entry's module type.
+                    moduleTypes: { '.js': 'jsx' },
+                    transform: { jsx: { runtime: 'classic' } },
+                  },
+                },
+              },
+            },
+          }),
+        },
+      )
+      expect(events).toEqual(['compiler', 'ssr', 'app manifest', 'engine manifest', 'engine'])
+    })
+
+    it('bundles the manifests when every bare import is external', async () => {
+      const events = await buildAndRun(
+        {
+          ...fakeSsrPackage('ssr'),
+          'main.server.ts': 'export default () => {}',
+          'server.js': `
+            import '@angular/ssr'
+            class AngularNodeAppEngine { constructor() { globalThis.events.push('engine') } }
+            new AngularNodeAppEngine()
+            console.log(JSON.stringify(globalThis.events))
+          `,
+        },
+        {
+          input: 'server.js',
+          ssrEntry: 'main.server.ts',
+          config: () => ({
+            environments: {
+              ssr: {
+                build: {
+                  // Like server configs that keep every package external: neither
+                  // relative, absolute (POSIX or Windows), nor a plugin's \0 id.
+                  rolldownOptions: { external: (id) => !/^([./]|[a-zA-Z]:[\\/]|\0)/.test(id) },
+                },
+              },
+            },
+          }),
+        },
+      )
+      expect(events).toEqual(['ssr', 'app manifest', 'engine manifest', 'engine'])
+    })
+
+    it('keeps the manifests in a package without side effects', async () => {
+      const events = await buildAndRun(
+        {
+          ...fakeSsrPackage('ssr'),
+          'package.json': '{ "type": "module", "sideEffects": false }',
+          'main.server.ts': 'export default () => {}',
+          'server.js': `
+            import '@angular/ssr'
+            class AngularNodeAppEngine { constructor() { globalThis.events.push('engine') } }
+            new AngularNodeAppEngine()
+            console.log(JSON.stringify(globalThis.events))
+          `,
+        },
+        { input: 'server.js', ssrEntry: 'main.server.ts' },
+      )
+      expect(events).toEqual(['ssr', 'app manifest', 'engine manifest', 'engine'])
+    })
+
+    it("resolves Angular and the bootstrap from the entry's directory", async () => {
+      // The root has another @angular/ssr and main.server.ts than src/.
+      const result = await buildAndRun(
+        {
+          ...fakeSsrPackage('root ssr'),
+          ...fakeSsrPackage('src ssr', 'src/node_modules'),
+          'main.server.ts': "export default () => 'root bootstrap'",
+          'src/main.server.ts': "export default () => 'src bootstrap'",
+          'src/server.js': `
+            import { state } from '@angular/ssr'
+            class AngularNodeAppEngine {}
+            const bootstrap = await state.app.bootstrap()
+            console.log(JSON.stringify({ events: globalThis.events, bootstrap: bootstrap() }))
+          `,
+        },
+        {
+          input: 'src/server.js',
+          ssrEntry: 'src/main.server.ts',
+          config: () => ({ ssr: { noExternal: true } }),
+        },
+      )
+      expect(result).toEqual({
+        events: ['src ssr', 'app manifest', 'engine manifest'],
+        bootstrap: 'src bootstrap',
+      })
     })
 
     it('should not inject the manifests twice', () => {
@@ -142,6 +319,17 @@ describe('SSR Manifest Generation (Issue #60)', () => {
           '/app/.nitro/vite/services/ssr/index.mjs',
         )
 
+      const ctx = { environment: { config: { consumer: 'server' } } }
+      const entry = '/app/src/server.ts'
+      const { id } = (plugin.resolveId as any).handler.call(
+        ctx,
+        `./server.ts${manifestQuery}`,
+        entry,
+      )
+      const bundled = (plugin.load as Function).call(ctx, id) + 'new AngularNodeAppEngine();'
+      expect(transform(bundled)).toBeUndefined()
+
+      // Nor into code that already imports them.
       const once = transform('const engine = new AngularNodeAppEngine();').code
       expect(transform(once)).toBeUndefined()
     })
@@ -245,10 +433,15 @@ describe('SSR Manifest Generation (Issue #60)', () => {
         /** The server's buildStart, then a transform of each module. */
         async server(...modules: string[]): Promise<(string | undefined)[]> {
           await plugin.buildStart.handler.call(context('ssr'))
-          return modules.map(
-            (code, i) =>
-              plugin.transform.call(context('ssr'), code, join(root, `src/server${i}.ts`))?.code,
-          )
+          const ctx = context('ssr')
+          return modules.map((code, i) => {
+            const id = join(root, `src/server${i}.ts`)
+            const result = plugin.transform.call(ctx, code, id)
+            if (!result) return
+            const [, specifier] = result.code.match(/import "(.+)";\n$/)
+            const manifest = plugin.resolveId.handler.call(ctx, specifier, id)
+            return plugin.load.call(ctx, manifest.id)
+          })
         },
         /** The server's renderChunk of a chunk with `code`. */
         async render(code: string): Promise<string | undefined> {

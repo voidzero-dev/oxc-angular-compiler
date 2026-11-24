@@ -8,7 +8,7 @@
  * This plugin:
  * 1. Detects server builds (environments whose `consumer` is `server`, which
  *    includes the `ssr` environment `vite build --ssr` builds)
- * 2. Auto-injects manifest setup into files that use AngularNodeAppEngine/AngularAppEngine
+ * 2. Appends an import of the manifest setup to files that use AngularNodeAppEngine/AngularAppEngine
  * 3. Provides the client's built index.html as a server asset for SSR rendering
  *
  * @see https://github.com/voidzero-dev/oxc-angular-compiler/issues/60
@@ -17,7 +17,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import type { Plugin, ResolvedConfig, Rolldown, ViteBuilder } from 'vite'
 import { normalizePath } from 'vite'
@@ -115,6 +115,11 @@ export interface SsrManifestPluginOptions {
 // identifiers until its renderChunk fills in the page of the client round.
 const PAGE_TOKEN = '__oxc_angular_index_server_html__'
 const PAGE_SIZE_TOKEN = '__oxc_angular_index_server_html_size__'
+
+// The entry imports its manifest module as `./<entry file>?oxc-angular-ssr-manifest`,
+// which resolves to `<entry path>?oxc-angular-ssr-manifest`. Neither looks like a
+// bare import, so `external` rules for bare imports do not catch them.
+const MANIFEST_QUERY = '?oxc-angular-ssr-manifest'
 
 const MINIMAL_PAGE = '<!DOCTYPE html><html><head></head><body><app-root></app-root></body></html>'
 
@@ -486,32 +491,9 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         !id.includes('node_modules') &&
         !id.startsWith('\0') &&
         (code.includes('AngularNodeAppEngine') || code.includes('AngularAppEngine')) &&
-        !code.includes('ɵsetAngularAppManifest')
+        !code.includes('ɵsetAngularAppManifest') &&
+        !code.includes(MANIFEST_QUERY)
       ) {
-        const baseHref = resolvedConfig.base || '/'
-
-        // Compute the import path for main.server.ts relative to the current file
-        const fileDir = dirname(id)
-        let ssrEntryImport = normalizePath(relative(fileDir, ssrEntryPath)).replace(/\.ts$/, '')
-        if (!ssrEntryImport.startsWith('.')) {
-          ssrEntryImport = './' + ssrEntryImport
-        }
-
-        // In `vite build --app --watch`, renderChunk fills in the page.
-        const appManifest = isAppWatchServer(this.environment, this.meta)
-          ? generateAppManifestCode({ ssrEntryImport, baseHref, indexHtmlContent: '' })
-              .replace('size: 0,', `size: ${PAGE_SIZE_TOKEN},`)
-              .replace('Promise.resolve(``)', `Promise.resolve(${PAGE_TOKEN})`)
-          : generateAppManifestCode({
-              ssrEntryImport,
-              baseHref,
-              indexHtmlContent: indexHtmlContent || '',
-            })
-
-        const engineManifest = generateAppEngineManifestCode({
-          basePath: baseHref,
-        })
-
         // Only warn about the page when a manifest embeds it, once per build.
         const warning = fallbackWarnings.get(this.environment.name)
         if (warning) {
@@ -520,10 +502,54 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         }
 
         return {
-          code: appManifest + engineManifest + code,
+          // ESM evaluates this last dependency after the user's imports (including
+          // @angular/compiler), but before the entry constructs its app engine.
+          code: `${code}\nimport ${JSON.stringify('./' + basename(id) + MANIFEST_QUERY)};\n`,
           map: null,
         }
       }
+    },
+
+    resolveId: {
+      // Before Vite's resolver, which marks the modules of a `"sideEffects": false`
+      // package as free of side effects. This one exports nothing, so it would go.
+      order: 'pre',
+      handler(source, importer) {
+        if (!importer || this.environment?.config.consumer !== 'server') return
+        if (source.endsWith(MANIFEST_QUERY)) {
+          const entry = resolve(dirname(importer), source.slice(0, -MANIFEST_QUERY.length))
+          return { id: normalizePath(entry) + MANIFEST_QUERY, moduleSideEffects: true }
+        }
+      },
+    },
+
+    load(id) {
+      if (!id.endsWith(MANIFEST_QUERY) || this.environment?.config.consumer !== 'server') return
+      const baseHref = resolvedConfig.base || '/'
+
+      // Import main.server.ts relative to the entry, the directory of this module.
+      const fileDir = dirname(id)
+      let ssrEntryImport = normalizePath(relative(fileDir, ssrEntryPath)).replace(/\.ts$/, '')
+      if (!ssrEntryImport.startsWith('.')) {
+        ssrEntryImport = './' + ssrEntryImport
+      }
+
+      // In `vite build --app --watch`, renderChunk fills in the page.
+      const appManifest = isAppWatchServer(this.environment, this.meta)
+        ? generateAppManifestCode({ ssrEntryImport, baseHref, indexHtmlContent: '' })
+            .replace('size: 0,', `size: ${PAGE_SIZE_TOKEN},`)
+            .replace('Promise.resolve(``)', `Promise.resolve(${PAGE_TOKEN})`)
+        : generateAppManifestCode({
+            ssrEntryImport,
+            baseHref,
+            indexHtmlContent: indexHtmlContent || '',
+          })
+
+      const engineManifest = generateAppEngineManifestCode({
+        basePath: baseHref,
+      })
+
+      return appManifest + engineManifest
     },
 
     async renderChunk(code) {
