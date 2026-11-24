@@ -8,7 +8,7 @@
  * This plugin:
  * 1. Detects server builds (environments whose `consumer` is `server`, which
  *    includes the `ssr` environment `vite build --ssr` builds)
- * 2. Auto-injects manifest setup into files that use AngularNodeAppEngine/AngularAppEngine
+ * 2. Appends an import of the manifest setup to files that use AngularNodeAppEngine/AngularAppEngine
  * 3. Provides the client's built index.html as a server asset for SSR rendering
  *
  * @see https://github.com/voidzero-dev/oxc-angular-compiler/issues/60
@@ -17,7 +17,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import type { Plugin, ResolvedConfig, Rolldown, ViteBuilder } from 'vite'
 import { normalizePath } from 'vite'
@@ -116,9 +116,10 @@ export interface SsrManifestPluginOptions {
 const PAGE_TOKEN = '__oxc_angular_index_server_html__'
 const PAGE_SIZE_TOKEN = '__oxc_angular_index_server_html_size__'
 
-const MANIFEST_ID = 'virtual:oxc-angular/ssr-manifest'
-const MANIFEST_IMPORT = `import '${MANIFEST_ID}';`
-const MANIFEST_PREFIX = '\0' + MANIFEST_ID + '.js?entry='
+// The entry imports its manifest module as `./<entry file>?oxc-angular-ssr-manifest`,
+// which resolves to `<entry path>?oxc-angular-ssr-manifest`. Neither looks like a
+// bare import, so `external` rules for bare imports do not catch them.
+const MANIFEST_QUERY = '?oxc-angular-ssr-manifest'
 
 const MINIMAL_PAGE = '<!DOCTYPE html><html><head></head><body><app-root></app-root></body></html>'
 
@@ -295,9 +296,6 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
   // Making the file failed once, so do not try (and warn) again.
   let stampFailed = false
   const servers = new Map<string, ServerState>()
-
-  const manifestEntry = (id: string) =>
-    resolve(resolvedConfig.root, decodeURIComponent(id.slice(MANIFEST_PREFIX.length)))
 
   const serverState = (name: string): ServerState => {
     let state = servers.get(name)
@@ -494,7 +492,7 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         !id.startsWith('\0') &&
         (code.includes('AngularNodeAppEngine') || code.includes('AngularAppEngine')) &&
         !code.includes('ɵsetAngularAppManifest') &&
-        !code.includes(MANIFEST_IMPORT)
+        !code.includes(MANIFEST_QUERY)
       ) {
         // Only warn about the page when a manifest embeds it, once per build.
         const warning = fallbackWarnings.get(this.environment.name)
@@ -506,30 +504,31 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
         return {
           // ESM evaluates this last dependency after the user's imports (including
           // @angular/compiler), but before the entry constructs its app engine.
-          code: `${code}\n${MANIFEST_IMPORT}\n`,
+          code: `${code}\nimport ${JSON.stringify('./' + basename(id) + MANIFEST_QUERY)};\n`,
           map: null,
         }
       }
     },
 
-    resolveId(source, importer, options) {
-      if (!importer || this.environment?.config.consumer !== 'server') return
-      if (source === MANIFEST_ID) {
-        const entry = normalizePath(relative(resolvedConfig.root, importer))
-        return { id: MANIFEST_PREFIX + encodeURIComponent(entry), moduleSideEffects: true }
-      }
-      // Resolve Angular and the bootstrap from the same entry as before injection.
-      if (importer.startsWith(MANIFEST_PREFIX)) {
-        return this.resolve(source, normalizePath(manifestEntry(importer)), options)
-      }
+    resolveId: {
+      // Before Vite's resolver, which marks the modules of a `"sideEffects": false`
+      // package as free of side effects. This one exports nothing, so it would go.
+      order: 'pre',
+      handler(source, importer) {
+        if (!importer || this.environment?.config.consumer !== 'server') return
+        if (source.endsWith(MANIFEST_QUERY)) {
+          const entry = resolve(dirname(importer), source.slice(0, -MANIFEST_QUERY.length))
+          return { id: normalizePath(entry) + MANIFEST_QUERY, moduleSideEffects: true }
+        }
+      },
     },
 
     load(id) {
-      if (!id.startsWith(MANIFEST_PREFIX) || this.environment?.config.consumer !== 'server') return
+      if (!id.endsWith(MANIFEST_QUERY) || this.environment?.config.consumer !== 'server') return
       const baseHref = resolvedConfig.base || '/'
 
-      // Compute the import path for main.server.ts relative to the current file
-      const fileDir = dirname(manifestEntry(id))
+      // Import main.server.ts relative to the entry, the directory of this module.
+      const fileDir = dirname(id)
       let ssrEntryImport = normalizePath(relative(fileDir, ssrEntryPath)).replace(/\.ts$/, '')
       if (!ssrEntryImport.startsWith('.')) {
         ssrEntryImport = './' + ssrEntryImport
