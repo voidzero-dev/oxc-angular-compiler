@@ -15,6 +15,7 @@ use crate::output::ast::{
 use crate::r3::{CORE, Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
 use oxc_allocator::Box;
 use oxc_str::Ident;
+use rustc_hash::FxHashMap;
 
 use crate::ir::ops::XrefId;
 
@@ -60,35 +61,36 @@ pub fn emit_template_fn<'a>(job: &mut ComponentCompilationJob<'a>) -> FunctionEx
 
 /// Emit child views to job.pool.statements.
 ///
-/// This function collects view xrefs first to avoid borrowing issues,
-/// then emits each child view depth-first.
+/// Angular's `emitChildViews` walks `job.units` once per view and keeps the
+/// units whose parent is the current view. We build the same parent -> children
+/// lists once, in `job.views` order, so each view is visited a single time.
 fn emit_child_views_to_job<'a>(job: &mut ComponentCompilationJob<'a>) {
-    // Collect all view xrefs to avoid borrow checker issues
-    let view_xrefs: std::vec::Vec<_> = job.views.keys().copied().collect();
+    let mut children_of: FxHashMap<XrefId, std::vec::Vec<XrefId>> = FxHashMap::default();
+    for (&xref, unit) in &job.views {
+        if let Some(parent) = unit.parent {
+            children_of.entry(parent).or_default().push(xref);
+        }
+    }
 
     // Process views in order, emitting children before parents
-    emit_child_views_recursive(job, job.root.xref, &view_xrefs);
+    emit_child_views_recursive(job, job.root.xref, &mut children_of);
 }
 
 /// Recursively emit child views for a given parent.
 fn emit_child_views_recursive<'a>(
     job: &mut ComponentCompilationJob<'a>,
     parent_xref: XrefId,
-    all_xrefs: &[XrefId],
+    children_of: &mut FxHashMap<XrefId, std::vec::Vec<XrefId>>,
 ) {
-    // Find children of this parent
-    let children: std::vec::Vec<_> = all_xrefs
-        .iter()
-        .filter(|&&xref| {
-            job.views.get(&xref).map(|unit| unit.parent == Some(parent_xref)).unwrap_or(false)
-        })
-        .copied()
-        .collect();
+    // Each view has one parent, so its child list is used once.
+    let Some(children) = children_of.remove(&parent_xref) else {
+        return;
+    };
 
     // Process each child depth-first
     for child_xref in children {
         // First, emit this child's children
-        emit_child_views_recursive(job, child_xref, all_xrefs);
+        emit_child_views_recursive(job, child_xref, children_of);
 
         // Then emit this child view
         if let Some(unit) = job.views.get_mut(&child_xref) {
