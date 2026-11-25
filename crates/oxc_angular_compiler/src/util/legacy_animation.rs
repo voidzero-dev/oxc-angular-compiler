@@ -1,20 +1,6 @@
 //! Legacy animation event names (`(@trigger.phase)`).
 
-/// Matches JavaScript's `\s`, which is also what `String.prototype.trim` strips.
-/// Unlike `char::is_whitespace`, it includes U+FEFF and leaves out U+0085.
-fn is_js_whitespace(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200A}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202F}'
-                | '\u{205F}'
-                | '\u{3000}'
-                | '\u{FEFF}'
-    )
-}
+use super::chars::is_js_whitespace;
 
 /// Splits a legacy animation event name (without its `@`) into the trigger name
 /// and the phase, like Angular's `parseLegacyAnimationEventName`.

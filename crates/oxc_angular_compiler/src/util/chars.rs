@@ -71,6 +71,23 @@ pub fn is_whitespace(ch: char) -> bool {
     matches!(ch, TAB..=SPACE | NBSP)
 }
 
+/// Matches JavaScript's `\s`, which is also what `String.prototype.trim`,
+/// `trimStart` and `trimEnd` strip. Unlike `char::is_whitespace`, it includes
+/// U+FEFF and leaves out U+0085.
+pub fn is_js_whitespace(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | NBSP | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
+
 /// Checks if a character is a decimal digit (0-9).
 #[inline]
 pub fn is_digit(ch: char) -> bool {
