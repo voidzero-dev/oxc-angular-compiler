@@ -240,6 +240,20 @@ fn offset_to_position(input: &str, offset: u32) -> (u32, u32) {
 /// The value JavaScript's `parseInt(digits, radix)` gives, for the non-negative values a character can have:
 /// leading whitespace and a `+` are skipped, a `0x` prefix is allowed in base 16, and the longest run of digits
 /// counts.
+/// Splits an attribute name into its namespace prefix and local name, like
+/// Angular's `_consumePrefixAndName`: the prefix is the run of ASCII letters and
+/// digits at the start, and only counts when a `:` follows it. So `xlink:href`
+/// has the prefix `xlink`, while `(window:click)`, `on-window:click` and
+/// `[attr.x:y]` have none.
+/// Reference: lexer.ts (`_consumePrefixAndName`, `isPrefixEnd`)
+fn split_attr_ns_prefix(name: &str) -> (&str, &str) {
+    let end = name.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(name.len());
+    match name[end..].strip_prefix(':') {
+        Some(local_name) if end > 0 => (&name[..end], local_name),
+        _ => ("", name),
+    }
+}
+
 fn parse_int_prefix(digits: &str, radix: u32) -> Option<u32> {
     let digits = digits.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let digits = digits.strip_prefix('+').unwrap_or(digits);
@@ -2432,18 +2446,7 @@ impl<'a> HtmlLexer<'a> {
                 break;
             }
 
-            // Split on colon for namespace prefix (but not for Angular bindings)
-            let first_char = attr_name.chars().next();
-            let is_angular_binding = matches!(first_char, Some('(' | '[' | '*' | '#'));
-            let (prefix, name) = if !is_angular_binding {
-                if let Some(colon_pos) = attr_name.find(':') {
-                    (&attr_name[..colon_pos], &attr_name[colon_pos + 1..])
-                } else {
-                    ("", attr_name)
-                }
-            } else {
-                ("", attr_name)
-            };
+            let (prefix, name) = split_attr_ns_prefix(attr_name);
 
             self.tokens.push(HtmlToken::with_prefix_name(
                 HtmlTokenType::AttrName,
@@ -2583,22 +2586,7 @@ impl<'a> HtmlLexer<'a> {
                 }
             }
 
-            // Split on colon for namespace prefix
-            // But NOT if the colon is inside parentheses or brackets (Angular bindings)
-            let (prefix, name) = {
-                let first_char = attr_full_name.chars().next();
-                let is_angular_binding = matches!(first_char, Some('(' | '[' | '*' | '#'));
-                if !is_angular_binding {
-                    if let Some(colon_pos) = attr_full_name.find(':') {
-                        (&attr_full_name[..colon_pos], &attr_full_name[colon_pos + 1..])
-                    } else {
-                        ("", attr_full_name)
-                    }
-                } else {
-                    // Angular bindings like (click), [value], *ngIf, #ref - don't split on colon
-                    ("", attr_full_name)
-                }
-            };
+            let (prefix, name) = split_attr_ns_prefix(attr_full_name);
 
             self.tokens.push(HtmlToken::with_prefix_name(
                 HtmlTokenType::AttrName,

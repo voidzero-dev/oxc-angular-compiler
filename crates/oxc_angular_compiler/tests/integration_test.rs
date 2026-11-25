@@ -19720,3 +19720,36 @@ fn test_template_two_way_animate() {
         }
     }
 }
+
+/// #726: `on-@fade.done` is a legacy animation listener, like `(@fade.done)`, not a
+/// DOM event named `@fade.done`. Output checked against Angular 22.3.0.
+#[test]
+fn test_on_prefix_legacy_animation_event() {
+    let on_prefix = compile_template_to_js(r#"<div on-@fade.done="x()"></div>"#, "C");
+    let parens = compile_template_to_js(r#"<div (@fade.done)="x()"></div>"#, "C");
+    assert!(
+        on_prefix.contains(
+            r#"ɵɵlistener("@fade.done",function C_Template_div_animation_fade_done_0_listener()"#
+        ),
+        "{on_prefix}"
+    );
+    assert!(!on_prefix.contains("domListener"), "{on_prefix}");
+    assert!(!on_prefix.contains("consts"), "{on_prefix}");
+    assert_eq!(on_prefix, parens);
+}
+
+/// `bind-@fade`, `bind-animate-fade` and `[animate-fade]` are legacy animation
+/// bindings, like `[@fade]` (Angular's `parsePropertyBinding`), not
+/// `animate.leave` callbacks or a DOM property. Output checked against Angular 22.3.0.
+#[test]
+fn test_legacy_animation_property_prefixes() {
+    let expected = compile_template_to_js(r#"<div [@fade]="v"></div>"#, "C");
+    assert!(expected.contains(r#"ɵɵproperty("@fade",ctx.v)"#), "{expected}");
+    for template in [
+        r#"<div bind-@fade="v"></div>"#,
+        r#"<div bind-animate-fade="v"></div>"#,
+        r#"<div [animate-fade]="v"></div>"#,
+    ] {
+        assert_eq!(compile_template_to_js(template, "C"), expected, "{template}");
+    }
+}

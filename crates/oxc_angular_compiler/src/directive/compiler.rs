@@ -38,6 +38,7 @@ use crate::pipeline::selector::{
     parse_selector_to_r3_selector as parse_css_to_r3, r3_selector_to_output_expr,
 };
 use crate::r3::Identifiers;
+use crate::util::legacy_animation::split_legacy_animation_event_name;
 
 /// Result of compiling a directive.
 #[derive(Debug)]
@@ -753,18 +754,7 @@ fn convert_r3_host_metadata_to_input<'a>(
             key_str
         };
 
-        // Check for target prefix (window:, document:, body:)
-        let (final_event_name, target) = parse_event_target(event_name);
-
-        let (effective_name, event_type, phase) =
-            parse_legacy_animation_event(final_event_name, &allocator);
-        // Angular's `_parseRegularEvent` checks the name before splitting off the target.
-        let event_type =
-            if event_type == ParsedEventType::Regular && event_name.starts_with("animate.") {
-                ParsedEventType::Animation
-            } else {
-                event_type
-            };
+        let (effective_name, event_type, phase, target) = classify_host_event(event_name);
 
         // Parse the handler expression
         let value_str = allocator.alloc_str(value.as_str());
@@ -775,7 +765,7 @@ fn convert_r3_host_metadata_to_input<'a>(
             event_type,
             handler: parse_result.ast,
             target: target.map(|t| Ident::from_in(t, &allocator)),
-            phase,
+            phase: phase.map(|p| Ident::from_in(p.as_str(), &allocator)),
             source_span: empty_span,
             handler_span: empty_span,
             key_span: empty_span,
@@ -819,6 +809,7 @@ fn convert_r3_host_metadata_to_input<'a>(
 ///
 /// Examples:
 /// - "@fade" -> (BindingType::LegacyAnimation, "fade", None)
+/// - "animate-fade" -> (BindingType::LegacyAnimation, "fade", None)
 /// - "animate.enter" -> (BindingType::Animation, "animate.enter", None)
 /// - "class.active" -> (BindingType::Class, "active", None)
 /// - "style.color" -> (BindingType::Style, "color", None)
@@ -826,11 +817,11 @@ fn convert_r3_host_metadata_to_input<'a>(
 /// - "attr.role" -> (BindingType::Attribute, "role", None)
 /// - "disabled" -> (BindingType::Property, "disabled", None)
 ///
-/// The `@` and `animate.` checks follow `parsePropertyBinding` in Angular's
-/// `template_parser/binding_parser.ts`: `@` is stripped (reify adds it back),
-/// and `animate.` keeps the full name.
+/// The `animate-` / `@` and `animate.` checks follow `parsePropertyBinding` in
+/// Angular's `template_parser/binding_parser.ts`: the legacy animation prefix is
+/// stripped (reify adds `@` back), and `animate.` keeps the full name.
 pub(crate) fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
-    if let Some(rest) = name.strip_prefix('@') {
+    if let Some(rest) = name.strip_prefix("animate-").or_else(|| name.strip_prefix('@')) {
         (BindingType::LegacyAnimation, rest, None)
     } else if name.starts_with("animate.") {
         (BindingType::Animation, name, None)
@@ -852,47 +843,38 @@ pub(crate) fn parse_host_property_name(name: &str) -> (BindingType, &str, Option
     }
 }
 
-/// Classify a host event name as a legacy animation event.
+/// A host listener name (without its parentheses) split as Angular's `parseEvent`
+/// does: the event name, its type, the legacy animation phase and the target.
 ///
-/// Mirrors Angular's `parseLegacyAnimationEventName` (binding_parser.ts) +
-/// `splitAtPeriod` (util.ts): `@` is stripped, the name is split on the first `.`,
-/// **both halves are trimmed**, and the **phase is lowercased** via `.toLowerCase()`.
+/// The `@` is checked first, on the whole name, so `@fade.done` is a legacy
+/// animation event (split by [`split_legacy_animation_event_name`]) and
+/// `window:@fade` is a regular event named `@fade` on `window`. The `animate.`
+/// check of `_parseRegularEvent` also runs before the target is split off.
 ///
-/// - `@trigger.phase`  → (`"trigger"`, `LegacyAnimation`, `Some("phase")`)
-/// - `@anim.START`     → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
-/// - `@anim. start `   → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
-/// - `@anim.foo`       → (`"anim"`,    `LegacyAnimation`, `Some("foo")`)  Angular reports
-///                       an error for invalid phases; we drop the diagnostic to match
-///                       this codebase's host-metadata convention (`parse_result.errors`
-///                       from `binding_parser.parse_event` is also discarded). Code
-///                       output still matches Angular byte-for-byte.
-/// - `@trigger`        → (`"trigger"`, `LegacyAnimation`, `None`)
-/// - `click`           → (`"click"`,   `Regular`,         `None`)
+/// - `@fade.DONE`   -> (`fade`, `LegacyAnimation`, `Some("done")`, `None`)
+/// - `@fade`        -> (`fade`, `LegacyAnimation`, `None`, `None`)
+/// - `window:@fade` -> (`@fade`, `Regular`, `None`, `Some("window")`)
+/// - `click`        -> (`click`, `Regular`, `None`, `None`)
 ///
-/// Keep in sync with the identical helper in `component/transform.rs`.
-fn parse_legacy_animation_event<'a>(
-    event_name: &'a str,
-    allocator: &'a Allocator,
-) -> (&'a str, ParsedEventType, Option<Ident<'a>>) {
-    use oxc_allocator::FromIn;
-    let Some(without_at) = event_name.strip_prefix('@') else {
-        return (event_name, ParsedEventType::Regular, None);
-    };
-    let (trigger_raw, phase_raw) = match without_at.find('.') {
-        Some(dot) => (&without_at[..dot], Some(&without_at[dot + 1..])),
-        None => (without_at, None),
-    };
-    let trigger_trimmed = trigger_raw.trim();
-    let trigger: &'a str = if trigger_trimmed.len() == trigger_raw.len() {
-        trigger_trimmed
+/// A missing or invalid phase in `host: {...}` is reported by
+/// `host_binding_errors` (`directive/decorator.rs`). `@HostListener` names are
+/// not checked, as in ngtsc, so they still reach this with any phase.
+///
+/// Reference: binding_parser.ts (`parseEvent`, `_parseRegularEvent`)
+pub(crate) fn classify_host_event(
+    event_name: &str,
+) -> (&str, ParsedEventType, Option<String>, Option<&str>) {
+    if let Some(anim_name) = event_name.strip_prefix('@') {
+        let (trigger, phase) = split_legacy_animation_event_name(anim_name);
+        return (trigger, ParsedEventType::LegacyAnimation, phase, None);
+    }
+    let event_type = if event_name.starts_with("animate.") {
+        ParsedEventType::Animation
     } else {
-        allocator.alloc_str(trigger_trimmed)
+        ParsedEventType::Regular
     };
-    let phase = phase_raw.map(|p| {
-        let normalized = p.trim().to_lowercase();
-        Ident::from_in(normalized.as_str(), &allocator)
-    });
-    (trigger, ParsedEventType::LegacyAnimation, phase)
+    let (name, target) = parse_event_target(event_name);
+    (name, event_type, None, target)
 }
 
 /// Parse an event name to extract target prefix (window:, document:, body:).

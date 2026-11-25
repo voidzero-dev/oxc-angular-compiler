@@ -1,8 +1,8 @@
 //! Tests for the Angular linker: key quoting and version-dependent emit.
 
 use oxc_allocator::Allocator;
-use oxc_angular_compiler::AngularVersion;
 use oxc_angular_compiler::linker::{LinkOptions, link, link_with_options};
+use oxc_angular_compiler::{AngularVersion, Prerelease};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
@@ -1343,9 +1343,10 @@ D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.3", t
     assert!(linked.contains("hostVars:7"), "{linked}");
 }
 
-/// #704: Angular's linker never reads the binding parser's errors, so an
-/// empty host property or listener name links (Angular 22.2.4's
-/// `compileDirectiveDeclaration` gives the same output).
+/// #704: before 22.3.0-rc.0, Angular's linker never reads the binding parser's
+/// errors, so an empty host property or listener name links (Angular 22.2.4's
+/// `compileDirectiveDeclaration` gives the same output). From 22.3.0-rc.0 it is
+/// an error (`test_link_reports_host_binding_errors`).
 #[test]
 fn test_link_host_empty_binding_names() {
     let code = r#"
@@ -1354,7 +1355,8 @@ class D {
 }
 D.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "22.2.4", type: D, isStandalone: true, selector: "[d]", host: { properties: { "": "a" }, listeners: { "": "b()" } }, ngImport: i0 });
 "#;
-    let linked: String = link_for_version(code, None).split_whitespace().collect();
+    let linked: String =
+        link_for_version(code, Some(AngularVersion::new(22, 2, 4))).split_whitespace().collect();
     assert!(
         linked.contains(r#"i0.ɵɵlistener("",functionD__HostBindingHandler(){returnctx.b();})"#),
         "{linked}"
@@ -1742,5 +1744,67 @@ fn test_link_reports_a_template_error_and_links_the_rest() {
     for error in &result.errors {
         assert!(error.message.contains("[ a + ]"), "{}", error.message);
         assert!(!error.message.contains("of the template)"), "{}", error.message);
+    }
+}
+
+/// Like Angular's `toR3DirectiveMeta`, a partial `host` with errors keeps the
+/// declaration from linking (`FatalLinkerError` at `host`). The listeners include
+/// `@HostListener` names, so `@HostListener('@fade')` fails to link too. Messages
+/// checked against the Angular 22.3.0 linker (`verifyHostBindings`).
+#[test]
+fn test_link_reports_host_binding_errors() {
+    const MISSING: &str = "The animation trigger output event (@fade) is missing its phase value \
+                           name (start or done are currently supported)";
+    let declare = |kind: &str, host: &str| {
+        let extra = if kind == "Component" { r#"template: "", "# } else { "" };
+        format!(
+            "import * as i0 from \"@angular/core\";\nclass X {{\n}}\nX.ɵ{} = i0.ɵɵngDeclare{kind}({{ minVersion: \"14.0.0\", version: \"22.3.0\", type: X, isStandalone: true, selector: \"[x]\", {extra}host: {host}, ngImport: i0 }});\n",
+            if kind == "Component" { "cmp" } else { "dir" }
+        )
+    };
+    for kind in ["Directive", "Component"] {
+        for (host, expected) in [
+            (r#"{ listeners: { "@fade": "go()" } }"#, MISSING.to_string()),
+            (
+                r#"{ listeners: { "@fade.end": "go()", "@.done": "go()" }, properties: { "@": "v" } }"#,
+                "The provided animation output phase value \"end\" for \"@fade\" is not supported \
+                 (use start or done)\nAnimation event name is missing in binding\nAnimation \
+                 trigger is missing"
+                    .to_string(),
+            ),
+            (r#"{ properties: { "": "v" } }"#, "Property name is missing in binding".to_string()),
+        ] {
+            let code = declare(kind, host);
+            let allocator = Allocator::default();
+            let result = link(&allocator, &code, "lib.mjs");
+            let messages: Vec<String> =
+                result.errors.iter().map(|e| e.message.to_string()).collect();
+            assert_eq!(messages, [expected.clone()], "{kind} {host}");
+            let help = result.errors[0].help.as_deref().unwrap_or_default();
+            let line = code.lines().nth(3).unwrap();
+            let column = line[..line.find("host: ").unwrap()].chars().count() + 7;
+            assert_eq!(help, format!("lib.mjs:4:{column}"), "{kind} {host}");
+            assert!(result.code.contains(&format!("ɵɵngDeclare{kind}")), "{kind} {host}: not kept");
+        }
+        // Before 22.3.0-rc.0 the linker does not check the host.
+        for version in [
+            AngularVersion::new(22, 2, 7),
+            AngularVersion::new(22, 3, 0).with_prerelease(Prerelease::Next(5)),
+        ] {
+            let code = declare(kind, r#"{ listeners: { "@fade": "go()" } }"#);
+            let allocator = Allocator::default();
+            let options = LinkOptions { angular_version: Some(version), ..LinkOptions::default() };
+            let result = link_with_options(&allocator, &code, "lib.mjs", &options);
+            assert!(result.errors.is_empty(), "{kind} {version:?}: {:?}", result.errors);
+        }
+        // Valid names link.
+        let code = declare(
+            kind,
+            r#"{ listeners: { "@fade.done": "go()", "window:@fade": "go()" }, properties: { "@fade": "v" } }"#,
+        );
+        let allocator = Allocator::default();
+        let result = link(&allocator, &code, "lib.mjs");
+        assert!(result.errors.is_empty(), "{kind}: {:?}", result.errors);
+        assert!(!result.code.contains("ɵɵngDeclare"), "{kind}: not linked");
     }
 }

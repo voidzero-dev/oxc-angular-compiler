@@ -2195,6 +2195,300 @@ mod whitespace {
 // Tests: Animation bindings
 // ============================================================================
 
+/// Errors of a template parsed with selectorless syntax (`@Dir(...)`).
+fn get_selectorless_transform_errors(html: &str) -> Vec<String> {
+    let allocator = Allocator::default();
+    let html_result = HtmlParser::with_selectorless(&allocator, html, "test.html").parse();
+    let options = TransformOptions { collect_comment_nodes: false, ..Default::default() };
+    let r3_result = HtmlToR3Transform::new(&allocator, html, options).transform(&html_result.nodes);
+    r3_result.errors.iter().map(|e| e.msg.clone()).collect()
+}
+
+/// #726: a legacy animation event needs a trigger name and a `start` / `done` phase,
+/// whatever its spelling. Messages checked against Angular 22.3.0 `parseTemplate`.
+/// Ported in part from r3_template_transform_spec.ts ('should report invalid phase
+/// value of animation event').
+mod legacy_animation_events {
+    use super::*;
+
+    const MISSING_FADE: &str = "The animation trigger output event (@fade) is missing its phase \
+                                value name (start or done are currently supported)";
+    const END_FADE: &str = "The provided animation output phase value \"end\" for \"@fade\" is \
+                            not supported (use start or done)";
+    const NO_NAME: &str = "Animation event name is missing in binding";
+
+    #[test]
+    fn valid_phases_have_no_errors() {
+        for html in [
+            r#"<div (@fade.done)="x()"></div>"#,
+            r#"<div (@fade.start)="x()"></div>"#,
+            r#"<div (@fade.DONE)="x()"></div>"#,
+            r#"<div on-@fade.done="x()"></div>"#,
+            r#"<ng-template (@fade.done)="x()"></ng-template>"#,
+        ] {
+            assert!(get_transform_errors(html).is_empty(), "{html}");
+        }
+    }
+
+    #[test]
+    fn missing_phase() {
+        assert_eq!(get_transform_errors(r#"<div (@fade)="x()"></div>"#), [MISSING_FADE]);
+        assert_eq!(get_transform_errors(r#"<div (@fade.)="x()"></div>"#), [MISSING_FADE]);
+        assert_eq!(get_transform_errors(r#"<div on-@fade="x()"></div>"#), [MISSING_FADE]);
+        assert_eq!(
+            get_transform_errors(r#"<ng-template (@fade)="x()"></ng-template>"#),
+            [MISSING_FADE]
+        );
+        // Reported once, though `*ngIf` copies the event to the template.
+        assert_eq!(get_transform_errors(r#"<div *ngIf="c" (@fade)="x()"></div>"#), [MISSING_FADE]);
+    }
+
+    #[test]
+    fn unsupported_phase() {
+        assert_eq!(get_transform_errors(r#"<div (@fade.end)="x()"></div>"#), [END_FADE]);
+        assert_eq!(get_transform_errors(r#"<div on-@fade.end="x()"></div>"#), [END_FADE]);
+        assert_eq!(
+            get_transform_errors(r#"<div (@event.invalidPhase)="x()"></div>"#),
+            ["The provided animation output phase value \"invalidphase\" for \"@event\" is \
+                 not supported (use start or done)"]
+        );
+        assert_eq!(
+            get_transform_errors(r#"<div (@fade.start.extra)="x()"></div>"#),
+            ["The provided animation output phase value \"start.extra\" for \"@fade\" is \
+                 not supported (use start or done)"]
+        );
+    }
+
+    #[test]
+    fn missing_trigger_name() {
+        assert_eq!(get_transform_errors(r#"<div (@.done)="x()"></div>"#), [NO_NAME]);
+        assert_eq!(
+            get_transform_errors(r#"<div (@)="x()"></div>"#),
+            [
+                NO_NAME,
+                "The animation trigger output event (@) is missing its phase value name (start \
+                 or done are currently supported)",
+            ]
+        );
+    }
+
+    /// The handler errors come first, as Angular parses the handler first.
+    #[test]
+    fn handler_errors_come_first() {
+        assert_eq!(
+            get_transform_errors(r#"<div (@fade)=""></div>"#),
+            ["Empty expressions are not allowed", MISSING_FADE]
+        );
+    }
+
+    /// `[(@fade)]` adds the event `@fadeChange`, which has no valid phase. Angular
+    /// skips the two-way target check for it.
+    #[test]
+    fn two_way_binding() {
+        const MISSING_FADE_CHANGE: &str = "The animation trigger output event (@fadeChange) is \
+                                           missing its phase value name (start or done are \
+                                           currently supported)";
+        for html in [
+            r#"<div [(@fade)]="v"></div>"#,
+            r#"<div [(@fade)]="a + b"></div>"#,
+            r#"<div bindon-@fade="v"></div>"#,
+        ] {
+            assert_eq!(get_transform_errors(html), [MISSING_FADE_CHANGE], "{html}");
+        }
+        assert_eq!(
+            get_transform_errors(r#"<div [(@fade.done)]="v"></div>"#),
+            ["The provided animation output phase value \"donechange\" for \"@fade\" is not \
+                 supported (use start or done)"]
+        );
+    }
+
+    /// `[@x]`, `[animate-x]`, `bind-@x`, `bind-animate-x`, `[(@x)]` and `bindon-@x`
+    /// are legacy animation inputs named `x` (Angular's `parsePropertyBinding`). An
+    /// empty name is an error.
+    #[test]
+    fn legacy_animation_inputs() {
+        for html in [
+            r#"<div [@fade]="v"></div>"#,
+            r#"<div [animate-fade]="v"></div>"#,
+            r#"<div bind-@fade="v"></div>"#,
+            r#"<div bind-animate-fade="v"></div>"#,
+        ] {
+            assert_eq!(
+                humanize(html),
+                vec![h!["Element", "div"], h!["BoundAttribute", 4, "fade", "v"]],
+                "{html}"
+            );
+        }
+        assert_eq!(
+            humanize(r#"<div @fade></div>"#),
+            vec![h!["Element", "div"], h!["BoundAttribute", 4, "fade", "undefined"]]
+        );
+        const TRIGGER: &str = "Animation trigger is missing";
+        for html in [
+            r#"<div [@]="v"></div>"#,
+            r#"<div [animate-]="v"></div>"#,
+            r#"<div bind-@="v"></div>"#,
+            r#"<div bind-animate-="v"></div>"#,
+        ] {
+            assert_eq!(get_transform_errors(html), [TRIGGER], "{html}");
+        }
+        assert_eq!(
+            get_transform_errors(r#"<div [(@)]="v"></div>"#),
+            [
+                TRIGGER,
+                "The animation trigger output event (@Change) is missing its phase value name \
+                 (start or done are currently supported)",
+            ]
+        );
+    }
+
+    /// A directive accepts only property and two-way inputs, so a legacy animation
+    /// input skips it. Checked against Angular 22.2.2 (the last with selectorless).
+    #[test]
+    fn selectorless_directive_legacy_animation_input() {
+        const NOT_SUPPORTED: &str = "Binding is not supported in a directive context";
+        for html in [
+            r#"<div @Dir([@fade]="v")></div>"#,
+            r#"<div @Dir([animate-fade]="v")></div>"#,
+            r#"<div @Dir(bind-@fade="v")></div>"#,
+        ] {
+            assert_eq!(get_selectorless_transform_errors(html), [NOT_SUPPORTED], "{html}");
+        }
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir([@]="v")></div>"#),
+            ["Animation trigger is missing", NOT_SUPPORTED]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir([(@fade)]="v")></div>"#),
+            [
+                "The animation trigger output event (@fadeChange) is missing its phase value \
+                 name (start or done are currently supported)",
+                NOT_SUPPORTED,
+            ]
+        );
+    }
+
+    /// Like `extractDirectives`, a directive with an unsupported attribute is skipped
+    /// before its other attributes are parsed, so they report nothing.
+    #[test]
+    fn selectorless_directive_unsupported_attribute_skips_it() {
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(*ngIf="c" (@fade)="x()")></div>"#),
+            ["Shorthand template syntax \"*ngIf\" is not supported inside a directive context"]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir((@fade)="x()" ngNonBindable)></div>"#),
+            ["Attribute \"ngNonBindable\" is not supported in a directive context"]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(
+                r#"<div @Dir(ngProjectAs="p" on-@fade="x()")></div>"#
+            ),
+            ["Attribute \"ngProjectAs\" is not supported in a directive context"]
+        );
+        // A skipped directive does not count as applied.
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(*ngIf="c") @Dir(a="b")></div>"#),
+            ["Shorthand template syntax \"*ngIf\" is not supported inside a directive context"]
+        );
+    }
+
+    #[test]
+    fn selectorless_directive() {
+        assert!(
+            get_selectorless_transform_errors(r#"<div @Dir(on-@fade.done="x()")></div>"#)
+                .is_empty()
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(on-@fade="x()")></div>"#),
+            [MISSING_FADE]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(on-@fade.end="x()")></div>"#),
+            [END_FADE]
+        );
+    }
+
+    /// Angular still adds the event when it reports the error.
+    #[test]
+    fn event_is_kept_on_error() {
+        let result = humanize_ignore_errors(r#"<div on-@fade="x()"></div>"#);
+        // `on-@fade` is a legacy animation event (type 1) named `fade`.
+        assert_eq!(result, vec![h!["Element", "div"], h!["BoundEvent", 1, "fade", "", "x()"]]);
+    }
+}
+
+/// Attribute names checked against Angular 22.3.0 `parseTemplate`.
+mod binding_names {
+    use super::*;
+
+    /// `on-window:click` has the target `window`, like `(window:click)`. The HTML
+    /// lexer only takes a namespace prefix made of letters and digits, so
+    /// `on-window` is not one.
+    #[test]
+    fn on_prefix_event_with_target() {
+        for html in [r#"<div on-window:click="f()"></div>"#, r#"<div (window:click)="f()"></div>"#]
+        {
+            assert_eq!(
+                humanize(html),
+                vec![h!["Element", "div"], h!["BoundEvent", 0, "click", "window", "f()"]],
+                "{html}"
+            );
+        }
+        // `window:@fade` is a regular event named `@fade`.
+        assert_eq!(
+            humanize(r#"<div on-window:@fade="f()"></div>"#),
+            vec![h!["Element", "div"], h!["BoundEvent", 0, "@fade", "window", "f()"]]
+        );
+    }
+
+    /// `()`, `[]` and `[()]` have no name, so they are plain attributes.
+    #[test]
+    fn empty_delimited_names_are_attributes() {
+        for (html, name) in [
+            (r#"<div ()="f()"></div>"#, "()"),
+            (r#"<div []="v"></div>"#, "[]"),
+            (r#"<div [()]="v"></div>"#, "[()]"),
+        ] {
+            assert!(get_transform_errors(html).is_empty(), "{html}");
+            let result = humanize(html);
+            assert_eq!(result[1][0], HumanValue::from("TextAttribute"), "{html}: {result:?}");
+            assert_eq!(result[1][1], HumanValue::from(name), "{html}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn empty_prefixed_names_are_errors() {
+        assert_eq!(
+            get_transform_errors(r#"<div on-="f()"></div>"#),
+            ["Event name is missing in binding"]
+        );
+        assert_eq!(
+            get_transform_errors(r#"<div bind-="v"></div>"#),
+            ["Property name is missing in binding"]
+        );
+        assert_eq!(
+            get_transform_errors(r#"<div bindon-="v"></div>"#),
+            ["Property name is missing in binding"]
+        );
+    }
+
+    /// Like `createDeferredBlock`, the connected blocks are parsed before the main
+    /// block, so their errors come first.
+    #[test]
+    fn defer_connected_block_errors_come_first() {
+        assert_eq!(
+            get_transform_errors(
+                r#"@defer { <div (@fade.x)="f()"></div> } @loading { <i (@fade.y)="f()"></i> } @placeholder { <b (@fade.w)="f()"></b> }"#
+            ),
+            ["y", "w", "x"].map(|phase| format!(
+                "The provided animation output phase value \"{phase}\" for \"@fade\" is not \
+                     supported (use start or done)"
+            ))
+        );
+    }
+}
+
 mod animation_bindings {
     use super::*;
 
