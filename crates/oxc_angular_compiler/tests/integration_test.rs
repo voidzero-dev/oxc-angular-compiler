@@ -4056,6 +4056,69 @@ export class C { f(): any { return null; } }
     assert!(!code.contains("_tmp"), "{code}");
 }
 
+/// Temporary names follow Angular's `generateTemporaries`: each read counts once,
+/// so a name is freed only at its real last read. A name that is still in use
+/// (`tmp_0_0` below) must not be handed to a nested safe call. Names match ngc
+/// 22.3 with `legacyOptionalChaining`.
+#[test]
+fn test_temporaries_are_freed_at_the_last_read() {
+    let options =
+        ComponentTransformOptions { legacy_optional_chaining: Some(true), ..Default::default() };
+    let compile = |template: &str| {
+        let source = format!(
+            "import {{ Component }} from '@angular/core';\n\
+             @Component({{ selector: 'c', template: `{template}` }})\n\
+             export class C {{ [k: string]: any; }}\n"
+        );
+        compile_compact(&source, Some(&options))
+    };
+
+    // Update op (interpolation).
+    let code = compile("{{ a()?.b?.c?.d?.[g()?.h]?.[k()?.m] }}");
+    assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
+    assert!(
+        code.contains(
+            "((tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]==null)?null:\
+             tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]\
+             [(((tmp_0_0=ctx.k())==null)?null:tmp_0_0.m)])"
+        ),
+        "{code}"
+    );
+
+    // Update op (property binding with a call argument).
+    let code = compile(r#"<span [title]="a()?.b?.[c()?.d]?.e(f()?.g)"></span>"#);
+    assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
+    assert!(
+        code.contains(
+            "tmp_0_0.b[(((tmp_0_1=ctx.c())==null)?null:tmp_0_1.d)]\
+             .e((((tmp_0_0=ctx.f())==null)?null:tmp_0_0.g))"
+        ),
+        "{code}"
+    );
+
+    // Listener handler expression.
+    let code = compile(r#"<span (click)="a()?.[b()?.c()?.[d()?.e()]]?.f()"></span>"#);
+    assert!(code.contains("{lettmp_0_0;lettmp_0_1;lettmp_0_2;lettmp_0_3;return"), "{code}");
+    assert!(code.contains("(tmp_0_2=tmp_0_1.c())"), "{code}");
+    assert!(code.contains("(tmp_0_3=ctx.d())"), "{code}");
+
+    // Many siblings: each op keeps its own index and the same two names.
+    let n = 40;
+    let code = compile(&r#"<span [title]="a()?.b?.[c()?.d]?.e(f()?.g)"></span>"#.repeat(n));
+    let decls: String = (0..n).map(|op| format!("lettmp_{op}_0;lettmp_{op}_1;")).collect();
+    assert!(code.contains(&format!("if((rf&2)){{{decls}i0.")), "{code}");
+    let mut from = 0;
+    for op in 0..n {
+        let (outer, inner) = (format!("tmp_{op}_0"), format!("tmp_{op}_1"));
+        let part = format!(
+            "{outer}.b[((({inner}=ctx.c())==null)?null:{inner}.d)]\
+             .e(((({outer}=ctx.f())==null)?null:{outer}.g))"
+        );
+        let Some(i) = code[from..].find(&part) else { panic!("missing op {op}: {code}") };
+        from += i + part.len();
+    }
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where
