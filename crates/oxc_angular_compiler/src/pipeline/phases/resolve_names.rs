@@ -9,10 +9,12 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_names.ts`.
 
+use std::cell::RefCell;
+
 use oxc_allocator::Box;
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_str::Ident;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::enums::SemanticVariableKind;
@@ -70,11 +72,20 @@ pub fn resolve_names(job: &mut ComponentCompilationJob<'_>) {
             // of this phase, and the allocator keeps the data alive.
             let arrow_fn = unsafe { &mut **fn_ptr };
             let scope = build_scope_from_handler_ops(arrow_fn.ops.iter());
+            let fresh = FreshSlots::default();
             for op in arrow_fn.ops.iter_mut() {
                 transform_expressions_in_update_op(
                     op,
                     &|expr, _flags| {
-                        resolve_expression(expr, &scope, root_xref, None, &allocator, expressions);
+                        resolve_in_visitor(
+                            expr,
+                            &fresh,
+                            &scope,
+                            root_xref,
+                            None,
+                            &allocator,
+                            expressions,
+                        );
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -220,6 +231,7 @@ fn process_lexical_scope_create<'a>(
     }
 
     // Second pass: Transform expressions
+    let fresh = FreshSlots::default();
     for op in ops.iter_mut() {
         match op {
             CreateOp::Listener(listener) => {
@@ -236,8 +248,9 @@ fn process_lexical_scope_create<'a>(
                     transform_expressions_in_update_op(
                         handler_op,
                         &|expr, _flags| {
-                            resolve_expression(
+                            resolve_in_visitor(
                                 expr,
+                                &fresh,
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
@@ -268,8 +281,9 @@ fn process_lexical_scope_create<'a>(
                     transform_expressions_in_update_op(
                         handler_op,
                         &|expr, _flags| {
-                            resolve_expression(
+                            resolve_in_visitor(
                                 expr,
+                                &fresh,
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
@@ -289,8 +303,9 @@ fn process_lexical_scope_create<'a>(
                     transform_expressions_in_update_op(
                         handler_op,
                         &|expr, _flags| {
-                            resolve_expression(
+                            resolve_in_visitor(
                                 expr,
+                                &fresh,
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
@@ -310,8 +325,9 @@ fn process_lexical_scope_create<'a>(
                     transform_expressions_in_update_op(
                         handler_op,
                         &|expr, _flags| {
-                            resolve_expression(
+                            resolve_in_visitor(
                                 expr,
+                                &fresh,
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
@@ -333,8 +349,9 @@ fn process_lexical_scope_create<'a>(
                 transform_expressions_in_create_op(
                     op,
                     &|expr, _flags| {
-                        resolve_expression(
+                        resolve_in_visitor(
                             expr,
+                            &fresh,
                             &scope,
                             root_xref,
                             current_saved_view.as_ref(),
@@ -394,12 +411,14 @@ fn process_lexical_scope_update<'a>(
     }
 
     // Second pass: Transform expressions
+    let fresh = FreshSlots::default();
     for op in ops.iter_mut() {
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                resolve_expression(
+                resolve_in_visitor(
                     expr,
+                    &fresh,
                     &scope,
                     root_xref,
                     current_saved_view.as_ref(),
@@ -412,7 +431,56 @@ fn process_lexical_scope_update<'a>(
     }
 }
 
-/// Resolve a single expression.
+/// Slots holding subtrees that the visitor callback built and whose parent has
+/// not been resolved yet. See [`resolve_in_visitor`].
+///
+/// Keyed by the address of the slot. Slots do not move while one op list is
+/// transformed.
+type FreshSlots<'a> = RefCell<FxHashSet<*const IrExpression<'a>>>;
+
+/// Visitor callback for `transform_expressions_in_*_op`.
+///
+/// The visitor is post-order, so the children of `expr` were already passed to
+/// this callback. Running the recursive [`resolve_expression`] on `expr` again
+/// would walk the whole subtree once per level (nodes x depth). This does the
+/// same work once per node:
+///
+/// - a leaf (`LexicalRead`, `RestoreView`, `Ast`, `ExpressionRef`) is resolved in place;
+/// - an `Ast`/`ExpressionRef` leaf that became a new subtree is remembered in `fresh`.
+///   Before, that subtree was resolved once more when its parent was resolved (this
+///   second pass turns kept `Ast($event)` children into context reads). So the parent
+///   does that one pass here, only for the child slots `resolve_expression` descends
+///   into. Further passes from higher ancestors did not change anything.
+fn resolve_in_visitor<'a>(
+    expr: &mut IrExpression<'a>,
+    fresh: &FreshSlots<'a>,
+    scope: &ScopeMaps<'a>,
+    root_xref: XrefId,
+    saved_view: Option<&SavedView>,
+    allocator: &'a oxc_allocator::Allocator,
+    expressions: &ExpressionStore<'a>,
+) {
+    match resolve_leaf(expr, scope, root_xref, saved_view, allocator, expressions) {
+        Some(true) => {
+            fresh.borrow_mut().insert(std::ptr::from_ref(expr));
+        }
+        Some(false) => {}
+        None => {
+            if fresh.borrow().is_empty() {
+                return;
+            }
+            for_each_resolvable_child(expr, &mut |child| {
+                let was_fresh = fresh.borrow_mut().remove(&std::ptr::from_ref(child));
+                if was_fresh {
+                    resolve_expression(child, scope, root_xref, saved_view, allocator, expressions);
+                }
+            });
+        }
+    }
+}
+
+/// Resolve a single expression and, recursively, the children listed in
+/// [`for_each_resolvable_child`].
 ///
 /// This handles:
 /// - `LexicalRead(name)` → `ReadVariable(xref)` if in scope
@@ -420,6 +488,8 @@ fn process_lexical_scope_update<'a>(
 /// - `RestoreView(Static(xref))` → `RestoreView(Dynamic(ReadVariable(saved_view_var)))`
 /// - `Ast(PropertyRead(ImplicitReceiver, name))` → `ReadVariable` or `Context` access
 /// - `ExpressionRef` → `ReadVariable` if stored expression is PropertyRead(ImplicitReceiver, name) in scope
+///
+/// A subtree built from an `Ast`/`ExpressionRef` leaf is not descended into here.
 fn resolve_expression<'a>(
     expr: &mut IrExpression<'a>,
     scope: &ScopeMaps<'a>,
@@ -428,6 +498,26 @@ fn resolve_expression<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) {
+    if resolve_leaf(expr, scope, root_xref, saved_view, allocator, expressions).is_none() {
+        for_each_resolvable_child(expr, &mut |child| {
+            resolve_expression(child, scope, root_xref, saved_view, allocator, expressions);
+        });
+    }
+}
+
+/// Resolve `expr` in place if it is a leaf this phase rewrites.
+///
+/// Returns `None` if `expr` is not such a leaf, `Some(true)` if an `Ast` or
+/// `ExpressionRef` leaf was replaced by a subtree from [`resolve_angular_expression`],
+/// and `Some(false)` otherwise.
+fn resolve_leaf<'a>(
+    expr: &mut IrExpression<'a>,
+    scope: &ScopeMaps<'a>,
+    root_xref: XrefId,
+    saved_view: Option<&SavedView>,
+    allocator: &'a oxc_allocator::Allocator,
+    expressions: &ExpressionStore<'a>,
+) -> Option<bool> {
     match expr {
         IrExpression::LexicalRead(lexical) => {
             // Check scope
@@ -465,6 +555,7 @@ fn resolve_expression<'a>(
             }
             // If not in scope and in root view, it stays as LexicalRead for now
             // The reify phase will convert it to ctx.propertyName
+            Some(false)
         }
 
         IrExpression::RestoreView(restore) => {
@@ -487,6 +578,7 @@ fn resolve_expression<'a>(
                     }
                 }
             }
+            Some(false)
         }
 
         IrExpression::Ast(ast_expr) => {
@@ -497,7 +589,7 @@ fn resolve_expression<'a>(
                 resolve_angular_expression(ast_expr.as_ref(), scope, root_xref, &allocator)
             {
                 *expr = resolved;
-                return;
+                return Some(true);
             }
 
             // Handle PropertyRead(ImplicitReceiver, name) pattern for remaining cases
@@ -520,7 +612,7 @@ fn resolve_expression<'a>(
                             ReadVariableExpr { xref, name: None, source_span },
                             &allocator,
                         ));
-                        return;
+                        return Some(false);
                     }
 
                     // Not in scope - check if it's a context property that should stay as-is
@@ -532,7 +624,7 @@ fn resolve_expression<'a>(
                     if is_context_property {
                         // Context property not in scope - keep as Ast for now
                         // reify will handle it properly (e.g., ctx.$index)
-                        return;
+                        return Some(false);
                     }
 
                     // Not a context property and not in scope - access from component context
@@ -553,7 +645,7 @@ fn resolve_expression<'a>(
                         },
                         &allocator,
                     ));
-                    return;
+                    return Some(false);
                 }
             }
 
@@ -564,6 +656,7 @@ fn resolve_expression<'a>(
                     &allocator,
                 ));
             }
+            Some(false)
         }
 
         IrExpression::ExpressionRef(id) => {
@@ -575,342 +668,142 @@ fn resolve_expression<'a>(
                 resolve_angular_expression(stored_expr, scope, root_xref, &allocator)
             {
                 *expr = resolved;
+                return Some(true);
             }
             // Otherwise, keep the ExpressionRef - it will be converted during reify
+            Some(false)
         }
 
-        IrExpression::ResetView(reset) => {
-            // ResetView wraps an expression - recursively resolve it
-            // This is important because save_restore_view wraps handler_expression in ResetView
-            // before resolve_names runs
-            resolve_expression(
-                reset.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
+        _ => None,
+    }
+}
 
-        // Handle IR expressions that may contain nested expressions needing resolution.
-        // These are created by convert_ast_to_ir during ingest and may contain LexicalRead
-        // or other expressions that need resolution.
+/// Call `f` on each child of `expr` that [`resolve_expression`] descends into.
+///
+/// These IR expressions may hold nested expressions that need resolution (many
+/// are created by convert_ast_to_ir during ingest and may contain LexicalRead).
+/// Other expression types are not descended into.
+fn for_each_resolvable_child<'a>(
+    expr: &mut IrExpression<'a>,
+    f: &mut dyn FnMut(&mut IrExpression<'a>),
+) {
+    match expr {
+        // ResetView wraps an expression. This is important because save_restore_view
+        // wraps handler_expression in ResetView before resolve_names runs.
+        IrExpression::ResetView(reset) => f(reset.expr.as_mut()),
+
         IrExpression::ResolvedCall(call) => {
-            resolve_expression(
-                call.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            for arg in call.args.iter_mut() {
-                resolve_expression(arg, scope, root_xref, saved_view, &allocator, expressions);
+            f(call.receiver.as_mut());
+            for arg in &mut call.args {
+                f(arg);
             }
         }
 
-        IrExpression::ResolvedPropertyRead(prop) => {
-            resolve_expression(
-                prop.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
+        IrExpression::ResolvedPropertyRead(prop) => f(prop.receiver.as_mut()),
 
         IrExpression::ResolvedKeyedRead(keyed) => {
-            resolve_expression(
-                keyed.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                keyed.key.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(keyed.receiver.as_mut());
+            f(keyed.key.as_mut());
         }
 
         IrExpression::ResolvedBinary(binary) => {
-            resolve_expression(
-                binary.left.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                binary.right.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(binary.left.as_mut());
+            f(binary.right.as_mut());
         }
 
         // Binary expressions may contain LexicalRead operands that need resolution.
         // This is critical for handler expressions like `activeOption = Option.A`
         // which are converted to IrExpression::Binary during ingest.
         IrExpression::Binary(binary) => {
-            resolve_expression(
-                binary.lhs.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                binary.rhs.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(binary.lhs.as_mut());
+            f(binary.rhs.as_mut());
         }
 
-        IrExpression::ResolvedSafePropertyRead(safe) => {
-            resolve_expression(
-                safe.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
+        IrExpression::ResolvedSafePropertyRead(safe) => f(safe.receiver.as_mut()),
 
         // Ternary expressions (condition ? true : false) need all sub-expressions resolved.
         // This is critical for handler expressions like `condition ? a : b` where
         // a and b may contain variable references.
         IrExpression::Ternary(ternary) => {
-            resolve_expression(
-                ternary.condition.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                ternary.true_expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                ternary.false_expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(ternary.condition.as_mut());
+            f(ternary.true_expr.as_mut());
+            f(ternary.false_expr.as_mut());
         }
 
         // Safe property read (obj?.prop) - resolve the receiver
-        IrExpression::SafePropertyRead(safe) => {
-            resolve_expression(
-                safe.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
+        IrExpression::SafePropertyRead(safe) => f(safe.receiver.as_mut()),
 
         // Safe keyed read (obj?.[key]) - resolve receiver and key
         IrExpression::SafeKeyedRead(safe) => {
-            resolve_expression(
-                safe.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                safe.index.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(safe.receiver.as_mut());
+            f(safe.index.as_mut());
         }
 
         // Safe function invocation (fn?.()) - resolve receiver and arguments
         IrExpression::SafeInvokeFunction(safe) => {
-            resolve_expression(
-                safe.receiver.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            for arg in safe.args.iter_mut() {
-                resolve_expression(arg, scope, root_xref, saved_view, &allocator, expressions);
+            f(safe.receiver.as_mut());
+            for arg in &mut safe.args {
+                f(arg);
             }
         }
 
         // Safe ternary (expanded safe navigation) - resolve all parts
         IrExpression::SafeTernary(safe) => {
-            resolve_expression(
-                safe.guard.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-            resolve_expression(
-                safe.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
+            f(safe.guard.as_mut());
+            f(safe.expr.as_mut());
         }
 
         // Literal map (object literal) - resolve all values
         IrExpression::LiteralMap(map) => {
-            for value in map.values.iter_mut() {
-                resolve_expression(value, scope, root_xref, saved_view, &allocator, expressions);
+            for value in &mut map.values {
+                f(value);
             }
         }
 
         // Derived literal map (object literal with some resolved values) - resolve all values
         IrExpression::DerivedLiteralMap(map) => {
-            for value in map.values.iter_mut() {
-                resolve_expression(value, scope, root_xref, saved_view, &allocator, expressions);
+            for value in &mut map.values {
+                f(value);
             }
         }
 
         // Literal array - resolve all entries
         IrExpression::LiteralArray(arr) => {
-            for elem in arr.elements.iter_mut() {
-                resolve_expression(elem, scope, root_xref, saved_view, &allocator, expressions);
+            for elem in &mut arr.elements {
+                f(elem);
             }
         }
 
         // Derived literal array - resolve all entries
         IrExpression::DerivedLiteralArray(arr) => {
-            for entry in arr.entries.iter_mut() {
-                resolve_expression(entry, scope, root_xref, saved_view, &allocator, expressions);
+            for entry in &mut arr.entries {
+                f(entry);
             }
         }
 
-        // Not expression (!expr) - resolve the operand
-        IrExpression::Not(not) => {
-            resolve_expression(
-                not.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
-
-        // Unary expression (+expr or -expr) - resolve the operand
-        IrExpression::Unary(unary) => {
-            resolve_expression(
-                unary.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
-
-        // Typeof expression (typeof expr) - resolve the operand
-        IrExpression::Typeof(typeof_expr) => {
-            resolve_expression(
-                typeof_expr.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
-
-        // Void expression (void expr) - resolve the operand
-        IrExpression::Void(void_expr) => {
-            resolve_expression(
-                void_expr.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
-
-        // Parenthesized expression - resolve the inner expression
-        IrExpression::Parenthesized(paren) => {
-            resolve_expression(
-                paren.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                &allocator,
-                expressions,
-            );
-        }
+        // Not (!expr), unary (+expr / -expr), typeof, void and parentheses - resolve the operand
+        IrExpression::Not(not) => f(not.expr.as_mut()),
+        IrExpression::Unary(unary) => f(unary.expr.as_mut()),
+        IrExpression::Typeof(typeof_expr) => f(typeof_expr.expr.as_mut()),
+        IrExpression::Void(void_expr) => f(void_expr.expr.as_mut()),
+        IrExpression::Parenthesized(paren) => f(paren.expr.as_mut()),
 
         // `$safeNavigationMigration(...)` wrapper - resolve the wrapped expression. A listener's
-        // `handler_expression` and hoisted arrow-function bodies reach this function directly,
-        // not through the generic visitor, so the wrapper must be descended here.
-        IrExpression::SafeNavigationMigration(migration) => {
-            resolve_expression(
-                migration.expr.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                allocator,
-                expressions,
-            );
-        }
+        // `handler_expression` and hoisted arrow-function bodies reach `resolve_expression`
+        // directly, not through the generic visitor, so the wrapper must be descended here.
+        IrExpression::SafeNavigationMigration(migration) => f(migration.expr.as_mut()),
 
         // ResolvedTemplateLiteral (created by ingest for template literals with inner expressions)
         // - resolve each inner expression so LexicalRead refs to @let vars and pipe args are resolved
         IrExpression::ResolvedTemplateLiteral(tl) => {
-            for expr in tl.expressions.iter_mut() {
-                resolve_expression(expr, scope, root_xref, saved_view, &allocator, expressions);
+            for expr in &mut tl.expressions {
+                f(expr);
             }
         }
 
         // Arrow function - resolve the names its body reads. Reads of its own parameters
         // were already turned into plain variables during ingestion.
-        IrExpression::ArrowFunction(arrow_fn) => {
-            resolve_expression(
-                arrow_fn.body.as_mut(),
-                scope,
-                root_xref,
-                saved_view,
-                allocator,
-                expressions,
-            );
-        }
+        IrExpression::ArrowFunction(arrow_fn) => f(arrow_fn.body.as_mut()),
 
         // Other expression types don't need resolution
         _ => {}
@@ -1868,11 +1761,20 @@ pub fn resolve_names_for_host(job: &mut HostBindingCompilationJob<'_>) {
         // SAFETY: We're only reading from expression_store, not modifying it
         let expressions = unsafe { &*expression_store_ptr };
         let scope = build_scope_from_handler_ops(arrow_fn.ops.iter());
+        let fresh = FreshSlots::default();
         for op in arrow_fn.ops.iter_mut() {
             transform_expressions_in_update_op(
                 op,
                 &|expr, _flags| {
-                    resolve_expression(expr, &scope, root_xref, None, &allocator, expressions);
+                    resolve_in_visitor(
+                        expr,
+                        &fresh,
+                        &scope,
+                        root_xref,
+                        None,
+                        &allocator,
+                        expressions,
+                    );
                 },
                 VisitorContextFlag::NONE,
             );
@@ -2017,4 +1919,147 @@ fn verify_no_lexical_reads_remain_for_host(job: &mut HostBindingCompilationJob<'
 
     // Add all collected errors to job diagnostics
     job.diagnostics.extend(errors.into_inner());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::expression::{
+        BinaryExpr, IrBinaryOperator, NotExpr, PipeBindingExpr, SafeInvokeFunctionExpr, SlotHandle,
+        transform_expressions_in_expression,
+    };
+    use crate::parser::expression::Parser;
+    use oxc_allocator::{Allocator, Vec};
+
+    fn lexical<'a>(allocator: &'a Allocator, name: &'a str) -> IrExpression<'a> {
+        IrExpression::LexicalRead(Box::new_in(
+            LexicalReadExpr { name: Ident::from(name), source_span: None },
+            &allocator,
+        ))
+    }
+
+    fn stored<'a>(
+        allocator: &'a Allocator,
+        store: &mut ExpressionStore<'a>,
+        source: &'a str,
+    ) -> IrExpression<'a> {
+        let ast = Parser::new(allocator, source).parse_action().ast;
+        IrExpression::ExpressionRef(store.store(ast))
+    }
+
+    fn plus<'a>(
+        allocator: &'a Allocator,
+        lhs: IrExpression<'a>,
+        rhs: IrExpression<'a>,
+    ) -> IrExpression<'a> {
+        IrExpression::Binary(Box::new_in(
+            BinaryExpr {
+                operator: IrBinaryOperator::Plus,
+                lhs: Box::new_in(lhs, &allocator),
+                rhs: Box::new_in(rhs, &allocator),
+                source_span: None,
+            },
+            &allocator,
+        ))
+    }
+
+    /// A long `+` chain whose leaves are lexical reads and stored expressions,
+    /// some under parents `resolve_expression` descends into (`Binary`, `Not`,
+    /// safe calls) and some under a parent it does not descend into (`PipeBinding`).
+    fn build<'a>(allocator: &'a Allocator, store: &mut ExpressionStore<'a>) -> IrExpression<'a> {
+        let mut expr = lexical(allocator, "x");
+        for i in 0..20 {
+            let leaf = match i % 5 {
+                0 => stored(allocator, store, "f($event, x, y)"),
+                1 => lexical(allocator, if i % 2 == 0 { "x" } else { "y" }),
+                2 => {
+                    let mut args = Vec::new_in(&allocator);
+                    args.push(stored(allocator, store, "g($event)"));
+                    IrExpression::PipeBinding(Box::new_in(
+                        PipeBindingExpr {
+                            target: XrefId::new(100 + i),
+                            target_slot: SlotHandle::new(),
+                            name: Ident::from("json"),
+                            args,
+                            var_offset: None,
+                            source_span: None,
+                        },
+                        &allocator,
+                    ))
+                }
+                3 => IrExpression::Not(Box::new_in(
+                    NotExpr {
+                        expr: Box::new_in(stored(allocator, store, "[$event, x]"), &allocator),
+                        source_span: None,
+                    },
+                    &allocator,
+                )),
+                _ => {
+                    let mut args = Vec::new_in(&allocator);
+                    args.push(stored(allocator, store, "h($event)"));
+                    args.push(lexical(allocator, "$event"));
+                    IrExpression::SafeInvokeFunction(Box::new_in(
+                        SafeInvokeFunctionExpr {
+                            receiver: Box::new_in(stored(allocator, store, "k"), &allocator),
+                            args,
+                            source_span: None,
+                        },
+                        &allocator,
+                    ))
+                }
+            };
+            expr = plus(allocator, expr, leaf);
+        }
+        expr
+    }
+
+    #[derive(Clone, Copy)]
+    enum Callback {
+        /// The old callback: the recursive `resolve_expression` at every node.
+        Recursive,
+        /// The new callback.
+        Visitor,
+        /// Leaves only, without the extra pass for new subtrees.
+        LeavesOnly,
+    }
+
+    /// Runs the post-order visitor over `build()` and returns the result as text.
+    fn run(callback: Callback) -> String {
+        let allocator = Allocator::default();
+        let mut store = ExpressionStore::new(&allocator);
+        let mut expr = build(&allocator, &mut store);
+        let mut scope = ScopeMaps::default();
+        scope.scope.insert(Ident::from("x"), XrefId::new(7));
+        scope.local_definitions.insert(Ident::from("y"), XrefId::new(8));
+        let root = XrefId::new(0);
+        let fresh = FreshSlots::default();
+        transform_expressions_in_expression(
+            &mut expr,
+            &|e, _flags| match callback {
+                Callback::Recursive => {
+                    resolve_expression(e, &scope, root, None, &allocator, &store);
+                }
+                Callback::Visitor => {
+                    resolve_in_visitor(e, &fresh, &scope, root, None, &allocator, &store);
+                }
+                Callback::LeavesOnly => {
+                    resolve_leaf(e, &scope, root, None, &allocator, &store);
+                }
+            },
+            VisitorContextFlag::NONE,
+        );
+        format!("{expr:?}")
+    }
+
+    /// The visitor callback gives the same tree as the old callback, which ran the
+    /// recursive `resolve_expression` again at every node (nodes x depth).
+    #[test]
+    fn visitor_callback_matches_recursive_resolution() {
+        let recursive = run(Callback::Recursive);
+        assert_eq!(run(Callback::Visitor), recursive);
+
+        // Resolving only the leaves is not the same: subtrees built from stored
+        // expressions under a resolving parent get one more pass.
+        assert_ne!(run(Callback::LeavesOnly), recursive);
+    }
 }

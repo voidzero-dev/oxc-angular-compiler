@@ -123,7 +123,7 @@ fn generate_temporaries_for_create<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, &allocator);
+                assign_temp_name(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -225,7 +225,7 @@ fn generate_temporaries_for_handler_ops<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, &allocator);
+                assign_temp_name(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -295,7 +295,7 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, &allocator);
+                assign_temp_name(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -378,7 +378,7 @@ fn generate_temporaries_for_update<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, &allocator);
+                assign_temp_name(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -425,8 +425,14 @@ fn collect_unique_names(defs: &FxHashMap<XrefId, String>) -> Vec<String> {
     names
 }
 
-/// Assigns names to temporary variable expressions.
-fn assign_temp_names<'a>(
+/// Assigns a name to one temporary variable expression.
+///
+/// Only the given node is handled. The caller runs this from
+/// `transform_expressions_in_*`, which already calls it once for every node
+/// (children first), like Angular's `visitExpressionsInOp` callback in
+/// `generateTemporaries`. Walking the subtree here too would cost
+/// nodes x depth and would count the same read more than once.
+fn assign_temp_name<'a>(
     expr: &mut IrExpression<'a>,
     tracker: &RefCell<TempVarTracker>,
     allocator: &'a Allocator,
@@ -442,177 +448,7 @@ fn assign_temp_names<'a>(
                 read.name = Some(Ident::from(allocator.alloc_str(&n)));
             }
         }
-        // Recursively process nested expressions
-        IrExpression::SafeNavigationMigration(m) => {
-            assign_temp_names(&mut m.expr, tracker, &allocator);
-        }
-        IrExpression::SafeTernary(st) => {
-            assign_temp_names(&mut st.guard, tracker, &allocator);
-            assign_temp_names(&mut st.expr, tracker, &allocator);
-        }
-        IrExpression::Ternary(t) => {
-            assign_temp_names(&mut t.condition, tracker, &allocator);
-            assign_temp_names(&mut t.true_expr, tracker, &allocator);
-            assign_temp_names(&mut t.false_expr, tracker, &allocator);
-        }
-        IrExpression::SafePropertyRead(sp) => {
-            assign_temp_names(&mut sp.receiver, tracker, &allocator);
-        }
-        IrExpression::SafeKeyedRead(sk) => {
-            assign_temp_names(&mut sk.receiver, tracker, &allocator);
-            assign_temp_names(&mut sk.index, tracker, &allocator);
-        }
-        IrExpression::SafeInvokeFunction(sf) => {
-            assign_temp_names(&mut sf.receiver, tracker, &allocator);
-            for arg in sf.args.iter_mut() {
-                assign_temp_names(arg, tracker, &allocator);
-            }
-        }
-        IrExpression::PipeBinding(pb) => {
-            for arg in pb.args.iter_mut() {
-                assign_temp_names(arg, tracker, &allocator);
-            }
-        }
-        IrExpression::PipeBindingVariadic(pbv) => {
-            assign_temp_names(&mut pbv.args, tracker, &allocator);
-        }
-        IrExpression::PureFunction(pf) => {
-            for arg in pf.args.iter_mut() {
-                assign_temp_names(arg, tracker, &allocator);
-            }
-        }
-        IrExpression::Interpolation(i) => {
-            for e in i.expressions.iter_mut() {
-                assign_temp_names(e, tracker, &allocator);
-            }
-        }
-        IrExpression::RestoreView(rv) => {
-            use crate::ir::expression::RestoreViewTarget;
-            if let RestoreViewTarget::Dynamic(e) = &mut rv.view {
-                assign_temp_names(e, tracker, &allocator);
-            }
-        }
-        IrExpression::ResetView(rv) => {
-            assign_temp_names(&mut rv.expr, tracker, &allocator);
-        }
-        IrExpression::ConditionalCase(cc) => {
-            if let Some(e) = &mut cc.expr {
-                assign_temp_names(e, tracker, &allocator);
-            }
-        }
-        IrExpression::TwoWayBindingSet(tbs) => {
-            assign_temp_names(&mut tbs.target, tracker, &allocator);
-            assign_temp_names(&mut tbs.value, tracker, &allocator);
-        }
-        IrExpression::StoreLet(sl) => {
-            assign_temp_names(&mut sl.value, tracker, &allocator);
-        }
-        IrExpression::ConstCollected(cc) => {
-            assign_temp_names(&mut cc.expr, tracker, &allocator);
-        }
-        IrExpression::Binary(binary) => {
-            assign_temp_names(&mut binary.lhs, tracker, &allocator);
-            assign_temp_names(&mut binary.rhs, tracker, &allocator);
-        }
-        IrExpression::ResolvedPropertyRead(rpr) => {
-            assign_temp_names(&mut rpr.receiver, tracker, &allocator);
-        }
-        IrExpression::ResolvedBinary(rb) => {
-            assign_temp_names(&mut rb.left, tracker, &allocator);
-            assign_temp_names(&mut rb.right, tracker, &allocator);
-        }
-        IrExpression::ResolvedCall(rc) => {
-            assign_temp_names(&mut rc.receiver, tracker, &allocator);
-            for arg in rc.args.iter_mut() {
-                assign_temp_names(arg, tracker, &allocator);
-            }
-        }
-        IrExpression::ResolvedKeyedRead(rkr) => {
-            assign_temp_names(&mut rkr.receiver, tracker, &allocator);
-            assign_temp_names(&mut rkr.key, tracker, &allocator);
-        }
-        IrExpression::ResolvedSafePropertyRead(rspr) => {
-            assign_temp_names(&mut rspr.receiver, tracker, &allocator);
-        }
-        IrExpression::DerivedLiteralArray(arr) => {
-            for entry in arr.entries.iter_mut() {
-                assign_temp_names(entry, tracker, &allocator);
-            }
-        }
-        IrExpression::DerivedLiteralMap(map) => {
-            for value in map.values.iter_mut() {
-                assign_temp_names(value, tracker, &allocator);
-            }
-        }
-        IrExpression::LiteralArray(arr) => {
-            for elem in arr.elements.iter_mut() {
-                assign_temp_names(elem, tracker, &allocator);
-            }
-        }
-        IrExpression::LiteralMap(map) => {
-            for value in map.values.iter_mut() {
-                assign_temp_names(value, tracker, &allocator);
-            }
-        }
-        // Leaf expressions - no nested expressions
-        IrExpression::LexicalRead(_)
-        | IrExpression::Reference(_)
-        | IrExpression::Context(_)
-        | IrExpression::BoundaryState(_)
-        | IrExpression::GetBoundary(_)
-        | IrExpression::NextContext(_)
-        | IrExpression::GetCurrentView(_)
-        | IrExpression::ReadVariable(_)
-        | IrExpression::PureFunctionParameter(_)
-        | IrExpression::Empty(_)
-        | IrExpression::SlotLiteral(_)
-        | IrExpression::ConstReference(_)
-        | IrExpression::ContextLetReference(_)
-        | IrExpression::TrackContext(_)
-        | IrExpression::ExpressionRef(_)
-        | IrExpression::Ast(_)
-        | IrExpression::OutputExpr(_) => {
-            // No nested IR expressions to process
-            // Note: Ast expressions contain AngularExpression which doesn't have
-            // AssignTemporary/ReadTemporary - those only exist at the IR level
-        }
-        IrExpression::Not(n) => {
-            assign_temp_names(&mut n.expr, tracker, &allocator);
-        }
-        IrExpression::Unary(u) => {
-            assign_temp_names(&mut u.expr, tracker, &allocator);
-        }
-        IrExpression::Typeof(t) => {
-            assign_temp_names(&mut t.expr, tracker, &allocator);
-        }
-        IrExpression::Void(v) => {
-            assign_temp_names(&mut v.expr, tracker, &allocator);
-        }
-        IrExpression::ResolvedTemplateLiteral(rtl) => {
-            for e in rtl.expressions.iter_mut() {
-                assign_temp_names(e, tracker, &allocator);
-            }
-        }
-        IrExpression::TaggedTemplateLiteral(ttl) => {
-            assign_temp_names(&mut ttl.tag, tracker, &allocator);
-            for e in ttl.expressions.iter_mut() {
-                assign_temp_names(e, tracker, &allocator);
-            }
-        }
-        IrExpression::SpreadElement(spread) => {
-            assign_temp_names(&mut spread.expr, tracker, &allocator);
-        }
-
-        // Arrow functions form their own operation scope: the op visitors reach
-        // their internals only under IN_CHILD_OPERATION, which this phase skips.
-        // Hoisted arrows are handled separately through `unit.functions` (which
-        // holds their `ops`, matching upstream `generateTemporaries(expr.ops)`),
-        // so naming their temporaries here would give them the containing op's
-        // index and leave dead declarations in the outer scope.
-        IrExpression::ArrowFunction(_) => {}
-        IrExpression::Parenthesized(paren) => {
-            assign_temp_names(&mut paren.expr, tracker, &allocator);
-        }
+        _ => {}
     }
 }
 

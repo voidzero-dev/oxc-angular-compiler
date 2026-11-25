@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::ptr::NonNull;
 
 use oxc_str::Ident;
+use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{CompatibilityMode, OpKind};
 use crate::ir::expression::{IrExpression, SlotHandle};
@@ -76,6 +77,25 @@ fn process_pipe_bindings_in_view(job: &mut ComponentCompilationJob<'_>, view_xre
         bindings
     };
 
+    let Some(view) = (if view_xref.0 == 0 {
+        Some(&mut job.root)
+    } else {
+        job.views.get_mut(&view_xref).map(AsMut::as_mut)
+    }) else {
+        return;
+    };
+
+    // In compatibility mode each pipe goes after its target element and after
+    // any pipes that already follow it. Find those spots once, up front, so we
+    // don't rescan the create list for every pipe.
+    let insertion_points = if compatibility_mode == CompatibilityMode::TemplateDefinitionBuilder
+        && pipe_bindings.iter().any(|p| p.target_element.is_some())
+    {
+        compute_pipe_insertion_points(&view.create)
+    } else {
+        FxHashMap::default()
+    };
+
     // Create PipeOp for each binding
     for pipe_info in pipe_bindings {
         let pipe_op = CreateOp::Pipe(PipeOp {
@@ -86,21 +106,19 @@ fn process_pipe_bindings_in_view(job: &mut ComponentCompilationJob<'_>, view_xre
             num_args: pipe_info.num_args,
         });
 
-        let view = if view_xref.0 == 0 {
-            &mut job.root
-        } else if let Some(v) = job.views.get_mut(&view_xref) {
-            v.as_mut()
-        } else {
-            continue;
-        };
-
         if compatibility_mode == CompatibilityMode::TemplateDefinitionBuilder {
             // In compatibility mode, insert the pipe after its target element
             // and after any existing pipes that follow the target element.
-            if let Some(target_xref) = pipe_info.target_element {
-                add_pipe_to_creation_block(view, target_xref, pipe_op);
+            // No target element, or target not found: append to end.
+            let insert_before = pipe_info
+                .target_element
+                .and_then(|target_xref| insertion_points.get(&target_xref).copied().flatten());
+            if let Some(insert_before) = insert_before {
+                // SAFETY: insert_before is a valid pointer in this list
+                unsafe {
+                    view.create.insert_before(insert_before, pipe_op);
+                }
             } else {
-                // No target element, append to end
                 view.create.push(pipe_op);
             }
         } else {
@@ -110,80 +128,50 @@ fn process_pipe_bindings_in_view(job: &mut ComponentCompilationJob<'_>, view_xre
     }
 }
 
-/// Adds a pipe to the creation block after the target element.
-///
-/// This function finds the target element in the create block by its xref,
-/// then skips past any existing pipe operations, and inserts the new pipe there.
-///
-/// This matches Angular's `addPipeToCreationBlock` from `pipe_creation.ts`.
-fn add_pipe_to_creation_block<'a>(
-    view: &mut crate::pipeline::compilation::ViewCompilationUnit<'a>,
-    target_xref: XrefId,
-    pipe_op: CreateOp<'a>,
-) {
-    // Find the target element and insertion point
-    let insertion_point = find_pipe_insertion_point(&view.create, target_xref);
-
-    if let Some(insert_before) = insertion_point {
-        // Insert the pipe before the next non-pipe operation
-        // SAFETY: insert_before is a valid pointer in this list
-        unsafe {
-            view.create.insert_before(insert_before, pipe_op);
-        }
-    } else {
-        // Fallback: no insertion point found, append to end
-        // This can happen if the target element is not found or is at the end
-        view.create.push(pipe_op);
-    }
-}
-
-/// Finds the insertion point for a pipe in the create block.
-///
-/// Returns the pointer to the operation BEFORE which the new pipe should be inserted.
-/// Returns None if the pipe should be appended to the end.
+/// Finds, for every xref in the create block, where a pipe targeting it goes.
 ///
 /// This matches Angular's `addPipeToCreationBlock` from `pipe_creation.ts`:
-/// 1. Find the target element by xref
-/// 2. Skip past any existing Pipe operations that follow it
-/// 3. Insert before the next non-Pipe operation (which could be a Listener, Template, etc.)
-fn find_pipe_insertion_point<'a>(
+/// 1. Find the (first) op with the target xref
+/// 2. Skip past any Pipe operations that follow it
+/// 3. Insert before the next non-Pipe operation (`Some(op)`), or at the end (`None`)
+///
+/// Angular does this scan once per pipe. We do it once per view instead. The
+/// result stays valid while pipes are inserted: we only ever add Pipe ops, and
+/// always right before a non-Pipe op (or at the end), so the first non-Pipe op
+/// after each target never changes. Each new pipe lands after the ones placed
+/// before it, just like Angular's rescan would put it.
+fn compute_pipe_insertion_points<'a>(
     create: &crate::ir::list::CreateOpList<'a>,
-    target_xref: XrefId,
-) -> Option<NonNull<CreateOp<'a>>> {
-    let mut current = create.head_ptr();
+) -> FxHashMap<XrefId, Option<NonNull<CreateOp<'a>>>> {
+    let mut points: FxHashMap<XrefId, Option<NonNull<CreateOp<'a>>>> = FxHashMap::default();
+    // Xrefs seen since the last non-Pipe op; they all insert before the next one.
+    let mut pending: Vec<XrefId> = Vec::new();
 
-    // Phase 1: Find the target element by xref
+    let mut current = create.head_ptr();
     while let Some(ptr) = current {
         // SAFETY: ptr is valid as it was obtained from the list
         let op = unsafe { ptr.as_ref() };
 
+        if op.kind() != OpKind::Pipe {
+            for &xref in &pending {
+                points.insert(xref, Some(ptr));
+            }
+            pending.clear();
+        }
+
         if let Some(op_xref) = get_create_op_xref(op) {
-            if op_xref == target_xref {
-                // Found the target element, now move to phase 2
-                current = op.next();
-                break;
+            // Only the first op with a given xref counts.
+            if let std::collections::hash_map::Entry::Vacant(entry) = points.entry(op_xref) {
+                entry.insert(None);
+                pending.push(op_xref);
             }
         }
 
         current = op.next();
     }
 
-    // Phase 2: Skip past any existing Pipe operations
-    while let Some(ptr) = current {
-        // SAFETY: ptr is valid as it was obtained from the list
-        let op = unsafe { ptr.as_ref() };
-
-        if op.kind() == OpKind::Pipe {
-            // Skip this pipe and continue looking
-            current = op.next();
-        } else {
-            // Found a non-Pipe operation - insert before this
-            return Some(ptr);
-        }
-    }
-
-    // Reached the end of the list - append to end
-    None
+    // Anything still pending is followed only by pipes: append to the end.
+    points
 }
 
 /// Gets the xref from a create operation if it has one.

@@ -9,6 +9,8 @@
 //!
 //! Ported from Angular's `ml_parser/html_whitespaces.ts`.
 
+use std::borrow::Cow;
+
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
 use oxc_str::Ident;
 
@@ -19,6 +21,7 @@ use crate::ast::html::{
 };
 
 use super::entities::NGSP_UNICODE;
+use crate::util::chars::is_js_whitespace;
 
 /// Attribute name that marks an element for whitespace preservation.
 pub const PRESERVE_WS_ATTR_NAME: &str = "ngPreserveWhitespaces";
@@ -47,37 +50,111 @@ fn has_non_whitespace(s: &str) -> bool {
     s.chars().any(|c| !is_ws_char(c))
 }
 
-/// Replace runs of 2+ consecutive whitespace characters with a single space.
-/// Single whitespace characters are preserved as-is.
-fn collapse_whitespace(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut pending_whitespace = None;
+/// Bytes that can start a whitespace char (or NGSP) in UTF-8.
+/// 1 = an ASCII whitespace byte. 2 = the lead byte of a 3-byte char that may be
+/// whitespace (U+1680, U+180E, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F,
+/// U+3000, U+FEFF) or NGSP (U+E500). Everything else is 0.
+static WS_START: [u8; 256] = {
+    let mut t = [0u8; 256];
+    t[b' ' as usize] = 1;
+    t[b'\t' as usize] = 1;
+    t[b'\n' as usize] = 1;
+    t[0x0B] = 1; // \v
+    t[0x0C] = 1; // \f
+    t[b'\r' as usize] = 1;
+    t[0xE1] = 2; // U+1680, U+180E
+    t[0xE2] = 2; // U+2000-U+200A, U+2028, U+2029, U+202F, U+205F
+    t[0xE3] = 2; // U+3000
+    t[0xEE] = 2; // U+E500 (NGSP)
+    t[0xEF] = 2; // U+FEFF
+    t
+};
 
-    for c in s.chars() {
-        if is_ws_char(c) {
-            pending_whitespace = Some(if pending_whitespace.is_some() { ' ' } else { c });
-        } else {
-            if let Some(ws) = pending_whitespace.take() {
-                result.push(ws);
-            }
-            result.push(c);
+// `ws_len_at` matches NGSP by its UTF-8 bytes EE 94 80.
+const _: () = assert!(NGSP_UNICODE as u32 == 0xE500);
+
+/// The byte length of the whitespace char (or NGSP) at byte `i`, or 0 when there
+/// is none. The flag is true for NGSP.
+#[inline]
+fn ws_len_at(b: &[u8], i: usize) -> (usize, bool) {
+    match WS_START[b[i] as usize] {
+        0 => (0, false),
+        1 => (1, false),
+        _ => {
+            // `b` is valid UTF-8, so a 0xE_ lead byte is always followed by 2 bytes.
+            let (b1, b2) = (b[i + 1], b[i + 2]);
+            let is_ws = match b[i] {
+                0xE1 => (b1 == 0x9A && b2 == 0x80) || (b1 == 0xA0 && b2 == 0x8E),
+                0xE2 => {
+                    (b1 == 0x80 && (b2 <= 0x8A || b2 == 0xA8 || b2 == 0xA9 || b2 == 0xAF))
+                        || (b1 == 0x81 && b2 == 0x9F)
+                }
+                0xE3 => b1 == 0x80 && b2 == 0x80,
+                0xEF => b1 == 0xBB && b2 == 0xBF,
+                // 0xEE: only NGSP.
+                _ => return if b1 == 0x94 && b2 == 0x80 { (3, true) } else { (0, false) },
+            };
+            if is_ws { (3, false) } else { (0, false) }
         }
     }
+}
 
-    if let Some(ws) = pending_whitespace {
-        result.push(ws);
+/// Process whitespace in text like Angular's `processWhitespace`: replace NGSP
+/// with a space, then replace each run of 2+ whitespace chars with one space.
+/// A single whitespace char is kept as is.
+///
+/// One pass over the bytes. Unchanged parts are copied in slices, and when
+/// nothing changes the input is returned as is, with no allocation. Every change
+/// makes the text shorter, so an output of the same length is the input.
+fn process_whitespace(text: &str) -> Cow<'_, str> {
+    let b = text.as_bytes();
+    let n = b.len();
+    let mut out: Option<String> = None;
+    // Bytes from `copy_from` up to the current run are not copied yet.
+    let mut copy_from = 0;
+    let mut i = 0;
+    while i < n {
+        let (len, is_ngsp) = ws_len_at(b, i);
+        if len == 0 {
+            i += 1;
+            continue;
+        }
+        let run_start = i;
+        i += len;
+        let mut count = 1;
+        while i < n {
+            let (len, _) = ws_len_at(b, i);
+            if len == 0 {
+                break;
+            }
+            i += len;
+            count += 1;
+        }
+        // A run of one char is kept, unless it is NGSP.
+        if count >= 2 || is_ngsp {
+            let o = out.get_or_insert_with(|| String::with_capacity(n));
+            o.push_str(&text[copy_from..run_start]);
+            o.push(' ');
+            copy_from = i;
+        }
     }
-    result
+    match out {
+        Some(mut o) => {
+            o.push_str(&text[copy_from..]);
+            Cow::Owned(o)
+        }
+        None => Cow::Borrowed(text),
+    }
 }
 
-/// Replace &ngsp; pseudo-entity with space.
-fn replace_ngsp(s: &str) -> String {
-    s.replace(NGSP_UNICODE, " ")
+/// `String.prototype.trimStart`.
+fn js_trim_start(s: &str) -> &str {
+    s.trim_start_matches(is_js_whitespace)
 }
 
-/// Process whitespace in text: replace ngsp and collapse consecutive whitespace.
-fn process_whitespace(text: &str) -> String {
-    collapse_whitespace(&replace_ngsp(text))
+/// `String.prototype.trimEnd`.
+fn js_trim_end(s: &str) -> &str {
+    s.trim_end_matches(is_js_whitespace)
 }
 
 /// Check if an element has the ngPreserveWhitespaces attribute.
@@ -442,18 +519,17 @@ impl<'a> WhitespaceVisitor<'a> {
             // Process whitespace in the value
             let processed = process_whitespace(text.value.as_str());
             let value = if self.preserve_significant_whitespace {
-                processed
+                &processed
             } else {
-                self.trim_leading_and_trailing(&processed, context)
+                Self::trim_leading_and_trailing(&processed, context)
             };
 
             // Process tokens
             let tokens = self.process_tokens(&text.tokens, context);
 
-            let value_atom = Ident::from_in(value.as_str(), &self.allocator);
             Some(HtmlNode::Text(Box::new_in(
                 HtmlText {
-                    value: value_atom,
+                    value: self.ident_if_changed(text.value, value),
                     span: text.span,
                     full_start: text.full_start,
                     tokens,
@@ -477,21 +553,22 @@ impl<'a> WhitespaceVisitor<'a> {
 
         for (i, token) in tokens.iter().enumerate() {
             if token.token_type == InterpolatedTokenType::Text && !token.parts.is_empty() {
-                let text = token.parts[0].as_str();
-                let mut processed = process_whitespace(text);
+                let original = token.parts[0];
+                let processed = process_whitespace(original.as_str());
+                let mut text: &str = &processed;
 
                 // Trim leading/trailing if not preserving significant whitespace
                 if !self.preserve_significant_whitespace {
                     if i == 0 && context.prev.is_none() {
-                        processed = processed.trim_start().to_string();
+                        text = js_trim_start(text);
                     }
                     if i == token_count - 1 && context.next.is_none() {
-                        processed = processed.trim_end().to_string();
+                        text = js_trim_end(text);
                     }
                 }
 
                 let mut parts = Vec::with_capacity_in(1, &self.allocator);
-                parts.push(Ident::from_in(processed.as_str(), &self.allocator));
+                parts.push(self.ident_if_changed(original, text));
 
                 result.push(InterpolatedToken {
                     token_type: token.token_type,
@@ -515,15 +592,25 @@ impl<'a> WhitespaceVisitor<'a> {
         result
     }
 
-    /// Trim leading and trailing whitespace based on sibling context.
-    fn trim_leading_and_trailing(&self, text: &str, context: &SiblingContext<'a, '_>) -> String {
+    /// Trim leading and trailing whitespace based on sibling context, with JS
+    /// `trimStart` / `trimEnd` rules like Angular.
+    fn trim_leading_and_trailing<'s>(text: &'s str, context: &SiblingContext<'a, '_>) -> &'s str {
         let is_first = context.prev.is_none();
         let is_last = context.next.is_none();
 
-        let trimmed_start = if is_first { text.trim_start() } else { text };
-        let trimmed = if is_last { trimmed_start.trim_end() } else { trimmed_start };
+        let trimmed_start = if is_first { js_trim_start(text) } else { text };
+        if is_last { js_trim_end(trimmed_start) } else { trimmed_start }
+    }
 
-        trimmed.to_string()
+    /// `new_text` is `original` after whitespace processing and trimming. Every
+    /// change makes the text shorter, so the same length means no change: reuse
+    /// `original` then, and only allocate a new `Ident` when the text changed.
+    fn ident_if_changed(&self, original: Ident<'a>, new_text: &str) -> Ident<'a> {
+        if new_text.len() == original.as_str().len() {
+            original
+        } else {
+            Ident::from_in(new_text, self.allocator)
+        }
     }
 
     /// Visit an element node.
@@ -725,6 +812,40 @@ pub fn remove_whitespaces<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::html::HtmlParser;
+
+    /// Angular's `processWhitespace`, char by char: replace NGSP with a space,
+    /// then `/[WS]{2,}/g` -> `' '`.
+    fn reference_process_whitespace(text: &str) -> String {
+        let replaced = text.replace(NGSP_UNICODE, " ");
+        let mut result = String::new();
+        let mut run = String::new();
+        let mut run_len = 0;
+        for c in replaced.chars().chain(std::iter::once('x')) {
+            if is_ws_char(c) {
+                run.push(c);
+                run_len += 1;
+                continue;
+            }
+            if run_len >= 2 {
+                result.push(' ');
+            } else {
+                result.push_str(&run);
+            }
+            run.clear();
+            run_len = 0;
+            result.push(c);
+        }
+        result.pop(); // the 'x' sentinel
+        result
+    }
+
+    fn check(s: &str) {
+        let got = process_whitespace(s);
+        assert_eq!(got, reference_process_whitespace(s), "on {s:?}");
+        // No allocation when nothing changes, and a change always makes it shorter.
+        assert_eq!(matches!(got, Cow::Borrowed(_)), got.len() == s.len(), "on {s:?}");
+    }
 
     #[test]
     fn test_is_ws_char() {
@@ -737,25 +858,162 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_whitespace() {
+    fn test_process_whitespace() {
         // Multiple consecutive whitespace -> single space
-        assert_eq!(collapse_whitespace("a  b"), "a b");
-        assert_eq!(collapse_whitespace("a\n\n\tb"), "a b");
-        assert_eq!(collapse_whitespace("  a  "), " a ");
+        assert_eq!(process_whitespace("a  b"), "a b");
+        assert_eq!(process_whitespace("a\n\n\tb"), "a b");
+        assert_eq!(process_whitespace("  a  "), " a ");
+        assert_eq!(process_whitespace("a  b  c"), "a b c");
+        assert_eq!(process_whitespace("a\u{3000}\u{FEFF}b"), "a b");
 
         // Single whitespace characters are preserved as-is
-        assert_eq!(collapse_whitespace("\n"), "\n");
-        assert_eq!(collapse_whitespace("a\nb"), "a\nb");
-        assert_eq!(collapse_whitespace(" "), " ");
-        assert_eq!(collapse_whitespace("\t"), "\t");
-        assert_eq!(collapse_whitespace("a b"), "a b");
-        assert_eq!(collapse_whitespace("a\t"), "a\t");
+        assert_eq!(process_whitespace("\n"), "\n");
+        assert_eq!(process_whitespace("a\nb"), "a\nb");
+        assert_eq!(process_whitespace(" "), " ");
+        assert_eq!(process_whitespace("\t"), "\t");
+        assert_eq!(process_whitespace("a b"), "a b");
+        assert_eq!(process_whitespace("a\t"), "a\t");
+        assert_eq!(process_whitespace("a\u{3000}b"), "a\u{3000}b");
+
+        // NGSP becomes a space, also alone.
+        assert_eq!(process_whitespace(&format!("a{NGSP_UNICODE}b")), "a b");
+        assert_eq!(process_whitespace(&format!("a{NGSP_UNICODE}\nb")), "a b");
+
+        // Nothing to change: the input is borrowed.
+        assert!(matches!(process_whitespace("a b\nc"), Cow::Borrowed("a b\nc")));
+        assert!(matches!(process_whitespace(""), Cow::Borrowed("")));
+        assert!(matches!(process_whitespace("a  b"), Cow::Owned(_)));
     }
 
     #[test]
-    fn test_process_whitespace() {
-        let ngsp = format!("a{}b", NGSP_UNICODE);
-        assert_eq!(process_whitespace(&ngsp), "a b");
-        assert_eq!(process_whitespace("a  b  c"), "a b c");
+    fn process_whitespace_matches_reference() {
+        const ALPHABET: &[char] = &[
+            ' ', ' ', ' ', '\n', '\n', '\t', '\r', '\x0B', '\x0C', 'a', 'b', '{', '}', '\u{1680}',
+            '\u{180E}', '\u{2000}', '\u{2005}', '\u{200A}', '\u{200B}', '\u{2027}', '\u{2028}',
+            '\u{2029}', '\u{202F}', '\u{205F}', '\u{2060}', '\u{3000}', '\u{3001}', '\u{FEFF}',
+            '\u{FF01}', '\u{E500}', '\u{E500}', '\u{E501}', '\u{E000}', '\u{00A0}', '\u{0085}',
+            'é', '日', '😀', '\u{1681}', '\u{180D}', '\u{200C}',
+        ];
+        // Small xorshift, so the test is the same on every run.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            usize::try_from(state % n as u64).unwrap()
+        };
+        for _ in 0..50_000 {
+            let len = next(24);
+            let s: String =
+                std::iter::repeat_with(|| ALPHABET[next(ALPHABET.len())]).take(len).collect();
+            check(&s);
+        }
+        // Every char in the BMP (this covers all 3-byte UTF-8 chars), alone,
+        // doubled and next to a space.
+        for c in (0u32..=0xFFFF).filter_map(char::from_u32) {
+            check(&c.to_string());
+            check(&format!("x{c}{c}y"));
+            check(&format!("{c} "));
+            check(&format!(" {c}x"));
+        }
+    }
+
+    #[test]
+    fn js_trim_rules() {
+        // JS trims U+FEFF, Rust's `trim` does not.
+        assert_eq!(js_trim_start("\u{FEFF} a\u{FEFF}"), "a\u{FEFF}");
+        assert_eq!(js_trim_end("\u{FEFF}a \u{FEFF}"), "\u{FEFF}a");
+        // Rust's `trim` strips U+0085, JS does not.
+        assert_eq!(js_trim_start("\u{85}a"), "\u{85}a");
+        assert_eq!(js_trim_end("a\u{85}"), "a\u{85}");
+        // NBSP is trimmed by both.
+        assert_eq!(js_trim_start("\u{A0}a"), "a");
+    }
+
+    fn text_values(nodes: &[HtmlNode<'_>]) -> std::vec::Vec<(String, std::vec::Vec<String>)> {
+        nodes
+            .iter()
+            .filter_map(|node| match node {
+                HtmlNode::Text(text) => Some((
+                    text.value.as_str().to_string(),
+                    text.tokens
+                        .iter()
+                        .filter(|t| t.token_type == InterpolatedTokenType::Text)
+                        .map(|t| t.parts[0].as_str().to_string())
+                        .collect(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn trims_with_js_rules() {
+        let allocator = Allocator::default();
+        // Root nodes have no siblings, so each text is trimmed at both ends.
+        let source = "\u{FEFF}a\u{FEFF}";
+        let parsed = HtmlParser::new(&allocator, source, "x.html").parse();
+        let nodes = remove_whitespaces(&allocator, &parsed.nodes, false);
+        assert_eq!(text_values(&nodes), [("a".to_string(), vec!["a".to_string()])]);
+
+        let source = "\u{85}a\u{85}";
+        let parsed = HtmlParser::new(&allocator, source, "x.html").parse();
+        let nodes = remove_whitespaces(&allocator, &parsed.nodes, false);
+        assert_eq!(
+            text_values(&nodes),
+            [("\u{85}a\u{85}".to_string(), vec!["\u{85}a\u{85}".to_string()])]
+        );
+    }
+
+    #[test]
+    fn many_siblings_keep_order_and_reuse_unchanged_text() {
+        let allocator = Allocator::default();
+        let mut source = String::from("<div>");
+        for i in 0..300 {
+            // Even texts need no change, odd ones collapse a run.
+            if i % 2 == 0 {
+                source.push_str("<b></b> t");
+                source.push_str(&i.to_string());
+                source.push(' ');
+            } else {
+                source.push_str("<b></b>  t");
+                source.push_str(&i.to_string());
+                source.push_str("\n\n");
+            }
+        }
+        source.push_str("</div>");
+        let parsed = HtmlParser::new(&allocator, allocator.alloc_str(&source), "x.html").parse();
+        let HtmlNode::Element(div) = &parsed.nodes[0] else { panic!() };
+
+        for preserve in [true, false] {
+            let nodes = remove_whitespaces(&allocator, &parsed.nodes, preserve);
+            let HtmlNode::Element(out) = &nodes[0] else { panic!() };
+            assert_eq!(out.children.len(), div.children.len());
+
+            let mut texts = 0;
+            for (before, after) in div.children.iter().zip(out.children.iter()) {
+                let (HtmlNode::Text(before), HtmlNode::Text(after)) = (before, after) else {
+                    assert!(matches!(after, HtmlNode::Element(_)));
+                    continue;
+                };
+                let i = texts;
+                texts += 1;
+                // The last text is trimmed at its end when not preserving.
+                let expected =
+                    if i == 299 && !preserve { format!(" t{i}") } else { format!(" t{i} ") };
+                assert_eq!(after.value.as_str(), expected);
+                assert_eq!(after.tokens.len(), 1);
+                assert_eq!(after.tokens[0].parts[0].as_str(), expected);
+                // An unchanged (even) text reuses the original string.
+                if i % 2 == 0 {
+                    assert!(std::ptr::eq(after.value.as_str(), before.value.as_str()));
+                    assert!(std::ptr::eq(
+                        after.tokens[0].parts[0].as_str(),
+                        before.tokens[0].parts[0].as_str()
+                    ));
+                }
+            }
+            assert_eq!(texts, 300);
+        }
     }
 }

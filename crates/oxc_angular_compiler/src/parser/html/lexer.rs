@@ -212,29 +212,32 @@ fn normalize_line_endings(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-/// Converts a byte offset to line:column position.
-fn offset_to_position(input: &str, offset: u32) -> (u32, u32) {
-    let mut line: u32 = 0;
-    let mut col: u32 = 0;
-    let mut byte_pos = 0u32;
-
-    for ch in input.chars() {
-        if byte_pos >= offset {
-            break;
+/// Converts byte offsets to line:column positions, in one pass over the input.
+/// Each position is what a walk from byte 0 gives: the line and column of the first character starting at or after
+/// the offset, where every `\n` and every `\r` starts a new line (so CRLF counts twice) and columns count characters.
+/// The offsets may come in any order; the positions come back in the same order as the offsets.
+fn offsets_to_positions(input: &str, offsets: &[u32]) -> Vec<(u32, u32)> {
+    let mut order: Vec<usize> = (0..offsets.len()).collect();
+    order.sort_by_key(|&i| offsets[i]);
+    let mut positions = vec![(0, 0); offsets.len()];
+    let mut chars = input.char_indices().peekable();
+    let (mut line, mut col) = (0u32, 0u32);
+    for i in order {
+        while let Some(&(byte_pos, ch)) = chars.peek() {
+            if byte_pos >= offsets[i] as usize {
+                break;
+            }
+            if ch == '\n' || ch == '\r' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
+            chars.next();
         }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else if ch == '\r' {
-            // Standalone CR or CRLF
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-        byte_pos += ch.len_utf8() as u32;
+        positions[i] = (line, col);
     }
-    (line, col)
+    positions
 }
 
 /// The value JavaScript's `parseInt(digits, radix)` gives, for the non-negative values a character can have:
@@ -743,7 +746,8 @@ impl<'a> HtmlLexer<'a> {
 
         // Process escape sequences if enabled
         if self.escaped_string {
-            let mut errors_to_add = Vec::new();
+            // (message, offset): positions are worked out once all are known, in one pass.
+            let mut errors_to_add: Vec<(String, u32)> = Vec::new();
             let mut null_encountered = false;
             let mut null_token_idx = None;
 
@@ -757,14 +761,8 @@ impl<'a> HtmlLexer<'a> {
                     let (processed, errs, has_null) = process_escape_sequences(part);
                     *part = processed;
                     for (msg, offset) in errs {
-                        // Convert offset to line:column using token start
-                        let error_pos = token.start + offset as u32;
-                        let (line, col) = offset_to_position(self.input, error_pos);
-                        errors_to_add.push(HtmlTokenError {
-                            msg,
-                            position: (line, col),
-                            offset: error_pos,
-                        });
+                        // The error offset is relative to the token start
+                        errors_to_add.push((msg, token.start + offset as u32));
                     }
                     if has_null {
                         null_encountered = true;
@@ -796,7 +794,14 @@ impl<'a> HtmlLexer<'a> {
                 }
             }
 
-            self.errors.extend(errors_to_add);
+            let offsets: Vec<u32> = errors_to_add.iter().map(|&(_, offset)| offset).collect();
+            let positions = offsets_to_positions(self.input, &offsets);
+            self.errors.extend(
+                errors_to_add
+                    .into_iter()
+                    .zip(positions)
+                    .map(|((msg, offset), position)| HtmlTokenError { msg, position, offset }),
+            );
         }
 
         HtmlTokenizeResult { tokens, errors: self.errors }
@@ -3517,6 +3522,65 @@ mod tests {
             assert_eq!(found, types, "{input}");
             assert_eq!(result.errors.len(), errors, "{input}: {:?}", result.errors);
         }
+    }
+
+    /// The walk from byte 0 that each escape error used to make, kept as the reference for the one-pass version.
+    fn naive_offset_to_position(input: &str, offset: u32) -> (u32, u32) {
+        let (mut line, mut col, mut byte_pos) = (0u32, 0u32, 0u32);
+        for ch in input.chars() {
+            if byte_pos >= offset {
+                break;
+            }
+            if ch == '\n' || ch == '\r' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
+            byte_pos += ch.len_utf8() as u32;
+        }
+        (line, col)
+    }
+
+    #[test]
+    fn test_offsets_to_positions_matches_walk_from_start() {
+        let input = "ab\ncd\r\nef\r\u{e9}g\u{1f600}h\n";
+        let len = input.len() as u32;
+        // Unsorted, repeated, inside a multi-byte character, and past the end.
+        let offsets: Vec<u32> = [len + 5, 3, 0, 14, 7, 3, 1, 15, 8, 12, len, 13, 2, 6].to_vec();
+        let found = offsets_to_positions(input, &offsets);
+        let expected: Vec<_> =
+            offsets.iter().map(|&offset| naive_offset_to_position(input, offset)).collect();
+        assert_eq!(found, expected);
+        assert!(offsets_to_positions(input, &[]).is_empty());
+    }
+
+    #[test]
+    fn test_many_escape_errors_in_escaped_string() {
+        // Bad escapes on several lines, in text and in attribute values, after a multi-byte character and a CRLF:
+        // each error keeps its message, its order and the position a walk from the start of the input gives.
+        let input = "<div title=\"\\xz \\u{zz}\">\\x1\n\u{e9} \\u{zz}\r\n\\xq \\u12</div>\n\\u{\n";
+        let result = HtmlLexer::new(input).with_escaped_string(true).tokenize();
+        let found: Vec<_> =
+            result.errors.iter().map(|e| (e.msg.as_str(), e.position, e.offset)).collect();
+        let expected: Vec<_> = result
+            .errors
+            .iter()
+            .map(|e| (e.msg.as_str(), naive_offset_to_position(input, e.offset), e.offset))
+            .collect();
+        assert_eq!(found, expected);
+        assert_eq!(
+            found,
+            [
+                ("Invalid hexadecimal escape sequence", (0, 14), 14),
+                ("Invalid hexadecimal escape sequence", (0, 19), 19),
+                ("Invalid hexadecimal escape sequence", (0, 26), 26),
+                ("Invalid hexadecimal escape sequence", (1, 4), 33),
+                ("Invalid hexadecimal escape sequence", (3, 0), 39),
+                ("Invalid hexadecimal escape sequence", (3, 4), 43),
+                ("Invalid hexadecimal escape sequence", (4, 1), 55),
+            ]
+        );
     }
 
     #[test]

@@ -38,6 +38,7 @@
 //! block then gets its own dependency function, as in ngc's full compilation
 //! ([`defer_block_dependencies`], [`compile_defer_block_resolver`]).
 
+use indexmap::IndexMap;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Class, Declaration, ExportDefaultDeclarationKind, Expression, ObjectPropertyKind, Program,
@@ -65,6 +66,7 @@ use crate::output::ast::{
 use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
 use oxc_str::Ident;
+use rustc_hash::FxBuildHasher;
 
 use super::metadata::{ComponentMetadata, ImportRef};
 use super::transform::ImportMap;
@@ -802,19 +804,22 @@ fn element_selector(
     inputs: &[R3BoundAttribute<'_>],
     outputs: &[R3BoundEvent<'_>],
 ) -> CssSelector {
-    let mut attrs = std::vec::Vec::new();
+    // Keyed by name and kept in insertion order, like the object
+    // `getAttrsForDirectiveMatching` builds: a later entry with the same name
+    // replaces the value but keeps the first position.
+    let mut attrs: IndexMap<&str, &str, FxBuildHasher> = IndexMap::default();
     for attribute in attributes {
         if !is_i18n_attribute(&attribute.name) {
-            set_attribute(&mut attrs, &attribute.name, &attribute.value);
+            attrs.insert(&attribute.name, &attribute.value);
         }
     }
     for input in inputs {
         if matches!(input.binding_type, BindingType::Property | BindingType::TwoWay) {
-            set_attribute(&mut attrs, &input.name, "");
+            attrs.insert(&input.name, "");
         }
     }
     for output in outputs {
-        set_attribute(&mut attrs, &output.name, "");
+        attrs.insert(&output.name, "");
     }
 
     let mut selector = CssSelector::new();
@@ -828,15 +833,6 @@ fn element_selector(
         }
     }
     selector
-}
-
-/// Sets `name` to `value` in `attrs`, a name/value map kept in insertion order
-/// like the object `getAttrsForDirectiveMatching` builds.
-fn set_attribute<'s>(attrs: &mut std::vec::Vec<(&'s str, &'s str)>, name: &'s str, value: &'s str) {
-    match attrs.iter_mut().find(|(existing, _)| *existing == name) {
-        Some(entry) => entry.1 = value,
-        None => attrs.push((name, value)),
-    }
 }
 
 /// A template as Angular matches directives against it: an `<ng-template>`
@@ -862,5 +858,53 @@ fn template_selector(template: &R3Template<'_>) -> CssSelector {
             }
             selector
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Write;
+
+    use super::*;
+    use crate::parser::html::HtmlParser;
+    use crate::transform::html_to_r3::{TransformOptions, html_ast_to_r3_ast};
+
+    /// Many attributes on one element keep their first position, and a later
+    /// binding or output with the same name replaces the value, like the
+    /// object `getAttrsForDirectiveMatching` builds.
+    #[test]
+    fn element_selector_keeps_order_and_last_value_on_many_attributes() {
+        let n = 300;
+        let mut template = String::from("<div class=\"A b\" ");
+        for i in 0..n {
+            write!(template, "a{i}=\"V{i}\" ").unwrap();
+        }
+        for i in (0..n).step_by(2) {
+            write!(template, "[a{i}]=\"x\" (b{i})=\"x\" ").unwrap();
+        }
+        template.push_str("(a1)=\"x\" (b0)=\"y\"></div>");
+
+        let allocator = Allocator::default();
+        let parsed = HtmlParser::new(&allocator, &template, "test.html").parse();
+        let result =
+            html_ast_to_r3_ast(&allocator, &template, &parsed.nodes, TransformOptions::default());
+        let Some(R3Node::Element(element)) = result.nodes.first() else {
+            panic!("expected an element");
+        };
+        let selector =
+            element_selector(&element.name, &element.attributes, &element.inputs, &element.outputs);
+
+        let mut expected = vec!["class".to_string(), "a b".to_string()];
+        for i in 0..n {
+            expected.push(format!("a{i}"));
+            expected.push(if i % 2 == 0 || i == 1 { String::new() } else { format!("v{i}") });
+        }
+        for i in (0..n).step_by(2) {
+            expected.push(format!("b{i}"));
+            expected.push(String::new());
+        }
+        assert_eq!(selector.element.as_deref(), Some("div"));
+        assert_eq!(selector.attrs, expected);
+        assert_eq!(selector.class_names, ["a", "b"]);
     }
 }

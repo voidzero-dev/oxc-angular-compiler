@@ -2128,6 +2128,60 @@ fn test_chained_pipes() {
     insta::assert_snapshot!("chained_pipes", js);
 }
 
+/// Each `ɵɵpipe` goes right after its target op and after the pipes already
+/// placed there (Angular's `addPipeToCreationBlock`), across many siblings.
+/// A target that is the last create op gets its pipes appended in order.
+#[test]
+fn test_pipe_creation_order_many_siblings() {
+    const N: usize = 40;
+    let mut template = String::new();
+    let mut expected: Vec<String> = Vec::new();
+    for i in 0..N {
+        template.push_str(&format!(
+            r#"<div [title]="a | pa{i}"><span [id]="b | pb{i}">{{{{ c | pc{i} | pd{i} }}}}</span>{{{{ d | pe{i} }}}}</div>"#
+        ));
+        for op in [
+            "elementStart div".to_string(),
+            format!("pipe pa{i}"),
+            "elementStart span".to_string(),
+            format!("pipe pb{i}"),
+            "text".to_string(),
+            format!("pipe pc{i}"),
+            format!("pipe pd{i}"),
+            "elementEnd".to_string(),
+            "text".to_string(),
+            format!("pipe pe{i}"),
+            "elementEnd".to_string(),
+        ] {
+            expected.push(op);
+        }
+    }
+    template.push_str("{{ e | pz | py }}");
+    expected.extend(["text".to_string(), "pipe pz".to_string(), "pipe py".to_string()]);
+
+    let js = compile_template_to_js(&template, "TestComponent");
+
+    // Read the create instructions in order: `ɵɵname(args)`, keeping only the
+    // ones that build the create block (update calls have other names).
+    let mut actual: Vec<String> = Vec::new();
+    for chunk in js.split("ɵɵ").skip(1) {
+        let Some((name, rest)) = chunk.split_once('(') else { continue };
+        let args: Vec<&str> = rest.split(')').next().unwrap_or("").split(',').collect();
+        let quoted = |s: &str| s.trim().trim_matches('"').to_string();
+        match name {
+            "elementStart" | "pipe" => actual.push(format!("{name} {}", quoted(args[1]))),
+            "elementEnd" | "text" => actual.push(name.to_string()),
+            _ => {}
+        }
+    }
+    assert_eq!(actual, expected, "Output:\n{js}");
+
+    // Slots stay in create order: pipes are numbered where they were inserted.
+    assert!(js.contains(r#"i0.ɵɵpipe(1,"pa0")"#), "Output:\n{js}");
+    assert!(js.contains(r#"i0.ɵɵpipe(5,"pc0")"#), "Output:\n{js}");
+    assert!(js.contains(r#"i0.ɵɵpipe(6,"pd0")"#), "Output:\n{js}");
+}
+
 #[test]
 fn test_pipe_in_property_binding() {
     let js = compile_template_to_js(r#"<div [title]="name | uppercase"></div>"#, "TestComponent");
@@ -4054,6 +4108,69 @@ export class C { f(): any { return null; } }
     assert!(code.contains(&format!("functionC_HostBindings_animateleave_cb(){body}")), "{code}");
     assert!(code.contains(&format!("functionC_Template_animateenter_cb(){body}")), "{code}");
     assert!(!code.contains("_tmp"), "{code}");
+}
+
+/// Temporary names follow Angular's `generateTemporaries`: each read counts once,
+/// so a name is freed only at its real last read. A name that is still in use
+/// (`tmp_0_0` below) must not be handed to a nested safe call. Names match ngc
+/// 22.3 with `legacyOptionalChaining`.
+#[test]
+fn test_temporaries_are_freed_at_the_last_read() {
+    let options =
+        ComponentTransformOptions { legacy_optional_chaining: Some(true), ..Default::default() };
+    let compile = |template: &str| {
+        let source = format!(
+            "import {{ Component }} from '@angular/core';\n\
+             @Component({{ selector: 'c', template: `{template}` }})\n\
+             export class C {{ [k: string]: any; }}\n"
+        );
+        compile_compact(&source, Some(&options))
+    };
+
+    // Update op (interpolation).
+    let code = compile("{{ a()?.b?.c?.d?.[g()?.h]?.[k()?.m] }}");
+    assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
+    assert!(
+        code.contains(
+            "((tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]==null)?null:\
+             tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]\
+             [(((tmp_0_0=ctx.k())==null)?null:tmp_0_0.m)])"
+        ),
+        "{code}"
+    );
+
+    // Update op (property binding with a call argument).
+    let code = compile(r#"<span [title]="a()?.b?.[c()?.d]?.e(f()?.g)"></span>"#);
+    assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
+    assert!(
+        code.contains(
+            "tmp_0_0.b[(((tmp_0_1=ctx.c())==null)?null:tmp_0_1.d)]\
+             .e((((tmp_0_0=ctx.f())==null)?null:tmp_0_0.g))"
+        ),
+        "{code}"
+    );
+
+    // Listener handler expression.
+    let code = compile(r#"<span (click)="a()?.[b()?.c()?.[d()?.e()]]?.f()"></span>"#);
+    assert!(code.contains("{lettmp_0_0;lettmp_0_1;lettmp_0_2;lettmp_0_3;return"), "{code}");
+    assert!(code.contains("(tmp_0_2=tmp_0_1.c())"), "{code}");
+    assert!(code.contains("(tmp_0_3=ctx.d())"), "{code}");
+
+    // Many siblings: each op keeps its own index and the same two names.
+    let n = 40;
+    let code = compile(&r#"<span [title]="a()?.b?.[c()?.d]?.e(f()?.g)"></span>"#.repeat(n));
+    let decls: String = (0..n).map(|op| format!("lettmp_{op}_0;lettmp_{op}_1;")).collect();
+    assert!(code.contains(&format!("if((rf&2)){{{decls}i0.")), "{code}");
+    let mut from = 0;
+    for op in 0..n {
+        let (outer, inner) = (format!("tmp_{op}_0"), format!("tmp_{op}_1"));
+        let part = format!(
+            "{outer}.b[((({inner}=ctx.c())==null)?null:{inner}.d)]\
+             .e(((({outer}=ctx.f())==null)?null:{outer}.g))"
+        );
+        let Some(i) = code[from..].find(&part) else { panic!("missing op {op}: {code}") };
+        from += i + part.len();
+    }
 }
 
 /// Test that multiple components with host bindings in the same file have unique constant names.
@@ -6372,6 +6489,59 @@ fn test_i18n_external_ids_use_computed_message_id() {
         "MSG_EXTERNAL_4388111603494198272$$REPRO_TS_7 =",
     ] {
         assert_contains(&js, name);
+    }
+}
+
+/// Element and template placeholders land in the right i18n context, with the right slots and
+/// sub-template indexes, when there are many placeholders and many contexts in many views:
+/// one block with many tags and nested templates, and many sibling `<ng-template i18n>` blocks
+/// that each have their own context in their own view.
+#[test]
+fn test_i18n_element_placeholders_many_siblings_and_contexts() {
+    let mut template = String::from("<div i18n>");
+    for k in 0..12 {
+        template.push_str(&format!("<b>b{k}</b>"));
+    }
+    for k in 0..3 {
+        template.push_str(&format!("<ng-template><i>t{k}</i></ng-template>"));
+    }
+    template.push_str("</div>");
+    for k in 0..12 {
+        template.push_str(&format!("<ng-template i18n><span>s{k}</span></ng-template>"));
+    }
+    let js = compile_i18n_component(&template);
+
+    // The `<div i18n>` block: the `<b>` tags take slots 2..=13 in order, the templates take
+    // slots 14..=16 with sub-template indexes 1..=3, and their `<i>` tags take slot 1 there.
+    let list = |f: &dyn Fn(u32) -> String, range: std::ops::RangeInclusive<u32>| {
+        format!("[{}]", range.map(f).collect::<Vec<_>>().join("|"))
+    };
+    let start_b = list(&|k| format!("\\uFFFD#{k}\\uFFFD"), 2..=13);
+    let close_b = list(&|k| format!("\\uFFFD/#{k}\\uFFFD"), 2..=13);
+    let start_i = list(&|k| format!("\\uFFFD#1:{k}\\uFFFD"), 1..=3);
+    let close_i = list(&|k| format!("\\uFFFD/#1:{k}\\uFFFD"), 1..=3);
+    let start_t = list(&|k| format!("\\uFFFD*{}:{k}\\uFFFD", k + 13), 1..=3);
+    let close_t = list(&|k| format!("\\uFFFD/*{}:{k}\\uFFFD", k + 13), 1..=3);
+    assert_contains(
+        &js,
+        &format!(
+            "{{\"closeBoldText\":\"{close_b}\",\"closeItalicText\":\"{close_i}\",\
+             \"closeTagNgTemplate\":\"{close_t}\",\"startBoldText\":\"{start_b}\",\
+             \"startItalicText\":\"{start_i}\",\"startTagNgTemplate\":\"{start_t}\"}}"
+        ),
+    );
+
+    // Each `<ng-template i18n>` has its own context in its own view, and gets only its own
+    // `<span>`, at slot 1 of that view.
+    for k in 0..12 {
+        assert_contains(
+            &js,
+            &format!(
+                "(i18n_{} = $localize `${{\"\\uFFFD#1\\uFFFD\"}}:START_TAG_SPAN:s{k}\
+                 ${{\"\\uFFFD/#1\\uFFFD\"}}:CLOSE_TAG_SPAN:`);",
+                k + 1
+            ),
+        );
     }
 }
 
@@ -19752,4 +19922,36 @@ fn test_legacy_animation_property_prefixes() {
     ] {
         assert_eq!(compile_template_to_js(template, "C"), expected, "{template}");
     }
+}
+
+#[test]
+fn test_collapse_empty_elements_many_siblings() {
+    // Many empty siblings of each kind, mixed with non-empty ones and with pipes between
+    // the start and end ops. Each empty one must collapse in place, in order.
+    let unit = "<br><span></span><ng-container></ng-container><b>x</b><input [value]=\"a | json\">";
+    let n = 50;
+    let js = compile_template_to_js(&unit.repeat(n), "TestComponent");
+
+    let mut expected = String::from("  if ((rf & 1)) {\n");
+    for k in 0..n {
+        let b = k * 7;
+        expected.push_str(&format!(
+            "    i0.ɵɵelement({},\"br\")({},\"span\");\n\
+             \x20   i0.ɵɵelementContainer({});\n\
+             \x20   i0.ɵɵelementStart({},\"b\");\n\
+             \x20   i0.ɵɵtext({},\"x\");\n\
+             \x20   i0.ɵɵelementEnd();\n\
+             \x20   i0.ɵɵelement({},\"input\",0);\n\
+             \x20   i0.ɵɵpipe({},\"json\");\n",
+            b,
+            b + 1,
+            b + 2,
+            b + 3,
+            b + 4,
+            b + 5,
+            b + 6
+        ));
+    }
+    expected.push_str("  }\n");
+    assert!(js.contains(&expected), "unexpected create block:\n{js}");
 }
