@@ -306,9 +306,9 @@ fn class_element_parts<'a, 'b>(
 ) -> (bool, bool, Option<&'b PropertyKey<'a>>) {
     match element {
         ClassElement::StaticBlock(_) | ClassElement::TSIndexSignature(_) => (false, false, None),
-        ClassElement::MethodDefinition(el) => (el.r#static, el.computed, Some(&el.key)),
-        ClassElement::PropertyDefinition(el) => (el.r#static, el.computed, Some(&el.key)),
-        ClassElement::AccessorProperty(el) => (el.r#static, el.computed, Some(&el.key)),
+        ClassElement::MethodDefinition(el) => (el.r#static, el.key.is_computed(), Some(&el.key)),
+        ClassElement::PropertyDefinition(el) => (el.r#static, el.key.is_computed(), Some(&el.key)),
+        ClassElement::AccessorProperty(el) => (el.r#static, el.key.is_computed(), Some(&el.key)),
     }
 }
 

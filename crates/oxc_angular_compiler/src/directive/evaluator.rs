@@ -984,7 +984,8 @@ impl<'a> FileScope<'a> {
                     }
                     obj.properties.iter().rev().find_map(|p| match p {
                         ObjectPropertyKind::ObjectProperty(p)
-                            if !p.computed && p.key.static_name().is_some_and(|n| n == *k) =>
+                            if !p.key.is_computed()
+                                && p.key.static_name().is_some_and(|n| n == *k) =>
                         {
                             Some(&p.value)
                         }
@@ -1061,9 +1062,7 @@ fn collect_bindings<'a>(
         BindingPattern::ObjectPattern(p) => {
             for prop in &p.properties {
                 path.push(match &prop.key {
-                    PropertyKey::StaticIdentifier(id) if !prop.computed => {
-                        PathKey::Key(id.name.as_str())
-                    }
+                    PropertyKey::StaticIdentifier(id) => PathKey::Key(id.name.as_str()),
                     _ => PathKey::Unknown,
                 });
                 collect_bindings(&prop.value, path, out);
@@ -1908,7 +1907,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     if p.method || !matches!(p.kind, PropertyKind::Init) {
                         return Value::Dynamic;
                     }
-                    let Some(key) = self.property_key(&p.key, p.computed, depth, frame) else {
+                    let Some(key) = self.property_key(&p.key, p.key.is_computed(), depth, frame)
+                    else {
                         return Value::Dynamic;
                     };
                     let value = match (&p.value, function_value(&p.value)) {
@@ -2141,8 +2141,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
         match key {
             PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-            PropertyKey::StringLiteral(s) => s.value.as_str().map(str::to_string),
-            PropertyKey::NumericLiteral(n) => Some(format_number_like_js(n.value)),
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                s.value.as_str().map(str::to_string)
+            }
+            PropertyKey::StaticNumericLiteral(n) | PropertyKey::NumericLiteral(n) => {
+                Some(format_number_like_js(n.value))
+            }
             _ => None,
         }
     }

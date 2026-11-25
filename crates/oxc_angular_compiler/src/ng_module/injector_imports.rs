@@ -187,7 +187,9 @@ pub fn injector_entries<'s>(
         }
         let key = match &property.key {
             PropertyKey::StaticIdentifier(id) => id.name.as_str(),
-            PropertyKey::StringLiteral(lit) => lit.value.as_str().unwrap_or_default(),
+            PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+                lit.value.as_str().unwrap_or_default()
+            }
             _ => continue,
         };
         let list = match key {

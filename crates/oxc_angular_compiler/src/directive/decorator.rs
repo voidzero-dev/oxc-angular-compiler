@@ -184,7 +184,7 @@ pub fn extract_directive_metadata<'a>(
                         // and `host_metadata_error` doesn't see this property
                         // either — an invalid one must not be applied here
                         // where it would be dropped silently.
-                        if !prop.computed {
+                        if !prop.key.is_computed() {
                             host_from_decorator =
                                 extract_host_metadata(allocator, &prop.value, source_text, consts);
                         }
@@ -712,7 +712,9 @@ fn get_property_key_name<'a>(
 ) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            lit.value.as_str().map(Ident::from)
+        }
         // Computed identifier reference: `[FOO]: bar` — resolve against same-file consts.
         PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
@@ -838,7 +840,7 @@ pub(super) fn config_property<'a>(
 ) -> Option<&'a Expression<'a>> {
     config.properties.iter().rev().find_map(|prop| match prop {
         ObjectPropertyKind::ObjectProperty(prop)
-            if !prop.computed
+            if !prop.key.is_computed()
                 && is_metadata_property(prop)
                 && get_property_key_name(&prop.key, consts).is_some_and(|k| k == name) =>
         {

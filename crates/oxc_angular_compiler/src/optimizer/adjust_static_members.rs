@@ -478,7 +478,7 @@ fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
         Expression::ObjectExpression(o) => o.properties.iter().all(|p| match p {
             ObjectPropertyKind::SpreadProperty(_) => false,
             ObjectPropertyKind::ObjectProperty(prop) => {
-                let key_pure = !prop.computed
+                let key_pure = !prop.key.is_computed()
                     || prop.key.as_expression().is_some_and(|k| is_pure(k, bindings));
                 key_pure
                     && (prop.method || matches!(prop.kind, PropertyKind::Init))
@@ -493,9 +493,10 @@ fn is_pure(expr: &Expression<'_>, bindings: &FxHashSet<&str>) -> bool {
         Expression::ClassExpression(c) => {
             c.heritage.as_ref().is_none_or(|h| is_pure(&h.expression, bindings))
                 && c.body.body.iter().all(|el| match el {
-                    ClassElement::MethodDefinition(m) => !m.computed,
+                    ClassElement::MethodDefinition(m) => !m.key.is_computed(),
                     ClassElement::PropertyDefinition(p) => {
-                        !p.computed && p.value.as_ref().is_none_or(|v| is_pure(v, bindings))
+                        !p.key.is_computed()
+                            && p.value.as_ref().is_none_or(|v| is_pure(v, bindings))
                     }
                     _ => false,
                 })

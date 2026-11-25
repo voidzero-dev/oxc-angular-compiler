@@ -1057,16 +1057,20 @@ fn build_host_attrs(
                     // (linker/src/ast/ast_value.ts), which assigns into a plain
                     // `{}`: a `__proto__` key is lost there.
                     PropertyKey::StaticIdentifier(ident) if ident.name == "__proto__" => continue,
-                    PropertyKey::StringLiteral(s) if s.value.as_str() == Some("__proto__") => {
+                    PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s)
+                        if s.value.as_str() == Some("__proto__") =>
+                    {
                         continue;
                     }
                     PropertyKey::StaticIdentifier(ident) => escape_string_for_linker(&ident.name),
                     // A lone surrogate (`'\uD800'`) has no `&str`: keep the key
                     // as written.
-                    PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                        Some(key) => escape_string_for_linker(key),
-                        None => source[s.span.start as usize..s.span.end as usize].to_string(),
-                    },
+                    PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                        match s.value.as_str() {
+                            Some(key) => escape_string_for_linker(key),
+                            None => source[s.span.start as usize..s.span.end as usize].to_string(),
+                        }
+                    }
                     _ => continue,
                 };
                 // Static strings (including template literals a bundler may have
@@ -1602,14 +1606,16 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             PropertyKey::StaticIdentifier(ident) => {
                 (quote_key(&ident.name), escape_string_for_linker(&ident.name))
             }
-            PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                Some(key) => (quote_key(key), escape_string_for_linker(key)),
-                // A lone surrogate (`'\uD800'`) has no `&str`: use the key as written.
-                None => {
-                    let key = source[s.span.start as usize..s.span.end as usize].to_string();
-                    (key.clone(), key)
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                match s.value.as_str() {
+                    Some(key) => (quote_key(key), escape_string_for_linker(key)),
+                    // A lone surrogate (`'\uD800'`) has no `&str`: use the key as written.
+                    None => {
+                        let key = source[s.span.start as usize..s.span.end as usize].to_string();
+                        (key.clone(), key)
+                    }
                 }
-            },
+            }
             _ => {
                 // Fallback: use source text
                 let span = p.span();
@@ -1755,10 +1761,12 @@ fn link_outputs(meta: &ObjectExpression<'_>, source: &str) -> Option<String> {
         };
         let key = match &p.key {
             PropertyKey::StaticIdentifier(ident) => quote_key(&ident.name),
-            PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                Some(key) => quote_key(key),
-                None => return Some(as_written.to_string()),
-            },
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                match s.value.as_str() {
+                    Some(key) => quote_key(key),
+                    None => return Some(as_written.to_string()),
+                }
+            }
             _ => return Some(as_written.to_string()),
         };
         let Some(value) = static_string_literal(&p.value, source) else {
@@ -1923,10 +1931,12 @@ fn extract_host_metadata_input(
             let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
             let key = match &p.key {
                 PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-                PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                    Some(key) => key.to_string(),
-                    None => continue,
-                },
+                PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                    match s.value.as_str() {
+                        Some(key) => key.to_string(),
+                        None => continue,
+                    }
+                }
                 _ => continue,
             };
             // Lost in Angular's linker, as in `build_host_attrs`.
@@ -1953,10 +1963,12 @@ fn extract_host_metadata_input(
             let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
             let key = match &p.key {
                 PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
-                PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                    Some(key) => key.to_string(),
-                    None => continue,
-                },
+                PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                    match s.value.as_str() {
+                        Some(key) => key.to_string(),
+                        None => continue,
+                    }
+                }
                 _ => continue,
             };
             if key == "__proto__" {
@@ -1983,7 +1995,7 @@ fn host_animation_attribute<'a>(
     }
     let key = match &prop.key {
         PropertyKey::StaticIdentifier(ident) => ident.name.as_str(),
-        PropertyKey::StringLiteral(s) => s.value.as_str()?,
+        PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => s.value.as_str()?,
         _ => return None,
     };
     if !key.starts_with("animate.") {
@@ -2394,7 +2406,9 @@ fn host_directive_entry_property<'a>(
         ObjectPropertyKind::ObjectProperty(prop) => {
             let key = match &prop.key {
                 PropertyKey::StaticIdentifier(ident) => ident.name.as_str(),
-                PropertyKey::StringLiteral(s) => s.value.as_str()?,
+                PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                    s.value.as_str()?
+                }
                 _ => return None,
             };
             (key == name).then_some(&prop.value)
@@ -2440,7 +2454,9 @@ fn has_animate_leave_host(host: &ObjectExpression<'_>) -> bool {
                     .filter_map(|prop| match prop {
                         ObjectPropertyKind::ObjectProperty(p) => match &p.key {
                             PropertyKey::StaticIdentifier(ident) => Some(ident.name.as_str()),
-                            PropertyKey::StringLiteral(s) => s.value.as_str(),
+                            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                                s.value.as_str()
+                            }
                             _ => None,
                         },
                         ObjectPropertyKind::SpreadProperty(_) => None,

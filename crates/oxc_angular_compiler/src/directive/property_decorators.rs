@@ -299,9 +299,9 @@ pub(crate) fn member_access_level(
 /// entirely: it can raise none of the member diagnostics.
 pub(crate) fn member_name(element: &ClassElement<'_>) -> Option<String> {
     let (key, computed) = match element {
-        ClassElement::PropertyDefinition(p) => (&p.key, p.computed),
-        ClassElement::AccessorProperty(p) => (&p.key, p.computed),
-        ClassElement::MethodDefinition(m) => (&m.key, m.computed),
+        ClassElement::PropertyDefinition(p) => (&p.key, p.key.is_computed()),
+        ClassElement::AccessorProperty(p) => (&p.key, p.key.is_computed()),
+        ClassElement::MethodDefinition(m) => (&m.key, m.key.is_computed()),
         _ => return None,
     };
     if computed {
@@ -311,7 +311,9 @@ pub(crate) fn member_name(element: &ClassElement<'_>) -> Option<String> {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
         // A lone surrogate (`'\uD800'`) is stored as
         // [`crate::util::lone_surrogate`] describes.
-        PropertyKey::StringLiteral(lit) => Some(js_str_to_str(lit.value).into_owned()),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            Some(js_str_to_str(lit.value).into_owned())
+        }
         PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
         _ => None,
     }
@@ -391,7 +393,7 @@ pub(crate) fn literal_alias_error<'a>(
         // `propertyNameToString` skips a computed key, so `['alias']` is not
         // an `alias` upstream.
         if !is_metadata_property(prop)
-            || prop.computed
+            || prop.key.is_computed()
             || !get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
         {
             continue;
@@ -413,7 +415,9 @@ pub(crate) fn literal_alias_error<'a>(
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            lit.value.as_str().map(Ident::from)
+        }
         _ => None,
     }
 }
@@ -693,7 +697,7 @@ fn options_alias<'a>(
         // an `alias` upstream.
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
             && is_metadata_property(prop)
-            && !prop.computed
+            && !prop.key.is_computed()
             && get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
         {
             alias = extract_name_value(allocator, &prop.value);
@@ -2142,16 +2146,23 @@ fn reflect_object_literal<'a>(
     let mut entries: std::vec::Vec<(String, &'a Expression<'a>)> = std::vec::Vec::new();
     for prop in &obj.properties {
         let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
-        if prop.method || prop.computed || !matches!(prop.kind, oxc_ast::ast::PropertyKind::Init) {
+        if prop.method
+            || prop.key.is_computed()
+            || !matches!(prop.kind, oxc_ast::ast::PropertyKind::Init)
+        {
             continue;
         }
         let name = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => match s.value.as_str() {
-                Some(name) => name.to_string(),
-                None => continue,
-            },
-            PropertyKey::NumericLiteral(n) => n.value.to_string(),
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                match s.value.as_str() {
+                    Some(name) => name.to_string(),
+                    None => continue,
+                }
+            }
+            PropertyKey::StaticNumericLiteral(n) | PropertyKey::NumericLiteral(n) => {
+                n.value.to_string()
+            }
             _ => continue,
         };
         // A Map keeps the first key's position and the last value.

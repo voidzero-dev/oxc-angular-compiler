@@ -1290,7 +1290,7 @@ fn walk_class_eager_parts<'a>(
             ClassElement::MethodDefinition(method) => {
                 // Computed keys fire at class-definition time regardless of
                 // method kind.
-                if method.computed
+                if method.key.is_computed()
                     && let Some(key_expr) = method.key.as_expression()
                 {
                     collect_expr_symbols(key_expr, semantic, out, called);
@@ -1308,7 +1308,7 @@ fn walk_class_eager_parts<'a>(
                 // class object, executed when called). Skip both.
             }
             ClassElement::PropertyDefinition(prop) => {
-                if prop.computed
+                if prop.key.is_computed()
                     && let Some(key_expr) = prop.key.as_expression()
                 {
                     collect_expr_symbols(key_expr, semantic, out, called);
@@ -1325,7 +1325,7 @@ fn walk_class_eager_parts<'a>(
                 }
             }
             ClassElement::AccessorProperty(accessor) => {
-                if accessor.computed
+                if accessor.key.is_computed()
                     && let Some(key_expr) = accessor.key.as_expression()
                 {
                     collect_expr_symbols(key_expr, semantic, out, called);
@@ -1849,7 +1849,7 @@ fn collect_expr_symbols<'a>(
                     ObjectPropertyKind::ObjectProperty(p) => {
                         // Computed keys (e.g. `{ [TOKEN]: 1 }`) reference the
                         // key identifier; static keys don't.
-                        if p.computed {
+                        if p.key.is_computed() {
                             if let Some(key_expr) = p.key.as_expression() {
                                 collect_expr_symbols(key_expr, semantic, out, called);
                             }
@@ -2194,7 +2194,7 @@ fn collect_assignment_target_property_symbols<'a>(
             }
         }
         P::AssignmentTargetPropertyProperty(prop) => {
-            if prop.computed
+            if prop.name.is_computed()
                 && let Some(key_expr) = prop.name.as_expression()
             {
                 collect_expr_symbols(key_expr, semantic, out, called);
