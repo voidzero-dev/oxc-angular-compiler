@@ -2128,6 +2128,60 @@ fn test_chained_pipes() {
     insta::assert_snapshot!("chained_pipes", js);
 }
 
+/// Each `ɵɵpipe` goes right after its target op and after the pipes already
+/// placed there (Angular's `addPipeToCreationBlock`), across many siblings.
+/// A target that is the last create op gets its pipes appended in order.
+#[test]
+fn test_pipe_creation_order_many_siblings() {
+    const N: usize = 40;
+    let mut template = String::new();
+    let mut expected: Vec<String> = Vec::new();
+    for i in 0..N {
+        template.push_str(&format!(
+            r#"<div [title]="a | pa{i}"><span [id]="b | pb{i}">{{{{ c | pc{i} | pd{i} }}}}</span>{{{{ d | pe{i} }}}}</div>"#
+        ));
+        for op in [
+            "elementStart div".to_string(),
+            format!("pipe pa{i}"),
+            "elementStart span".to_string(),
+            format!("pipe pb{i}"),
+            "text".to_string(),
+            format!("pipe pc{i}"),
+            format!("pipe pd{i}"),
+            "elementEnd".to_string(),
+            "text".to_string(),
+            format!("pipe pe{i}"),
+            "elementEnd".to_string(),
+        ] {
+            expected.push(op);
+        }
+    }
+    template.push_str("{{ e | pz | py }}");
+    expected.extend(["text".to_string(), "pipe pz".to_string(), "pipe py".to_string()]);
+
+    let js = compile_template_to_js(&template, "TestComponent");
+
+    // Read the create instructions in order: `ɵɵname(args)`, keeping only the
+    // ones that build the create block (update calls have other names).
+    let mut actual: Vec<String> = Vec::new();
+    for chunk in js.split("ɵɵ").skip(1) {
+        let Some((name, rest)) = chunk.split_once('(') else { continue };
+        let args: Vec<&str> = rest.split(')').next().unwrap_or("").split(',').collect();
+        let quoted = |s: &str| s.trim().trim_matches('"').to_string();
+        match name {
+            "elementStart" | "pipe" => actual.push(format!("{name} {}", quoted(args[1]))),
+            "elementEnd" | "text" => actual.push(name.to_string()),
+            _ => {}
+        }
+    }
+    assert_eq!(actual, expected, "Output:\n{js}");
+
+    // Slots stay in create order: pipes are numbered where they were inserted.
+    assert!(js.contains(r#"i0.ɵɵpipe(1,"pa0")"#), "Output:\n{js}");
+    assert!(js.contains(r#"i0.ɵɵpipe(5,"pc0")"#), "Output:\n{js}");
+    assert!(js.contains(r#"i0.ɵɵpipe(6,"pd0")"#), "Output:\n{js}");
+}
+
 #[test]
 fn test_pipe_in_property_binding() {
     let js = compile_template_to_js(r#"<div [title]="name | uppercase"></div>"#, "TestComponent");
