@@ -2167,6 +2167,15 @@ fn host_binding_errors(
     entries: &[(Ident<'_>, HostValue<'_>)],
     check_empty_names: bool,
 ) -> Option<String> {
+    host_key_errors(entries.iter().map(|(key, _)| key.as_str()), check_empty_names)
+}
+
+/// [`host_binding_errors`] for the `host:`-style keys `keys` (`(click)`,
+/// `[prop]`, `attr`), also used by the linker for a partial declaration's host.
+pub(crate) fn host_key_errors<'k>(
+    keys: impl Iterator<Item = &'k str> + Clone,
+    check_empty_names: bool,
+) -> Option<String> {
     // `verifyHostBindings` (compiler.ts) collects every error, in this order,
     // and ngtsc joins their messages with "\n" into one NG5001:
     // 1. `createDirectiveHostEventAsts`, for each listener in key order: `()` has
@@ -2180,11 +2189,11 @@ fn host_binding_errors(
     // expressions, which oxc doesn't do. Only the name inside the brackets is
     // checked, so `[ ]` and `( )` are not errors.
     let mut errors: std::vec::Vec<String> = std::vec::Vec::new();
-    for (key, _) in entries {
-        if !matches!(HostKey::of(key.as_str()), HostKey::Listener) {
+    for key in keys.clone() {
+        if !matches!(HostKey::of(key), HostKey::Listener) {
             continue;
         }
-        let name = &key.as_str()[1..key.len() - 1];
+        let name = &key[1..key.len() - 1];
         if name.is_empty() {
             if check_empty_names {
                 errors.push("Event name is missing in binding".to_string());
@@ -2199,11 +2208,11 @@ fn host_binding_errors(
     // `createBoundHostProperties` (`parsePropertyBinding`), for each property in key
     // order: `[]` has no name; a legacy animation property (`[@]`, `[animate-]`) has
     // no trigger name.
-    for (key, _) in entries {
-        if !matches!(HostKey::of(key.as_str()), HostKey::Property) {
+    for key in keys.clone() {
+        if !matches!(HostKey::of(key), HostKey::Property) {
             continue;
         }
-        let name = &key.as_str()[1..key.len() - 1];
+        let name = &key[1..key.len() - 1];
         if name.is_empty() {
             if check_empty_names {
                 errors.push("Property name is missing in binding".to_string());
@@ -2212,9 +2221,9 @@ fn host_binding_errors(
             errors.push("Animation trigger is missing".to_string());
         }
     }
-    for (key, _) in entries {
-        let HostKey::Property = HostKey::of(key.as_str()) else { continue };
-        let prop = &key.as_str()[1..key.as_str().len() - 1];
+    for key in keys.clone() {
+        let HostKey::Property = HostKey::of(key) else { continue };
+        let prop = &key[1..key.len() - 1];
         let is_attr = prop.starts_with("attr.");
         let bound = if is_attr { &prop[5..] } else { prop };
         if bound.to_lowercase().starts_with("on") {

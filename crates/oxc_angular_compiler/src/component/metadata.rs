@@ -522,6 +522,13 @@ impl AngularVersion {
         ])
     }
 
+    /// Check if the linker verifies a partial declaration's host bindings: its
+    /// `toR3DirectiveMeta` runs `verifyHostBindings` and throws a
+    /// `FatalLinkerError` (22.3.0-rc.0+; not in 22.3.0-next.5, 22.2.7 or 21.2.26).
+    pub fn links_with_host_binding_checks(&self) -> bool {
+        self.cmp_release(&Self::new(22, 3, 0).with_prerelease(Prerelease::Rc(0))).is_ge()
+    }
+
     /// Whether a fix is in this version, given the first fixed release on
     /// each release line, oldest line first.
     ///

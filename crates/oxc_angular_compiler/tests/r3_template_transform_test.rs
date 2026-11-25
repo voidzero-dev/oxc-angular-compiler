@@ -2418,6 +2418,77 @@ mod legacy_animation_events {
     }
 }
 
+/// Attribute names checked against Angular 22.3.0 `parseTemplate`.
+mod binding_names {
+    use super::*;
+
+    /// `on-window:click` has the target `window`, like `(window:click)`. The HTML
+    /// lexer only takes a namespace prefix made of letters and digits, so
+    /// `on-window` is not one.
+    #[test]
+    fn on_prefix_event_with_target() {
+        for html in [r#"<div on-window:click="f()"></div>"#, r#"<div (window:click)="f()"></div>"#]
+        {
+            assert_eq!(
+                humanize(html),
+                vec![h!["Element", "div"], h!["BoundEvent", 0, "click", "window", "f()"]],
+                "{html}"
+            );
+        }
+        // `window:@fade` is a regular event named `@fade`.
+        assert_eq!(
+            humanize(r#"<div on-window:@fade="f()"></div>"#),
+            vec![h!["Element", "div"], h!["BoundEvent", 0, "@fade", "window", "f()"]]
+        );
+    }
+
+    /// `()`, `[]` and `[()]` have no name, so they are plain attributes.
+    #[test]
+    fn empty_delimited_names_are_attributes() {
+        for (html, name) in [
+            (r#"<div ()="f()"></div>"#, "()"),
+            (r#"<div []="v"></div>"#, "[]"),
+            (r#"<div [()]="v"></div>"#, "[()]"),
+        ] {
+            assert!(get_transform_errors(html).is_empty(), "{html}");
+            let result = humanize(html);
+            assert_eq!(result[1][0], HumanValue::from("TextAttribute"), "{html}: {result:?}");
+            assert_eq!(result[1][1], HumanValue::from(name), "{html}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn empty_prefixed_names_are_errors() {
+        assert_eq!(
+            get_transform_errors(r#"<div on-="f()"></div>"#),
+            ["Event name is missing in binding"]
+        );
+        assert_eq!(
+            get_transform_errors(r#"<div bind-="v"></div>"#),
+            ["Property name is missing in binding"]
+        );
+        assert_eq!(
+            get_transform_errors(r#"<div bindon-="v"></div>"#),
+            ["Property name is missing in binding"]
+        );
+    }
+
+    /// Like `createDeferredBlock`, the connected blocks are parsed before the main
+    /// block, so their errors come first.
+    #[test]
+    fn defer_connected_block_errors_come_first() {
+        assert_eq!(
+            get_transform_errors(
+                r#"@defer { <div (@fade.x)="f()"></div> } @loading { <i (@fade.y)="f()"></i> } @placeholder { <b (@fade.w)="f()"></b> }"#
+            ),
+            ["y", "w", "x"].map(|phase| format!(
+                "The provided animation output phase value \"{phase}\" for \"@fade\" is not \
+                     supported (use start or done)"
+            ))
+        );
+    }
+}
+
 mod animation_bindings {
     use super::*;
 

@@ -105,8 +105,9 @@ pub struct LinkResult {
     pub map: Option<String>,
     /// Whether any declarations were linked.
     pub linked: bool,
-    /// The errors of each component whose template has errors. That component stays as it is;
-    /// a build should fail on them, as Angular's linker throws a `FatalLinkerError`.
+    /// The errors of each directive or component whose `host` or template has errors. That
+    /// declaration stays as it is; a build should fail on them, as Angular's linker throws a
+    /// `FatalLinkerError`.
     pub errors: Vec<OxcDiagnostic>,
 }
 
@@ -1154,9 +1155,17 @@ fn link_declaration<'a>(
         DECLARE_CLASS_METADATA => link_class_metadata(meta, source, ns, type_name),
         DECLARE_CLASS_METADATA_ASYNC => link_class_metadata_async(meta, source, ns, type_name),
         DECLARE_DIRECTIVE => {
+            if let Some(error) = host_errors(meta, source, filename, options) {
+                errors.push(error);
+                return None;
+            }
             return Some(link_directive(meta, source, ns, type_name, options, allocator, pool));
         }
         DECLARE_COMPONENT => {
+            if let Some(error) = host_errors(meta, source, filename, options) {
+                errors.push(error);
+                return None;
+            }
             return link_component(
                 meta, source, filename, ns, type_name, options, allocator, pool, errors,
             );
@@ -2465,6 +2474,52 @@ fn has_directive_dependencies(meta: &ObjectExpression<'_>) -> bool {
         })
 }
 
+/// The error for a partial directive or component whose `host` has errors, like
+/// the `FatalLinkerError` Angular's `toR3DirectiveMeta` throws from 22.3.0-rc.0
+/// (see [`AngularVersion::links_with_host_binding_checks`]; before, the linker
+/// ignores these errors): the errors of `verifyHostBindings`, joined with "\n",
+/// at the `host` object. The declaration stays as it is. Only the binding names
+/// are checked, as for `host:` metadata (`host_binding_errors`); the expressions
+/// are not parsed for errors.
+///
+/// The listeners include the `@HostListener` names, which ngtsc merges into the
+/// partial `host.listeners` without checking them, so `@HostListener('@fade')`
+/// compiles with ngtsc but fails to link.
+fn host_errors(
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    filename: &str,
+    options: &LinkOptions,
+) -> Option<OxcDiagnostic> {
+    if !options.angular_version.is_none_or(|v| v.links_with_host_binding_checks()) {
+        return None;
+    }
+    let host_obj = get_object_property(meta, "host")?;
+    let input = extract_host_metadata_input(host_obj, None);
+    let keys = input.listeners.iter().chain(&input.properties).map(|(key, _)| key.as_str());
+    // `parseEvent` / `parsePropertyBinding` report a missing name in every version;
+    // only ngtsc's `parseHostBindings` once kept `()` / `[]` as attributes.
+    let message = crate::directive::host_key_errors(keys, true)?;
+    let span = get_property_expression(meta, "host").map(GetSpan::span);
+    Some(located_error(message, span, source, filename))
+}
+
+/// An error with the label `span` and its `file:line:column` as help.
+fn located_error(
+    message: String,
+    span: Option<Span>,
+    source: &str,
+    filename: &str,
+) -> OxcDiagnostic {
+    let error = OxcDiagnostic::error(message);
+    let Some(span) = span else { return error };
+    let before = &source[..(span.start as usize).min(source.len())];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let (line, column) =
+        (before.matches('\n').count() + 1, before[line_start..].chars().count() + 1);
+    error.with_label(span).with_help(format!("{filename}:{line}:{column}"))
+}
+
 /// The error for a partial component whose template has errors, like the `FatalLinkerError`
 /// Angular's `PartialComponentLinkerVersion1` throws: "Errors found in the template:" and each
 /// error, at the `template` string.
@@ -2484,13 +2539,7 @@ fn template_errors(
             message.push(')');
         }
     }
-    let error = OxcDiagnostic::error(message);
-    let Some(span) = template else { return error };
-    let before = &source[..(span.start as usize).min(source.len())];
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    let (line, column) =
-        (before.matches('\n').count() + 1, before[line_start..].chars().count() + 1);
-    error.with_label(span).with_help(format!("{filename}:{line}:{column}"))
+    located_error(message, template, source, filename)
 }
 
 /// Link ɵɵngDeclareComponent → ɵɵdefineComponent.

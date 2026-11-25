@@ -58,9 +58,7 @@ const BIND_NAME_PREFIXES: &[(&str, BindingPrefix)] = &[
 const BANANA_BOX_START: &str = "[(";
 const BANANA_BOX_END: &str = ")]";
 const PROPERTY_START: char = '[';
-const PROPERTY_END: char = ']';
 const EVENT_START: char = '(';
-const EVENT_END: char = ')';
 
 /// Template attribute prefix for structural directives.
 const TEMPLATE_ATTR_PREFIX: char = '*';
@@ -96,6 +94,26 @@ fn property_binding_key_span(name: &str, key_span: Span) -> Span {
 /// Reference: binding_parser.ts (`parsePropertyBinding`)
 fn legacy_animation_property_name(name: &str) -> Option<&str> {
     name.strip_prefix(LEGACY_ANIMATE_PROP_PREFIX).or_else(|| name.strip_prefix('@'))
+}
+
+/// The binding syntax of an attribute name, as Angular's `parseAttribute` picks
+/// it from `BINDING_DELIMS`: the delimiters come from how the name starts
+/// (`[(`, else `[`, else `(`), and count only when the name ends with the
+/// matching delimiter and has a name between them. So `[(x]`, `()`, `[]` and
+/// `[()]` are not bindings (they are plain or interpolated attributes).
+/// Returns the start delimiter and the name.
+fn binding_delims(name: &str) -> Option<(&'static str, &str)> {
+    let (start, end) = if name.starts_with(BANANA_BOX_START) {
+        (BANANA_BOX_START, BANANA_BOX_END)
+    } else if name.starts_with(PROPERTY_START) {
+        ("[", "]")
+    } else if name.starts_with(EVENT_START) {
+        ("(", ")")
+    } else {
+        return None;
+    };
+    (name.ends_with(end) && name.len() > start.len() + end.len())
+        .then(|| (start, &name[start.len()..name.len() - end.len()]))
 }
 
 /// Angular's error for a legacy animation attribute with a value (`@fade="x"`).
@@ -1314,6 +1332,19 @@ impl<'a> HtmlToR3Transform<'a> {
                     // bindParts[KW_*_IDX], identifier)`)
                     let key_span =
                         create_key_span(attr, &attr_name[..attr_name.len() - rest.len()], rest);
+                    // `parsePropertyBinding` / `parseEvent` report an empty name (`bind-`, `on-`).
+                    // `bindon-` adds the event `Change`, which has a name.
+                    if rest.is_empty() {
+                        match prefix {
+                            BindingPrefix::Bind | BindingPrefix::BindOn => {
+                                self.report_error("Property name is missing in binding", attr.span);
+                            }
+                            BindingPrefix::On => {
+                                self.report_error("Event name is missing in binding", attr.span)
+                            }
+                            _ => {}
+                        }
+                    }
                     match prefix {
                         BindingPrefix::Bind => {
                             // bind-prop="value" - property binding
@@ -1364,21 +1395,9 @@ impl<'a> HtmlToR3Transform<'a> {
                                 );
                                 continue;
                             }
-                            // on-event="handler" - event binding
-                            let value_span = attr.value_span.unwrap_or(attr.span);
-                            let parse_result =
-                                self.binding_parser.parse_event(attr_value, value_span);
-
-                            outputs.push(R3BoundEvent {
-                                name: Ident::from_in(rest, &self.allocator),
-                                handler: parse_result.ast,
-                                target: None,
-                                event_type: ParsedEventType::Regular,
-                                phase: None,
-                                source_span: attr.span,
-                                key_span: event_key_span(rest, key_span),
-                                handler_span: value_span,
-                            });
+                            // on-event="handler" - event binding (`on-window:click` has a target)
+                            let key_span = event_key_span(rest, key_span);
+                            outputs.push(self.create_bound_event_with_target(rest, attr, key_span));
                         }
                         BindingPrefix::BindOn => {
                             // bindon-@prop: a legacy animation input, not supported here
@@ -1440,9 +1459,9 @@ impl<'a> HtmlToR3Transform<'a> {
                 }
 
                 // Check for binding syntax
-                if attr_name.starts_with("[(") && attr_name.ends_with(")]") {
+                let delims = binding_delims(attr_name);
+                if let Some((BANANA_BOX_START, prop_name)) = delims {
                     // Two-way binding: [(prop)]="value" - allowed
-                    let prop_name = &attr_name[2..attr_name.len() - 2];
                     // Reference: r3_template_transform.ts line 871
                     let key_span = create_key_span(attr, BANANA_BOX_START, prop_name);
                     // [(@prop)]: a legacy animation input, not supported here
@@ -1485,9 +1504,8 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: attr.span,
                         handler_span: value_span,
                     });
-                } else if attr_name.starts_with('[') && attr_name.ends_with(']') {
+                } else if let Some(("[", prop_name)) = delims {
                     // Property binding: [prop]="value"
-                    let prop_name = &attr_name[1..attr_name.len() - 1];
 
                     // Check for non-property bindings which are not allowed
                     // Reference: r3_template_transform.ts lines 946-951
@@ -1541,9 +1559,8 @@ impl<'a> HtmlToR3Transform<'a> {
                         i18n: None,
                         security_context: self.security_context(element_name, prop_name),
                     });
-                } else if attr_name.starts_with('(') && attr_name.ends_with(')') {
+                } else if let Some(("(", event_name)) = delims {
                     // Event binding: (event)="handler"
-                    let event_name = &attr_name[1..attr_name.len() - 1];
                     // Reference: r3_template_transform.ts line 871
                     let key_span =
                         event_key_span(event_name, create_key_span(attr, "(", event_name));
@@ -3247,27 +3264,6 @@ impl<'a> HtmlToR3Transform<'a> {
             R3DeferredBlockError, R3DeferredBlockLoading, R3DeferredBlockPlaceholder,
         };
 
-        let children = self.visit_children(&block.children);
-
-        // Parse defer triggers from block parameters. `idle(<time>)` is v22+;
-        // an unknown version is treated as the latest.
-        let trigger_result = parse_defer_triggers(
-            self.allocator,
-            &block.parameters,
-            &self.binding_parser,
-            block.start_span,
-            self.angular_version.is_none_or(|v| v.major >= 22),
-            self.angular_version.is_none_or(|v| v.supports_named_deferred_imports()),
-        );
-
-        // Report trigger parsing errors via diagnostics
-        for error in trigger_result.errors {
-            match error {
-                DeferTriggerError::Trigger { span, msg } => self.report_error(&msg, span),
-                DeferTriggerError::Expression(error) => self.errors.push(error),
-            }
-        }
-
         // Process connected blocks with validation
         // Reference: r3_deferred_blocks.ts parseConnectedBlocks (lines 106-164)
         let mut placeholder = None;
@@ -3478,6 +3474,29 @@ impl<'a> HtmlToR3Transform<'a> {
             }
         }
 
+        // Parse defer triggers from block parameters. `idle(<time>)` is v22+;
+        // an unknown version is treated as the latest.
+        let trigger_result = parse_defer_triggers(
+            self.allocator,
+            &block.parameters,
+            &self.binding_parser,
+            block.start_span,
+            self.angular_version.is_none_or(|v| v.major >= 22),
+            self.angular_version.is_none_or(|v| v.supports_named_deferred_imports()),
+        );
+
+        // Report trigger parsing errors via diagnostics
+        for error in trigger_result.errors {
+            match error {
+                DeferTriggerError::Trigger { span, msg } => self.report_error(&msg, span),
+                DeferTriggerError::Expression(error) => self.errors.push(error),
+            }
+        }
+
+        // Like Angular's `createDeferredBlock`, the connected blocks and the triggers
+        // are parsed before the main block's children, so their errors come first.
+        let children = self.visit_children(&block.children);
+
         // Calculate the outer span to encompass all connected blocks
         let end_source_span =
             if let Some(last) = connected_blocks.last() { last.end_span } else { block.end_span };
@@ -3647,6 +3666,19 @@ impl<'a> HtmlToR3Transform<'a> {
                 // Reference: r3_template_transform.ts lines 765-811 (`createKeySpan(srcSpan,
                 // bindParts[KW_*_IDX], identifier)`)
                 let key_span = create_key_span(attr, &name[..name.len() - rest.len()], rest);
+                // `parsePropertyBinding` / `parseEvent` report an empty name (`bind-`, `on-`).
+                // `bindon-` adds the event `Change`, which has a name.
+                if rest.is_empty() {
+                    match prefix {
+                        BindingPrefix::Bind | BindingPrefix::BindOn => {
+                            self.report_error("Property name is missing in binding", attr.span);
+                        }
+                        BindingPrefix::On => {
+                            self.report_error("Event name is missing in binding", attr.span)
+                        }
+                        _ => {}
+                    }
+                }
                 match prefix {
                     BindingPrefix::Bind => {
                         // bind-@prop / bind-animate-prop is a legacy animation binding
@@ -3702,7 +3734,8 @@ impl<'a> HtmlToR3Transform<'a> {
                         outputs.push(if let Some(anim_name) = rest.strip_prefix('@') {
                             self.create_legacy_animation_event(anim_name, attr, key_span)
                         } else {
-                            self.create_bound_event(rest, attr, key_span)
+                            // `on-window:click` has a target, like `(window:click)`
+                            self.create_bound_event_with_target(rest, attr, key_span)
                         });
                     }
                     BindingPrefix::BindOn => {
@@ -3742,8 +3775,7 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Check for banana-in-a-box [(prop)]
-            if name.starts_with(BANANA_BOX_START) && name.ends_with(BANANA_BOX_END) {
-                let prop_name = &name[2..name.len() - 2];
+            if let Some((BANANA_BOX_START, prop_name)) = binding_delims(name) {
                 // Reference: r3_template_transform.ts line 871 (`createKeySpan(srcSpan,
                 // delims.start, identifier)`)
                 let key_span = create_key_span(attr, BANANA_BOX_START, prop_name);
@@ -3762,8 +3794,7 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Check for property binding [prop]
-            if name.starts_with(PROPERTY_START) && name.ends_with(PROPERTY_END) {
-                let prop_name = &name[1..name.len() - 1];
+            if let Some(("[", prop_name)) = binding_delims(name) {
                 // Reference: r3_template_transform.ts line 871 (`createKeySpan(srcSpan,
                 // delims.start, identifier)`)
                 let key_span =
@@ -3815,8 +3846,7 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Check for event binding (event)
-            if name.starts_with(EVENT_START) && name.ends_with(EVENT_END) {
-                let event_name = &name[1..name.len() - 1];
+            if let Some(("(", event_name)) = binding_delims(name) {
                 // Reference: r3_template_transform.ts line 871 (`createKeySpan(srcSpan,
                 // delims.start, identifier)`)
                 let key_span = event_key_span(event_name, create_key_span(attr, "(", event_name));
@@ -4062,35 +4092,6 @@ impl<'a> HtmlToR3Transform<'a> {
             event_type,
             handler,
             target,
-            phase: None,
-            source_span: attr.span,
-            handler_span,
-            key_span,
-        }
-    }
-
-    /// Creates a bound event (without target parsing).
-    fn create_bound_event(
-        &mut self,
-        name: &str,
-        attr: &HtmlAttribute<'a>,
-        key_span: Span,
-    ) -> R3BoundEvent<'a> {
-        let handler_span = self.calculate_event_handler_span(attr);
-        let handler = self.parse_event_expression(&attr.value, handler_span);
-        let name_atom = Ident::from(self.allocator.alloc_str(name));
-        // `on-animate.enter` is an animation event, like `(animate.enter)`
-        let event_type = if name.starts_with("animate.") && self.supports_animate() {
-            ParsedEventType::Animation
-        } else {
-            ParsedEventType::Regular
-        };
-
-        R3BoundEvent {
-            name: name_atom,
-            event_type,
-            handler,
-            target: None,
             phase: None,
             source_span: attr.span,
             handler_span,
