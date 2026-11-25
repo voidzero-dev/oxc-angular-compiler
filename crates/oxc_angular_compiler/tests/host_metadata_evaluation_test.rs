@@ -743,6 +743,76 @@ fn empty_binding_name_is_an_error() {
     );
 }
 
+/// #726: a legacy animation listener needs a trigger name and a `start` /
+/// `done` phase. Messages and order checked against ngtsc 22.3.0: the
+/// listeners in key order, then the properties.
+#[test]
+fn legacy_animation_listener_needs_a_phase() {
+    const MISSING: &str = "The animation trigger output event (@fade) is missing its phase value \
+                           name (start or done are currently supported)";
+    const END: &str = "The provided animation output phase value \"end\" for \"@fade\" is not \
+                       supported (use start or done)";
+    const NO_NAME: &str = "Animation event name is missing in binding";
+    assert_error("", "{ '(@fade)': 'go()' }", MISSING);
+    assert_error("", "{ '(@fade.)': 'go()' }", MISSING);
+    assert_error("", "{ '(@fade.end)': 'go()' }", END);
+    assert_error("", "{ '(@ fade . END )': 'go()' }", END);
+    assert_error("", "{ '(@.done)': 'go()' }", NO_NAME);
+    assert_error(
+        "",
+        "{ '(@)': 'go()' }",
+        &format!(
+            "{NO_NAME}\nThe animation trigger output event (@) is missing its phase value name \
+             (start or done are currently supported)"
+        ),
+    );
+    // No `.`: the name is not trimmed.
+    assert_error(
+        "",
+        "{ '(@fade )': 'go()' }",
+        "The animation trigger output event (@fade ) is missing its phase value name (start or \
+         done are currently supported)",
+    );
+    assert_error(
+        "",
+        "{ '[]': 't', '(@fade)': 'go()', '()': 'other()', '(@.end)': 'go()' }",
+        &format!(
+            "{MISSING}\nEvent name is missing in binding\n{NO_NAME}\nThe provided animation \
+             output phase value \"end\" for \"@\" is not supported (use start or done)\nProperty \
+             name is missing in binding"
+        ),
+    );
+    assert_error("const H = { '(@fade)': 'go()' };", "{ ...H }", MISSING);
+
+    // Valid phases, and `(window:@fade)`, which is a regular event.
+    for host in [
+        "{ '(@fade.done)': 'go()' }",
+        "{ '(@fade.start)': 'go()' }",
+        "{ '(@fade.DONE)': 'go()' }",
+        "{ '(window:@fade)': 'go()' }",
+    ] {
+        for decorator in ["Component", "Directive"] {
+            let (_, diagnostics) = compile(&source(decorator, "", host));
+            assert!(diagnostics.is_empty(), "`host: {host}`: {diagnostics:?}");
+        }
+    }
+}
+
+/// ngtsc does not check `@HostListener` names (only the `host` object goes
+/// through `verifyHostBindings`), so `@HostListener('@fade')` compiles.
+#[test]
+fn host_listener_decorator_legacy_animation_name_is_not_checked() {
+    for name in ["@fade", "@fade.end", "@.done"] {
+        let source = format!(
+            "import {{ Directive, HostListener }} from '@angular/core';\n\
+             @Directive({{ selector: '[x]' }})\n\
+             export class X {{ @HostListener('{name}') go() {{}} }}\n"
+        );
+        let (_, diagnostics) = compile(&source);
+        assert!(diagnostics.is_empty(), "@HostListener('{name}'): {diagnostics:?}");
+    }
+}
+
 /// The `[]` / `()` checks came with 21.2.8 and 22.0.0-next.7. Before them
 /// ngtsc's `HOST_REG_EXP` needs a name, `[]` and `()` are plain host
 /// attributes and nothing is reported (ngtsc 19.2.15, 20.1.8, 20.2.0;

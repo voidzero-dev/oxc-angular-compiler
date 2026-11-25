@@ -8708,12 +8708,12 @@ fn convert_host_metadata_to_input<'a>(
 /// - `@trigger.phase`  → (`"trigger"`, `LegacyAnimation`, `Some("phase")`)
 /// - `@anim.START`     → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
 /// - `@anim. start `   → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
-/// - `@anim.foo`       → (`"anim"`,    `LegacyAnimation`, `Some("foo")`)  Angular reports
-///                       an error for invalid phases; we drop the diagnostic to match
-///                       this codebase's convention for host metadata (see
-///                       `binding_parser.parse_event` callers below — `parse_result.errors`
-///                       is also discarded). Code output still matches Angular byte-for-byte.
+/// - `@anim.foo`       → (`"anim"`,    `LegacyAnimation`, `Some("foo")`)
 /// - `@trigger`        → (`"trigger"`, `LegacyAnimation`, `None`)
+///
+/// For `host: {...}` keys, a missing or invalid phase is already an error (see
+/// `host_binding_errors` in `directive/decorator.rs`). Names from `@HostListener`
+/// are not checked, as in ngtsc, so they still reach this with any phase.
 /// - `click`           → (`"click"`,   `Regular`,         `None`)
 ///
 /// Keep in sync with the identical helper in `directive/compiler.rs`.

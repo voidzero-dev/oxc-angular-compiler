@@ -19720,3 +19720,20 @@ fn test_template_two_way_animate() {
         }
     }
 }
+
+/// #726: `on-@fade.done` is a legacy animation listener, like `(@fade.done)`, not a
+/// DOM event named `@fade.done`. Output checked against Angular 22.3.0.
+#[test]
+fn test_on_prefix_legacy_animation_event() {
+    let on_prefix = compile_template_to_js(r#"<div on-@fade.done="x()"></div>"#, "C");
+    let parens = compile_template_to_js(r#"<div (@fade.done)="x()"></div>"#, "C");
+    assert!(
+        on_prefix.contains(
+            r#"ɵɵlistener("@fade.done",function C_Template_div_animation_fade_done_0_listener()"#
+        ),
+        "{on_prefix}"
+    );
+    assert!(!on_prefix.contains("domListener"), "{on_prefix}");
+    assert!(!on_prefix.contains("consts"), "{on_prefix}");
+    assert_eq!(on_prefix, parens);
+}

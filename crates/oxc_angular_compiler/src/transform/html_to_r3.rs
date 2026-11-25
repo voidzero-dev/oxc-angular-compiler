@@ -38,6 +38,9 @@ use crate::transform::control_flow::{
     DeferTriggerError, parse_conditional_params, parse_defer_triggers,
 };
 use crate::util::ParseError;
+use crate::util::legacy_animation::{
+    legacy_animation_event_errors, split_legacy_animation_event_name,
+};
 
 /// Regex pattern for binding prefixes.
 /// Matches: bind-, let-, ref-/#, on-, bindon-, @
@@ -1338,6 +1341,14 @@ impl<'a> HtmlToR3Transform<'a> {
                             });
                         }
                         BindingPrefix::On => {
+                            // on-@trigger.phase="handler" - legacy animation event
+                            if let Some(anim_name) = rest.strip_prefix('@') {
+                                let key_span = event_key_span(rest, key_span);
+                                outputs.push(
+                                    self.create_legacy_animation_event(anim_name, attr, key_span),
+                                );
+                                continue;
+                            }
                             // on-event="handler" - event binding
                             let value_span = attr.value_span.unwrap_or(attr.span);
                             let parse_result =
@@ -1375,6 +1386,16 @@ impl<'a> HtmlToR3Transform<'a> {
                             // Two-way binding also creates an output event
                             let event_name =
                                 Ident::from_in(&format!("{rest}Change"), &self.allocator);
+                            if event_name.starts_with('@') {
+                                // `bindon-@fade`: a legacy animation event (`@fadeChange`)
+                                let key_span = event_key_span(&event_name, key_span);
+                                outputs.push(self.create_legacy_animation_event(
+                                    &event_name[1..],
+                                    attr,
+                                    key_span,
+                                ));
+                                continue;
+                            }
                             let event_parse_result =
                                 self.binding_parser.parse_event(attr_value, value_span);
 
@@ -1444,6 +1465,16 @@ impl<'a> HtmlToR3Transform<'a> {
 
                     // Two-way binding also creates an output event
                     let event_name = Ident::from_in(&format!("{prop_name}Change"), &self.allocator);
+                    if event_name.starts_with('@') {
+                        // `[(@fade)]`: a legacy animation event (`@fadeChange`)
+                        let key_span = event_key_span(&event_name, key_span);
+                        outputs.push(self.create_legacy_animation_event(
+                            &event_name[1..],
+                            attr,
+                            key_span,
+                        ));
+                        continue;
+                    }
                     let event_value_str = self.allocator.alloc_str(attr_value);
                     let event_parse_result =
                         self.binding_parser.parse_event(event_value_str, value_span);
@@ -3681,11 +3712,14 @@ impl<'a> HtmlToR3Transform<'a> {
                         }
                     }
                     BindingPrefix::On => {
-                        outputs.push(self.create_bound_event(
-                            rest,
-                            attr,
-                            event_key_span(rest, key_span),
-                        ));
+                        // `on-@fade.done` is a legacy animation event, like `(@fade.done)`:
+                        // `parseEvent` checks the `@` whatever the prefix.
+                        let key_span = event_key_span(rest, key_span);
+                        outputs.push(if let Some(anim_name) = rest.strip_prefix('@') {
+                            self.create_legacy_animation_event(anim_name, attr, key_span)
+                        } else {
+                            self.create_bound_event(rest, attr, key_span)
+                        });
                     }
                     BindingPrefix::BindOn => {
                         // Two-way binding creates both input and output
@@ -4078,13 +4112,13 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// Creates a legacy animation event binding for `(@name)` or `(@name.phase)` syntax.
+    /// Creates a legacy animation event binding for `(@name)` or `(@name.phase)` syntax
+    /// (`name` is without the `@`).
     ///
-    /// Parses the event name to extract the animation trigger name and optional phase.
-    /// Per TypeScript's `parseLegacyAnimationEventName` in binding_parser.ts:
-    /// - `openClose.start` -> eventName: "openClose", phase: "start"
-    /// - `openClose.done` -> eventName: "openClose", phase: "done"
-    /// - `openClose` -> eventName: "openClose", phase: null
+    /// Like Angular's `_parseLegacyAnimationEvent` (binding_parser.ts), the name is split
+    /// into the trigger name and the phase (`openClose.done` -> `openClose`, `done`), and
+    /// a missing trigger name, a missing phase or a phase other than `start` / `done` is
+    /// an error. The event is still returned, as Angular also keeps it.
     fn create_legacy_animation_event(
         &mut self,
         name: &str,
@@ -4092,31 +4126,20 @@ impl<'a> HtmlToR3Transform<'a> {
         key_span: Span,
     ) -> R3BoundEvent<'a> {
         let handler_span = self.calculate_event_handler_span(attr);
+        // Angular parses the handler first, so its errors come before the name errors.
         let handler = self.parse_event_expression(&attr.value, handler_span);
 
-        // Split the name at the period to extract event name and phase
-        // Per TypeScript's parseLegacyAnimationEventName: splitAtPeriod(rawName, [rawName, null])
-        // returns {eventName: matches[0], phase: matches[1]}
-        // e.g., "openClose.done" -> eventName: "openClose", phase: "done"
-        let (event_name, phase) = if let Some(dot_pos) = name.find('.') {
-            let event_name = &name[..dot_pos];
-            let phase_str = &name[dot_pos + 1..];
-            // Phase is lowercased per TypeScript: matches[1].toLowerCase()
-            let phase_lower = phase_str.to_lowercase();
-            (event_name, Some(Ident::from(self.allocator.alloc_str(&phase_lower))))
-        } else {
-            (name, None)
-        };
-
-        // Use only the event name (trigger name), not including the phase
-        let name_atom = Ident::from(self.allocator.alloc_str(event_name));
+        let (event_name, phase) = split_legacy_animation_event_name(name);
+        for error in legacy_animation_event_errors(event_name, phase.as_deref()) {
+            self.report_error(&error, attr.span);
+        }
 
         R3BoundEvent {
-            name: name_atom,
+            name: Ident::from(self.allocator.alloc_str(event_name)),
             event_type: ParsedEventType::LegacyAnimation,
             handler,
             target: None,
-            phase,
+            phase: phase.map(|phase| Ident::from(self.allocator.alloc_str(&phase))),
             source_span: attr.span,
             handler_span,
             key_span,
@@ -4143,6 +4166,12 @@ impl<'a> HtmlToR3Transform<'a> {
         attr: &HtmlAttribute<'a>,
         key_span: Span,
     ) -> R3BoundEvent<'a> {
+        // `[(@fade)]` / `bindon-@fade`: `parseEvent` sees the `@` in `@fadeChange` and
+        // parses a legacy animation event, with no two-way target check. It has no valid
+        // phase (`fadeChange`, or `doneChange` for `[(@fade.done)]`), so it is an error.
+        if let Some(anim_name) = name.strip_prefix('@') {
+            return self.create_legacy_animation_event(anim_name, attr, key_span);
+        }
         let handler_span = self.calculate_event_handler_span(attr);
         let name_atom = Ident::from(self.allocator.alloc_str(name));
         let errors_before = self.errors.len();

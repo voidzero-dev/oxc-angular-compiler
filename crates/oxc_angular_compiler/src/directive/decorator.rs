@@ -27,6 +27,9 @@ use crate::output::ast::{OutputAstBuilder, OutputExpression};
 use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
 use crate::r3::CORE;
 use crate::util::is_metadata_property;
+use crate::util::legacy_animation::{
+    legacy_animation_event_errors, split_legacy_animation_event_name,
+};
 use crate::util::lone_surrogate::has_lone_surrogate;
 
 /// Find the @Directive decorator in a list of decorators. With the file's
@@ -2166,7 +2169,9 @@ fn host_binding_errors(
 ) -> Option<String> {
     // `verifyHostBindings` (compiler.ts) collects every error, in this order,
     // and ngtsc joins their messages with "\n" into one NG5001:
-    // 1. `createDirectiveHostEventAsts`: `()` has no event name.
+    // 1. `createDirectiveHostEventAsts`, for each listener in key order: `()` has
+    //    no event name; a legacy animation event (`(@fade)`) has no trigger name,
+    //    no phase or a phase other than `start` / `done`.
     // 2. `createBoundHostProperties`: `[]` has no property name.
     // 3. `validateNoEventBindings`: binding a host property or attribute to an
     //    event (`[onclick]`, `[attr.onload]`) is disallowed.
@@ -2174,12 +2179,23 @@ fn host_binding_errors(
     // expressions, which oxc doesn't do. Only the name inside the brackets is
     // checked, so `[ ]` and `( )` are not errors.
     let mut errors: std::vec::Vec<String> = std::vec::Vec::new();
-    if check_empty_names {
-        for (key, _) in entries {
-            if matches!(HostKey::of(key.as_str()), HostKey::Listener) && key.len() == 2 {
+    for (key, _) in entries {
+        if !matches!(HostKey::of(key.as_str()), HostKey::Listener) {
+            continue;
+        }
+        let name = &key.as_str()[1..key.len() - 1];
+        if name.is_empty() {
+            if check_empty_names {
                 errors.push("Event name is missing in binding".to_string());
             }
+        } else if let Some(anim_name) = name.strip_prefix('@') {
+            // The `@` is checked before a `window:` / `document:` target is
+            // split off, so `(window:@fade)` is a regular event.
+            let (trigger, phase) = split_legacy_animation_event_name(anim_name);
+            errors.extend(legacy_animation_event_errors(trigger, phase.as_deref()));
         }
+    }
+    if check_empty_names {
         for (key, _) in entries {
             if matches!(HostKey::of(key.as_str()), HostKey::Property) && key.len() == 2 {
                 errors.push("Property name is missing in binding".to_string());
