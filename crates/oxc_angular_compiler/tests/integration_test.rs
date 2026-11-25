@@ -6438,6 +6438,59 @@ fn test_i18n_external_ids_use_computed_message_id() {
     }
 }
 
+/// Element and template placeholders land in the right i18n context, with the right slots and
+/// sub-template indexes, when there are many placeholders and many contexts in many views:
+/// one block with many tags and nested templates, and many sibling `<ng-template i18n>` blocks
+/// that each have their own context in their own view.
+#[test]
+fn test_i18n_element_placeholders_many_siblings_and_contexts() {
+    let mut template = String::from("<div i18n>");
+    for k in 0..12 {
+        template.push_str(&format!("<b>b{k}</b>"));
+    }
+    for k in 0..3 {
+        template.push_str(&format!("<ng-template><i>t{k}</i></ng-template>"));
+    }
+    template.push_str("</div>");
+    for k in 0..12 {
+        template.push_str(&format!("<ng-template i18n><span>s{k}</span></ng-template>"));
+    }
+    let js = compile_i18n_component(&template);
+
+    // The `<div i18n>` block: the `<b>` tags take slots 2..=13 in order, the templates take
+    // slots 14..=16 with sub-template indexes 1..=3, and their `<i>` tags take slot 1 there.
+    let list = |f: &dyn Fn(u32) -> String, range: std::ops::RangeInclusive<u32>| {
+        format!("[{}]", range.map(f).collect::<Vec<_>>().join("|"))
+    };
+    let start_b = list(&|k| format!("\\uFFFD#{k}\\uFFFD"), 2..=13);
+    let close_b = list(&|k| format!("\\uFFFD/#{k}\\uFFFD"), 2..=13);
+    let start_i = list(&|k| format!("\\uFFFD#1:{k}\\uFFFD"), 1..=3);
+    let close_i = list(&|k| format!("\\uFFFD/#1:{k}\\uFFFD"), 1..=3);
+    let start_t = list(&|k| format!("\\uFFFD*{}:{k}\\uFFFD", k + 13), 1..=3);
+    let close_t = list(&|k| format!("\\uFFFD/*{}:{k}\\uFFFD", k + 13), 1..=3);
+    assert_contains(
+        &js,
+        &format!(
+            "{{\"closeBoldText\":\"{close_b}\",\"closeItalicText\":\"{close_i}\",\
+             \"closeTagNgTemplate\":\"{close_t}\",\"startBoldText\":\"{start_b}\",\
+             \"startItalicText\":\"{start_i}\",\"startTagNgTemplate\":\"{start_t}\"}}"
+        ),
+    );
+
+    // Each `<ng-template i18n>` has its own context in its own view, and gets only its own
+    // `<span>`, at slot 1 of that view.
+    for k in 0..12 {
+        assert_contains(
+            &js,
+            &format!(
+                "(i18n_{} = $localize `${{\"\\uFFFD#1\\uFFFD\"}}:START_TAG_SPAN:s{k}\
+                 ${{\"\\uFFFD/#1\\uFFFD\"}}:CLOSE_TAG_SPAN:`);",
+                k + 1
+            ),
+        );
+    }
+}
+
 /// Compiles `template` with `enableI18nLegacyMessageIdFormat` set to `legacy_ids`.
 fn compile_with_legacy_ids(template: &str, legacy_ids: bool) -> String {
     let allocator = Allocator::default();

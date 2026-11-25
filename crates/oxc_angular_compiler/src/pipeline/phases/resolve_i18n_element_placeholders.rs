@@ -45,10 +45,19 @@ pub fn resolve_i18n_element_placeholders(job: &mut ComponentCompilationJob<'_>) 
         }
     }
 
+    // Params are collected per context and written back in one pass at the end. Looking up the
+    // context op for every placeholder would walk every view's create list each time.
+    let mut params: ContextParams<'_> = FxHashMap::default();
+
     // Child views are reached through the ops that create them, as in Angular, so each view
     // is resolved exactly once and with its enclosing structural directive.
-    resolve_placeholders_for_view(job, job.root.xref, &i18n_contexts, &elements, None);
+    resolve_placeholders_for_view(job, job.root.xref, &i18n_contexts, &elements, None, &mut params);
+
+    apply_context_params(job, params);
 }
+
+/// Params to add to each i18n context, keyed by the context xref, in the order they are found.
+type ContextParams<'a> = FxHashMap<XrefId, Vec<(Ident<'a>, I18nParamValue)>>;
 
 /// Information about an element for placeholder resolution.
 #[derive(Clone)]
@@ -71,14 +80,13 @@ struct CurrentI18nOps {
 
 /// Recursively resolves element and template tag placeholders in the given view.
 fn resolve_placeholders_for_view<'a>(
-    job: &mut ComponentCompilationJob<'a>,
+    job: &ComponentCompilationJob<'a>,
     view_xref: XrefId,
     i18n_contexts: &FxHashMap<XrefId, XrefId>,
     elements: &FxHashMap<XrefId, ElementInfo<'a>>,
     pending_structural_directive: Option<PendingStructuralDirective>,
+    params: &mut ContextParams<'a>,
 ) {
-    let allocator = job.allocator;
-
     // Track the current i18n op and corresponding i18n context op
     let mut current_ops: Option<CurrentI18nOps> = None;
     let mut pending_structural_directive_closes: FxHashMap<XrefId, PendingStructuralDirective> =
@@ -281,13 +289,7 @@ fn resolve_placeholders_for_view<'a>(
                     }
 
                     let param_value = I18nParamValue::new(value, sub_template_index, flags);
-                    add_param_to_context(
-                        job,
-                        context_xref,
-                        start_name.as_str(),
-                        param_value,
-                        &allocator,
-                    );
+                    add_param_to_context(params, context_xref, start_name, param_value);
                 }
             }
             OpInfo::ElementEnd {
@@ -312,13 +314,7 @@ fn resolve_placeholders_for_view<'a>(
                     };
 
                     let param_value = I18nParamValue::new(value, sub_template_index, flags);
-                    add_param_to_context(
-                        job,
-                        context_xref,
-                        close_name.as_str(),
-                        param_value,
-                        &allocator,
-                    );
+                    add_param_to_context(params, context_xref, close_name, param_value);
                 }
             }
             OpInfo::TemplateStart {
@@ -344,13 +340,7 @@ fn resolve_placeholders_for_view<'a>(
                         sub_template_index,
                         flags,
                     );
-                    add_param_to_context(
-                        job,
-                        context_xref,
-                        start_name.as_str(),
-                        structural_value,
-                        &allocator,
-                    );
+                    add_param_to_context(params, context_xref, start_name, structural_value);
                 }
 
                 // Record template start with proper sub-template index
@@ -361,13 +351,7 @@ fn resolve_placeholders_for_view<'a>(
                     template_sub_index,
                     flags,
                 );
-                add_param_to_context(
-                    job,
-                    context_xref,
-                    start_name.as_str(),
-                    param_value,
-                    &allocator,
-                );
+                add_param_to_context(params, context_xref, start_name, param_value);
             }
             OpInfo::Recurse { view_xref, pending_structural } => {
                 resolve_placeholders_for_view(
@@ -376,6 +360,7 @@ fn resolve_placeholders_for_view<'a>(
                     i18n_contexts,
                     elements,
                     pending_structural,
+                    params,
                 );
             }
             OpInfo::TemplateEnd {
@@ -396,13 +381,7 @@ fn resolve_placeholders_for_view<'a>(
                     template_sub_index,
                     flags,
                 );
-                add_param_to_context(
-                    job,
-                    context_xref,
-                    close_name.as_str(),
-                    param_value,
-                    &allocator,
-                );
+                add_param_to_context(params, context_xref, close_name, param_value);
 
                 // If associated with structural directive, record it after
                 if let Some(structural) = pending_structural {
@@ -411,13 +390,7 @@ fn resolve_placeholders_for_view<'a>(
                         sub_template_index,
                         flags,
                     );
-                    add_param_to_context(
-                        job,
-                        context_xref,
-                        close_name.as_str(),
-                        structural_value,
-                        &allocator,
-                    );
+                    add_param_to_context(params, context_xref, close_name, structural_value);
                 }
             }
         }
@@ -534,37 +507,35 @@ enum OpInfo<'a> {
     Recurse { view_xref: XrefId, pending_structural: Option<PendingStructuralDirective> },
 }
 
-/// Add a param value to an i18n context's params map.
+/// Record a param value for an i18n context. It is written to the context op later, by
+/// `apply_context_params`.
 fn add_param_to_context<'a>(
-    job: &mut ComponentCompilationJob<'a>,
+    params: &mut ContextParams<'a>,
     context_xref: XrefId,
-    placeholder: &'a str,
+    placeholder: Ident<'a>,
     value: I18nParamValue,
-    allocator: &'a oxc_allocator::Allocator,
 ) {
-    let placeholder_atom = Ident::from(placeholder);
+    params.entry(context_xref).or_default().push((placeholder, value));
+}
 
-    // Try root view first
-    for op in job.root.create.iter_mut() {
-        if let CreateOp::I18nContext(ctx) = op {
-            if ctx.xref == context_xref {
-                add_to_params_map(&mut ctx.params, placeholder_atom, value, &allocator);
-                return;
-            }
-        }
+/// Write the collected params to their i18n context ops, in the order they were recorded.
+///
+/// Views are visited root first, and each context takes its params only once, so a context
+/// gets the same params, in the same order, as a direct lookup of its op would give.
+fn apply_context_params<'a>(job: &mut ComponentCompilationJob<'a>, mut params: ContextParams<'a>) {
+    if params.is_empty() {
+        return;
     }
-
-    // Try other views
-    let view_xrefs: Vec<XrefId> = job.views.keys().copied().collect();
-    for view_xref in view_xrefs {
-        if let Some(view) = job.view_mut(view_xref) {
-            for op in view.create.iter_mut() {
-                if let CreateOp::I18nContext(ctx) = op {
-                    if ctx.xref == context_xref {
-                        add_to_params_map(&mut ctx.params, placeholder_atom, value, &allocator);
-                        return;
-                    }
-                }
+    let allocator = job.allocator;
+    for view in job.all_views_mut() {
+        for op in view.create.iter_mut() {
+            let CreateOp::I18nContext(ctx) = op else { continue };
+            let Some(values) = params.remove(&ctx.xref) else { continue };
+            for (placeholder, value) in values {
+                add_to_params_map(&mut ctx.params, placeholder, value, allocator);
+            }
+            if params.is_empty() {
+                return;
             }
         }
     }
