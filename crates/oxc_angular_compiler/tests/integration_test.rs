@@ -19753,3 +19753,35 @@ fn test_legacy_animation_property_prefixes() {
         assert_eq!(compile_template_to_js(template, "C"), expected, "{template}");
     }
 }
+
+#[test]
+fn test_collapse_empty_elements_many_siblings() {
+    // Many empty siblings of each kind, mixed with non-empty ones and with pipes between
+    // the start and end ops. Each empty one must collapse in place, in order.
+    let unit = "<br><span></span><ng-container></ng-container><b>x</b><input [value]=\"a | json\">";
+    let n = 50;
+    let js = compile_template_to_js(&unit.repeat(n), "TestComponent");
+
+    let mut expected = String::from("  if ((rf & 1)) {\n");
+    for k in 0..n {
+        let b = k * 7;
+        expected.push_str(&format!(
+            "    i0.ɵɵelement({},\"br\")({},\"span\");\n\
+             \x20   i0.ɵɵelementContainer({});\n\
+             \x20   i0.ɵɵelementStart({},\"b\");\n\
+             \x20   i0.ɵɵtext({},\"x\");\n\
+             \x20   i0.ɵɵelementEnd();\n\
+             \x20   i0.ɵɵelement({},\"input\",0);\n\
+             \x20   i0.ɵɵpipe({},\"json\");\n",
+            b,
+            b + 1,
+            b + 2,
+            b + 3,
+            b + 4,
+            b + 5,
+            b + 6
+        ));
+    }
+    expected.push_str("  }\n");
+    assert!(js.contains(&expected), "unexpected create block:\n{js}");
+}
