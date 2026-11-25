@@ -28,7 +28,7 @@ use crate::ast::r3::{
 };
 use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
-use crate::parser::expression::{BindingParser, blank_interpolation_error, find_comment_start};
+use crate::parser::expression::{BindingParser, blank_interpolation_error};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
     element_security_context_for, is_known_element, is_trusted_types_sink_at,
@@ -4066,7 +4066,7 @@ impl<'a> HtmlToR3Transform<'a> {
         attr: &HtmlAttribute<'a>,
         key_span: Span,
     ) -> R3BoundEvent<'a> {
-        let handler_span = self.calculate_event_handler_span(attr);
+        let handler_span = attr.value_span.unwrap_or(attr.span);
         let handler = self.parse_event_expression(&attr.value, handler_span);
 
         // Check for animation events (animate.xxx)
@@ -4146,7 +4146,7 @@ impl<'a> HtmlToR3Transform<'a> {
         attr: &HtmlAttribute<'a>,
         key_span: Span,
     ) -> R3BoundEvent<'a> {
-        let handler_span = self.calculate_event_handler_span(attr);
+        let handler_span = attr.value_span.unwrap_or(attr.span);
         // Angular parses the handler first, so its errors come before the name errors.
         let handler = self.parse_event_expression(&attr.value, handler_span);
 
@@ -4203,7 +4203,7 @@ impl<'a> HtmlToR3Transform<'a> {
         if let Some(anim_name) = name.strip_prefix('@') {
             return self.create_legacy_animation_event(anim_name, attr, key_span);
         }
-        let handler_span = self.calculate_event_handler_span(attr);
+        let handler_span = attr.value_span.unwrap_or(attr.span);
         let name_atom = Ident::from(self.allocator.alloc_str(name));
         let errors_before = self.errors.len();
 
@@ -4259,25 +4259,6 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         result.ast
-    }
-
-    /// Calculates the handler span for an event binding, adjusting for comments.
-    ///
-    /// Angular strips `//` comments from action bindings before parsing.
-    /// The handler span should exclude the comment portion and trailing whitespace.
-    fn calculate_event_handler_span(&self, attr: &HtmlAttribute<'a>) -> Span {
-        let base_span = attr.value_span.unwrap_or(attr.span);
-        let value_str = attr.value.as_str();
-
-        // Check if there's a comment to strip
-        if let Some(comment_pos) = find_comment_start(value_str) {
-            // Get the portion before the comment and trim trailing whitespace
-            let before_comment = &value_str[..comment_pos];
-            let trimmed_len = before_comment.trim_end().len();
-            Span::new(base_span.start, base_span.start + trimmed_len as u32)
-        } else {
-            base_span
-        }
     }
 
     /// Creates a variable with validation.

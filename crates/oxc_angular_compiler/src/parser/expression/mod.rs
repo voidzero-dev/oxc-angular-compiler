@@ -52,20 +52,17 @@ pub fn find_comment_start(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut outer_quote: Option<u8> = None;
 
-    for i in 0..bytes.len().saturating_sub(1) {
-        let ch = bytes[i];
-        let next_ch = bytes[i + 1];
-
-        // Check for // outside of quotes
-        if ch == b'/' && next_ch == b'/' && outer_quote.is_none() {
-            return Some(i);
-        }
-
-        // Track quote state
-        if outer_quote == Some(ch) {
-            outer_quote = None;
-        } else if outer_quote.is_none() && (ch == b'\'' || ch == b'"' || ch == b'`') {
-            outer_quote = Some(ch);
+    let mut chars = bytes.iter().copied().enumerate();
+    while let Some((i, ch)) = chars.next() {
+        match ch {
+            // Angular's _commentStart skips escaped slashes and quotes alike.
+            b'\\' => {
+                chars.next();
+            }
+            b'/' if outer_quote.is_none() && bytes.get(i + 1) == Some(&b'/') => return Some(i),
+            _ if outer_quote == Some(ch) => outer_quote = None,
+            b'\'' | b'"' | b'`' if outer_quote.is_none() => outer_quote = Some(ch),
+            _ => {}
         }
     }
 
