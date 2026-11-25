@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.46 - 2026-11-26
+
+- Failed like ngtsc on bad legacy animation event names, like `(@fade.typo)`, instead of turning them into DOM listeners.
+- Kept regex literals that end in an escaped slash (`/^\//`) and escaped quotes when looking for `//` comments.
+- Matched ngtsc for safe reads like `a?.[b()?.c]?.d`: calls in the guard run once, and temp variables come in the same order.
+- Kept the SSR server entry's own imports first, so an entry that loads `@angular/compiler` first works.
+- Made big templates compile faster: whitespace handling and several pipeline steps no longer slow down badly as templates grow.
+- Updated Oxc to 0.160, and other dependencies.
+
 ## 0.0.45 - 2026-11-18
 
 - Reported a known HTML element that is self closed, like ngtsc.
