@@ -280,14 +280,13 @@ fn find_qualified_class_body<'a, 'b>(
 
 /// The member's name as written, if it is a non-computed static or string
 /// literal key.
+/// A non-computed member name (`a`, `"a"`, `1`). Callers skip computed keys.
 fn property_key_name(key: &PropertyKey<'_>) -> Option<String> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-        _ => match key.as_expression() {
-            Some(Expression::StringLiteral(lit)) => lit.value.as_str().map(str::to_string),
-            Some(Expression::NumericLiteral(lit)) => Some(lit.value.to_string()),
-            _ => None,
-        },
+        PropertyKey::StaticStringLiteral(lit) => lit.value.as_str().map(str::to_string),
+        PropertyKey::StaticNumericLiteral(lit) => Some(lit.value.to_string()),
+        _ => None,
     }
 }
 
@@ -1105,6 +1104,20 @@ mod tests {
             apply_splices(source, &merge_splices(splices.clone())),
             old_apply(source, &splices)
         );
+    }
+
+    #[test]
+    fn skips_a_member_the_class_declares_with_a_quoted_name() {
+        // `static "ɵfac"` and `static 1` are plain (not computed) names.
+        let declaration = DtsInjectDeclaration {
+            class_name: "X".into(),
+            members: "static ɵfac: i0.ɵɵFactoryDeclaration<X, never>;\nstatic 1: number;".into(),
+            namespace_imports: [("i0".to_string(), CORE.to_string())].into_iter().collect(),
+            source_file: None,
+        };
+        let source =
+            "export declare class X {\n    static \"ɵfac\": unknown;\n    static 1: number;\n}\n";
+        assert_eq!(inject_dts_declarations(source, &[declaration]), source);
     }
 
     #[test]
