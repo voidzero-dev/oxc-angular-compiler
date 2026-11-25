@@ -4133,7 +4133,7 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(
         code.contains(
             "((tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]==null)?null:\
-             tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]\
+             tmp_0_0.b.c.d[(((tmp_0_1=tmp_0_1)==null)?null:tmp_0_1.h)]\
              [(((tmp_0_0=ctx.k())==null)?null:tmp_0_0.m)])"
         ),
         "{code}"
@@ -4144,7 +4144,7 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
     assert!(
         code.contains(
-            "tmp_0_0.b[(((tmp_0_1=ctx.c())==null)?null:tmp_0_1.d)]\
+            "tmp_0_0.b[(((tmp_0_1=tmp_0_1)==null)?null:tmp_0_1.d)]\
              .e((((tmp_0_0=ctx.f())==null)?null:tmp_0_0.g))"
         ),
         "{code}"
@@ -4155,6 +4155,21 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(code.contains("{lettmp_0_0;lettmp_0_1;lettmp_0_2;lettmp_0_3;return"), "{code}");
     assert!(code.contains("(tmp_0_2=tmp_0_1.c())"), "{code}");
     assert!(code.contains("(tmp_0_3=ctx.d())"), "{code}");
+    // The copy of the guard reads the temporaries back instead of calling again.
+    assert!(code.contains("(tmp_0_1=tmp_0_1)"), "{code}");
+    assert!(code.contains("(tmp_0_2=tmp_0_2)"), "{code}");
+    assert!(code.contains("(tmp_0_3=tmp_0_3)"), "{code}");
+    assert_eq!(code.matches("ctx.b()").count(), 1, "{code}");
+    assert_eq!(code.matches("ctx.d()").count(), 1, "{code}");
+
+    // An arrow function inside a copied guard is its own scope: it still sets
+    // its own temporary instead of reading one that was never set.
+    let code = compile("{{ (c || ((v) => g()?.h))?.y }}");
+    assert!(
+        code.contains("{lettmp_0_0;return(((tmp_0_0=ctx.g())==null)?null:tmp_0_0.h);}"),
+        "{code}"
+    );
+    assert!(!code.contains("_tmp)"), "{code}");
 
     // Many siblings: each op keeps its own index and the same two names.
     let n = 40;
@@ -4165,7 +4180,7 @@ fn test_temporaries_are_freed_at_the_last_read() {
     for op in 0..n {
         let (outer, inner) = (format!("tmp_{op}_0"), format!("tmp_{op}_1"));
         let part = format!(
-            "{outer}.b[((({inner}=ctx.c())==null)?null:{inner}.d)]\
+            "{outer}.b[((({inner}={inner})==null)?null:{inner}.d)]\
              .e(((({outer}=ctx.f())==null)?null:{outer}.g))"
         );
         let Some(i) = code[from..].find(&part) else { panic!("missing op {op}: {code}") };

@@ -77,7 +77,8 @@ use oxc_str::Ident;
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, IrUnaryOperator, ReadTemporaryExpr, ResolvedCallExpr,
     ResolvedKeyedReadExpr, ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
-    transform_expressions_in_create_op, transform_expressions_in_update_op,
+    transform_expressions_in_create_op, transform_expressions_in_expression,
+    transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -397,8 +398,11 @@ where
             source_span: None,
         }
     } else {
-        // Clone the guard for use in body
-        let guard_clone = guard.clone_in(allocator);
+        // Clone the guard for use in body. Temporaries assigned in the guard are
+        // already set when the body runs, so the clone reads them instead of
+        // evaluating their expressions (and side effects) a second time.
+        let mut guard_clone = guard.clone_in(allocator);
+        eliminate_temporary_assignments(&mut guard_clone, allocator);
 
         SafeTernaryExpr {
             guard: ArenaBox::new_in(guard, &allocator),
@@ -406,6 +410,41 @@ where
             source_span: None,
         }
     }
+}
+
+/// Replaces every `tmp = expr` in `expr` with `tmp = tmp`.
+///
+/// Used on the copy of a guard that has no temporary of its own: the guard
+/// itself already assigned these temporaries, so the copy reads them back
+/// instead of evaluating `expr` again. Angular keeps the assignment form
+/// (`(tmp = tmp)`) rather than a plain read.
+///
+/// Every temporary in the copy comes from the guard it was cloned from, so
+/// all of them are replaced (Angular's `temporariesIn(guard)` check).
+///
+/// Arrow functions inside the guard are left alone: they are their own scope
+/// and assign their own temporaries when called, so reading one back there
+/// would read a variable that was never set. (Angular walks into them too,
+/// but then fails to name the temporary and stops with an error.)
+///
+/// Reference: expand_safe_reads.ts (`eliminateTemporaryAssignments`)
+fn eliminate_temporary_assignments<'a>(expr: &mut IrExpression<'a>, allocator: &'a Allocator) {
+    transform_expressions_in_expression(
+        expr,
+        &|e, flags| {
+            if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
+                return;
+            }
+            if let IrExpression::AssignTemporary(assign) = e {
+                let xref = assign.xref;
+                *assign.expr = IrExpression::ReadTemporary(ArenaBox::new_in(
+                    ReadTemporaryExpr { xref, name: None, source_span: None },
+                    &allocator,
+                ));
+            }
+        },
+        VisitorContextFlag::NONE,
+    );
 }
 
 /// Data extracted from an access expression for processing.
