@@ -437,12 +437,8 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
                     // Use unparser for proper formatting (e.g., "foo(); bar();" with space after semicolon)
                     let unparsed = unparse_expression(&event.handler);
                     self.sources.push(vec![unparsed]);
-                } else {
-                    let start = event.handler_span.start as usize;
-                    let end = event.handler_span.end as usize;
-                    if end <= self.source.len() {
-                        self.sources.push(vec![self.source[start..end].to_string()]);
-                    }
+                } else if let Some(source) = self.extract_expression_source(&event.handler) {
+                    self.sources.push(vec![source]);
                 }
             }
         }
@@ -489,12 +485,8 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
                     // Use unparser for proper formatting
                     let unparsed = unparse_expression(&event.handler);
                     self.sources.push(vec![unparsed]);
-                } else {
-                    let start = event.handler_span.start as usize;
-                    let end = event.handler_span.end as usize;
-                    if end <= self.source.len() {
-                        self.sources.push(vec![self.source[start..end].to_string()]);
-                    }
+                } else if let Some(source) = self.extract_expression_source(&event.handler) {
+                    self.sources.push(vec![source]);
                 }
             }
             // Visit children

@@ -871,6 +871,13 @@ mod parse_binding {
         }
 
         #[test]
+        fn should_parse_regex_ending_with_escaped_slash() {
+            // TS: it('should parse a regular expression literal that ends with an escaped slash')
+            check_binding(r"/^https?:\/\//", None);
+            check_binding(r#"url.replace(/^\//, "") //comment"#, Some(r"url.replace(/^\//, '')"));
+        }
+
+        #[test]
         fn should_report_invalid_regex_flag() {
             expect_binding_error("\"foo\".match(/abc/O)", "Unsupported regular expression flag");
         }
@@ -1563,6 +1570,30 @@ mod parse_interpolation {
         fn should_retain_nested_unterminated_strings() {
             // Angular serialize() uses single quotes
             check_interpolation(r#"{{ "a'b`" //comment}}"#, Some(r"{{ 'a\'b`' }}"));
+        }
+
+        #[test]
+        fn should_ignore_escaped_quotes_when_looking_for_comments() {
+            // TS: it('should ignore escaped quotes when looking for comments')
+            check_interpolation(r"{{ 'it\'s // here' //comment }}", Some(r"{{ 'it\'s // here' }}"));
+        }
+
+        #[test]
+        fn should_find_the_end_after_a_regex_with_an_escaped_slash() {
+            // Like Angular's _getInterpolationEndIndex: a `//` inside the regex is not a
+            // comment, and the `'` inside the second regex does not hide the `}}`.
+            check_interpolation(r"{{ s.replace(/\//g, '').replace(/'/g, '') }}", None);
+        }
+
+        #[test]
+        fn should_not_treat_slash_star_as_a_block_comment() {
+            check_interpolation(r"{{ s.replace(/[/*]/g, '') }}", None);
+        }
+
+        #[test]
+        fn should_find_the_end_after_a_comment_across_lines() {
+            // After `//`, Angular looks for the next `}}` anywhere, past the newline.
+            check_interpolation("{{ z // it\n  's z }}", Some("{{ z }}"));
         }
 
         #[test]

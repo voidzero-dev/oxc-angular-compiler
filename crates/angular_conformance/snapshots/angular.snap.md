@@ -7,7 +7,7 @@
 | ast_serializer | 6 | 0 | 0 | 0 | 6 | 100.0% |
 | ast_spans | 55 | 0 | 0 | 0 | 55 | 100.0% |
 | expression_lexer | 154 | 0 | 0 | 0 | 154 | 100.0% |
-| expression_parser | 390 | 10 | 3 | 0 | 403 | 96.8% |
+| expression_parser | 392 | 10 | 1 | 0 | 403 | 97.3% |
 | expression_serializer | 44 | 0 | 0 | 0 | 44 | 100.0% |
 | html_lexer | 291 | 6 | 0 | 0 | 297 | 98.0% |
 | html_parser | 89 | 1 | 0 | 0 | 90 | 98.9% |
@@ -15,7 +15,7 @@
 | r3_transform | 180 | 4 | 0 | 0 | 184 | 97.8% |
 | shadow_css | 185 | 2 | 0 | 0 | 187 | 98.9% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1430** | **23** | **3** | **0** | **1456** | **98.2%** |
+| **Total** | **1432** | **23** | **1** | **0** | **1456** | **98.4%** |
 
 ## Failed Tests
 
@@ -157,22 +157,6 @@ Error containing: Unterminated template literal
 **Actual:**
 ```
 No errors
-```
-
-#### should parse a regular expression literal that ends with an escaped slash: CheckBinding { input: "/^https?:\\/\\//", expected: None }
-Path: `parser/parseAction/regular expression literals/should parse a regular expression literal that ends with an escaped slash`
-
-**Error:**
-```
-Unexpected parse errors: ["Lexer Error: Unterminated regular expression at column 12 in expression [/^https?:\\/\\]", "Unexpected token 'Lexer Error: Unterminated regular expression at column 12 in expression [/^https?:\\/\\]' at column 13 in [/^https?:\\/\\//]"]
-```
-
-#### should parse a regular expression literal that ends with an escaped slash: CheckBinding { input: "url.replace(/^\\//, \"\") //comment", expected: Some("url.replace(/^\\//, \"\")") }
-Path: `parser/parseAction/regular expression literals/should parse a regular expression literal that ends with an escaped slash`
-
-**Error:**
-```
-Unexpected parse errors: ["Lexer Error: Unterminated regular expression at column 15 in expression [url.replace(/^\\]", "Missing expected ) at column 16"]
 ```
 
 ### html_lexer

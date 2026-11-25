@@ -20,8 +20,8 @@ use crate::ast::expression::{
 };
 use crate::util::ParseError;
 
-use super::TemplateBindingParseResult;
 use super::lexer::{Lexer, Token};
+use super::{TemplateBindingParseResult, strip_comments};
 
 /// Angular's error for an interpolation with a blank expression (`{{ }}`), raised by
 /// `splitInterpolation`; `column` is the offset of the `{{` in `input`.
@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
     pub fn new(allocator: &'a Allocator, source: &'a str) -> Self {
         // Strip comments from the source before tokenizing. The stripped source is a prefix
         // of `source`, so it is borrowed rather than copied.
-        let lexer = Lexer::new(allocator, Self::strip_comments(source));
+        let lexer = Lexer::new(allocator, strip_comments(source).stripped);
         let tokens = lexer.tokenize();
 
         // Collect error tokens from the lexer
@@ -169,43 +169,6 @@ impl<'a> Parser<'a> {
             context: ParseContextFlags::NONE,
             action_mode: false,
         }
-    }
-
-    /// Strips single-line comments (`//`) from the input.
-    ///
-    /// Comments are only recognized outside of quoted strings.
-    /// This matches Angular's behavior in `_stripComments`.
-    fn strip_comments(input: &str) -> &str {
-        match Self::find_comment_start(input) {
-            Some(idx) => &input[..idx],
-            None => input,
-        }
-    }
-
-    /// Finds the start index of a `//` comment, respecting quoted strings.
-    ///
-    /// Returns `None` if no comment is found.
-    fn find_comment_start(input: &str) -> Option<usize> {
-        let bytes = input.as_bytes();
-        let mut outer_quote: Option<u8> = None;
-
-        for i in 0..input.len().saturating_sub(1) {
-            let ch = bytes[i];
-            let next_ch = bytes[i + 1];
-
-            // Check for // outside of quotes
-            if ch == b'/' && next_ch == b'/' && outer_quote.is_none() {
-                return Some(i);
-            }
-
-            // Track quote state
-            if outer_quote == Some(ch) {
-                outer_quote = None;
-            } else if outer_quote.is_none() && (ch == b'\'' || ch == b'"' || ch == b'`') {
-                outer_quote = Some(ch);
-            }
-        }
-        None
     }
 
     /// Checks for interpolation syntax (`{{` and `}}`) in the input.
@@ -888,102 +851,31 @@ impl<'a> Parser<'a> {
         result
     }
 
-    /// Finds the end of an interpolation, respecting quotes, escapes, and comments.
-    /// Returns the index of the end delimiter (relative to the start of the input),
-    /// or None if no valid end is found.
+    /// Finds the end of an interpolation, as Angular's `_getInterpolationEndIndex` does:
+    /// the first `end_delimiter` outside quotes, or, after an unquoted `//`, the next
+    /// `end_delimiter` anywhere. A quote preceded by an odd number of backslashes does not
+    /// open or close a string (`_forEachUnquotedChar`). Returns a byte index into `input`.
     fn find_interpolation_end(input: &str, end_delimiter: &str) -> Option<usize> {
-        let mut current_quote: Option<char> = None;
-        let mut escape_count = 0;
-        let mut in_single_line_comment = false;
-        let mut in_multi_line_comment = false;
-        let end_len = end_delimiter.len();
-        let mut byte_pos = 0;
-        let input_bytes = input.as_bytes();
-
-        while byte_pos < input.len() {
-            // Get current char
-            let remaining = &input[byte_pos..];
-            // Safety: byte_pos < input.len() guarantees at least one char
-            let Some(ch) = remaining.chars().next() else { break };
-            let ch_len = ch.len_utf8();
-
-            // Get next char if available
-            let next_ch = remaining.chars().nth(1);
-
-            // Handle single-line comment
-            // Note: In Angular interpolations, we still check for end delimiter inside comments
-            // because the interpolation end `}}` takes precedence over comment continuation
-            if in_single_line_comment {
-                if ch == '\n' || ch == '\r' {
-                    in_single_line_comment = false;
-                }
-                // Check for end delimiter even inside single-line comment
-                // This is Angular-specific behavior for interpolations
-                if byte_pos + end_len <= input.len()
-                    && &input_bytes[byte_pos..byte_pos + end_len] == end_delimiter.as_bytes()
-                {
-                    return Some(byte_pos);
-                }
-                byte_pos += ch_len;
-                continue;
-            }
-
-            // Handle multi-line comment end
-            if in_multi_line_comment {
-                if ch == '*' && next_ch == Some('/') {
-                    in_multi_line_comment = false;
-                    byte_pos += 2; // '*' and '/' are both 1 byte
-                    continue;
-                }
-                byte_pos += ch_len;
-                continue;
-            }
-
-            // Track escape sequences by counting consecutive backslashes
-            if ch == '\\' {
-                escape_count += 1;
-                byte_pos += ch_len;
-                continue;
-            }
-
-            // Check for quotes (only if not escaped: even number of backslashes)
-            if (ch == '"' || ch == '\'' || ch == '`')
-                && (current_quote.is_none() || current_quote == Some(ch))
-                && escape_count % 2 == 0
+        let bytes = input.as_bytes();
+        let mut quote: Option<u8> = None;
+        let mut escapes = 0usize;
+        for (i, &ch) in bytes.iter().enumerate() {
+            if matches!(ch, b'\'' | b'"' | b'`')
+                && quote.is_none_or(|q| q == ch)
+                && escapes.is_multiple_of(2)
             {
-                current_quote = if current_quote.is_none() { Some(ch) } else { None };
-            }
-
-            // Check for comment start (only when not in quotes)
-            if current_quote.is_none() && escape_count % 2 == 0 {
-                if ch == '/' && next_ch == Some('/') {
-                    in_single_line_comment = true;
-                    byte_pos += 2; // '//' is 2 bytes
-                    escape_count = 0;
-                    continue;
+                quote = if quote.is_none() { Some(ch) } else { None };
+            } else if quote.is_none() {
+                if bytes[i..].starts_with(end_delimiter.as_bytes()) {
+                    return Some(i);
                 }
-                if ch == '/' && next_ch == Some('*') {
-                    in_multi_line_comment = true;
-                    byte_pos += 2; // '/*' is 2 bytes
-                    escape_count = 0;
-                    continue;
+                // `/` is ASCII, so `i` is a char boundary here.
+                if bytes[i..].starts_with(b"//") {
+                    return input[i..].find(end_delimiter).map(|pos| i + pos);
                 }
             }
-
-            // If not inside quotes or comments, check for end delimiter
-            if current_quote.is_none()
-                && !in_single_line_comment
-                && !in_multi_line_comment
-                && byte_pos + end_len <= input.len()
-                && &input_bytes[byte_pos..byte_pos + end_len] == end_delimiter.as_bytes()
-            {
-                return Some(byte_pos);
-            }
-
-            escape_count = 0;
-            byte_pos += ch_len;
+            escapes = if ch == b'\\' { escapes + 1 } else { 0 };
         }
-
         None
     }
 
@@ -1857,7 +1749,6 @@ impl<'a> Parser<'a> {
                 if self.is_assignment_operator(token) {
                     // Clone the operation first to avoid borrow issues
                     let operation = token.str_value.clone();
-                    let result_span = result.span();
 
                     // In binding mode, still parse the full expression but emit an error
                     // This ensures spans cover the entire expression
@@ -1878,7 +1769,7 @@ impl<'a> Parser<'a> {
 
                     // Create Binary expression for assignment
                     let end = self.current_end_index();
-                    let assign_span = ParseSpan::new(result_span.start, end);
+                    let assign_span = ParseSpan::new(start, end);
                     let assign_source_span = assign_span.to_absolute(self.absolute_offset);
                     let binary_op = self.string_to_binary_operator(&operation);
                     let binary = Binary {

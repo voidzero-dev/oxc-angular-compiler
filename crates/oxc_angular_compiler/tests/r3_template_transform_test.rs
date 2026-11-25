@@ -1011,6 +1011,53 @@ mod events {
     use super::*;
 
     #[test]
+    fn event_handler_span_includes_regex_ending_with_escaped_slash() {
+        for (handler, expression) in [
+            (r"url.replace(/^\//, '')", r"url.replace(/^\//, '')"),
+            (r"url.replace(/^\//, '') //comment", r"url.replace(/^\//, '')"),
+            ("result = save(&quot;x&quot;) //comment", r#"result = save("x")"#),
+        ] {
+            let html = format!(r#"<button (click)="{handler}"></button>"#);
+            let allocator = Allocator::default();
+            let parsed = HtmlParser::new(&allocator, &html, "test.html").parse();
+            let result = HtmlToR3Transform::new(&allocator, &html, TransformOptions::default())
+                .transform(&parsed.nodes);
+            let R3Node::Element(button) = &result.nodes[0] else { panic!("expected button") };
+            let event = &button.outputs[0];
+            let start = html.find(handler).unwrap() as u32;
+            let attr_span = event.handler_span;
+            let expr_span = event.handler.source_span();
+            assert_eq!((attr_span.start, attr_span.end), (start, start + handler.len() as u32));
+            assert_eq!((expr_span.start, expr_span.end), (start, start + expression.len() as u32));
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+        }
+    }
+
+    /// The handler span is the whole attribute value, comment included, on every
+    /// event path, like Angular's `handlerSpan` (`attribute.valueSpan`).
+    #[test]
+    fn event_handler_span_keeps_trailing_comment() {
+        for (attr, handler) in [
+            ("on-click=\"a() // c\"", "a() // c"),
+            ("[(x)]=\"v // c\"", "v // c"),
+            ("bindon-x=\"v // c\"", "v // c"),
+            ("(@x.done)=\"a() // c\"", "a() // c"),
+        ] {
+            let html = format!("<a {attr}></a>");
+            let allocator = Allocator::default();
+            let parsed = HtmlParser::new(&allocator, &html, "test.html").parse();
+            let result = HtmlToR3Transform::new(&allocator, &html, TransformOptions::default())
+                .transform(&parsed.nodes);
+            let R3Node::Element(a) = &result.nodes[0] else { panic!("expected element") };
+            let event = a.outputs.last().expect("an output");
+            let start = u32::try_from(html.find(handler).unwrap()).unwrap();
+            let end = start + u32::try_from(handler.len()).unwrap();
+            let span = event.handler_span;
+            assert_eq!((span.start, span.end), (start, end), "{attr}");
+        }
+    }
+
+    #[test]
     fn should_parse_event_bindings() {
         // TS: expectFromHtml('<div (window:event)="v"></div>')
         assert_eq!(

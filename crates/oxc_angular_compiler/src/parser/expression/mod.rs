@@ -45,27 +45,27 @@ pub struct StripCommentsResult<'a> {
     pub comment_start: Option<usize>,
 }
 
-/// Finds the start of a `//` comment, respecting string quotes.
+/// Finds the start of a `//` comment outside string quotes.
+///
+/// Like Angular's `_commentStart`, a backslash skips the next character, so
+/// `/^\//` and `'it\'s'` do not start a comment.
 ///
 /// Returns `None` if no comment is found, or the byte position of `//`.
 pub fn find_comment_start(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut outer_quote: Option<u8> = None;
 
-    for i in 0..bytes.len().saturating_sub(1) {
-        let ch = bytes[i];
-        let next_ch = bytes[i + 1];
-
-        // Check for // outside of quotes
-        if ch == b'/' && next_ch == b'/' && outer_quote.is_none() {
-            return Some(i);
-        }
-
-        // Track quote state
-        if outer_quote == Some(ch) {
-            outer_quote = None;
-        } else if outer_quote.is_none() && (ch == b'\'' || ch == b'"' || ch == b'`') {
-            outer_quote = Some(ch);
+    let mut chars = bytes.iter().copied().enumerate();
+    while let Some((i, ch)) = chars.next() {
+        match ch {
+            // Angular's _commentStart skips escaped slashes and quotes alike.
+            b'\\' => {
+                chars.next();
+            }
+            b'/' if outer_quote.is_none() && bytes.get(i + 1) == Some(&b'/') => return Some(i),
+            _ if outer_quote == Some(ch) => outer_quote = None,
+            b'\'' | b'"' | b'`' if outer_quote.is_none() => outer_quote = Some(ch),
+            _ => {}
         }
     }
 
@@ -228,5 +228,27 @@ impl<'a> BindingParser<'a> {
             span: AbsoluteSourceSpan::new(key_span.start, key_span.end),
         };
         parser.parse_template_bindings(key_identifier)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_comment_start;
+
+    /// Same results as Angular's `_commentStart`, as byte offsets.
+    #[test]
+    fn find_comment_start_skips_escaped_chars() {
+        for (input, expected) in [
+            ("a // b", Some(2)),
+            ("'a // b'", None),
+            (r"/\//", None),
+            (r"'\'//'", None),
+            (r"a\\//b", Some(3)),
+            (r"p.replace(/^\//, '') // c", Some(21)),
+            ("\\", None),
+            ("\\é//", Some(3)),
+        ] {
+            assert_eq!(find_comment_start(input), expected, "{input}");
+        }
     }
 }
