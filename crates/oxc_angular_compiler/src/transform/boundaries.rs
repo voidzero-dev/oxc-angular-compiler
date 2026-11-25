@@ -12,6 +12,7 @@ use crate::ast::html::HtmlBlockParameter;
 use crate::ast::r3::R3Variable;
 use crate::parser::expression::BindingParser;
 use crate::util::ParseError;
+use crate::util::chars::is_js_whitespace;
 
 /// An error reported while parsing `@error` block parameters.
 pub struct BoundaryParamError {
@@ -31,22 +32,6 @@ pub struct BoundaryErrorParams<'a> {
     pub errors: std::vec::Vec<BoundaryParamError>,
     /// Errors from parsing the `when` expression.
     pub expression_errors: std::vec::Vec<ParseError>,
-}
-
-/// Matches JavaScript's `\s`, which is also what `String.prototype.trim` strips. Unlike
-/// `char::is_whitespace`, it includes U+FEFF and leaves out U+0085.
-fn is_js_whitespace(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200A}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202F}'
-                | '\u{205F}'
-                | '\u{3000}'
-                | '\u{FEFF}'
-    )
 }
 
 /// `String.prototype.trim`.

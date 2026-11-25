@@ -4133,7 +4133,7 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(
         code.contains(
             "((tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]==null)?null:\
-             tmp_0_0.b.c.d[(((tmp_0_1=ctx.g())==null)?null:tmp_0_1.h)]\
+             tmp_0_0.b.c.d[(((tmp_0_1=tmp_0_1)==null)?null:tmp_0_1.h)]\
              [(((tmp_0_0=ctx.k())==null)?null:tmp_0_0.m)])"
         ),
         "{code}"
@@ -4144,7 +4144,7 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(code.contains("lettmp_0_0;lettmp_0_1;"), "{code}");
     assert!(
         code.contains(
-            "tmp_0_0.b[(((tmp_0_1=ctx.c())==null)?null:tmp_0_1.d)]\
+            "tmp_0_0.b[(((tmp_0_1=tmp_0_1)==null)?null:tmp_0_1.d)]\
              .e((((tmp_0_0=ctx.f())==null)?null:tmp_0_0.g))"
         ),
         "{code}"
@@ -4155,6 +4155,21 @@ fn test_temporaries_are_freed_at_the_last_read() {
     assert!(code.contains("{lettmp_0_0;lettmp_0_1;lettmp_0_2;lettmp_0_3;return"), "{code}");
     assert!(code.contains("(tmp_0_2=tmp_0_1.c())"), "{code}");
     assert!(code.contains("(tmp_0_3=ctx.d())"), "{code}");
+    // The copy of the guard reads the temporaries back instead of calling again.
+    assert!(code.contains("(tmp_0_1=tmp_0_1)"), "{code}");
+    assert!(code.contains("(tmp_0_2=tmp_0_2)"), "{code}");
+    assert!(code.contains("(tmp_0_3=tmp_0_3)"), "{code}");
+    assert_eq!(code.matches("ctx.b()").count(), 1, "{code}");
+    assert_eq!(code.matches("ctx.d()").count(), 1, "{code}");
+
+    // An arrow function inside a copied guard is its own scope: it still sets
+    // its own temporary instead of reading one that was never set.
+    let code = compile("{{ (c || ((v) => g()?.h))?.y }}");
+    assert!(
+        code.contains("{lettmp_0_0;return(((tmp_0_0=ctx.g())==null)?null:tmp_0_0.h);}"),
+        "{code}"
+    );
+    assert!(!code.contains("_tmp)"), "{code}");
 
     // Many siblings: each op keeps its own index and the same two names.
     let n = 40;
@@ -4165,12 +4180,46 @@ fn test_temporaries_are_freed_at_the_last_read() {
     for op in 0..n {
         let (outer, inner) = (format!("tmp_{op}_0"), format!("tmp_{op}_1"));
         let part = format!(
-            "{outer}.b[((({inner}=ctx.c())==null)?null:{inner}.d)]\
+            "{outer}.b[((({inner}={inner})==null)?null:{inner}.d)]\
              .e(((({outer}=ctx.f())==null)?null:{outer}.g))"
         );
         let Some(i) = code[from..].find(&part) else { panic!("missing op {op}: {code}") };
         from += i + part.len();
     }
+}
+
+/// With 11 or more temporaries in one op, the declarations keep the order the
+/// names were first assigned, like Angular's `new Set(defs.values())`. Sorting
+/// them as strings would put `tmp_0_10` before `tmp_0_2`. Matches ngc 22.3 with
+/// `legacyOptionalChaining`.
+#[test]
+fn test_temporary_declarations_keep_assignment_order() {
+    let options =
+        ComponentTransformOptions { legacy_optional_chaining: Some(true), ..Default::default() };
+    // f0()?.[f1()?.[ ... f10()?.x ... ]]?.y keeps 11 temporaries live at once.
+    let mut expr = String::from("f10()?.x");
+    for i in (0..10).rev() {
+        expr = format!("f{i}()?.[{expr}]");
+    }
+    let source = format!(
+        "import {{ Component }} from '@angular/core';\n\
+         @Component({{ selector: 'c', template: `{{{{ a()?.b?.c }}}} {{{{ {expr}?.y }}}}` }})\n\
+         export class C {{ [k: string]: any; }}\n"
+    );
+    // Debug builds need a bigger stack for this nesting depth.
+    let code = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || compile_compact(&source, Some(&options)))
+        .unwrap()
+        .join()
+        .unwrap();
+    let mut decls = String::new();
+    for i in 0..=10 {
+        decls.push_str("lettmp_0_");
+        decls.push_str(&i.to_string());
+        decls.push(';');
+    }
+    assert!(code.contains(&decls), "{code}");
 }
 
 /// Test that multiple components with host bindings in the same file have unique constant names.
