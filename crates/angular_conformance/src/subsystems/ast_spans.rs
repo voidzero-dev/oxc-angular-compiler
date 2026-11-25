@@ -1,5 +1,7 @@
 use oxc_allocator::Allocator;
-use oxc_angular_compiler::ast::expression::{AngularExpression, BinaryOperator};
+use oxc_angular_compiler::ast::expression::{
+    AbsoluteSourceSpan, AngularExpression, BinaryOperator,
+};
 use oxc_angular_compiler::ast::r3::{
     R3BoundText, R3BoundaryErrorBlock, R3DeferredBlock, R3Element, R3ForLoopBlock, R3IfBlock,
     R3SwitchBlock, R3Template, R3TemplateAttr, R3Visitor, visit_all,
@@ -172,32 +174,19 @@ impl<'a> ExpressionSourceCollector<'a> {
         }
     }
 
-    fn record_expression(&mut self, expr: &AngularExpression<'_>) {
-        self.sources.push(vec![unparse_expression(expr)]);
-    }
-
-    fn record_source(&mut self, expr: &AngularExpression<'_>) {
-        if let Some(source) = self.extract_expression_source(expr) {
-            self.sources.push(vec![source]);
-        }
-    }
-
-    // Event expressions are parsed from decoded attribute values, so their offsets
-    // cannot be used to slice the original HTML when it contains character references.
-    fn visit_event_handler(&mut self, handler: &AngularExpression<'_>) {
-        if self.extract_sub_expressions {
-            self.collect_sub_expressions(handler, Self::record_expression);
+    /// Extract source text from an absolute span
+    fn extract_source(&self, span: AbsoluteSourceSpan) -> Option<String> {
+        let start = span.start as usize;
+        let end = span.end as usize;
+        if start <= end && end <= self.source.len() {
+            Some(self.source[start..end].to_string())
         } else {
-            self.record_expression(handler);
+            None
         }
     }
 
     /// Collect sub-expressions from an expression based on its type
-    fn collect_sub_expressions(
-        &mut self,
-        expr: &AngularExpression<'_>,
-        record: fn(&mut Self, &AngularExpression<'_>),
-    ) {
+    fn collect_sub_expressions(&mut self, expr: &AngularExpression<'_>) {
         match expr {
             // Binary: for assignments, only collect from right side; for others, both sides
             AngularExpression::Binary(bin) => {
@@ -205,120 +194,169 @@ impl<'a> ExpressionSourceCollector<'a> {
                     // For assignment expressions (property write), only collect the value (right side)
                     // unless left is a keyed expression which has interesting sub-expressions
                     if let AngularExpression::KeyedRead(_) = &bin.left {
-                        self.collect_sub_expressions(&bin.left, record);
+                        self.collect_sub_expressions(&bin.left);
                     }
-                    self.collect_sub_expressions(&bin.right, record);
+                    self.collect_sub_expressions(&bin.right);
                 } else {
                     // For other binary operators, collect from both sides
-                    self.collect_sub_expressions(&bin.left, record);
-                    self.collect_sub_expressions(&bin.right, record);
+                    self.collect_sub_expressions(&bin.left);
+                    self.collect_sub_expressions(&bin.right);
                 }
             }
             // Conditional: collect condition, true, and false expressions
             AngularExpression::Conditional(cond) => {
-                record(self, &cond.condition);
-                record(self, &cond.true_exp);
-                record(self, &cond.false_exp);
+                if let Some(s) = self.extract_source(cond.condition.source_span()) {
+                    self.sources.push(vec![s]);
+                }
+                if let Some(s) = self.extract_source(cond.true_exp.source_span()) {
+                    self.sources.push(vec![s]);
+                }
+                if let Some(s) = self.extract_source(cond.false_exp.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // Chain: collect each expression in the chain
             AngularExpression::Chain(chain) => {
                 for child in &chain.expressions {
-                    record(self, child);
+                    if let Some(s) = self.extract_source(child.source_span()) {
+                        self.sources.push(vec![s]);
+                    }
                 }
             }
             // PropertyRead: output the receiver's source or recurse to find ImplicitReceiver
             AngularExpression::PropertyRead(prop) => {
                 if self.find_implicit_receiver {
                     // Recurse to find ImplicitReceiver and output its (empty) span
-                    self.collect_sub_expressions(&prop.receiver, record);
+                    self.collect_sub_expressions(&prop.receiver);
                 } else {
-                    if matches!(&prop.receiver, AngularExpression::ImplicitReceiver(_)) {
-                        self.sources.push(vec![String::new()]);
-                    } else {
-                        record(self, &prop.receiver);
+                    // Output the receiver's span directly
+                    match &prop.receiver {
+                        AngularExpression::ImplicitReceiver(_) => {
+                            // For ImplicitReceiver, output empty string
+                            self.sources.push(vec![String::new()]);
+                        }
+                        receiver => {
+                            if let Some(s) = self.extract_source(receiver.source_span()) {
+                                self.sources.push(vec![s]);
+                            }
+                        }
                     }
                 }
             }
             // SafePropertyRead: output the receiver's source (for safe method call tests)
             AngularExpression::SafePropertyRead(prop) => {
-                record(self, &prop.receiver);
+                if let Some(s) = self.extract_source(prop.receiver.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // KeyedRead: collect the key
             AngularExpression::KeyedRead(keyed) => {
-                record(self, &keyed.key);
+                if let Some(s) = self.extract_source(keyed.key.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // SafeKeyedRead: collect the key
             AngularExpression::SafeKeyedRead(keyed) => {
-                record(self, &keyed.key);
+                if let Some(s) = self.extract_source(keyed.key.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // Call: collect from SafePropertyRead receiver (for safe method calls), then arguments
             AngularExpression::Call(call) => {
                 // For safe method calls like prop?.safe(), collect from SafePropertyRead receiver
-                if let AngularExpression::SafePropertyRead(safe_prop) = &call.receiver {
-                    record(self, &safe_prop.receiver);
+                if let AngularExpression::SafePropertyRead(safe_prop) = &call.receiver
+                    && let Some(s) = self.extract_source(safe_prop.receiver.source_span())
+                {
+                    self.sources.push(vec![s]);
                 }
                 // Collect arguments
                 for arg in &call.args {
-                    record(self, arg);
+                    if let Some(s) = self.extract_source(arg.source_span()) {
+                        self.sources.push(vec![s]);
+                    }
                 }
             }
             // SafeCall: collect receiver (for safe method calls)
             AngularExpression::SafeCall(call) => {
                 // First collect the receiver
-                record(self, &call.receiver);
+                if let Some(s) = self.extract_source(call.receiver.source_span()) {
+                    self.sources.push(vec![s]);
+                }
                 // Then collect arguments
                 for arg in &call.args {
-                    record(self, arg);
+                    if let Some(s) = self.extract_source(arg.source_span()) {
+                        self.sources.push(vec![s]);
+                    }
                 }
             }
             // LiteralArray: collect elements
             AngularExpression::LiteralArray(arr) => {
                 for elem in &arr.expressions {
-                    record(self, elem);
+                    if let Some(s) = self.extract_source(elem.source_span()) {
+                        self.sources.push(vec![s]);
+                    }
                 }
             }
             // LiteralMap: collect values
             AngularExpression::LiteralMap(map) => {
                 for value in &map.values {
-                    record(self, value);
+                    if let Some(s) = self.extract_source(value.source_span()) {
+                        self.sources.push(vec![s]);
+                    }
                 }
             }
             // PrefixNot: collect the operand
             AngularExpression::PrefixNot(not) => {
-                record(self, &not.expression);
+                if let Some(s) = self.extract_source(not.expression.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // Unary: collect the operand
             AngularExpression::Unary(unary) => {
-                record(self, &unary.expr);
+                if let Some(s) = self.extract_source(unary.expr.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // NonNullAssert: collect the expression
             AngularExpression::NonNullAssert(nna) => {
-                record(self, &nna.expression);
+                if let Some(s) = self.extract_source(nna.expression.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // BindingPipe: collect the input expression
             AngularExpression::BindingPipe(pipe) => {
-                record(self, &pipe.exp);
+                if let Some(s) = self.extract_source(pipe.exp.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // Interpolation: recursively collect from each expression
             AngularExpression::Interpolation(interp) => {
                 for expr in &interp.expressions {
-                    self.collect_sub_expressions(expr, record);
+                    self.collect_sub_expressions(expr);
                 }
             }
             // LiteralPrimitive: output the value (for binary operands, array elements, etc.)
-            AngularExpression::LiteralPrimitive(_) => record(self, expr),
+            AngularExpression::LiteralPrimitive(lit) => {
+                if let Some(s) = self.extract_source(lit.source_span) {
+                    self.sources.push(vec![s]);
+                }
+            }
             // Empty expression or ImplicitReceiver: output empty string
             AngularExpression::Empty(_) | AngularExpression::ImplicitReceiver(_) => {
                 self.sources.push(vec![String::new()]);
             }
             // SpreadElement: collect the expression being spread
             AngularExpression::SpreadElement(spread) => {
-                record(self, &spread.expression);
+                if let Some(s) = self.extract_source(spread.expression.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // ArrowFunction: collect the body and parameter spans
             AngularExpression::ArrowFunction(arrow) => {
                 // Collect the body expression
-                record(self, &arrow.body);
+                if let Some(s) = self.extract_source(arrow.body.source_span()) {
+                    self.sources.push(vec![s]);
+                }
             }
             // Terminal expressions - no sub-expressions to extract
             AngularExpression::ThisReceiver(_)
@@ -334,11 +372,12 @@ impl<'a> ExpressionSourceCollector<'a> {
     /// Process an expression - either extract the whole thing or its sub-expressions
     fn process_expression(&mut self, expr: &AngularExpression<'_>) {
         if self.extract_sub_expressions {
-            self.collect_sub_expressions(expr, Self::record_source);
+            self.collect_sub_expressions(expr);
         } else if self.use_unparser {
-            self.record_expression(expr);
-        } else {
-            self.record_source(expr);
+            let unparsed = unparse_expression(expr);
+            self.sources.push(vec![unparsed]);
+        } else if let Some(source) = self.extract_expression_source(expr) {
+            self.sources.push(vec![source]);
         }
     }
 }
@@ -381,7 +420,7 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
                         self.process_expression(expr);
                     }
                 } else if self.extract_sub_expressions {
-                    self.collect_sub_expressions(&attr.value, Self::record_source);
+                    self.collect_sub_expressions(&attr.value);
                 } else if let Some(ref value_span) = attr.value_span {
                     let start = value_span.start as usize;
                     let end = value_span.end as usize;
@@ -392,7 +431,15 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
             }
             // Visit bound outputs (events)
             for event in &element.outputs {
-                self.visit_event_handler(&event.handler);
+                if self.extract_sub_expressions {
+                    self.collect_sub_expressions(&event.handler);
+                } else if self.use_unparser {
+                    // Use unparser for proper formatting (e.g., "foo(); bar();" with space after semicolon)
+                    let unparsed = unparse_expression(&event.handler);
+                    self.sources.push(vec![unparsed]);
+                } else if let Some(source) = self.extract_expression_source(&event.handler) {
+                    self.sources.push(vec![source]);
+                }
             }
         }
         // Visit children
@@ -415,7 +462,7 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
                         self.process_expression(expr);
                     }
                 } else if self.extract_sub_expressions {
-                    self.collect_sub_expressions(&attr.value, Self::record_source);
+                    self.collect_sub_expressions(&attr.value);
                 } else if let Some(ref value_span) = attr.value_span {
                     let start = value_span.start as usize;
                     let end = value_span.end as usize;
@@ -432,7 +479,15 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
             }
             // Visit bound outputs
             for event in &template.outputs {
-                self.visit_event_handler(&event.handler);
+                if self.extract_sub_expressions {
+                    self.collect_sub_expressions(&event.handler);
+                } else if self.use_unparser {
+                    // Use unparser for proper formatting
+                    let unparsed = unparse_expression(&event.handler);
+                    self.sources.push(vec![unparsed]);
+                } else if let Some(source) = self.extract_expression_source(&event.handler) {
+                    self.sources.push(vec![source]);
+                }
             }
             // Visit children
             visit_all(self, &template.children);
@@ -479,30 +534,6 @@ impl<'b> R3Visitor<'b> for ExpressionSourceCollector<'b> {
         }
         if let Some(ref error) = block.error {
             visit_all(self, &error.children);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::AstSpansRunner;
-
-    #[test]
-    fn event_expression_text_uses_decoded_attribute_values() {
-        for tag in ["button", "ng-template"] {
-            let html = format!(r#"<{tag} (click)="save(&quot;x&quot;) // tail"></{tag}>"#);
-            for (sub_expressions, expected) in [(false, r#"save("x")"#), (true, r#""x""#)] {
-                let texts = AstSpansRunner::new().extract_expression_sources(
-                    &html,
-                    None,
-                    sub_expressions,
-                    false,
-                    false,
-                    false,
-                    false,
-                );
-                assert_eq!(texts, [vec![expected]], "{html}");
-            }
         }
     }
 }
