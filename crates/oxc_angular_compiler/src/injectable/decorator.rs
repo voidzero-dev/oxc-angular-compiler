@@ -325,7 +325,9 @@ fn is_injectable_decorator(decorator: &Decorator<'_>) -> bool {
 fn get_property_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(s) => s.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+            s.value.as_str().map(Ident::from)
+        }
         _ => None,
     }
 }

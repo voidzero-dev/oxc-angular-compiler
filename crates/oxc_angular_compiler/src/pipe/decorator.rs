@@ -255,7 +255,9 @@ fn is_pipe_call(callee: &Expression<'_>) -> bool {
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            lit.value.as_str().map(Ident::from)
+        }
         _ => None,
     }
 }

@@ -163,15 +163,15 @@ impl<'a> VisitMut<'a> for SplitDecoratedStaticFields<'a> {
             let ClassElement::PropertyDefinition(prop) = &mut element else { unreachable!() };
             let this = Expression::new_this_expression(SPAN, &ast);
             let target = match &prop.key {
-                PropertyKey::StaticIdentifier(id) if !prop.computed => {
+                PropertyKey::StaticIdentifier(id) => {
                     let name = IdentifierName::new(id.span, id.name, &ast);
                     AssignmentTarget::new_static_member_expression(SPAN, this, name, false, &ast)
                 }
-                PropertyKey::StringLiteral(lit) if !prop.computed => {
+                PropertyKey::StaticStringLiteral(lit) => {
                     let key = Expression::StringLiteral(lit.clone_in(allocator));
                     AssignmentTarget::new_computed_member_expression(SPAN, this, key, false, &ast)
                 }
-                PropertyKey::NumericLiteral(lit) if !prop.computed => {
+                PropertyKey::StaticNumericLiteral(lit) => {
                     let key = Expression::NumericLiteral(lit.clone_in(allocator));
                     AssignmentTarget::new_computed_member_expression(SPAN, this, key, false, &ast)
                 }

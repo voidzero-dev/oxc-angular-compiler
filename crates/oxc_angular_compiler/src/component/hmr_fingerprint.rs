@@ -121,13 +121,15 @@ fn collect_excluded_ranges(
         if property.kind != PropertyKind::Init
             || property.method
             || property.shorthand
-            || property.computed
+            || property.key.is_computed()
         {
             continue;
         }
         let name = match &property.key {
             PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-            PropertyKey::StringLiteral(lit) => lit.value.as_str(),
+            PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+                lit.value.as_str()
+            }
             _ => None,
         };
         // `template` is a string; `styles` is a string or an array of them.

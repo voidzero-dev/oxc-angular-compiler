@@ -81,7 +81,7 @@ pub fn extract_component_metadata<'a>(
         {
             // A string key with a lone surrogate (`'\uD800'`) has no `&str`
             // form and names no option, so it is ignored like any unknown key.
-            if matches!(&prop.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
+            if matches!(&prop.key, PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
             {
                 continue;
             }
@@ -129,7 +129,7 @@ pub fn extract_component_metadata<'a>(
                     // ngtsc's `reflectObjectLiteral` drops computed keys and
                     // folds duplicate `styles` entries with `Map.set` — the
                     // last one is the only one `parseDirectiveStyles` sees.
-                    if prop.computed {
+                    if prop.key.is_computed() {
                         continue;
                     }
                     // Anything that isn't styles is an error `styles_error` reports.
@@ -173,7 +173,7 @@ pub fn extract_component_metadata<'a>(
                     // `host_metadata_error` doesn't see this property either —
                     // an invalid one must not be applied here where it would
                     // be dropped silently.
-                    if !prop.computed {
+                    if !prop.key.is_computed() {
                         metadata.host =
                             extract_host_metadata(allocator, &prop.value, source_text, consts);
                     }
@@ -385,7 +385,9 @@ fn get_property_key_name<'a>(
 ) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            lit.value.as_str().map(Ident::from)
+        }
         // Computed identifier reference: `[FOO]: bar` — resolve against same-file consts.
         PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
@@ -452,7 +454,7 @@ pub fn extract_component_resource_urls_of<'a>(
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
             && is_metadata_property(prop)
         {
-            if matches!(&prop.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
+            if matches!(&prop.key, PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate())
             {
                 continue;
             }
@@ -530,9 +532,10 @@ fn read_deferred_imports<'a>(
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let block = match &property.key {
-                    _ if property.computed => continue,
+                    _ if property.key.is_computed() => continue,
                     PropertyKey::StaticIdentifier(id) => id.name,
-                    PropertyKey::StringLiteral(literal) => match literal.value.as_str() {
+                    PropertyKey::StaticStringLiteral(literal)
+                    | PropertyKey::StringLiteral(literal) => match literal.value.as_str() {
                         Some(name) => Ident::from(name),
                         None => continue,
                     },

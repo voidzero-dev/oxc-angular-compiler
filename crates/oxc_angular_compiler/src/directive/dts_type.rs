@@ -1147,7 +1147,7 @@ impl<'a> TypePrinter<'_, 'a> {
                         &[(p.span.start, 8, "readonly")],
                     )?;
                 }
-                self.key_node(out, &p.key, p.computed)?;
+                self.key_node(out, &p.key, p.key.is_computed())?;
                 if p.optional {
                     let q = skip_trivia(self.source, p.key.span().end as usize);
                     self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
@@ -1194,7 +1194,7 @@ impl<'a> TypePrinter<'_, 'a> {
                     };
                     self.modifiers(out, m.span.start, m.span.end, &[(m.span.start, len, word)])?;
                 }
-                self.key_node(out, &m.key, m.computed)?;
+                self.key_node(out, &m.key, m.key.is_computed())?;
                 if m.optional {
                     let q = skip_trivia(self.source, m.key.span().end as usize);
                     self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
@@ -1280,8 +1280,10 @@ impl<'a> TypePrinter<'_, 'a> {
     fn key_text(&mut self, key: &PropertyKey<'a>) -> Option<String> {
         Some(match key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => quote_literal(s),
-            PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => quote_literal(s),
+            PropertyKey::StaticNumericLiteral(n) | PropertyKey::NumericLiteral(n) => {
+                format_number_like_js(n.value)
+            }
             PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
             PropertyKey::Identifier(id) => self.computed_name(std::vec![id.name.as_str()])?,
             PropertyKey::StaticMemberExpression(m) => {
@@ -1401,7 +1403,7 @@ impl<'a> TypePrinter<'_, 'a> {
         property: &BindingProperty<'a>,
     ) -> Option<()> {
         if !property.shorthand {
-            self.key_node(out, &property.key, property.computed)?;
+            self.key_node(out, &property.key, property.key.is_computed())?;
             self.write(out, ": ");
         }
         self.emit_node(

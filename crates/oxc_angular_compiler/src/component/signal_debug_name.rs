@@ -290,7 +290,7 @@ impl<'a> Visit<'a> for SignalDebugNameVisitor<'_> {
         if self.jit_signal_inputs.contains(&it.span) {
             return;
         }
-        let name = property_name_text(self.source, self.comments, &it.key, it.computed);
+        let name = property_name_text(self.source, self.comments, &it.key, it.key.is_computed());
         self.transform(it.span, call, name);
     }
 
@@ -300,7 +300,7 @@ impl<'a> Visit<'a> for SignalDebugNameVisitor<'_> {
             walk::walk_accessor_property(self, it);
             return;
         };
-        let name = property_name_text(self.source, self.comments, &it.key, it.computed);
+        let name = property_name_text(self.source, self.comments, &it.key, it.key.is_computed());
         self.transform(it.span, call, name);
     }
 }
@@ -428,7 +428,7 @@ fn insert_debug_name_into_call_expression(
                     if property.kind == PropertyKind::Init
                         && !property.method
                         && !property.shorthand
-                        && !property.computed
+                        && !property.key.is_computed()
                         && matches!(&property.key, PropertyKey::StaticIdentifier(key)
                             if key.name == "debugName"))
             });

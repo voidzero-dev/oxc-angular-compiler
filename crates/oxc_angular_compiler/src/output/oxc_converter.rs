@@ -371,7 +371,7 @@ fn convert_object_expression<'a>(
     // Keep such objects as written rather than emitting an altered object.
     if obj.properties.iter().any(|prop| {
         matches!(prop, ObjectPropertyKind::ObjectProperty(p) if !is_plain_property(p)
-            || matches!(&p.key, PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate()))
+            || matches!(&p.key, PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) if lit.value.has_lone_surrogate()))
     }) {
         return make_raw_source(allocator, source_text, obj.span);
     }
@@ -381,12 +381,14 @@ fn convert_object_expression<'a>(
 /// Whether a property is a `key: value` pair with an identifier, string or number key.
 pub fn is_plain_property(p: &oxc_ast::ast::ObjectProperty<'_>) -> bool {
     !p.method
-        && !p.computed
+        && !p.key.is_computed()
         && p.kind == PropertyKind::Init
         && matches!(
             p.key,
             PropertyKey::StaticIdentifier(_)
+                | PropertyKey::StaticStringLiteral(_)
                 | PropertyKey::StringLiteral(_)
+                | PropertyKey::StaticNumericLiteral(_)
                 | PropertyKey::NumericLiteral(_)
         )
 }
@@ -409,7 +411,8 @@ pub fn convert_plain_properties<'a>(
                 }
                 // A quoted key with text outside ASCII keeps its source text,
                 // as ngtsc copies the object as written.
-                if let PropertyKey::StringLiteral(lit) = &p.key
+                if let PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) =
+                    &p.key
                     && let Some(key) = string_literal_as_written(lit)
                     && lit.value.as_str().is_some()
                 {
@@ -421,11 +424,13 @@ pub fn convert_plain_properties<'a>(
                     PropertyKey::StaticIdentifier(id) => (id.name.clone().into(), false),
                     // A key with a lone surrogate (`'\uD800'`) has no `&str`
                     // form and the emitter re-quotes keys, so leave it out.
-                    PropertyKey::StringLiteral(lit) => match lit.value.as_str() {
-                        Some(key) => (Ident::from(key), true),
-                        None => continue,
-                    },
-                    PropertyKey::NumericLiteral(lit) => {
+                    PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+                        match lit.value.as_str() {
+                            Some(key) => (Ident::from(key), true),
+                            None => continue,
+                        }
+                    }
+                    PropertyKey::StaticNumericLiteral(lit) | PropertyKey::NumericLiteral(lit) => {
                         (Ident::from(allocator.alloc_str(&lit.value.to_string())), true)
                     }
                     _ => continue,

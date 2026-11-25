@@ -109,7 +109,7 @@ pub fn static_method_ng_module<'b, 'a>(
         .find_map(|element| match element {
             ClassElement::MethodDefinition(m)
                 if m.r#static
-                    && !m.computed
+                    && !m.key.is_computed()
                     && m.key.static_name().is_some_and(|key| key == method) =>
             {
                 Some(m)
@@ -242,7 +242,7 @@ fn object_ng_module<'b, 'a>(
         if property.kind != oxc_ast::ast::PropertyKind::Init || property.method {
             return Some(ObjectModule::Dynamic);
         }
-        if property.computed {
+        if property.key.is_computed() {
             return None;
         }
         if property.key.static_name().is_some_and(|key| key == "ngModule") {
@@ -496,7 +496,9 @@ pub fn read_module_lists(
             let ObjectPropertyKind::ObjectProperty(property) = property else { return None };
             let key = match &property.key {
                 PropertyKey::StaticIdentifier(id) => id.name.as_str(),
-                PropertyKey::StringLiteral(lit) => lit.value.as_str()?,
+                PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+                    lit.value.as_str()?
+                }
                 _ => return None,
             };
             (crate::util::is_metadata_property(property) && key == name).then_some(&property.value)

@@ -438,7 +438,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 for member in &type_lit.members {
                     if let oxc_ast::ast::TSSignature::TSPropertySignature(prop_sig) = member {
                         // Check if the property key is computed
-                        if prop_sig.computed {
+                        if prop_sig.key.is_computed() {
                             Self::collect_idents_from_expr(&prop_sig.key, result);
                         }
                         // Recurse into the property's type annotation to find

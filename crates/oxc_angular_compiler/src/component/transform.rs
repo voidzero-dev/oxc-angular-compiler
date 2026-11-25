@@ -1401,7 +1401,7 @@ fn decorator_forces_jit(decorator: &oxc_ast::ast::Decorator<'_>) -> bool {
         }
         let is_jit = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.as_str() == "jit",
-            PropertyKey::StringLiteral(s) => s.value == "jit",
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => s.value == "jit",
             _ => false,
         };
         if is_jit {
@@ -1539,7 +1539,7 @@ fn extract_all_jit_member_decorators(
                 ClassElement::PropertyDefinition(prop) => {
                     let (name, quoted) = match &prop.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => {
+                        PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
                             (js_str_to_str(s.value).into_owned(), true)
                         }
                         _ => continue,
@@ -1552,7 +1552,7 @@ fn extract_all_jit_member_decorators(
                     }
                     let (name, quoted) = match &method.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => {
+                        PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
                             (js_str_to_str(s.value).into_owned(), true)
                         }
                         _ => continue,
@@ -1562,7 +1562,7 @@ fn extract_all_jit_member_decorators(
                 ClassElement::AccessorProperty(accessor) => {
                     let (name, quoted) = match &accessor.key {
                         PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
-                        PropertyKey::StringLiteral(s) => {
+                        PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
                             (js_str_to_str(s.value).into_owned(), true)
                         }
                         _ => continue,
@@ -2162,8 +2162,12 @@ fn jit_signal_input_fields(
         for element in &class.body.body {
             let ClassElement::PropertyDefinition(prop) = element else { continue };
             // The keys `extract_all_jit_member_decorators` lowers.
-            if !matches!(prop.key, PropertyKey::StaticIdentifier(_) | PropertyKey::StringLiteral(_))
-            {
+            if !matches!(
+                prop.key,
+                PropertyKey::StaticIdentifier(_)
+                    | PropertyKey::StaticStringLiteral(_)
+                    | PropertyKey::StringLiteral(_)
+            ) {
                 continue;
             }
             let Some(Expression::CallExpression(call)) = &prop.value else { continue };
@@ -2212,7 +2216,9 @@ fn extract_string_option(
         let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
         let key_matches = match &prop.key {
             PropertyKey::StaticIdentifier(id) => id.name.as_str() == option_name,
-            PropertyKey::StringLiteral(s) => s.value == option_name,
+            PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                s.value == option_name
+            }
             _ => false,
         };
         if !key_matches {
@@ -2412,7 +2418,9 @@ fn build_jit_decorator_text<'a>(
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             let key_name = match &prop.key {
                 PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-                PropertyKey::StringLiteral(s) => s.value.as_str(),
+                PropertyKey::StaticStringLiteral(s) | PropertyKey::StringLiteral(s) => {
+                    s.value.as_str()
+                }
                 _ => None,
             };
 

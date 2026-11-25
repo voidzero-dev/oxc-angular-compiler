@@ -1696,7 +1696,9 @@ fn get_decorator_name<'a>(decorator: &Decorator<'a>) -> Option<&'a str> {
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
-        PropertyKey::StringLiteral(lit) => lit.value.as_str().map(Ident::from),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            lit.value.as_str().map(Ident::from)
+        }
         _ => None,
     }
 }
@@ -1716,7 +1718,9 @@ fn member_key_name<'a>(
     let quoted = |value: oxc_str::JSStr<'a>| Some((js_str_to_ident(value, allocator), true));
     match key {
         PropertyKey::StaticIdentifier(id) => Some((id.name.into(), false)),
-        PropertyKey::StringLiteral(lit) => quoted(lit.value),
+        PropertyKey::StaticStringLiteral(lit) | PropertyKey::StringLiteral(lit) => {
+            quoted(lit.value)
+        }
         PropertyKey::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first().and_then(|q| q.value.cooked.and_then(quoted))
         }
