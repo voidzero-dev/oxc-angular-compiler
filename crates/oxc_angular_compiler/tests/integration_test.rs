@@ -19737,3 +19737,19 @@ fn test_on_prefix_legacy_animation_event() {
     assert!(!on_prefix.contains("consts"), "{on_prefix}");
     assert_eq!(on_prefix, parens);
 }
+
+/// `bind-@fade`, `bind-animate-fade` and `[animate-fade]` are legacy animation
+/// bindings, like `[@fade]` (Angular's `parsePropertyBinding`), not
+/// `animate.leave` callbacks or a DOM property. Output checked against Angular 22.3.0.
+#[test]
+fn test_legacy_animation_property_prefixes() {
+    let expected = compile_template_to_js(r#"<div [@fade]="v"></div>"#, "C");
+    assert!(expected.contains(r#"ɵɵproperty("@fade",ctx.v)"#), "{expected}");
+    for template in [
+        r#"<div bind-@fade="v"></div>"#,
+        r#"<div bind-animate-fade="v"></div>"#,
+        r#"<div [animate-fade]="v"></div>"#,
+    ] {
+        assert_eq!(compile_template_to_js(template, "C"), expected, "{template}");
+    }
+}

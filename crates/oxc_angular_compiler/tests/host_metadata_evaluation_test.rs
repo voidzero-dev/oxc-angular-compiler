@@ -798,6 +798,28 @@ fn legacy_animation_listener_needs_a_phase() {
     }
 }
 
+/// A legacy animation host property needs a trigger name (`parsePropertyBinding`).
+/// Its error comes after the listener errors, in property key order. ngtsc 22.3.0.
+#[test]
+fn legacy_animation_property_needs_a_trigger_name() {
+    const TRIGGER: &str = "Animation trigger is missing";
+    assert_error("", "{ '[@]': 'v' }", TRIGGER);
+    assert_error("", "{ '[animate-]': 'v' }", TRIGGER);
+    assert_error(
+        "",
+        "{ '[@]': 't', '(@fade)': 'go()', '[]': 't' }",
+        &format!(
+            "The animation trigger output event (@fade) is missing its phase value name (start \
+             or done are currently supported)\n{TRIGGER}\nProperty name is missing in binding"
+        ),
+    );
+    // `[animate-fade]` binds the trigger `fade`, like `[@fade]`.
+    assert_eq!(
+        host_definition("Directive", "", "{ '[animate-fade]': 't' }"),
+        host_definition("Directive", "", "{ '[@fade]': 't' }")
+    );
+}
+
 /// ngtsc does not check `@HostListener` names (only the `host` object goes
 /// through `verifyHostBindings`), so `@HostListener('@fade')` compiles.
 #[test]
@@ -908,5 +930,29 @@ fn host_that_is_a_method_or_getter_is_not_metadata() {
             assert!(diagnostics.is_empty(), "unexpected diagnostics for `{host}`: {diagnostics:?}");
             assert!(!code.contains("hostAttrs"), "no host output for `{host}`");
         }
+    }
+}
+
+/// The `@` of a host listener is checked on the whole name, before a target is
+/// split off: `(window:@fade)` is a regular `@fade` event on `window`. The
+/// phase is trimmed as JS does (U+FEFF too). Output of ngtsc 22.3.0.
+#[test]
+fn legacy_animation_listener_name_split_like_angular() {
+    for (host, listener) in [
+        (
+            "{ '(window:@fade)': 'go()' }",
+            r#"i0.ɵɵlistener("@fade",functionX__fade_HostBindingHandler(){returnctx.go();},i0.ɵɵresolveWindow)"#,
+        ),
+        (
+            "{ '(document:@fade.done)': 'go()' }",
+            r#"i0.ɵɵlistener("@fade.done",functionX__fade_done_HostBindingHandler(){returnctx.go();},i0.ɵɵresolveDocument)"#,
+        ),
+        (
+            "{ '(@fade.\u{FEFF}done)': 'go()' }",
+            r#"i0.ɵɵsyntheticHostListener("@fade.done",functionX_animation_fade_done_HostBindingHandler(){returnctx.go();})"#,
+        ),
+    ] {
+        let part = host_definition("Directive", "", host);
+        assert!(part.contains(listener), "`host: {host}`: {part}");
     }
 }

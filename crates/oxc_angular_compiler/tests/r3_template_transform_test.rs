@@ -2302,6 +2302,97 @@ mod legacy_animation_events {
         );
     }
 
+    /// `[@x]`, `[animate-x]`, `bind-@x`, `bind-animate-x`, `[(@x)]` and `bindon-@x`
+    /// are legacy animation inputs named `x` (Angular's `parsePropertyBinding`). An
+    /// empty name is an error.
+    #[test]
+    fn legacy_animation_inputs() {
+        for html in [
+            r#"<div [@fade]="v"></div>"#,
+            r#"<div [animate-fade]="v"></div>"#,
+            r#"<div bind-@fade="v"></div>"#,
+            r#"<div bind-animate-fade="v"></div>"#,
+        ] {
+            assert_eq!(
+                humanize(html),
+                vec![h!["Element", "div"], h!["BoundAttribute", 4, "fade", "v"]],
+                "{html}"
+            );
+        }
+        assert_eq!(
+            humanize(r#"<div @fade></div>"#),
+            vec![h!["Element", "div"], h!["BoundAttribute", 4, "fade", "undefined"]]
+        );
+        const TRIGGER: &str = "Animation trigger is missing";
+        for html in [
+            r#"<div [@]="v"></div>"#,
+            r#"<div [animate-]="v"></div>"#,
+            r#"<div bind-@="v"></div>"#,
+            r#"<div bind-animate-="v"></div>"#,
+        ] {
+            assert_eq!(get_transform_errors(html), [TRIGGER], "{html}");
+        }
+        assert_eq!(
+            get_transform_errors(r#"<div [(@)]="v"></div>"#),
+            [
+                TRIGGER,
+                "The animation trigger output event (@Change) is missing its phase value name \
+                 (start or done are currently supported)",
+            ]
+        );
+    }
+
+    /// A directive accepts only property and two-way inputs, so a legacy animation
+    /// input skips it. Checked against Angular 22.2.2 (the last with selectorless).
+    #[test]
+    fn selectorless_directive_legacy_animation_input() {
+        const NOT_SUPPORTED: &str = "Binding is not supported in a directive context";
+        for html in [
+            r#"<div @Dir([@fade]="v")></div>"#,
+            r#"<div @Dir([animate-fade]="v")></div>"#,
+            r#"<div @Dir(bind-@fade="v")></div>"#,
+        ] {
+            assert_eq!(get_selectorless_transform_errors(html), [NOT_SUPPORTED], "{html}");
+        }
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir([@]="v")></div>"#),
+            ["Animation trigger is missing", NOT_SUPPORTED]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir([(@fade)]="v")></div>"#),
+            [
+                "The animation trigger output event (@fadeChange) is missing its phase value \
+                 name (start or done are currently supported)",
+                NOT_SUPPORTED,
+            ]
+        );
+    }
+
+    /// Like `extractDirectives`, a directive with an unsupported attribute is skipped
+    /// before its other attributes are parsed, so they report nothing.
+    #[test]
+    fn selectorless_directive_unsupported_attribute_skips_it() {
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(*ngIf="c" (@fade)="x()")></div>"#),
+            ["Shorthand template syntax \"*ngIf\" is not supported inside a directive context"]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir((@fade)="x()" ngNonBindable)></div>"#),
+            ["Attribute \"ngNonBindable\" is not supported in a directive context"]
+        );
+        assert_eq!(
+            get_selectorless_transform_errors(
+                r#"<div @Dir(ngProjectAs="p" on-@fade="x()")></div>"#
+            ),
+            ["Attribute \"ngProjectAs\" is not supported in a directive context"]
+        );
+        // A skipped directive does not count as applied.
+        assert_eq!(
+            get_selectorless_transform_errors(r#"<div @Dir(*ngIf="c") @Dir(a="b")></div>"#),
+            ["Shorthand template syntax \"*ngIf\" is not supported inside a directive context"]
+        );
+    }
+
     #[test]
     fn selectorless_directive() {
         assert!(

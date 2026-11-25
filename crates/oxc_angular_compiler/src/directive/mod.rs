@@ -12,7 +12,7 @@
 //! - Providers
 //! - Lifecycle hooks
 
-mod compiler;
+pub(crate) mod compiler;
 mod decorator;
 mod definition;
 mod dts_type;

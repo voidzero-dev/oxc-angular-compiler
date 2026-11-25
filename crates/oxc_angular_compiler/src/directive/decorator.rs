@@ -2172,7 +2172,8 @@ fn host_binding_errors(
     // 1. `createDirectiveHostEventAsts`, for each listener in key order: `()` has
     //    no event name; a legacy animation event (`(@fade)`) has no trigger name,
     //    no phase or a phase other than `start` / `done`.
-    // 2. `createBoundHostProperties`: `[]` has no property name.
+    // 2. `createBoundHostProperties`, for each property in key order: `[]` has no
+    //    property name; `[@]` / `[animate-]` has no animation trigger name.
     // 3. `validateNoEventBindings`: binding a host property or attribute to an
     //    event (`[onclick]`, `[attr.onload]`) is disallowed.
     // The other errors these steps report come from parsing the binding
@@ -2195,11 +2196,20 @@ fn host_binding_errors(
             errors.extend(legacy_animation_event_errors(trigger, phase.as_deref()));
         }
     }
-    if check_empty_names {
-        for (key, _) in entries {
-            if matches!(HostKey::of(key.as_str()), HostKey::Property) && key.len() == 2 {
+    // `createBoundHostProperties` (`parsePropertyBinding`), for each property in key
+    // order: `[]` has no name; a legacy animation property (`[@]`, `[animate-]`) has
+    // no trigger name.
+    for (key, _) in entries {
+        if !matches!(HostKey::of(key.as_str()), HostKey::Property) {
+            continue;
+        }
+        let name = &key.as_str()[1..key.len() - 1];
+        if name.is_empty() {
+            if check_empty_names {
                 errors.push("Property name is missing in binding".to_string());
             }
+        } else if name == "@" || name == "animate-" {
+            errors.push("Animation trigger is missing".to_string());
         }
     }
     for (key, _) in entries {

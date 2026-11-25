@@ -37,7 +37,6 @@ use super::metadata::{
 };
 use super::namespace_registry::NamespaceRegistry;
 use super::signal_debug_name;
-use crate::ast::expression::ParsedEventType;
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata_in,
@@ -8641,18 +8640,8 @@ fn convert_host_metadata_to_input<'a>(
             key_str
         };
 
-        // Check for target prefix (window:, document:, body:)
-        let (final_event_name, target) = parse_event_target(event_name);
-
-        let (effective_name, event_type, phase) =
-            parse_legacy_animation_event(final_event_name, &allocator);
-        // Angular's `_parseRegularEvent` checks the name before splitting off the target.
-        let event_type =
-            if event_type == ParsedEventType::Regular && event_name.starts_with("animate.") {
-                ParsedEventType::Animation
-            } else {
-                event_type
-            };
+        let (effective_name, event_type, phase, target) =
+            crate::directive::compiler::classify_host_event(event_name);
 
         // Parse the handler expression
         let value_str = allocator.alloc_str(value.as_str());
@@ -8663,7 +8652,7 @@ fn convert_host_metadata_to_input<'a>(
             event_type,
             handler: parse_result.ast,
             target: target.map(|t| Ident::from_in(t, &allocator)),
-            phase,
+            phase: phase.map(|p| Ident::from_in(p.as_str(), &allocator)),
             source_span: empty_span,
             handler_span: empty_span,
             key_span: empty_span,
@@ -8697,67 +8686,6 @@ fn convert_host_metadata_to_input<'a>(
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }
-}
-
-/// Classify a host event name as a legacy animation event.
-///
-/// Mirrors Angular's `parseLegacyAnimationEventName` (binding_parser.ts) +
-/// `splitAtPeriod` (util.ts): `@` is stripped, the name is split on the first `.`,
-/// **both halves are trimmed**, and the **phase is lowercased** via `.toLowerCase()`.
-///
-/// - `@trigger.phase`  → (`"trigger"`, `LegacyAnimation`, `Some("phase")`)
-/// - `@anim.START`     → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
-/// - `@anim. start `   → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
-/// - `@anim.foo`       → (`"anim"`,    `LegacyAnimation`, `Some("foo")`)
-/// - `@trigger`        → (`"trigger"`, `LegacyAnimation`, `None`)
-///
-/// For `host: {...}` keys, a missing or invalid phase is already an error (see
-/// `host_binding_errors` in `directive/decorator.rs`). Names from `@HostListener`
-/// are not checked, as in ngtsc, so they still reach this with any phase.
-/// - `click`           → (`"click"`,   `Regular`,         `None`)
-///
-/// Keep in sync with the identical helper in `directive/compiler.rs`.
-fn parse_legacy_animation_event<'a>(
-    event_name: &'a str,
-    allocator: &'a Allocator,
-) -> (&'a str, ParsedEventType, Option<Ident<'a>>) {
-    use oxc_allocator::FromIn;
-    let Some(without_at) = event_name.strip_prefix('@') else {
-        return (event_name, ParsedEventType::Regular, None);
-    };
-    let (trigger_raw, phase_raw) = match without_at.find('.') {
-        Some(dot) => (&without_at[..dot], Some(&without_at[dot + 1..])),
-        None => (without_at, None),
-    };
-    let trigger_trimmed = trigger_raw.trim();
-    let trigger: &'a str = if trigger_trimmed.len() == trigger_raw.len() {
-        trigger_trimmed
-    } else {
-        allocator.alloc_str(trigger_trimmed)
-    };
-    let phase = phase_raw.map(|p| {
-        let normalized = p.trim().to_lowercase();
-        Ident::from_in(normalized.as_str(), &allocator)
-    });
-    (trigger, ParsedEventType::LegacyAnimation, phase)
-}
-
-/// Parse event name to extract target (window:, document:, body:).
-///
-/// Examples:
-/// - "click" -> ("click", None)
-/// - "window:resize" -> ("resize", Some("window"))
-/// - "document:keydown" -> ("keydown", Some("document"))
-fn parse_event_target(event_name: &str) -> (&str, Option<&str>) {
-    if let Some(rest) = event_name.strip_prefix("window:") {
-        (rest, Some("window"))
-    } else if let Some(rest) = event_name.strip_prefix("document:") {
-        (rest, Some("document"))
-    } else if let Some(rest) = event_name.strip_prefix("body:") {
-        (rest, Some("body"))
-    } else {
-        (event_name, None)
-    }
 }
 
 /// Convert HostMetadataInput (owned strings) to HostMetadata<'a> (with Atom types).

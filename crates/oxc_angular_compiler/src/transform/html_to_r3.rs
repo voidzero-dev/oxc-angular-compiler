@@ -90,6 +90,20 @@ fn property_binding_key_span(name: &str, key_span: Span) -> Span {
     }
 }
 
+/// The trigger name of a legacy animation property binding (`[@fade]`,
+/// `[animate-fade]`, `bind-@fade`, `[(@fade)]`...), which Angular's
+/// `parsePropertyBinding` checks before anything else.
+/// Reference: binding_parser.ts (`parsePropertyBinding`)
+fn legacy_animation_property_name(name: &str) -> Option<&str> {
+    name.strip_prefix(LEGACY_ANIMATE_PROP_PREFIX).or_else(|| name.strip_prefix('@'))
+}
+
+/// Angular's error for a legacy animation attribute with a value (`@fade="x"`).
+/// Reference: binding_parser.ts (`parseLiteralAttr`)
+const LEGACY_ANIMATION_ATTR_VALUE: &str = "Assigning animation triggers via @prop=\"exp\" attributes \
+     with an expression is invalid. Use property bindings (e.g. [@prop]=\"exp\") or use an \
+     attribute without a value (e.g. @prop) instead.";
+
 /// Angular's error for an event handler with no expression.
 const EMPTY_EXPRESSION: &str = "Empty expressions are not allowed";
 
@@ -1205,18 +1219,45 @@ impl<'a> HtmlToR3Transform<'a> {
         for html_dir in html_directives {
             let directive_name = html_dir.name.as_str();
 
-            // Check for duplicate directives
-            // Reference: r3_template_transform.ts lines 924-930
-            if seen_directives.contains(directive_name) {
+            // Like Angular's `extractDirectives`, the unsupported attributes are checked
+            // first, and a directive that has one is skipped before its other attributes
+            // are parsed (so they report nothing).
+            // Reference: r3_template_transform.ts (`extractDirectives`)
+            let mut invalid = false;
+            for attr in &html_dir.attrs {
+                let attr_name = attr.name.as_str();
+                if attr_name.starts_with(TEMPLATE_ATTR_PREFIX) {
+                    invalid = true;
+                    self.report_error(
+                        &format!(
+                            "Shorthand template syntax \"{attr_name}\" is not supported inside a directive context"
+                        ),
+                        attr.span,
+                    );
+                } else if attr_name == "ngProjectAs" || attr_name == "ngNonBindable" {
+                    invalid = true;
+                    self.report_error(
+                        &format!(
+                            "Attribute \"{attr_name}\" is not supported in a directive context"
+                        ),
+                        attr.span,
+                    );
+                }
+            }
+
+            // Check for duplicate directives. Only a directive that is kept counts.
+            if !invalid && seen_directives.contains(directive_name) {
+                invalid = true;
                 self.report_error(
                     &format!(
                         "Cannot apply directive \"{directive_name}\" multiple times on the same element"
                     ),
                     html_dir.span,
                 );
+            }
+            if invalid {
                 continue;
             }
-            seen_directives.insert(directive_name);
 
             // Parse directive attributes similar to element attributes
             let mut attributes = Vec::new_in(&self.allocator);
@@ -1224,35 +1265,10 @@ impl<'a> HtmlToR3Transform<'a> {
             let mut outputs = Vec::new_in(&self.allocator);
             let mut references = Vec::new_in(&self.allocator);
             let mut seen_reference_names: FxHashSet<&str> = FxHashSet::default();
-            let mut invalid = false;
 
             for attr in &html_dir.attrs {
                 let attr_name = attr.name.as_str();
                 let attr_value = attr.value.as_str();
-
-                // Check for unsupported attributes
-                // Reference: r3_template_transform.ts lines 908-922
-                if attr_name.starts_with(TEMPLATE_ATTR_PREFIX) {
-                    self.report_error(
-                        &format!(
-                            "Shorthand template syntax \"{attr_name}\" is not supported inside a directive context"
-                        ),
-                        attr.span,
-                    );
-                    invalid = true;
-                    continue;
-                }
-
-                if attr_name == "ngProjectAs" || attr_name == "ngNonBindable" {
-                    self.report_error(
-                        &format!(
-                            "Attribute \"{attr_name}\" is not supported in a directive context"
-                        ),
-                        attr.span,
-                    );
-                    invalid = true;
-                    continue;
-                }
 
                 // Check for reference syntax (#ref or ref-)
                 if attr_name.starts_with('#') || attr_name.starts_with("ref-") {
@@ -1301,15 +1317,14 @@ impl<'a> HtmlToR3Transform<'a> {
                     match prefix {
                         BindingPrefix::Bind => {
                             // bind-prop="value" - property binding
-                            // Check for animation bindings: bind-@prop or bind-animate-prop
-                            let (prop_name, binding_type) =
-                                if let Some(anim_name) = rest.strip_prefix('@') {
-                                    (anim_name, BindingType::Animation)
-                                } else if let Some(anim_name) = rest.strip_prefix("animate-") {
-                                    (anim_name, BindingType::Animation)
-                                } else {
-                                    (rest, BindingType::Property)
-                                };
+                            // bind-@prop / bind-animate-prop is a legacy animation binding,
+                            // which a directive does not support.
+                            if let Some(anim_name) = legacy_animation_property_name(rest) {
+                                self.reject_directive_legacy_animation_input(anim_name, attr);
+                                invalid = true;
+                                continue;
+                            }
+                            let (prop_name, binding_type) = (rest, BindingType::Property);
 
                             // Check for non-property bindings which are not allowed
                             if prop_name.starts_with("attr.")
@@ -1366,6 +1381,14 @@ impl<'a> HtmlToR3Transform<'a> {
                             });
                         }
                         BindingPrefix::BindOn => {
+                            // bindon-@prop: a legacy animation input, not supported here
+                            if let Some(anim_name) = legacy_animation_property_name(rest) {
+                                self.reject_directive_legacy_animation_two_way(
+                                    anim_name, rest, attr, key_span,
+                                );
+                                invalid = true;
+                                continue;
+                            }
                             // bindon-prop="value" - two-way binding
                             let value_span = attr.value_span.unwrap_or(attr.span);
                             let parse_result =
@@ -1386,16 +1409,6 @@ impl<'a> HtmlToR3Transform<'a> {
                             // Two-way binding also creates an output event
                             let event_name =
                                 Ident::from_in(&format!("{rest}Change"), &self.allocator);
-                            if event_name.starts_with('@') {
-                                // `bindon-@fade`: a legacy animation event (`@fadeChange`)
-                                let key_span = event_key_span(&event_name, key_span);
-                                outputs.push(self.create_legacy_animation_event(
-                                    &event_name[1..],
-                                    attr,
-                                    key_span,
-                                ));
-                                continue;
-                            }
                             let event_parse_result =
                                 self.binding_parser.parse_event(attr_value, value_span);
 
@@ -1411,28 +1424,13 @@ impl<'a> HtmlToR3Transform<'a> {
                             });
                         }
                         BindingPrefix::At => {
-                            // @trigger="value" - legacy animation trigger
-                            let value_span = attr.value_span.unwrap_or(attr.span);
-                            // For legacy animation triggers, use "undefined" when there's no expression.
-                            // This matches TypeScript's behavior: `expression || 'undefined'`
-                            let value_str =
-                                if attr_value.is_empty() { "undefined" } else { attr_value };
-                            let parse_result =
-                                self.binding_parser.parse_binding(value_str, value_span);
-
-                            inputs.push(R3BoundAttribute {
-                                name: Ident::from_in(rest, &self.allocator),
-                                binding_type: BindingType::LegacyAnimation,
-                                value: parse_result.ast,
-                                unit: None,
-                                source_span: attr.span,
-                                // `parseLiteralAttr` drops the `@` from the key span.
-                                // Reference: binding_parser.ts lines 308-314
-                                key_span: create_key_span(attr, "@", rest),
-                                value_span: Some(value_span),
-                                i18n: None,
-                                security_context: crate::ast::r3::SecurityContext::None,
-                            });
+                            // @trigger - a legacy animation input, which a directive does
+                            // not support (`parseLiteralAttr`, then `extractDirectives`)
+                            if !attr_value.is_empty() {
+                                self.report_error(LEGACY_ANIMATION_ATTR_VALUE, attr.span);
+                            }
+                            self.reject_directive_legacy_animation_input(rest, attr);
+                            invalid = true;
                         }
                         BindingPrefix::Ref | BindingPrefix::Let => {
                             // Already handled above
@@ -1447,6 +1445,14 @@ impl<'a> HtmlToR3Transform<'a> {
                     let prop_name = &attr_name[2..attr_name.len() - 2];
                     // Reference: r3_template_transform.ts line 871
                     let key_span = create_key_span(attr, BANANA_BOX_START, prop_name);
+                    // [(@prop)]: a legacy animation input, not supported here
+                    if let Some(anim_name) = legacy_animation_property_name(prop_name) {
+                        self.reject_directive_legacy_animation_two_way(
+                            anim_name, prop_name, attr, key_span,
+                        );
+                        invalid = true;
+                        continue;
+                    }
                     let value_str = self.allocator.alloc_str(attr_value);
                     let value_span = attr.value_span.unwrap_or(attr.span);
                     let parse_result = self.binding_parser.parse_binding(value_str, value_span);
@@ -1465,16 +1471,6 @@ impl<'a> HtmlToR3Transform<'a> {
 
                     // Two-way binding also creates an output event
                     let event_name = Ident::from_in(&format!("{prop_name}Change"), &self.allocator);
-                    if event_name.starts_with('@') {
-                        // `[(@fade)]`: a legacy animation event (`@fadeChange`)
-                        let key_span = event_key_span(&event_name, key_span);
-                        outputs.push(self.create_legacy_animation_event(
-                            &event_name[1..],
-                            attr,
-                            key_span,
-                        ));
-                        continue;
-                    }
                     let event_value_str = self.allocator.alloc_str(attr_value);
                     let event_parse_result =
                         self.binding_parser.parse_event(event_value_str, value_span);
@@ -1519,11 +1515,9 @@ impl<'a> HtmlToR3Transform<'a> {
                         invalid = true;
                         continue;
                     }
-                    if prop_name.starts_with('@') {
-                        self.report_error(
-                            "Binding is not supported in a directive context",
-                            attr.span,
-                        );
+                    // [@prop] / [animate-prop]: a legacy animation input
+                    if let Some(anim_name) = legacy_animation_property_name(prop_name) {
+                        self.reject_directive_legacy_animation_input(anim_name, attr);
                         invalid = true;
                         continue;
                     }
@@ -1592,6 +1586,7 @@ impl<'a> HtmlToR3Transform<'a> {
             if invalid {
                 continue;
             }
+            seen_directives.insert(directive_name);
 
             // Calculate source spans for the directive
             // start_source_span should include the opening paren if present
@@ -3654,24 +3649,13 @@ impl<'a> HtmlToR3Transform<'a> {
                 let key_span = create_key_span(attr, &name[..name.len() - rest.len()], rest);
                 match prefix {
                     BindingPrefix::Bind => {
-                        // Check for animation bindings: bind-@prop or bind-animate-prop
+                        // bind-@prop / bind-animate-prop is a legacy animation binding
                         let key_span = property_binding_key_span(rest, key_span);
-                        if let Some(anim_name) = rest.strip_prefix('@') {
-                            inputs.push(self.create_bound_attribute(
+                        if let Some(anim_name) = legacy_animation_property_name(rest) {
+                            inputs.push(self.create_legacy_animation_attribute(
                                 element_name,
                                 anim_name,
                                 attr,
-                                BindingType::Animation,
-                                None,
-                                key_span,
-                            ));
-                        } else if let Some(anim_name) = rest.strip_prefix("animate-") {
-                            inputs.push(self.create_bound_attribute(
-                                element_name,
-                                anim_name,
-                                attr,
-                                BindingType::Animation,
-                                None,
                                 key_span,
                             ));
                         } else {
@@ -3723,13 +3707,10 @@ impl<'a> HtmlToR3Transform<'a> {
                     }
                     BindingPrefix::BindOn => {
                         // Two-way binding creates both input and output
-                        let binding_type = self.two_way_binding_type(rest);
-                        inputs.push(self.create_bound_attribute(
+                        inputs.push(self.create_two_way_input(
                             element_name,
                             rest,
                             attr,
-                            binding_type,
-                            None,
                             property_binding_key_span(rest, key_span),
                         ));
                         // Create the output event (propChange)
@@ -3741,10 +3722,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         // Legacy animation trigger syntax (@prop)
                         // If there's a value, report an error - expressions require [@prop]
                         if !attr.value.is_empty() {
-                            self.report_error(
-                                "Assigning animation triggers via @prop=\"exp\" attributes with an expression is invalid. Use property bindings (e.g. [@prop]=\"exp\") or use an attribute without a value (e.g. @prop) instead.",
-                                attr.span,
-                            );
+                            self.report_error(LEGACY_ANIMATION_ATTR_VALUE, attr.span);
                         }
                         // Still create as a legacy animation input for error recovery
                         // Use create_legacy_animation_attribute to default empty values to "undefined"
@@ -3770,13 +3748,10 @@ impl<'a> HtmlToR3Transform<'a> {
                 // delims.start, identifier)`)
                 let key_span = create_key_span(attr, BANANA_BOX_START, prop_name);
                 // Two-way binding creates both input and output
-                let binding_type = self.two_way_binding_type(prop_name);
-                inputs.push(self.create_bound_attribute(
+                inputs.push(self.create_two_way_input(
                     element_name,
                     prop_name,
                     attr,
-                    binding_type,
-                    None,
                     property_binding_key_span(prop_name, key_span),
                 ));
                 // Create the output event (propChange)
@@ -3793,6 +3768,16 @@ impl<'a> HtmlToR3Transform<'a> {
                 // delims.start, identifier)`)
                 let key_span =
                     property_binding_key_span(prop_name, create_key_span(attr, "[", prop_name));
+                // [@xxx] / [animate-xxx] is a legacy animation binding (`ɵɵproperty("@xxx")`)
+                if let Some(anim_name) = legacy_animation_property_name(prop_name) {
+                    inputs.push(self.create_legacy_animation_attribute(
+                        element_name,
+                        anim_name,
+                        attr,
+                        key_span,
+                    ));
+                    continue;
+                }
                 let (binding_type, final_name, unit) =
                     if let Some(stripped) = prop_name.strip_prefix("attr.") {
                         (BindingType::Attribute, stripped, None)
@@ -3810,10 +3795,6 @@ impl<'a> HtmlToR3Transform<'a> {
                     } else if prop_name.starts_with("animate.") && self.supports_animate() {
                         // [animate.xxx] keeps the full name "animate.xxx"
                         (BindingType::Animation, prop_name, None)
-                    } else if prop_name.starts_with('@') {
-                        // [@xxx] is legacy animation binding - uses ɵɵproperty
-                        // TypeScript: isLegacyAnimationLabel checks name[0] == '@'
-                        (BindingType::LegacyAnimation, prop_name, None)
                     } else {
                         (BindingType::Property, prop_name, None)
                     };
@@ -4005,8 +3986,9 @@ impl<'a> HtmlToR3Transform<'a> {
         result.ast
     }
 
-    /// Creates a bound attribute for legacy animation triggers (@prop).
-    /// When there's no expression, uses "undefined" as the default value.
+    /// Creates a bound attribute for legacy animation triggers (`@prop`, `[@prop]`,
+    /// `[animate-prop]`, ...), named without the prefix. When there's no expression,
+    /// uses "undefined" as the default value. An empty trigger name is an error.
     /// TypeScript reference: binding_parser.ts _parseLegacyAnimation (line 505-506)
     fn create_legacy_animation_attribute(
         &mut self,
@@ -4015,6 +3997,10 @@ impl<'a> HtmlToR3Transform<'a> {
         attr: &HtmlAttribute<'a>,
         key_span: Span,
     ) -> R3BoundAttribute<'a> {
+        // Reference: binding_parser.ts (`_parseLegacyAnimation`)
+        if property_name.is_empty() {
+            self.report_error("Animation trigger is missing", attr.span);
+        }
         let value_span = attr.value_span.unwrap_or(attr.span);
         // For legacy animation triggers, parse "undefined" when there's no expression.
         // This matches TypeScript's behavior: `expression || 'undefined'`
@@ -4112,6 +4098,40 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
+    /// Reports the errors of a legacy animation input (`[@x]`, `bind-@x`, `@x`) on a
+    /// selectorless directive: an empty trigger name, then that a directive does not
+    /// support it (`extractDirectives` accepts only property and two-way inputs).
+    fn reject_directive_legacy_animation_input(
+        &mut self,
+        anim_name: &str,
+        attr: &HtmlAttribute<'a>,
+    ) {
+        if anim_name.is_empty() {
+            self.report_error("Animation trigger is missing", attr.span);
+        }
+        self.report_error("Binding is not supported in a directive context", attr.span);
+    }
+
+    /// Like [`Self::reject_directive_legacy_animation_input`], for `[(@x)]` /
+    /// `bindon-@x` (`prop_name`), whose event (`@xChange`) is parsed in between.
+    fn reject_directive_legacy_animation_two_way(
+        &mut self,
+        anim_name: &str,
+        prop_name: &str,
+        attr: &HtmlAttribute<'a>,
+        key_span: Span,
+    ) {
+        if anim_name.is_empty() {
+            self.report_error("Animation trigger is missing", attr.span);
+        }
+        let event_name = format!("{prop_name}Change");
+        if let Some(event_anim_name) = event_name.strip_prefix('@') {
+            let key_span = event_key_span(&event_name, key_span);
+            self.create_legacy_animation_event(event_anim_name, attr, key_span);
+        }
+        self.report_error("Binding is not supported in a directive context", attr.span);
+    }
+
     /// Creates a legacy animation event binding for `(@name)` or `(@name.phase)` syntax
     /// (`name` is without the `@`).
     ///
@@ -4146,15 +4166,25 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// The input type of a two-way binding `[(prop)]` / `bindon-prop`. From v20.2
-    /// `[(animate.x)]` is an animation binding: Angular's `parsePropertyBinding`
-    /// checks the `animate.` prefix before it looks at two-way.
-    fn two_way_binding_type(&self, prop_name: &str) -> BindingType {
-        if prop_name.starts_with("animate.") && self.supports_animate() {
+    /// The input of a two-way binding `[(prop)]` / `bindon-prop`. Angular's
+    /// `parsePropertyBinding` checks the legacy animation prefixes (`[(@x)]`) and,
+    /// from v20.2, `animate.` (`[(animate.x)]`) before it looks at two-way.
+    fn create_two_way_input(
+        &mut self,
+        element_name: &str,
+        prop_name: &str,
+        attr: &HtmlAttribute<'a>,
+        key_span: Span,
+    ) -> R3BoundAttribute<'a> {
+        if let Some(anim_name) = legacy_animation_property_name(prop_name) {
+            return self.create_legacy_animation_attribute(element_name, anim_name, attr, key_span);
+        }
+        let binding_type = if prop_name.starts_with("animate.") && self.supports_animate() {
             BindingType::Animation
         } else {
             BindingType::TwoWay
-        }
+        };
+        self.create_bound_attribute(element_name, prop_name, attr, binding_type, None, key_span)
     }
 
     /// Creates a bound event for two-way binding.
