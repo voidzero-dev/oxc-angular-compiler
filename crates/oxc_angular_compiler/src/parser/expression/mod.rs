@@ -45,7 +45,10 @@ pub struct StripCommentsResult<'a> {
     pub comment_start: Option<usize>,
 }
 
-/// Finds the start of a `//` comment, respecting string quotes.
+/// Finds the start of a `//` comment outside string quotes.
+///
+/// Like Angular's `_commentStart`, a backslash skips the next character, so
+/// `/^\//` and `'it\'s'` do not start a comment.
 ///
 /// Returns `None` if no comment is found, or the byte position of `//`.
 pub fn find_comment_start(input: &str) -> Option<usize> {
@@ -225,5 +228,27 @@ impl<'a> BindingParser<'a> {
             span: AbsoluteSourceSpan::new(key_span.start, key_span.end),
         };
         parser.parse_template_bindings(key_identifier)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_comment_start;
+
+    /// Same results as Angular's `_commentStart`, as byte offsets.
+    #[test]
+    fn find_comment_start_skips_escaped_chars() {
+        for (input, expected) in [
+            ("a // b", Some(2)),
+            ("'a // b'", None),
+            (r"/\//", None),
+            (r"'\'//'", None),
+            (r"a\\//b", Some(3)),
+            (r"p.replace(/^\//, '') // c", Some(21)),
+            ("\\", None),
+            ("\\é//", Some(3)),
+        ] {
+            assert_eq!(find_comment_start(input), expected, "{input}");
+        }
     }
 }
