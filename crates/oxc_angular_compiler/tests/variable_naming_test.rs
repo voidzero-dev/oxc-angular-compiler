@@ -892,3 +892,71 @@ fn test_variable_naming_in_nested_views() {
         "Should have context navigation"
     );
 }
+
+/// Many sibling child views in one parent view must be named in document
+/// order, depth first, with the same steps for every sibling group. The naming
+/// phase walks the parent's create ops once and names each child view right
+/// after the op that owns it (and `@for` track ops after its child views), as
+/// Angular's `nameFunctionsAndVariables` does.
+#[test]
+fn test_many_sibling_child_views_are_named_in_order() {
+    use std::fmt::Write as _;
+
+    const GROUPS: usize = 40;
+    let mut template = String::new();
+    for i in 0..GROUPS {
+        write!(
+            template,
+            "@if (a) {{ <button (click)=\"go({i})\">b</button> }}\n\
+             @for (it of items; track it.id + off) {{ <i (click)=\"pick(it)\">{{{{ it }}}}</i> }} @empty {{ e }}\n\
+             @let v{i} = a + {i};\n\
+             <span>{{{{ v{i} }}}}</span>\n"
+        )
+        .unwrap();
+    }
+
+    let js = compile_template_to_js(&template, "TestCmp");
+    let code: String = js.chars().filter(|c| !c.is_whitespace()).collect();
+
+    for g in 0..GROUPS {
+        // Each group uses 6 slots: @if, @for, @for body/@empty, @let, span, text.
+        let cond_slot = 6 * g;
+        let for_slot = cond_slot + 2;
+        let empty_slot = cond_slot + 3;
+        // Shared counter, named depth first in document order. Group 0 also
+        // names the shared `ctx_r1` (reused by every later group).
+        let (cond_view, for_view) = if g == 0 { (1, 3) } else { (3 * g + 2, 3 * g + 3) };
+        let item = for_view + 1;
+
+        let cond = format!(
+            "functionTestCmp_Conditional_{cond_slot}_Template(rf,ctx){{if((rf&1)){{\
+             const_r{cond_view}=i0.ɵɵgetCurrentView();"
+        );
+        assert_eq!(code.matches(&cond).count(), 1, "group {g}: missing `{cond}` in:\n{js}");
+        let cond_listener = format!(
+            "functionTestCmp_Conditional_{cond_slot}_Template_button_click_0_listener(){{\
+             i0.ɵɵrestoreView(_r{cond_view});constctx_r1=i0.ɵɵnextContext();\
+             returni0.ɵɵresetView(ctx_r1.go({g}));"
+        );
+        assert!(code.contains(&cond_listener), "group {g}: missing `{cond_listener}` in:\n{js}");
+
+        let body = format!(
+            "functionTestCmp_For_{for_slot}_Template(rf,ctx){{if((rf&1)){{\
+             const_r{for_view}=i0.ɵɵgetCurrentView();"
+        );
+        assert_eq!(code.matches(&body).count(), 1, "group {g}: missing `{body}` in:\n{js}");
+        let body_listener = format!(
+            "functionTestCmp_For_{for_slot}_Template_i_click_0_listener(){{\
+             constit_r{item}=i0.ɵɵrestoreView(_r{for_view}).$implicit;"
+        );
+        assert!(code.contains(&body_listener), "group {g}: missing `{body_listener}` in:\n{js}");
+
+        let empty = format!("functionTestCmp_ForEmpty_{empty_slot}_Template(rf,ctx)");
+        assert_eq!(code.matches(&empty).count(), 1, "group {g}: missing `{empty}` in:\n{js}");
+
+        // `@let` variables live in the root update block, which is named after
+        // all create ops and child views.
+        let let_var = format!("constv{g}_r{}=(ctx.a+{g});", 3 * GROUPS + 2 + g);
+        assert!(code.contains(&let_var), "group {g}: missing `{let_var}` in:\n{js}");
+    }
+}

@@ -19,6 +19,7 @@ use crate::ir::expression::{
     IrExpression, VisitorContextFlag, transform_expressions_in_create_op,
     transform_expressions_in_update_op,
 };
+use crate::ir::list::CreateOpList;
 use crate::ir::ops::{CreateOp, UpdateOp, XrefId};
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
 use crate::pipeline::phases::parse_extracted_styles::hyphenate;
@@ -591,53 +592,31 @@ fn process_create_ops_with_child_recursion<'a>(
             .push((child.xref, child.base_name.clone()));
     }
 
-    // Get the number of create ops
-    let num_create_ops = match view_xref {
-        None => job.root.create.len(),
-        Some(xref) => job.view(xref).map(|v| v.create.len()).unwrap_or(0),
+    // Take this view's create list out of the job for the walk below. Naming a
+    // child view needs `&mut job`, but it only touches the child's own lists
+    // (and the name pool), never this list. So the list can sit outside the job
+    // until the walk ends, and we walk the linked list once instead of calling
+    // `nth(index)` for every op (which made this O(n^2)).
+    let create_slot = match view_xref {
+        None => &mut job.root.create,
+        Some(xref) => match job.view_mut(xref) {
+            Some(view) => &mut view.create,
+            None => return,
+        },
     };
+    let mut create_ops = std::mem::replace(create_slot, CreateOpList::new(allocator));
 
-    // Process each create op by index
-    // We use index-based iteration and re-acquire the iterator each time
-    // to release the borrow and allow for child view recursion
-    for index in 0..num_create_ops {
-        // Track if this is a RepeaterCreate with track_by_ops
-        let mut is_repeater_with_track_by = false;
-
-        // Process the create op at this index (excluding track_by_ops for RepeaterCreate)
-        {
-            let create_ops = match view_xref {
-                None => &mut job.root.create,
-                Some(xref) => {
-                    if let Some(view) = job.view_mut(xref) {
-                        &mut view.create
-                    } else {
-                        continue;
-                    }
-                }
-            };
-
-            // Use nth() to get the specific op - this is O(n) per op making the
-            // overall algorithm O(n^2), but necessary due to Rust's borrowing rules
-            if let Some(op) = create_ops.iter_mut().nth(index) {
-                // Check if this is a RepeaterCreate with track_by_ops BEFORE processing
-                if let CreateOp::RepeaterCreate(rep) = op {
-                    if rep.track_by_ops.is_some() {
-                        is_repeater_with_track_by = true;
-                    }
-                }
-
-                process_single_create_op_ref(
-                    op,
-                    &allocator,
-                    base_name,
-                    fn_name,
-                    state,
-                    var_names,
-                    semantic_var_names,
-                );
-            }
-        } // Borrow of job ends here
+    for (index, op) in create_ops.iter_mut().enumerate() {
+        // Process the create op (excluding track_by_ops for RepeaterCreate)
+        process_single_create_op_ref(
+            op,
+            allocator,
+            base_name,
+            fn_name,
+            state,
+            var_names,
+            semantic_var_names,
+        );
 
         // Recurse into any child views at this index BEFORE processing track_by_ops.
         // This matches TypeScript's naming.ts behavior:
@@ -653,7 +632,7 @@ fn process_create_ops_with_child_recursion<'a>(
                     job,
                     child_xref,
                     &child_base_name,
-                    &allocator,
+                    allocator,
                     state,
                     var_names,
                     semantic_var_names,
@@ -665,35 +644,26 @@ fn process_create_ops_with_child_recursion<'a>(
         // In TypeScript, the ops() generator yields track_by_ops after the RepeaterCreate,
         // and the switch statement has already recursed into child views during the
         // RepeaterCreate case. So track_by_ops are named AFTER all child view variables.
-        if is_repeater_with_track_by {
-            let create_ops = match view_xref {
-                None => &mut job.root.create,
-                Some(xref) => {
-                    if let Some(view) = job.view_mut(xref) {
-                        &mut view.create
-                    } else {
-                        continue;
-                    }
-                }
-            };
-
-            if let Some(CreateOp::RepeaterCreate(repeater)) = create_ops.iter_mut().nth(index) {
-                if let Some(track_by_ops) = &mut repeater.track_by_ops {
-                    for track_op in track_by_ops.iter_mut() {
-                        if let UpdateOp::Variable(var_op) = track_op {
-                            name_variable_op(
-                                var_op,
-                                &allocator,
-                                state,
-                                var_names,
-                                semantic_var_names,
-                            );
-                        }
-                    }
+        if let CreateOp::RepeaterCreate(repeater) = op
+            && let Some(track_by_ops) = &mut repeater.track_by_ops
+        {
+            for track_op in track_by_ops.iter_mut() {
+                if let UpdateOp::Variable(var_op) = track_op {
+                    name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
                 }
             }
         }
     }
+
+    // Put the create list back into its view.
+    let create_slot = match view_xref {
+        None => &mut job.root.create,
+        Some(xref) => match job.view_mut(xref) {
+            Some(view) => &mut view.create,
+            None => unreachable!("the view existed when its create list was taken"),
+        },
+    };
+    *create_slot = create_ops;
 }
 
 /// Names a create-phase variable op using semantic identity tracking.
