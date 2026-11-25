@@ -1566,6 +1566,24 @@ mod parse_interpolation {
         }
 
         #[test]
+        fn should_find_the_end_after_a_regex_with_an_escaped_slash() {
+            // Like Angular's _getInterpolationEndIndex: a `//` inside the regex is not a
+            // comment, and the `'` inside the second regex does not hide the `}}`.
+            check_interpolation(r"{{ s.replace(/\//g, '').replace(/'/g, '') }}", None);
+        }
+
+        #[test]
+        fn should_not_treat_slash_star_as_a_block_comment() {
+            check_interpolation(r"{{ s.replace(/[/*]/g, '') }}", None);
+        }
+
+        #[test]
+        fn should_find_the_end_after_a_comment_across_lines() {
+            // After `//`, Angular looks for the next `}}` anywhere, past the newline.
+            check_interpolation("{{ z // it\n  's z }}", Some("{{ z }}"));
+        }
+
+        #[test]
         fn should_ignore_quotes_inside_comment() {
             // TS: it("should ignore quotes inside a comment")
             check_interpolation(r#""{{name // " }}""#, Some(r#""{{ name }}""#));
