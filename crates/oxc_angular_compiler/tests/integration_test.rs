@@ -4188,6 +4188,40 @@ fn test_temporaries_are_freed_at_the_last_read() {
     }
 }
 
+/// With 11 or more temporaries in one op, the declarations keep the order the
+/// names were first assigned, like Angular's `new Set(defs.values())`. Sorting
+/// them as strings would put `tmp_0_10` before `tmp_0_2`. Matches ngc 22.3 with
+/// `legacyOptionalChaining`.
+#[test]
+fn test_temporary_declarations_keep_assignment_order() {
+    let options =
+        ComponentTransformOptions { legacy_optional_chaining: Some(true), ..Default::default() };
+    // f0()?.[f1()?.[ ... f10()?.x ... ]]?.y keeps 11 temporaries live at once.
+    let mut expr = String::from("f10()?.x");
+    for i in (0..10).rev() {
+        expr = format!("f{i}()?.[{expr}]");
+    }
+    let source = format!(
+        "import {{ Component }} from '@angular/core';\n\
+         @Component({{ selector: 'c', template: `{{{{ a()?.b?.c }}}} {{{{ {expr}?.y }}}}` }})\n\
+         export class C {{ [k: string]: any; }}\n"
+    );
+    // Debug builds need a bigger stack for this nesting depth.
+    let code = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || compile_compact(&source, Some(&options)))
+        .unwrap()
+        .join()
+        .unwrap();
+    let mut decls = String::new();
+    for i in 0..=10 {
+        decls.push_str("lettmp_0_");
+        decls.push_str(&i.to_string());
+        decls.push(';');
+    }
+    assert!(code.contains(&decls), "{code}");
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where

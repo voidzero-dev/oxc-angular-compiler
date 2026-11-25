@@ -33,9 +33,10 @@
 
 use std::cell::RefCell;
 
+use indexmap::IndexMap;
 use oxc_allocator::Allocator;
 use oxc_str::Ident;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::ir::expression::{
     IrExpression, VisitorContextFlag, transform_expressions_in_create_op,
@@ -416,13 +417,13 @@ fn create_declare_var_statement<'a>(allocator: &'a Allocator, name: &str) -> Out
     ))
 }
 
-/// Collect unique names from defs map, sorted for deterministic output.
-fn collect_unique_names(defs: &FxHashMap<XrefId, String>) -> Vec<String> {
+/// Collect the unique names in `defs`, in the order they were first assigned.
+///
+/// Matches Angular's `Array.from(new Set(defs.values()))`. Sorting the names as
+/// strings would put `tmp_0_10` before `tmp_0_2`.
+fn collect_unique_names(defs: &IndexMap<XrefId, String, FxBuildHasher>) -> Vec<String> {
     let mut seen = FxHashSet::default();
-    let mut names: Vec<_> = defs.values().filter(|v| seen.insert(*v)).cloned().collect();
-    // Sort for deterministic output (TypeScript uses Set which has insertion order)
-    names.sort();
-    names
+    defs.values().filter(|v| seen.insert(*v)).cloned().collect()
 }
 
 /// Assigns a name to one temporary variable expression.
@@ -471,8 +472,9 @@ struct TempVarTracker {
     assigned: FxHashSet<XrefId>,
     /// Set of XrefIds that have been released (final read encountered).
     released: FxHashSet<XrefId>,
-    /// Map from XrefId to generated variable name.
-    defs: FxHashMap<XrefId, String>,
+    /// Map from XrefId to generated variable name, in the order the names were
+    /// first assigned (Angular's `defs` Map).
+    defs: IndexMap<XrefId, String, FxBuildHasher>,
     /// Total number of reads per xref (from first pass).
     total_reads: FxHashMap<XrefId, usize>,
     /// Current read count per xref (incremented during second pass).
@@ -487,7 +489,7 @@ impl TempVarTracker {
             count: 0,
             assigned: FxHashSet::default(),
             released: FxHashSet::default(),
-            defs: FxHashMap::default(),
+            defs: IndexMap::default(),
             total_reads,
             current_reads: FxHashMap::default(),
         }
