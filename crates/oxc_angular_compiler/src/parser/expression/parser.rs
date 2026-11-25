@@ -20,8 +20,8 @@ use crate::ast::expression::{
 };
 use crate::util::ParseError;
 
-use super::TemplateBindingParseResult;
 use super::lexer::{Lexer, Token};
+use super::{TemplateBindingParseResult, strip_comments};
 
 /// Angular's error for an interpolation with a blank expression (`{{ }}`), raised by
 /// `splitInterpolation`; `column` is the offset of the `{{` in `input`.
@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
     pub fn new(allocator: &'a Allocator, source: &'a str) -> Self {
         // Strip comments from the source before tokenizing. The stripped source is a prefix
         // of `source`, so it is borrowed rather than copied.
-        let lexer = Lexer::new(allocator, Self::strip_comments(source));
+        let lexer = Lexer::new(allocator, strip_comments(source).stripped);
         let tokens = lexer.tokenize();
 
         // Collect error tokens from the lexer
@@ -169,43 +169,6 @@ impl<'a> Parser<'a> {
             context: ParseContextFlags::NONE,
             action_mode: false,
         }
-    }
-
-    /// Strips single-line comments (`//`) from the input.
-    ///
-    /// Comments are only recognized outside of quoted strings.
-    /// This matches Angular's behavior in `_stripComments`.
-    fn strip_comments(input: &str) -> &str {
-        match Self::find_comment_start(input) {
-            Some(idx) => &input[..idx],
-            None => input,
-        }
-    }
-
-    /// Finds the start index of a `//` comment, respecting quoted strings.
-    ///
-    /// Returns `None` if no comment is found.
-    fn find_comment_start(input: &str) -> Option<usize> {
-        let bytes = input.as_bytes();
-        let mut outer_quote: Option<u8> = None;
-
-        for i in 0..input.len().saturating_sub(1) {
-            let ch = bytes[i];
-            let next_ch = bytes[i + 1];
-
-            // Check for // outside of quotes
-            if ch == b'/' && next_ch == b'/' && outer_quote.is_none() {
-                return Some(i);
-            }
-
-            // Track quote state
-            if outer_quote == Some(ch) {
-                outer_quote = None;
-            } else if outer_quote.is_none() && (ch == b'\'' || ch == b'"' || ch == b'`') {
-                outer_quote = Some(ch);
-            }
-        }
-        None
     }
 
     /// Checks for interpolation syntax (`{{` and `}}`) in the input.
@@ -1857,7 +1820,6 @@ impl<'a> Parser<'a> {
                 if self.is_assignment_operator(token) {
                     // Clone the operation first to avoid borrow issues
                     let operation = token.str_value.clone();
-                    let result_span = result.span();
 
                     // In binding mode, still parse the full expression but emit an error
                     // This ensures spans cover the entire expression
@@ -1878,7 +1840,7 @@ impl<'a> Parser<'a> {
 
                     // Create Binary expression for assignment
                     let end = self.current_end_index();
-                    let assign_span = ParseSpan::new(result_span.start, end);
+                    let assign_span = ParseSpan::new(start, end);
                     let assign_source_span = assign_span.to_absolute(self.absolute_offset);
                     let binary_op = self.string_to_binary_operator(&operation);
                     let binary = Binary {
