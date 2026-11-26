@@ -11337,6 +11337,74 @@ export class TestComponent {
 }
 
 #[test]
+fn test_sourcemap_maps_columns_inside_unchanged_code() {
+    // Code the compiler copies through unchanged (a method body) keeps its columns, so a
+    // position inside a line maps to the same column in the source, not to the line's start.
+    // Stack traces point inside lines: `throw` here is indented, and `compute` is mid-line,
+    // after an emoji that is one character but two UTF-16 code units, as columns are counted.
+    let allocator = Allocator::default();
+    let source = r"import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    template: '<h1>Hello</h1>',
+})
+export class TestComponent {
+    run(): number {
+        const total = this.count + '😀'.length + compute();
+        if (total < 0) {
+            throw new Error('negative');
+        }
+        return total;
+    }
+}
+";
+
+    let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    let json = result.map.expect("map requested");
+    let map = oxc_sourcemap::SourceMap::from_json_string(&json).unwrap();
+    let table = map.generate_lookup_table();
+
+    let position = |text: &str, needle: &str| -> (u32, u32) {
+        let (line, at) = text
+            .lines()
+            .enumerate()
+            .find_map(|(line, l)| l.find(needle).map(|at| (line, l[..at].encode_utf16().count())))
+            .unwrap_or_else(|| panic!("{needle:?} not in:\n{text}"));
+        (line as u32, at as u32)
+    };
+
+    for needle in ["throw new Error", "compute()"] {
+        let (src_line, src_col) = position(source, needle);
+        let (out_line, out_col) = position(&result.code, needle);
+        let token = map
+            .lookup_token(&table, out_line, out_col)
+            .unwrap_or_else(|| panic!("no mapping for {needle:?} at {out_line}:{out_col}"));
+        assert_eq!(
+            (token.get_src_line(), token.get_src_col()),
+            (src_line, src_col),
+            "{needle:?} at output {out_line}:{out_col} should map to source {src_line}:{src_col}:\n{}",
+            result.code
+        );
+    }
+
+    // One mapping per token, not per character: a position inside a word or on whitespace
+    // resolves to the token it belongs to, which keeps the map small.
+    for (needle, offset) in [("compute()", 2), ("if (total", 2)] {
+        let (out_line, out_col) = position(&result.code, needle);
+        let token = map.lookup_token(&table, out_line, out_col + offset).unwrap();
+        assert_eq!(
+            token.get_dst_col(),
+            out_col,
+            "{needle:?}: column {} should resolve to the token at {out_col}",
+            out_col + offset
+        );
+    }
+}
+
+#[test]
 fn test_sourcemap_with_external_template() {
     // Source map should work with resolved external templates
     let allocator = Allocator::default();
