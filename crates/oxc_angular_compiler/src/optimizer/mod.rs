@@ -433,7 +433,10 @@ impl<'a> LineColCursor<'a> {
 
 /// Add source map mappings for an unchanged segment of source code.
 ///
-/// Adds a mapping at the start of the segment and at the beginning of each new line.
+/// Adds a mapping at the start of the segment, at the beginning of each new line, and at the
+/// start of each token within a line (a run of word characters, or a single punctuation
+/// character). A position inside a line, such as a stack frame's, then maps to its own column
+/// in the source rather than to the start of the line.
 fn add_line_mappings_for_segment(
     builder: &mut oxc_sourcemap::SourceMapBuilder,
     segment: &str,
@@ -444,6 +447,9 @@ fn add_line_mappings_for_segment(
 ) {
     // Add mapping at the start of this segment
     builder.add_token(out_line, out_col, src_line, src_col, Some(0), None);
+    // Whether the current position already has a mapping, so it is not added twice.
+    let mut mapped_here = true;
+    let mut previous_is_word = false;
 
     for ch in segment.chars() {
         if ch == '\n' {
@@ -453,7 +459,20 @@ fn add_line_mappings_for_segment(
             src_col = 0;
             // Add mapping at the start of each new line
             builder.add_token(out_line, out_col, src_line, src_col, Some(0), None);
+            mapped_here = true;
+            continue;
         }
+
+        let is_word = ch.is_alphanumeric() || ch == '_' || ch == '$';
+        if !(mapped_here || ch.is_whitespace() || (is_word && previous_is_word)) {
+            builder.add_token(out_line, out_col, src_line, src_col, Some(0), None);
+        }
+        previous_is_word = is_word;
+        mapped_here = false;
+        // Columns are UTF-16 code units, as `LineColCursor` counts them.
+        let width = ch.len_utf16() as u32;
+        out_col += width;
+        src_col += width;
     }
 }
 
