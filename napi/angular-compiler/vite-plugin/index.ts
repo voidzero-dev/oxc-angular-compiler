@@ -661,7 +661,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       // modules, as those are served via HTTP middleware only. This matches
       // Angular's official behavior where _enableHmr is only set for browser
       // bundles (see @angular/build application-code-bundle.js).
-      hmr: pluginOptions.liveReload && watchMode && !isSSR,
+      // Vitest uses client transforms for DOM tests but disables Vite's HMR server.
+      hmr: pluginOptions.liveReload && watchMode && !isSSR && resolvedConfig?.server?.hmr !== false,
       angularVersion: pluginOptions.angularVersion,
       minifyComponentStyles: getMinifyComponentStyles(context),
       emitClassMetadata: pluginOptions.emitClassMetadata,
