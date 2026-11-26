@@ -104,12 +104,16 @@ async function callPluginHook(hook: any, ...args: unknown[]) {
 }
 
 /** Run the plugin through `config`/`configResolved`/`configureServer`. */
-async function setupPlugin(plugin: Plugin, command: 'serve' | 'build' = 'serve') {
+async function setupPlugin(
+  plugin: Plugin,
+  command: 'serve' | 'build' = 'serve',
+  serverHmr?: boolean,
+) {
   const mockServer = createMockServer()
   await callPluginHook(plugin.config, {}, { command, mode: 'development' })
   // A real resolved config: preprocessCSS needs one to run Sass.
   const resolved = await resolveConfig(
-    { configFile: false, root: tempDir, logLevel: 'silent' },
+    { configFile: false, root: tempDir, logLevel: 'silent', server: { hmr: serverHmr } },
     command,
   )
   await callPluginHook(plugin.configResolved, resolved)
@@ -179,6 +183,22 @@ function preprocessCallsFor(path: string): number {
     ([, filename]) => normalizePath(filename as string) === normalizePath(path),
   ).length
 }
+
+it('omits the component update import when Vite disables HMR (e.g. Vitest)', async () => {
+  const plugin = getAngularPlugin({})
+  await setupPlugin(plugin, 'serve', false)
+  const { code, errors } = await transform(
+    plugin,
+    `import { Component } from '@angular/core';
+     @Component({ selector: 'app-root', template: 'Hello' })
+     export class AppComponent {}`,
+    join(appDir, 'app.component.ts'),
+  )
+
+  expect(errors).toEqual([])
+  expect(code).toContain('ɵɵdefineComponent')
+  expect(code).not.toContain('ɵɵreplaceMetadata')
+})
 
 describe('transform skips the resource URL parse when no URL is spelled', () => {
   it('does not call extractComponentUrls for an inline-only component', async () => {
